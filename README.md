@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 0 — baseline e governança**.
+- Fase ativa: **Fase 0 — baseline e governança (commit local criado; push remoto pendente de autenticação)**.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional: ainda não iniciada.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.

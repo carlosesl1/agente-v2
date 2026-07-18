@@ -2,7 +2,7 @@
 
 ## Status
 
-`em execução`
+`em execução — commit local criado; push remoto bloqueado por ausência de autenticação GitHub neste host`
 
 ## Objetivo
 
@@ -39,8 +39,8 @@ Criar a base limpa e verificável da refatoração sem alterar o sistema atual.
 - [x] CI;
 - [x] hashes da evidência;
 - [x] secret/PII scan local;
-- [ ] commit criado;
-- [ ] push verificado.
+- [x] commit criado;
+- [ ] push verificado — bloqueado: host sem token, credential helper ou chave SSH autorizada.
 
 ## Evidências capturadas
 
