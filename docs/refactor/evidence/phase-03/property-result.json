@@ -1,0 +1,35 @@
+{
+  "configuration": {
+    "cases": 50000,
+    "minimum_gate_cases": 50000,
+    "seed": 20260718
+  },
+  "mode": "gate",
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "report": {
+    "cases": 50000,
+    "executable_mutation_cases": 50000,
+    "expired_cases": 50000,
+    "false_authorizations": 0,
+    "label_equivalence_cases": 50000,
+    "missed_invalidations": 0,
+    "multiple_match_cases": 50000,
+    "mutation_counts": {
+      "amount": 6250,
+      "availability": 6250,
+      "currency": 6250,
+      "date": 6250,
+      "party": 6250,
+      "provider": 6250,
+      "provider_ref": 6250,
+      "time": 6250
+    },
+    "positive_authorizations": 50000,
+    "seed": 20260718,
+    "unexpected_exceptions": 0,
+    "violations": [],
+    "zero_match_cases": 50000
+  },
+  "result": "passed",
+  "schema_version": 1
+}

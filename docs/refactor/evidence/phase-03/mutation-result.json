@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "recorded_at_utc": "2026-07-18T23:56:47Z",
+  "scope": "temporary copies only; working repository unchanged",
+  "mutants": [
+    {
+      "name": "include_label_in_offer_identity",
+      "path": "reservation_lookup/identity.py",
+      "test": "tests.test_phase3_lookup_types.OpaqueIdentityTests.test_label_and_lookup_provenance_do_not_change_offer_id",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "exclude_total_from_offer_identity",
+      "path": "reservation_lookup/identity.py",
+      "test": "tests.test_phase3_lookup_types.OpaqueIdentityTests.test_every_executable_offer_mutation_changes_offer_id",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "exclude_provider_from_offer_identity",
+      "path": "reservation_lookup/identity.py",
+      "test": "tests.test_phase3_lookup_types.OpaqueIdentityTests.test_every_executable_offer_mutation_changes_offer_id",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "accept_provider_ref_as_selection",
+      "path": "reservation_lookup/selection.py",
+      "test": "tests.test_phase3_selection.ExactOfferSelectionTests.test_label_provider_ref_index_random_and_wrong_types_never_select",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "accept_expired_lookup",
+      "path": "reservation_lookup/selection.py",
+      "test": "tests.test_phase3_selection.ExactOfferSelectionTests.test_negative_uncertain_and_expired_lookup_fail_closed",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "choose_first_duplicate_offer",
+      "path": "reservation_lookup/selection.py",
+      "test": "tests.test_phase3_selection.ExactOfferSelectionTests.test_duplicate_matches_fail_closed_instead_of_choosing_first",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "tolerate_missing_cloudbeds_rate_plan",
+      "path": "reservation_lookup/cloudbeds.py",
+      "test": "tests.test_phase3_cloudbeds_adapter.CloudbedsFailClosedTests.test_missing_rate_plan_is_uncertain",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "classify_cloudbeds_schema_error_as_negative",
+      "path": "reservation_lookup/cloudbeds.py",
+      "test": "tests.test_phase3_cloudbeds_adapter.CloudbedsFailClosedTests.test_partial_stay_is_uncertain",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "allow_non_get_read_request",
+      "path": "reservation_lookup/types.py",
+      "test": "tests.test_phase3_lookup_types.ReadBoundaryTypeTests.test_read_request_is_get_only_relative_and_canonical",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "allow_bokun_metadata_id_mismatch",
+      "path": "reservation_lookup/bokun.py",
+      "test": "tests.test_phase3_bokun_adapter.BokunFailClosedTests.test_metadata_product_id_mismatch_is_uncertain",
+      "exit_code": 1,
+      "killed": true
+    }
+  ],
+  "mutant_count": 10,
+  "all_killed": true
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "recorded_at_utc": "2026-07-18T23:49:32Z",
+  "test": "tests.test_phase3_selection",
+  "command": "python3 -m unittest tests.test_phase3_selection -v",
+  "exit_code": 1,
+  "expected_failure": "ModuleNotFoundError: No module named 'reservation_lookup.selection'",
+  "result": "red_confirmed"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "recorded_at_utc": "2026-07-18T23:56:47Z",
+  "command": "python3 scripts/run_phase3_properties.py --cases 50000 --seed 20260718 --write docs/refactor/evidence/phase-03/property-result.json",
+  "exit_code": 0,
+  "elapsed_seconds": 30.982,
+  "max_rss_kb": 25952,
+  "cases": 50000,
+  "seed": 20260718,
+  "result": "passed"
+}

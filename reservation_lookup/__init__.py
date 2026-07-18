@@ -8,6 +8,13 @@ from .identity import (
     snapshot_hash_for,
     snapshot_hash_from_hashes,
 )
+from .properties import Phase3PropertyReport, run_lookup_properties
+from .selection import (
+    SelectionErrorCode,
+    SelectionRejected,
+    revalidate_offer,
+    select_offer,
+)
 from .types import (
     BokunLookupRequest,
     CloudbedsLookupRequest,
@@ -28,14 +35,20 @@ __all__ = [
     "LookupFailure",
     "LookupProvenance",
     "LookupResult",
+    "Phase3PropertyReport",
     "ProviderKind",
     "ReadRequest",
     "ReadResponse",
     "ReadTransport",
+    "SelectionErrorCode",
+    "SelectionRejected",
     "lookup_id_for",
     "offer_id_for",
     "request_fingerprint",
+    "revalidate_offer",
     "response_hash",
+    "run_lookup_properties",
+    "select_offer",
     "snapshot_hash_for",
     "snapshot_hash_from_hashes",
 ]
