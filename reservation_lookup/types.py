@@ -189,12 +189,24 @@ class LookupResult:
                 raise ValueError("offer lookup_id does not match evidence")
             if offer.service is not self.query.service:
                 raise ValueError("offer service does not match query")
-            if offer.start_date != self.query.start_date:
-                raise ValueError("offer start_date does not match query")
-            if offer.end_date != self.query.end_date:
-                raise ValueError("offer end_date does not match query")
-            if offer.start_time != self.query.start_time:
-                raise ValueError("offer start_time does not match query")
+            if self.query.service is ServiceKind.LODGING:
+                if offer.start_date != self.query.start_date:
+                    raise ValueError("offer start_date does not match lodging query")
+                if offer.end_date != self.query.end_date:
+                    raise ValueError("offer end_date does not match lodging query")
+                if offer.start_time != self.query.start_time:
+                    raise ValueError("offer start_time does not match lodging query")
+            else:
+                end_bound = self.query.end_date or self.query.start_date
+                if not self.query.start_date <= offer.start_date <= end_bound:
+                    raise ValueError("offer start_date is outside activity query")
+                if offer.end_date is not None:
+                    raise ValueError("activity offer end_date must be absent")
+                if (
+                    self.query.start_time is not None
+                    and offer.start_time != self.query.start_time
+                ):
+                    raise ValueError("offer start_time does not match activity query")
             if offer.party != self.query.party:
                 raise ValueError("offer party does not match query")
             if not offer.available:

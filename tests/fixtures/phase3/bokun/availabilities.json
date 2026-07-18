@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "data": [
+    {
+      "date": "2026-11-11",
+      "startTimeId": "3210363",
+      "startTime": "07:30",
+      "availabilityCount": 8,
+      "available": true,
+      "soldOut": false,
+      "unavailable": false,
+      "totalAmount": "1300.00",
+      "currency": "BRL",
+      "defaultRateId": "RATE1"
+    }
+  ]
+}

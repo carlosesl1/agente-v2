@@ -1,3 +1,4 @@
+from .bokun import BokunReadAdapter
 from .cloudbeds import CloudbedsReadAdapter
 from .identity import (
     lookup_id_for,
@@ -21,6 +22,7 @@ from .types import (
 
 __all__ = [
     "BokunLookupRequest",
+    "BokunReadAdapter",
     "CloudbedsLookupRequest",
     "CloudbedsReadAdapter",
     "LookupFailure",
