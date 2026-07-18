@@ -12,12 +12,12 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma**.
+- Fase ativa: **Fase 2 — domínio tipado e reducer puro**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
-- Próxima fase: **Fase 2 — domínio tipado e reducer**, ainda não iniciada.
+- Fase 2: **em execução**, sem integração com runtime ou providers.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
-- Implementação funcional: ainda não iniciada.
+- Implementação funcional: restrita ao domínio puro no novo repositório.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
 
 ## Navegação
@@ -32,6 +32,7 @@ Contrato central:
 - [Registro de riscos](docs/refactor/06-risk-register.md)
 - [Execução da Fase 0](docs/refactor/phases/phase-00-baseline-and-governance.md)
 - [Execução da Fase 1](docs/refactor/phases/phase-01-incident-characterization.md)
+- [Execução da Fase 2](docs/refactor/phases/phase-02-typed-domain-and-reducer.md)
 
 ## Regras de execução
 

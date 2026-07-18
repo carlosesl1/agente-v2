@@ -10,7 +10,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 |---|---|---|
 | 0. Baseline e governança | **concluída** | Criar trilha limpa, evidência reproduzível, arquitetura e gates |
 | 1. Caracterização | **concluída** | Reproduzir todos os incidentes históricos desde payload/estado vazio |
-| 2. Domínio tipado e reducer | próxima — não iniciada | Criar a máquina de estados pura, sem integrar produção |
+| 2. Domínio tipado e reducer | **em execução** | Criar a máquina de estados pura, sem integrar produção |
 | 3. Consultas e `OfferSnapshot` | bloqueada | Vincular seleção a `offer_id` e evidência fresca |
 | 4. Resumo e confirmação únicos | bloqueada | Uma versão, um resumo, uma confirmação posterior |
 | 5. Comando e execução duráveis | bloqueada | Retirar writes do turno síncrono da LLM |
