@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "phase": "phase-01-incident-characterization",
-  "validated_at_utc": "2026-07-18T20:57:10Z",
+  "validated_at_utc": "2026-07-18T20:59:01Z",
   "entry_commit": "cd49452a9e2fac544241f22851586828a4d21bd8",
+  "implementation_commit": "faadb8a0fcffc5f244bda744c1c6b03cd06c4768",
   "checks": [
     {
       "name": "phase0_regression_validator",
@@ -62,6 +63,22 @@
       "exit_code": 0,
       "workflow": "phase-0-validation",
       "run_id": 29659750170,
+      "conclusion": "success"
+    },
+    {
+      "name": "implementation_commit_phase0_ci",
+      "command": "GitHub Actions lookup by head SHA",
+      "exit_code": 0,
+      "workflow": "phase-0-validation",
+      "run_id": 29660723371,
+      "conclusion": "success"
+    },
+    {
+      "name": "implementation_commit_phase1_ci",
+      "command": "GitHub Actions lookup by head SHA",
+      "exit_code": 0,
+      "workflow": "phase-1-characterization",
+      "run_id": 29660723370,
       "conclusion": "success"
     }
   ],

@@ -12,9 +12,10 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 1 — caracterização e corpus de incidentes**.
+- Fase ativa: **nenhuma**.
 - Fase 0: **concluída e publicada no GitHub**.
-- Fase 1: **em execução**, limitada a testes, fixtures sanitizadas, harness e evidências.
+- Fase 1: **concluída e publicada no GitHub**.
+- Próxima fase: **Fase 2 — domínio tipado e reducer**, ainda não iniciada.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional: ainda não iniciada.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
@@ -46,4 +47,5 @@ Contrato central:
 
 ```bash
 python3 scripts/validate_phase0.py
+python3 scripts/validate_phase1.py
 ```

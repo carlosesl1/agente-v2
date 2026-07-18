@@ -2,10 +2,13 @@
 
 ## Status
 
-`em execução`
+`concluída`
 
 Aberta em `2026-07-18T20:26:56Z`, a partir do commit-base
 `664db7eb9717830eec2604e2c0811d26d08f048d`.
+
+Commit de entrada: `cd49452a9e2fac544241f22851586828a4d21bd8`.
+Commit técnico validado: `faadb8a0fcffc5f244bda744c1c6b03cd06c4768`.
 
 ## Objetivo
 
@@ -68,21 +71,108 @@ O resultado do replay deve registrar, sem texto/PII:
 
 ## Entregáveis
 
-- [ ] schema versionado dos cenários;
-- [ ] fixtures sanitizadas de ManyChat e provider reads;
-- [ ] harness determinístico desde estado vazio;
-- [ ] cenário aplicável para F01–F22;
-- [ ] casos obrigatórios `n°/nº`, confirmação dupla, estado ausente,
+- [x] schema versionado dos cenários;
+- [x] fixtures sanitizadas de ManyChat e provider reads;
+- [x] harness determinístico desde estado vazio;
+- [x] cenário aplicável para F01–F22;
+- [x] casos obrigatórios `n°/nº`, confirmação dupla, estado ausente,
       lookup vencido, configuração 120/300, handoff sem e-mail, outcome
       composto, webhook duplicado e crash em fronteiras;
-- [ ] testes temporais e concorrentes;
-- [ ] teste que proíbe preseed de estado canônico;
-- [ ] relatório de cobertura dos incidentes;
-- [ ] baseline de comportamento aceito/não aceito;
-- [ ] validador local e CI da Fase 1;
-- [ ] evidências e hashes SHA-256;
-- [ ] revisão de riscos;
-- [ ] commit de entrada e commit de saída enviados e verificados no remoto.
+- [x] testes temporais e concorrentes;
+- [x] teste que proíbe preseed de estado canônico;
+- [x] relatório de cobertura dos incidentes;
+- [x] baseline de comportamento aceito/não aceito;
+- [x] validador local e CI da Fase 1;
+- [x] evidências e hashes SHA-256;
+- [x] revisão de riscos;
+- [x] commit de entrada e commit técnico enviados, CI e remoto verificados;
+      o commit de closeout é verificado imediatamente após a publicação.
+
+## Resultado
+
+O corpus contém:
+
+```text
+fixtures ManyChat sintéticas: 4
+fixtures provider sintéticas: 4
+cenários: 30
+classes F01–F22 cobertas: 22
+witnesses reproduced: 16
+witnesses contract_characterized: 14
+not_reproducible: 0
+violações derivadas: 37
+fault boundaries: 8/8
+```
+
+O harness exige que o primeiro trace comece no primeiro payload da fixture,
+que todos os demais `inbound` existam no payload e que `initial_state` seja
+exatamente `{}`. Também rejeita preseed, fixture não sintética, trace kind
+desconhecido, PII/segredo e capability externa.
+
+## Evidências
+
+Diretório:
+
+```text
+docs/refactor/evidence/phase-01/
+```
+
+Principais artefatos:
+
+- `incident-coverage.json`;
+- `source-map.json`;
+- `corpus-manifest.json`, com hashes de 40 arquivos;
+- `behavior-baseline.md`;
+- `classification-method.md`;
+- `source-readonly-verification.json`;
+- `validation-result.json`;
+- `SHA256SUMS`, com 14 artefatos externos ao manifesto.
+
+## Validação executada
+
+```text
+replay do corpus: 30/30
+unittest: 13/13
+F01–F22: 22/22
+fault boundaries: 8/8
+fixtures: 8/8
+source paths: 13
+source symbols: 58
+source symbol failures: 0
+phase0 regression validator: ok
+phase1 validator local: ok
+phase1 validator CI-mode: ok
+compileall: ok
+git diff --check: ok
+secret/PII scan: ok
+```
+
+GitHub Actions do commit técnico:
+
+- [phase-0-validation — success](https://github.com/carlosesl1/agente-v2/actions/runs/29660723371);
+- [phase-1-characterization — success](https://github.com/carlosesl1/agente-v2/actions/runs/29660723370).
+
+## Fonte legada e segurança
+
+O legado permaneceu em modo somente leitura:
+
+```text
+HEAD inicial/final: 57408d8b2040399bc25ee7957505208079458884
+status entries inicial/final: 80
+status canônico SHA-256 inicial/final:
+15bfc6b0d3cb7248481027e5f736396b76206b0dd040358190f5545a7036a64a
+```
+
+Não houve teste no repositório legado, provider read/write, mensagem,
+alteração de contato, container, profile, env ou deploy.
+
+## Riscos revisados
+
+- R17 registra o risco de confundir witness com E2E e é mitigado pela
+  classificação explícita;
+- R18 monitora drift do working tree legado e foi verificado por HEAD/status;
+- R19 permanece aberto: traces sintéticos precisarão ser confirmados nos
+  boundaries reais das fases posteriores.
 
 ## Gate de aceite
 
@@ -107,4 +197,5 @@ runtime live.
 
 ## Decisão de avanço
 
-Pendente. A Fase 2 permanece bloqueada até o closeout formal desta fase.
+A Fase 1 está concluída. A Fase 2 torna-se a próxima fase elegível, mas não foi
+iniciada e exige um novo ciclo explícito, preservando a regra de uma fase por vez.
