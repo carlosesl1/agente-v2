@@ -12,10 +12,12 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma**.
+- Fase ativa: **Fase 3 — consultas e seleção por `OfferSnapshot`**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
+- Fase 3: **em execução**, somente adapters read-only com transporte injetado e
+  fixtures sanitizadas; nenhuma rede real.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída: domínio puro no novo repositório.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
@@ -33,6 +35,7 @@ Contrato central:
 - [Execução da Fase 0](docs/refactor/phases/phase-00-baseline-and-governance.md)
 - [Execução da Fase 1](docs/refactor/phases/phase-01-incident-characterization.md)
 - [Execução da Fase 2](docs/refactor/phases/phase-02-typed-domain-and-reducer.md)
+- [Execução da Fase 3](docs/refactor/phases/phase-03-lookups-and-offer-snapshots.md)
 
 ## Regras de execução
 

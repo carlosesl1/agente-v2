@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "opened_at_utc": "2026-07-18T23:24:58Z",
+  "base_commit": "e318a2f1cad6fbeda3db11a0368f7b762ae84cdf",
+  "previous_phase_validators": {
+    "phase_0": "ok",
+    "phase_1": "ok",
+    "phase_2": "ok"
+  },
+  "legacy_readonly": {
+    "head": "57408d8b2040399bc25ee7957505208079458884",
+    "status_entries": 80,
+    "status_sha256": "77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b",
+    "sources": [
+      {
+        "path": "services/cloudbeds.py",
+        "sha256": "15cc293d985142a0f59a6faed07629efbf1376396567824384659cd13f013082"
+      },
+      {
+        "path": "services/bokun.py",
+        "sha256": "5df4133cc2980d43ec8a8cab3bf8aa0a2d808c7dcad0138cd47a8b1d522be0ed"
+      },
+      {
+        "path": "tools/cloudbeds_v2_tools.py",
+        "sha256": "43f0a0a8669f3030ee90a5fa1a1932769e1aa35dc46a0460cf0d5648f55f52ad"
+      },
+      {
+        "path": "tools/bokun_v2_tools.py",
+        "sha256": "239accab85abd62b5abb240381307c9b25d939e60b6ebe9630b3d5b2caaf4310"
+      },
+      {
+        "path": "tests/test_cloudbeds_v2_tools.py",
+        "sha256": "43311290fc7e34b299efcd0f11c8b2771f6074444131148f5daa594baef8771d"
+      },
+      {
+        "path": "tests/test_bokun_v2_tools.py",
+        "sha256": "295f05701f96956d9c4633c8a05dde8ee3f36d8949cfae7b109470ba356173dc"
+      }
+    ]
+  },
+  "network_executed": false,
+  "provider_reads_executed": false,
+  "provider_writes_executed": false
+}
