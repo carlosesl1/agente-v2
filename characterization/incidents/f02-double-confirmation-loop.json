@@ -1,0 +1,67 @@
+{
+  "case_id": "f02-double-confirmation-loop",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "accepted_summary_requires_second_confirmation",
+    "same_draft_summary_presented_twice"
+  ],
+  "incident_id": "F02",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O guard cria confirmation_phase_required quando a fase assinada não chega ao write.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "reservation_write_confirmation_guard_action"
+      ]
+    },
+    {
+      "evidence": "O runtime apresenta e arma o resumo em uma etapa separada.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_prepare_single_service_confirmation_reply"
+      ]
+    }
+  ],
+  "title": "Resumo aceito exige uma segunda confirmação",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-alpha",
+      "kind": "confirmation_received",
+      "seq": 3
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "guard_blocked",
+      "reason": "confirmation_phase_required",
+      "seq": 4
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 5
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "case_id": "f17-fault-03-after-command-before-claim",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "command_is_not_durable_before_claim"
+  ],
+  "incident_id": "F17",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Ledger e request síncrono definem janelas de claim e resultado.",
+      "path": "services/side_effect_ledger.py",
+      "symbols": [
+        "SideEffectLedger"
+      ]
+    },
+    {
+      "evidence": "Persistência e outbox pública possuem fronteiras separadas no request.",
+      "path": "app.py",
+      "symbols": [
+        "_process_event"
+      ]
+    }
+  ],
+  "title": "Fault boundary contract: after_command_before_claim",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "event_id": "evt-hostel-confirm",
+      "kind": "inbound",
+      "seq": 3
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-alpha",
+      "kind": "confirmation_received",
+      "seq": 4
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "command_created",
+      "seq": 5
+    },
+    {
+      "command_persisted": false,
+      "fault_point": "after_command_before_claim",
+      "kind": "crash",
+      "seq": 6
+    }
+  ]
+}

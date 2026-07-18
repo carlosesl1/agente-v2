@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "contact_ref": "contact-gamma",
+      "conversation_ref": "conversation-gamma",
+      "event_id": "evt-handoff",
+      "message": "Preciso de atendimento humano.",
+      "phone": "synthetic-phone-gamma",
+      "received_at": "2026-09-03T12:00:00Z",
+      "subscriber_ref": "subscriber-gamma"
+    }
+  ],
+  "fixture_id": "manychat-handoff",
+  "schema_version": 1,
+  "synthetic": true
+}

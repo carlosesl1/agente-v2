@@ -1,0 +1,52 @@
+{
+  "case_id": "f05-stale-provider-lookup",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "stale_lookup_authorized"
+  ],
+  "incident_id": "F05",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Resultados positivos são copiados para tool_order com timestamp.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_tool_order_after_tool_results"
+      ]
+    },
+    {
+      "evidence": "A seleção consome opções persistidas em metadata.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "_lookup_options_for_service",
+        "with_canonical_lookup_selections"
+      ]
+    }
+  ],
+  "title": "Lookup positivo vencido continua autorizando seleção",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "age_seconds": 1200,
+      "authorized": true,
+      "kind": "lookup_use",
+      "seq": 2,
+      "ttl_seconds": 300
+    }
+  ]
+}

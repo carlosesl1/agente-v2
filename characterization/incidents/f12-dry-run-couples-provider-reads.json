@@ -1,0 +1,48 @@
+{
+  "case_id": "f12-dry-run-couples-provider-reads",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "dry_run_couples_read_and_write_controls"
+  ],
+  "incident_id": "F12",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A configuração concentra dry_run e gates de runtime.",
+      "path": "config/settings.py",
+      "symbols": [
+        "Settings"
+      ]
+    },
+    {
+      "evidence": "Reads e writes recebem o mesmo contexto de modo em múltiplas branches.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "ToolExecutor.execute"
+      ]
+    }
+  ],
+  "title": "Uma flag de dry-run desativa reads reais e writes juntos",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "dry_run_disables_real_reads": true,
+      "kind": "config",
+      "seq": 2
+    }
+  ]
+}

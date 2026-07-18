@@ -1,0 +1,73 @@
+{
+  "case_id": "f20-second-tool-consumes-turn-budget",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "accepted_summary_requires_second_confirmation",
+    "guard_retry_consumes_turn_budget"
+  ],
+  "incident_id": "F20",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O runner mantém orçamento e retorna tool_turn_budget_exceeded.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_tool_budget_rejection_action"
+      ]
+    },
+    {
+      "evidence": "O primeiro write pode retornar confirmation_phase_required antes do segundo intento.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "reservation_write_confirmation_guard_action"
+      ]
+    }
+  ],
+  "title": "Nova tentativa no mesmo turno é bloqueada pelo orçamento de tools",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "event_id": "evt-hostel-confirm",
+      "kind": "inbound",
+      "seq": 3
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-alpha",
+      "kind": "confirmation_received",
+      "seq": 4
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "guard_blocked",
+      "reason": "confirmation_phase_required",
+      "seq": 5
+    },
+    {
+      "after_guard_failure": true,
+      "draft_version": "draft-alpha",
+      "kind": "guard_blocked",
+      "reason": "tool_turn_budget_exceeded",
+      "seq": 6
+    }
+  ]
+}

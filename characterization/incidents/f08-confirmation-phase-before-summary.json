@@ -1,0 +1,48 @@
+{
+  "case_id": "f08-confirmation-phase-before-summary",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "confirmation_phase_armed_before_summary"
+  ],
+  "incident_id": "F08",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Preparação mecânica e apresentação do resumo são operações separadas.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_single_service_confirmation_phase_from_state",
+        "_prepare_single_service_confirmation_reply"
+      ]
+    }
+  ],
+  "title": "Fase é armada antes da apresentação exata do resumo",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "phase_armed",
+      "seq": 2
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 3
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "case_id": "f16-impossible-write-deadline",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "write_budget_impossible_by_configuration"
+  ],
+  "incident_id": "F16",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O runner propaga deadline público para as tools.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "PUBLIC_RESPONSE_DEADLINE_CONTEXT_KEY"
+      ]
+    },
+    {
+      "evidence": "O guard exige orçamento suficiente para timeout do provider e margem.",
+      "path": "tools/side_effect_guard.py",
+      "symbols": [
+        "public_response_deadline_context"
+      ]
+    }
+  ],
+  "title": "Timeout do turno é menor que o mínimo exigido para write",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "agent_timeout_seconds": 120,
+      "kind": "config",
+      "ledger_seconds": 1,
+      "margin_seconds": 1,
+      "provider_timeout_seconds": 300,
+      "seq": 2
+    }
+  ]
+}

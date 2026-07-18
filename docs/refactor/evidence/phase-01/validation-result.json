@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "phase": "phase-01-incident-characterization",
+  "validated_at_utc": "2026-07-18T20:57:10Z",
+  "entry_commit": "cd49452a9e2fac544241f22851586828a4d21bd8",
+  "checks": [
+    {
+      "name": "phase0_regression_validator",
+      "command": "python3 scripts/validate_phase0.py",
+      "exit_code": 0,
+      "result": "ok"
+    },
+    {
+      "name": "incident_corpus_replay",
+      "command": "python3 -m characterization.harness",
+      "exit_code": 0,
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37
+    },
+    {
+      "name": "characterization_tests",
+      "command": "python3 -m unittest discover -s tests -v",
+      "exit_code": 0,
+      "tests_run": 13
+    },
+    {
+      "name": "python_compile",
+      "command": "python3 -m compileall -q characterization scripts tests",
+      "exit_code": 0
+    },
+    {
+      "name": "generated_reports",
+      "command": "python3 scripts/generate_phase1_reports.py --write",
+      "exit_code": 0,
+      "corpus_files_hashed": 40
+    },
+    {
+      "name": "working_diff_check",
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "name": "legacy_source_readonly",
+      "command": "compare legacy HEAD and canonical porcelain status with Phase 0 evidence",
+      "exit_code": 0,
+      "head": "57408d8b2040399bc25ee7957505208079458884",
+      "status_entry_count": 80,
+      "canonical_status_match": true
+    },
+    {
+      "name": "source_reference_validation",
+      "command": "python3 scripts/validate_phase1.py source-reference stage",
+      "exit_code": 0,
+      "paths_checked": 13,
+      "symbols_checked": 58,
+      "symbol_failures": 0
+    },
+    {
+      "name": "entry_commit_ci",
+      "command": "GitHub Actions lookup by head SHA",
+      "exit_code": 0,
+      "workflow": "phase-0-validation",
+      "run_id": 29659750170,
+      "conclusion": "success"
+    }
+  ],
+  "result": "passed",
+  "classifications": {
+    "reproduced": 16,
+    "contract_characterized": 14,
+    "not_reproducible": 0
+  },
+  "fault_boundaries": 8,
+  "safety": {
+    "legacy_files_edited": 0,
+    "legacy_tests_executed": 0,
+    "network_calls_from_harness": 0,
+    "provider_reads": 0,
+    "provider_writes": 0,
+    "messages_sent": 0,
+    "deploys": 0
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "captured_at": "2026-09-02T12:00:10Z",
+  "fixture_id": "provider-rejects-synthetic-option",
+  "options": [],
+  "query": {
+    "adults": 1,
+    "date": "2026-09-15"
+  },
+  "rejection": {
+    "category": "invalid_option_contract",
+    "provider_called": false
+  },
+  "schema_version": 1,
+  "synthetic": true
+}

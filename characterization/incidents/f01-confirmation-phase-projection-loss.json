@@ -1,0 +1,78 @@
+{
+  "case_id": "f01-confirmation-phase-projection-loss",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "authorization_state_projection_loss",
+    "accepted_summary_requires_second_confirmation"
+  ],
+  "incident_id": "F01",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A fase é derivada de resultados e persistida em metadata antes da fronteira do plugin.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_reservation_confirmation_phase_from_results",
+        "_next_state_for_native_turn"
+      ]
+    },
+    {
+      "evidence": "A fronteira serializa e reconstrói contexto comercial por allowlist.",
+      "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+      "symbols": [
+        "execute_hermes_native_tool"
+      ]
+    }
+  ],
+  "title": "Fase de confirmação perdida na projeção runner-plugin",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "phase_armed",
+      "seq": 3
+    },
+    {
+      "dropped_fields": [
+        "reservation_confirmation_phase"
+      ],
+      "kind": "projection",
+      "required_fields": [
+        "reservation_confirmation_phase"
+      ],
+      "seq": 4
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-alpha",
+      "kind": "confirmation_received",
+      "seq": 5
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "guard_blocked",
+      "reason": "confirmation_phase_required",
+      "seq": 6
+    }
+  ]
+}

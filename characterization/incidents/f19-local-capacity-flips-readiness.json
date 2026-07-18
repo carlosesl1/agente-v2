@@ -1,0 +1,51 @@
+{
+  "case_id": "f19-local-capacity-flips-readiness",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "local_capacity_directly_flips_readiness"
+  ],
+  "incident_id": "F19",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Readiness agrega checks operacionais, incluindo a saúde de disco local.",
+      "path": "chapada_leads/api/use_cases/health.py",
+      "symbols": [
+        "build_readiness_payload",
+        "_disk_health"
+      ]
+    },
+    {
+      "evidence": "Thresholds de capacidade e stores locais compartilham configuração do runtime.",
+      "path": "config/settings.py",
+      "symbols": [
+        "Settings"
+      ]
+    }
+  ],
+  "title": "Pressão de disco local derruba readiness do atendimento",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "disk_percent": 88,
+      "kind": "readiness",
+      "only_failed_check": "local_capacity",
+      "ready": false,
+      "seq": 2
+    }
+  ]
+}

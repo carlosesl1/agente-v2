@@ -1,0 +1,168 @@
+{
+  "file_count": 40,
+  "files": [
+    {
+      "path": "characterization/harness.py",
+      "sha256": "435878652add9b425747a5c8de05f4d495185f160805f454c61d257418452d5c"
+    },
+    {
+      "path": "characterization/schema/scenario.schema.json",
+      "sha256": "9284ac74eb9dd8f9cd49aa29d36aac40a1f2332416c7d2843c97279b5b9f5484"
+    },
+    {
+      "path": "characterization/fixtures/manychat/agency-reservation.json",
+      "sha256": "76f6e8b3fde3fdeee0bff7c2a6a6b4f1506bf7e53a7eb605fe501e6fc6362143"
+    },
+    {
+      "path": "characterization/fixtures/manychat/duplicate-webhook.json",
+      "sha256": "eee8d1e82d027d52648dd78800f62718af1dc42117ecab84cc9e949c51722ca9"
+    },
+    {
+      "path": "characterization/fixtures/manychat/handoff.json",
+      "sha256": "4a2b67fb0746930fafd96656197a5b31a2aef3cf0d46a5765733753cfab9659f"
+    },
+    {
+      "path": "characterization/fixtures/manychat/hostel-reservation.json",
+      "sha256": "a92a2d6ca9e59169158d94cefd56de8aae5c798eeb83d97aba60de7e42c93ebd"
+    },
+    {
+      "path": "characterization/fixtures/provider/agency-available.json",
+      "sha256": "174b2fb7b850cad60e3e3e5c6afb95c9009394f674162f0ae114cbbabc04ac0c"
+    },
+    {
+      "path": "characterization/fixtures/provider/composite-outcome.json",
+      "sha256": "c517aebdf797754c40868413f2f2df75a48612fdab0083947b97c28eae9c7e9c"
+    },
+    {
+      "path": "characterization/fixtures/provider/hostel-available.json",
+      "sha256": "1f4a5e85fb586bd32379c6a1acee7110ce826bb4d76ad8bf415eb005e8470a8a"
+    },
+    {
+      "path": "characterization/fixtures/provider/provider-rejects-synthetic-option.json",
+      "sha256": "c2c4e06ec55b507504e06a7bbbe18a6e20ff15329da1c7d1a26afec86fd7f8a8"
+    },
+    {
+      "path": "characterization/incidents/f01-confirmation-phase-projection-loss.json",
+      "sha256": "db8210375eabce99f7e15daa25a656a55983298187b49a8902d812279d0feefb"
+    },
+    {
+      "path": "characterization/incidents/f02-double-confirmation-loop.json",
+      "sha256": "3354845dadcc534d00ec14003cdbce081d0d26603de7c525a6540d15dea6b769"
+    },
+    {
+      "path": "characterization/incidents/f03-legacy-write-alias-bypass.json",
+      "sha256": "e47e0006d1b0f3f81fdc5da26fb7b7e193ca5a8e42c47313c06f6752b085be7c"
+    },
+    {
+      "path": "characterization/incidents/f04-package-signature-omits-economic-fields.json",
+      "sha256": "f3b2953237990fd4e5788d8ff6fcbb3e3867f8045f1431c8c9814c82c99cfb2b"
+    },
+    {
+      "path": "characterization/incidents/f05-stale-provider-lookup.json",
+      "sha256": "bb1e96e704eb57dbc830e9f65a4ef7574538499425451ae751db0e45590454d0"
+    },
+    {
+      "path": "characterization/incidents/f06-concurrent-duplicate-webhook.json",
+      "sha256": "3b0f81454dc533efeaafb9d33dd4080c707f43f503cf06ab1102143165288be3"
+    },
+    {
+      "path": "characterization/incidents/f07-nested-private-metadata-leak.json",
+      "sha256": "18b04d19578e54bd624d620c6529727b1d9661686170721b87a8b6a72b89b6a2"
+    },
+    {
+      "path": "characterization/incidents/f08-confirmation-phase-before-summary.json",
+      "sha256": "f3737c55d616c8bfd8abb3d138a3da3162913454d5bf35d6ef8dd5f93238fffe"
+    },
+    {
+      "path": "characterization/incidents/f09-model-selects-provider-target.json",
+      "sha256": "aa59fc1c72618dea4d982460457fffb18fea6e5f3b8ddea25e067fabbcfaa8e4"
+    },
+    {
+      "path": "characterization/incidents/f10-session-bootstrap-from-log.json",
+      "sha256": "73147c41fe9ea9dfc3b37b320d80c5bca838e67552f313b680a57901b992d832"
+    },
+    {
+      "path": "characterization/incidents/f11-runtime-provenance-drift.json",
+      "sha256": "ba28033c2acdba42ab33c2592b3d1012d65847cd67bcb53662d0f80590d44790"
+    },
+    {
+      "path": "characterization/incidents/f12-dry-run-couples-provider-reads.json",
+      "sha256": "b42a898caf8856d60ee6d44249e14e4d83b67ca5242ad93201c4839c01422746"
+    },
+    {
+      "path": "characterization/incidents/f13-fake-provider-contract-optimism.json",
+      "sha256": "29ce621f3ad0c6c5dfdc32b726a16e9ec1848e7e6695527e677ec8ae518c9118"
+    },
+    {
+      "path": "characterization/incidents/f14-future-promise-without-workflow.json",
+      "sha256": "131ff73d3e6f2547db843be654a8565abfedc936f68054172226d6b9f96bea6b"
+    },
+    {
+      "path": "characterization/incidents/f15-unicode-room-label-identity.json",
+      "sha256": "0eb0fe38ee6aa91636aa5f2078b5fedd6d3a524f0fd9010a95db78d8a98e637a"
+    },
+    {
+      "path": "characterization/incidents/f16-impossible-write-deadline.json",
+      "sha256": "96e552580d4a8c838360e3bd93d2899c21d92216210d2a7a5507f570613cfe9b"
+    },
+    {
+      "path": "characterization/incidents/f17-composite-outcome-flattening.json",
+      "sha256": "0505a2b2302afe9543a658ffd84644d7276f2d62dc6d639e5facd8de841d94e8"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-01-before-event-persist.json",
+      "sha256": "d375db20f8b8c018c168dbdac905eff4a98d4f54b4620da63db14fc93a3fabef"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-02-after-event-before-command.json",
+      "sha256": "6905443d2c234bf14ae6befe14765d32d1c6e5fdfd0c8a3a3d6cd5c143020d68"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-03-after-command-before-claim.json",
+      "sha256": "93c78b2799f2f3872cd72c2dce456e0f76d84e10385ab3a493d296b2df476411"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-04-after-claim-before-socket.json",
+      "sha256": "9c741e1266546ef4ac6824cff8d191844af845198e2ba959576d603998e61c01"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-05-after-socket-response-lost.json",
+      "sha256": "421fe2120ce465793e863df3147611479a892b60d836f661530af88dc51a2294"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-06-after-provider-before-outcome.json",
+      "sha256": "f225e920f4c4054bd076f8185462d7eeb7f782230078b4fd0ed1f94767e14176"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-07-after-outcome-before-outbox.json",
+      "sha256": "5ff33e18a2d2adc4fd811932ddf6df6b1360d1e04d4cc9ed5f0d5dd092bed354"
+    },
+    {
+      "path": "characterization/incidents/f17-fault-08-during-public-delivery.json",
+      "sha256": "9fa9bb31e2d54796aefb3ded155a88af81858f0444c3187362c485ab8e240e48"
+    },
+    {
+      "path": "characterization/incidents/f18-optional-email-blocks-public-handoff.json",
+      "sha256": "d630ee14619926607fa123b3bbe0349dbdee3f55317b4f91c59b1c23143f2030"
+    },
+    {
+      "path": "characterization/incidents/f19-local-capacity-flips-readiness.json",
+      "sha256": "0e362277b5635f890c1ec41d9db9246c003ddaa1118bcf55438e5a053a2f9a67"
+    },
+    {
+      "path": "characterization/incidents/f20-second-tool-consumes-turn-budget.json",
+      "sha256": "8d810da82ab9cdf1a0f56748abf88f80f4eab78ff31f9730f53286e8af0eef0c"
+    },
+    {
+      "path": "characterization/incidents/f21-dirty-tree-unbound-image.json",
+      "sha256": "ed007ec2d3b21e5c4f9252b3d0161e36a37e13ad2999dd6a3411a7ae999dab48"
+    },
+    {
+      "path": "characterization/incidents/f22-preseeded-canonical-state-false-green.json",
+      "sha256": "921199937eea642d19856d4fe77d50c2a7e6466072a92bfa45393a65ea62eed9"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "phase": "phase-01-incident-characterization",
+  "schema_version": 1
+}

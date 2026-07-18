@@ -1,0 +1,49 @@
+{
+  "case_id": "f17-fault-01-before-event-persist",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "public_continuation_without_persisted_event"
+  ],
+  "incident_id": "F17",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Ledger e request síncrono definem janelas de claim e resultado.",
+      "path": "services/side_effect_ledger.py",
+      "symbols": [
+        "SideEffectLedger"
+      ]
+    },
+    {
+      "evidence": "Persistência e outbox pública possuem fronteiras separadas no request.",
+      "path": "app.py",
+      "symbols": [
+        "_process_event"
+      ]
+    }
+  ],
+  "title": "Fault boundary contract: before_event_persist",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "fault_point": "before_event_persist",
+      "kind": "crash",
+      "public_continuation_emitted": true,
+      "seq": 2
+    }
+  ]
+}

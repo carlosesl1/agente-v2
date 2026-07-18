@@ -1,0 +1,53 @@
+{
+  "case_id": "f11-runtime-provenance-drift",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "runtime_artifact_provenance_drift"
+  ],
+  "incident_id": "F11",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A imagem não vinculava de forma verificável o commit efetivo do working tree.",
+      "path": "Dockerfile",
+      "symbols": [
+        "build metadata"
+      ]
+    },
+    {
+      "evidence": "Bind mounts e env podem alterar o runtime após o build.",
+      "path": "deploy/production/docker-compose.yml",
+      "symbols": [
+        "runtime mounts"
+      ]
+    }
+  ],
+  "title": "Canary e runtime não atestam o mesmo artefato",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "clean_commit": false,
+      "kind": "runtime_attestation",
+      "mismatched_fields": [
+        "image_digest",
+        "profile_hash",
+        "python_path"
+      ],
+      "seq": 2
+    }
+  ]
+}

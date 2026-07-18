@@ -1,0 +1,43 @@
+{
+  "case_id": "f10-session-bootstrap-from-log",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "session_bootstrap_is_implicit"
+  ],
+  "incident_id": "F10",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A sessão é mantida fora de uma resposta explícita de protocolo e retomada pelo runner.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "HermesCLINativeAgentClient.run_turn",
+        "HERMES_PROFILE_SESSION_ID_METADATA_KEY"
+      ]
+    }
+  ],
+  "title": "Bootstrap descobre sessão por log ou filesystem",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "discovery_source": "log",
+      "kind": "bootstrap",
+      "seq": 2
+    }
+  ]
+}

@@ -1,0 +1,417 @@
+{
+  "incidents": [
+    {
+      "incident_id": "F01",
+      "source_refs": [
+        {
+          "evidence": "A fase é derivada de resultados e persistida em metadata antes da fronteira do plugin.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_reservation_confirmation_phase_from_results",
+            "_next_state_for_native_turn"
+          ]
+        },
+        {
+          "evidence": "A fronteira serializa e reconstrói contexto comercial por allowlist.",
+          "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+          "symbols": [
+            "execute_hermes_native_tool"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F02",
+      "source_refs": [
+        {
+          "evidence": "O guard cria confirmation_phase_required quando a fase assinada não chega ao write.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "reservation_write_confirmation_guard_action"
+          ]
+        },
+        {
+          "evidence": "O runtime apresenta e arma o resumo em uma etapa separada.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_prepare_single_service_confirmation_reply"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F03",
+      "source_refs": [
+        {
+          "evidence": "A proteção depende de conjuntos explícitos de nomes de tools.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "RESERVATION_WRITE_TOOLS_REQUIRING_CURRENT_CONFIRMATION",
+            "reservation_selection_guard_action"
+          ]
+        },
+        {
+          "evidence": "Aliases e ferramentas executáveis atravessam a superfície do plugin.",
+          "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+          "symbols": [
+            "execute_hermes_native_tool"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F04",
+      "source_refs": [
+        {
+          "evidence": "A assinatura é uma projeção allowlisted do request e do progresso de pacote.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "reservation_confirmation_subject_signature",
+            "_reservation_confirmation_subject_value",
+            "derive_package_progress"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F05",
+      "source_refs": [
+        {
+          "evidence": "Resultados positivos são copiados para tool_order com timestamp.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_tool_order_after_tool_results"
+          ]
+        },
+        {
+          "evidence": "A seleção consome opções persistidas em metadata.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "_lookup_options_for_service",
+            "with_canonical_lookup_selections"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F06",
+      "source_refs": [
+        {
+          "evidence": "O estado, handoff e outbox são coordenados no request.",
+          "path": "app.py",
+          "symbols": [
+            "_process_event"
+          ]
+        },
+        {
+          "evidence": "Runner, commits e tools mantêm disciplina de turno própria.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "NativeHermesAgentRunner.plan"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F07",
+      "source_refs": [
+        {
+          "evidence": "O contexto nativo projeta estado e resultados para o plugin.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_native_tool_context"
+          ]
+        },
+        {
+          "evidence": "A fronteira do plugin recebe JSON serializado e precisa redigir recursivamente.",
+          "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+          "symbols": [
+            "execute_hermes_native_tool"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F08",
+      "source_refs": [
+        {
+          "evidence": "Preparação mecânica e apresentação do resumo são operações separadas.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_single_service_confirmation_phase_from_state",
+            "_prepare_single_service_confirmation_reply"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F09",
+      "source_refs": [
+        {
+          "evidence": "A operação técnica ainda chega como nome de tool selecionado antes do binding canônico.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "with_selected_reservation_option",
+            "prepare_reservation_write_arguments"
+          ]
+        },
+        {
+          "evidence": "O modelo retorna o nome da tool executável.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "NativeAgentToolCall"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F10",
+      "source_refs": [
+        {
+          "evidence": "A sessão é mantida fora de uma resposta explícita de protocolo e retomada pelo runner.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "HermesCLINativeAgentClient.run_turn",
+            "HERMES_PROFILE_SESSION_ID_METADATA_KEY"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F11",
+      "source_refs": [
+        {
+          "evidence": "A imagem não vinculava de forma verificável o commit efetivo do working tree.",
+          "path": "Dockerfile",
+          "symbols": [
+            "build metadata"
+          ]
+        },
+        {
+          "evidence": "Bind mounts e env podem alterar o runtime após o build.",
+          "path": "deploy/production/docker-compose.yml",
+          "symbols": [
+            "runtime mounts"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F12",
+      "source_refs": [
+        {
+          "evidence": "A configuração concentra dry_run e gates de runtime.",
+          "path": "config/settings.py",
+          "symbols": [
+            "Settings"
+          ]
+        },
+        {
+          "evidence": "Reads e writes recebem o mesmo contexto de modo em múltiplas branches.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "ToolExecutor.execute"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F13",
+      "source_refs": [
+        {
+          "evidence": "O teste usa provider fake e estado canônico previamente montado.",
+          "path": "tests/test_manychat_single_confirmation_flow.py",
+          "symbols": [
+            "test_manychat_handler_uses_one_natural_confirmation_and_one_provider_write"
+          ]
+        },
+        {
+          "evidence": "O provider real valida um contrato mais rico que o shape mínimo do fake.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "with_selected_reservation_option"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F14",
+      "source_refs": [
+        {
+          "evidence": "Texto público pode expressar ação futura sem um tipo de continuação.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "NativeAgentTurn"
+          ]
+        },
+        {
+          "evidence": "A outbox existente entrega a resposta atual, não materializa qualquer promessa futura.",
+          "path": "app.py",
+          "symbols": [
+            "_process_event"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F15",
+      "source_refs": [
+        {
+          "evidence": "Facts conversacionais e label pública participam do matching da seleção.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "with_canonical_lookup_selections",
+            "_lookup_option_matches_selection_facts"
+          ]
+        },
+        {
+          "evidence": "A fixture histórica apresenta nº, mas preseeda opção com n° e ID.",
+          "path": "tests/test_manychat_single_confirmation_flow.py",
+          "symbols": [
+            "ManyChatSingleConfirmationClient"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F16",
+      "source_refs": [
+        {
+          "evidence": "O runner propaga deadline público para as tools.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "PUBLIC_RESPONSE_DEADLINE_CONTEXT_KEY"
+          ]
+        },
+        {
+          "evidence": "O guard exige orçamento suficiente para timeout do provider e margem.",
+          "path": "tools/side_effect_guard.py",
+          "symbols": [
+            "public_response_deadline_context"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F17",
+      "source_refs": [
+        {
+          "evidence": "Wrappers compostos projetam evidência das operações internas.",
+          "path": "domain/chapada_native_tools.py",
+          "symbols": [
+            "execute_hermes_native_tool"
+          ]
+        },
+        {
+          "evidence": "Resultados são normalizados para booleans públicos e claim evidence.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "ToolExecutor.execute"
+          ]
+        },
+        {
+          "evidence": "Ledger e request síncrono definem janelas de claim e resultado.",
+          "path": "services/side_effect_ledger.py",
+          "symbols": [
+            "SideEffectLedger"
+          ]
+        },
+        {
+          "evidence": "Persistência e outbox pública possuem fronteiras separadas no request.",
+          "path": "app.py",
+          "symbols": [
+            "_process_event"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F18",
+      "source_refs": [
+        {
+          "evidence": "O envio público é condicionado à prontidão agregada dos side effects de handoff.",
+          "path": "app.py",
+          "symbols": [
+            "_process_event",
+            "_handoff_side_effects_ready_for_public_reply"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F19",
+      "source_refs": [
+        {
+          "evidence": "Readiness agrega checks operacionais, incluindo a saúde de disco local.",
+          "path": "chapada_leads/api/use_cases/health.py",
+          "symbols": [
+            "build_readiness_payload",
+            "_disk_health"
+          ]
+        },
+        {
+          "evidence": "Thresholds de capacidade e stores locais compartilham configuração do runtime.",
+          "path": "config/settings.py",
+          "symbols": [
+            "Settings"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F20",
+      "source_refs": [
+        {
+          "evidence": "O runner mantém orçamento e retorna tool_turn_budget_exceeded.",
+          "path": "domain/hermes_native_runner.py",
+          "symbols": [
+            "_tool_budget_rejection_action"
+          ]
+        },
+        {
+          "evidence": "O primeiro write pode retornar confirmation_phase_required antes do segundo intento.",
+          "path": "domain/tool_executor.py",
+          "symbols": [
+            "reservation_write_confirmation_guard_action"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F21",
+      "source_refs": [
+        {
+          "evidence": "O build pode partir do checkout efetivo sem manifesto imutável completo.",
+          "path": "deploy/production/deploy.sh",
+          "symbols": [
+            "deploy flow"
+          ]
+        },
+        {
+          "evidence": "A imagem herdava metadata sem provar o commit da aplicação.",
+          "path": "Dockerfile",
+          "symbols": [
+            "image labels"
+          ]
+        }
+      ]
+    },
+    {
+      "incident_id": "F22",
+      "source_refs": [
+        {
+          "evidence": "O repository é preenchido com selected_lodging_option, IDs e lookup antes do primeiro webhook.",
+          "path": "tests/test_manychat_single_confirmation_flow.py",
+          "symbols": [
+            "test_manychat_handler_uses_one_natural_confirmation_and_one_provider_write"
+          ]
+        }
+      ]
+    }
+  ],
+  "phase": "phase-01-incident-characterization",
+  "references_are_relative": true,
+  "schema_version": 1,
+  "source_mode": "read_only",
+  "source_repository": "chapada-leads-hermes"
+}

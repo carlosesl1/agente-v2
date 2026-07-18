@@ -1,0 +1,45 @@
+{
+  "case_id": "f18-optional-email-blocks-public-handoff",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "optional_internal_email_blocks_public_handoff"
+  ],
+  "incident_id": "F18",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/handoff.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O envio público é condicionado à prontidão agregada dos side effects de handoff.",
+      "path": "app.py",
+      "symbols": [
+        "_process_event",
+        "_handoff_side_effects_ready_for_public_reply"
+      ]
+    }
+  ],
+  "title": "E-mail interno opcional bloqueia resposta pública de handoff",
+  "trace": [
+    {
+      "event_id": "evt-handoff",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "internal_email_required": false,
+      "internal_email_sent": false,
+      "kind": "handoff",
+      "public_reply_sent": false,
+      "seq": 2,
+      "tag_applied": true
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "case_id": "f21-dirty-tree-unbound-image",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "runtime_artifact_provenance_drift"
+  ],
+  "incident_id": "F21",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O build pode partir do checkout efetivo sem manifesto imutável completo.",
+      "path": "deploy/production/deploy.sh",
+      "symbols": [
+        "deploy flow"
+      ]
+    },
+    {
+      "evidence": "A imagem herdava metadata sem provar o commit da aplicação.",
+      "path": "Dockerfile",
+      "symbols": [
+        "image labels"
+      ]
+    }
+  ],
+  "title": "Working tree, commit e imagem não formam uma identidade única",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "clean_commit": false,
+      "kind": "runtime_attestation",
+      "mismatched_fields": [
+        "git_head",
+        "working_tree_hash",
+        "image_digest"
+      ],
+      "seq": 2
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "case_id": "f17-composite-outcome-flattening",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "composite_outcome_is_not_monotonic"
+  ],
+  "incident_id": "F17",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/composite-outcome.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Wrappers compostos projetam evidência das operações internas.",
+      "path": "domain/chapada_native_tools.py",
+      "symbols": [
+        "execute_hermes_native_tool"
+      ]
+    },
+    {
+      "evidence": "Resultados são normalizados para booleans públicos e claim evidence.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "ToolExecutor.execute"
+      ]
+    }
+  ],
+  "title": "Outcome pai contradiz outcomes das operações filhas",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "kind": "composite_outcome",
+      "leaf_outcomes": [
+        "not_called",
+        "not_called"
+      ],
+      "parent_outcome": "effect_confirmed",
+      "seq": 2
+    }
+  ]
+}

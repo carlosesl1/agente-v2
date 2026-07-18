@@ -1,0 +1,53 @@
+{
+  "case_id": "f07-nested-private-metadata-leak",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "nested_private_metadata_leak"
+  ],
+  "incident_id": "F07",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O contexto nativo projeta estado e resultados para o plugin.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "_native_tool_context"
+      ]
+    },
+    {
+      "evidence": "A fronteira do plugin recebe JSON serializado e precisa redigir recursivamente.",
+      "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+      "symbols": [
+        "execute_hermes_native_tool"
+      ]
+    }
+  ],
+  "title": "Filtro raso deixa campos privados aninhados atravessarem o plugin",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "allowed_container": "selected_option",
+      "kind": "redaction",
+      "leaked_private_fields": [
+        "api_token_field",
+        "raw_provider_payload_field"
+      ],
+      "seq": 2
+    }
+  ]
+}

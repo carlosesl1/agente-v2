@@ -1,0 +1,76 @@
+{
+  "$id": "https://example.invalid/agente-v2/phase-1-scenario.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "case_id": {
+      "pattern": "^[a-z0-9][a-z0-9-]{2,80}$"
+    },
+    "classification": {
+      "enum": [
+        "reproduced",
+        "contract_characterized"
+      ]
+    },
+    "clock_utc": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "expected_violations": {
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "incident_id": {
+      "pattern": "^F(?:0[1-9]|1[0-9]|2[0-2])$"
+    },
+    "initial_state": {
+      "maxProperties": 0,
+      "type": "object"
+    },
+    "manychat_fixture": {
+      "pattern": "^fixtures/manychat/",
+      "type": "string"
+    },
+    "provider_fixture": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "safety": {
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "source_refs": {
+      "minItems": 1,
+      "type": "array"
+    },
+    "title": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "trace": {
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "incident_id",
+    "case_id",
+    "classification",
+    "title",
+    "initial_state",
+    "clock_utc",
+    "safety",
+    "manychat_fixture",
+    "source_refs",
+    "trace",
+    "expected_violations"
+  ],
+  "title": "Agente v2 Phase 1 incident characterization scenario",
+  "type": "object"
+}

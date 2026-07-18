@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-09-01T12:00:10Z",
+  "fixture_id": "provider-hostel-available",
+  "options": [
+    {
+      "available": true,
+      "currency": "BRL",
+      "provider_option_ref": "hostel-option-alpha",
+      "public_name": "Compartilhado n°2",
+      "rate_ref": "rate-alpha",
+      "room_type_ref": "room-type-alpha",
+      "total_amount": "300.00"
+    }
+  ],
+  "query": {
+    "adults": 1,
+    "check_in": "2026-09-10",
+    "check_out": "2026-09-13",
+    "children": 0
+  },
+  "schema_version": 1,
+  "synthetic": true
+}

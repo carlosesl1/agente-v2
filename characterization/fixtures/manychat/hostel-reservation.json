@@ -1,0 +1,43 @@
+{
+  "events": [
+    {
+      "contact_ref": "contact-alpha",
+      "conversation_ref": "conversation-alpha",
+      "event_id": "evt-hostel-request",
+      "message": "Quero reservar uma hospedagem para setembro.",
+      "phone": "synthetic-phone-alpha",
+      "received_at": "2026-09-01T12:00:00Z",
+      "subscriber_ref": "subscriber-alpha"
+    },
+    {
+      "contact_ref": "contact-alpha",
+      "conversation_ref": "conversation-alpha",
+      "event_id": "evt-hostel-choice",
+      "message": "Escolho o quarto compartilhado número 2.",
+      "phone": "synthetic-phone-alpha",
+      "received_at": "2026-09-01T12:01:00Z",
+      "subscriber_ref": "subscriber-alpha"
+    },
+    {
+      "contact_ref": "contact-alpha",
+      "conversation_ref": "conversation-alpha",
+      "event_id": "evt-hostel-details",
+      "message": "Uma pessoa, pagamento no cartão.",
+      "phone": "synthetic-phone-alpha",
+      "received_at": "2026-09-01T12:02:00Z",
+      "subscriber_ref": "subscriber-alpha"
+    },
+    {
+      "contact_ref": "contact-alpha",
+      "conversation_ref": "conversation-alpha",
+      "event_id": "evt-hostel-confirm",
+      "message": "Sim, confirmo exatamente esse resumo.",
+      "phone": "synthetic-phone-alpha",
+      "received_at": "2026-09-01T12:03:00Z",
+      "subscriber_ref": "subscriber-alpha"
+    }
+  ],
+  "fixture_id": "manychat-hostel-reservation",
+  "schema_version": 1,
+  "synthetic": true
+}

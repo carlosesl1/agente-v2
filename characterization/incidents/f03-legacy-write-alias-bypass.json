@@ -1,0 +1,69 @@
+{
+  "case_id": "f03-legacy-write-alias-bypass",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "legacy_write_alias_bypasses_guard"
+  ],
+  "incident_id": "F03",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A proteção depende de conjuntos explícitos de nomes de tools.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "RESERVATION_WRITE_TOOLS_REQUIRING_CURRENT_CONFIRMATION",
+        "reservation_selection_guard_action"
+      ]
+    },
+    {
+      "evidence": "Aliases e ferramentas executáveis atravessam a superfície do plugin.",
+      "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+      "symbols": [
+        "execute_hermes_native_tool"
+      ]
+    }
+  ],
+  "title": "Alias legado conserva capacidade de write sem o guard canônico",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-alpha",
+      "kind": "confirmation_received",
+      "seq": 3
+    },
+    {
+      "guard_enforced": false,
+      "kind": "tool_surface",
+      "legacy_alias": true,
+      "operation": "legacy-create-reservation",
+      "seq": 4
+    },
+    {
+      "draft_version": "draft-alpha",
+      "idempotency_key": "command-alpha",
+      "kind": "dispatch",
+      "seq": 5
+    }
+  ]
+}

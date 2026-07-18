@@ -1,0 +1,34 @@
+{
+  "events": [
+    {
+      "contact_ref": "contact-beta",
+      "conversation_ref": "conversation-beta",
+      "event_id": "evt-agency-request",
+      "message": "Quero consultar um passeio para duas pessoas.",
+      "phone": "synthetic-phone-beta",
+      "received_at": "2026-09-02T12:00:00Z",
+      "subscriber_ref": "subscriber-beta"
+    },
+    {
+      "contact_ref": "contact-beta",
+      "conversation_ref": "conversation-beta",
+      "event_id": "evt-agency-choice",
+      "message": "Escolho a opção da manhã.",
+      "phone": "synthetic-phone-beta",
+      "received_at": "2026-09-02T12:01:00Z",
+      "subscriber_ref": "subscriber-beta"
+    },
+    {
+      "contact_ref": "contact-beta",
+      "conversation_ref": "conversation-beta",
+      "event_id": "evt-agency-confirm",
+      "message": "Confirmo o resumo.",
+      "phone": "synthetic-phone-beta",
+      "received_at": "2026-09-02T12:02:00Z",
+      "subscriber_ref": "subscriber-beta"
+    }
+  ],
+  "fixture_id": "manychat-agency-reservation",
+  "schema_version": 1,
+  "synthetic": true
+}

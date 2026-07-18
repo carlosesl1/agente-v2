@@ -20,6 +20,9 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R14 | Pagamento acopla novamente confirmação da reserva | 3 | 4 | mudança de método reabre draft | workflow financeiro posterior e separado | payments | aberto |
 | R15 | Legado nunca é removido | 4 | 4 | dual paths permanentes | Fase 9 obrigatória, métricas de remoção | tech lead | aberto |
 | R16 | Disco/capacidade interrompe evidências/workers | 3 | 4 | uso >85%, backlog | quotas, alertas e backend externo | operations | aberto |
+| R17 | Corpus de witness é interpretado como E2E do legado | 3 | 4 | claim “runtime reproduzido” | classificação explícita, source map e limites documentados | QA | monitorado |
+| R18 | Working tree legado muda e invalida o source map | 3 | 4 | HEAD/status canônico diverge | verificação read-only de HEAD/status e símbolos no closeout | tech lead | monitorado |
+| R19 | Trace sintético codifica uma premissa incorreta | 3 | 5 | cenário sem owner/fonte verificável | revisão independente, símbolo validado e futuro replay no boundary real | QA/domain | aberto |
 
 ## Processo
 

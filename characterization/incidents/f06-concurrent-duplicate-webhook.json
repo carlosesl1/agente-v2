@@ -1,0 +1,95 @@
+{
+  "case_id": "f06-concurrent-duplicate-webhook",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "duplicate_webhook_not_deduplicated",
+    "turn_has_multiple_unsynchronized_owners",
+    "duplicate_provider_dispatch"
+  ],
+  "incident_id": "F06",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/duplicate-webhook.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O estado, handoff e outbox são coordenados no request.",
+      "path": "app.py",
+      "symbols": [
+        "_process_event"
+      ]
+    },
+    {
+      "evidence": "Runner, commits e tools mantêm disciplina de turno própria.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "NativeHermesAgentRunner.plan"
+      ]
+    }
+  ],
+  "title": "Webhook duplicado atravessa owners de turno não serializados",
+  "trace": [
+    {
+      "event_id": "evt-duplicate-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "draft-delta",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "event_id": "evt-duplicate-confirm",
+      "kind": "inbound",
+      "seq": 3
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "draft-delta",
+      "kind": "confirmation_received",
+      "seq": 4
+    },
+    {
+      "draft_version": "draft-delta",
+      "kind": "command_created",
+      "seq": 5
+    },
+    {
+      "draft_version": "draft-delta",
+      "idempotency_key": "command-delta",
+      "kind": "dispatch",
+      "seq": 6
+    },
+    {
+      "conflicting_commits": true,
+      "decision_owners": 3,
+      "kind": "concurrency",
+      "seq": 7
+    },
+    {
+      "event_id": "evt-duplicate-confirm",
+      "kind": "inbound",
+      "seq": 8
+    },
+    {
+      "draft_version": "draft-delta",
+      "kind": "command_created",
+      "seq": 9
+    },
+    {
+      "draft_version": "draft-delta",
+      "idempotency_key": "command-delta",
+      "kind": "dispatch",
+      "seq": 10
+    }
+  ]
+}

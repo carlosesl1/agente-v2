@@ -1,0 +1,49 @@
+{
+  "case_id": "f14-future-promise-without-workflow",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "future_promise_without_durable_workflow"
+  ],
+  "incident_id": "F14",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Texto público pode expressar ação futura sem um tipo de continuação.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "NativeAgentTurn"
+      ]
+    },
+    {
+      "evidence": "A outbox existente entrega a resposta atual, não materializa qualquer promessa futura.",
+      "path": "app.py",
+      "symbols": [
+        "_process_event"
+      ]
+    }
+  ],
+  "title": "Resposta promete continuação sem comando ou outbox durável",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "durable_continuation": false,
+      "kind": "future_promise",
+      "public_promise": true,
+      "seq": 2
+    }
+  ]
+}

@@ -30,3 +30,19 @@ Para verificar:
 ```bash
 python3 scripts/validate_phase0.py
 ```
+
+## Fase 1
+
+`phase-01/incident-coverage.json` e `phase-01/source-map.json` são gerados
+deterministicamente a partir do corpus. `behavior-baseline.md` separa o
+comportamento aceito do não aceito; `classification-method.md` define o sentido
+de `reproduced` e `contract_characterized`; `source-readonly-verification.json`
+prova que o legado permaneceu somente leitura.
+
+Para verificar:
+
+```bash
+python3 -m characterization.harness
+python3 -m unittest discover -s tests -v
+python3 scripts/validate_phase1.py
+```

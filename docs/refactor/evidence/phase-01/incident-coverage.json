@@ -1,0 +1,363 @@
+{
+  "classifications": {
+    "contract_characterized": 14,
+    "reproduced": 16
+  },
+  "fault_points": [
+    "after_claim_before_socket",
+    "after_command_before_claim",
+    "after_event_before_command",
+    "after_outcome_before_outbox",
+    "after_provider_before_outcome",
+    "after_socket_response_lost",
+    "before_event_persist",
+    "during_public_delivery"
+  ],
+  "incident_count": 22,
+  "incident_ids": [
+    "F01",
+    "F02",
+    "F03",
+    "F04",
+    "F05",
+    "F06",
+    "F07",
+    "F08",
+    "F09",
+    "F10",
+    "F11",
+    "F12",
+    "F13",
+    "F14",
+    "F15",
+    "F16",
+    "F17",
+    "F18",
+    "F19",
+    "F20",
+    "F21",
+    "F22"
+  ],
+  "incidents": [
+    {
+      "case_count": 1,
+      "cases": [
+        "f01-confirmation-phase-projection-loss"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F01",
+      "violations": [
+        "accepted_summary_requires_second_confirmation",
+        "authorization_state_projection_loss"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f02-double-confirmation-loop"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F02",
+      "violations": [
+        "accepted_summary_requires_second_confirmation",
+        "same_draft_summary_presented_twice"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f03-legacy-write-alias-bypass"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F03",
+      "violations": [
+        "legacy_write_alias_bypasses_guard"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f04-package-signature-omits-economic-fields"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F04",
+      "violations": [
+        "confirmation_signature_omits_economic_fields"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f05-stale-provider-lookup"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F05",
+      "violations": [
+        "stale_lookup_authorized"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f06-concurrent-duplicate-webhook"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F06",
+      "violations": [
+        "duplicate_provider_dispatch",
+        "duplicate_webhook_not_deduplicated",
+        "turn_has_multiple_unsynchronized_owners"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f07-nested-private-metadata-leak"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F07",
+      "violations": [
+        "nested_private_metadata_leak"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f08-confirmation-phase-before-summary"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F08",
+      "violations": [
+        "confirmation_phase_armed_before_summary"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f09-model-selects-provider-target"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F09",
+      "violations": [
+        "model_owns_provider_target"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f10-session-bootstrap-from-log"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F10",
+      "violations": [
+        "session_bootstrap_is_implicit"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f11-runtime-provenance-drift"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F11",
+      "violations": [
+        "runtime_artifact_provenance_drift"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f12-dry-run-couples-provider-reads"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F12",
+      "violations": [
+        "dry_run_couples_read_and_write_controls"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f13-fake-provider-contract-optimism"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F13",
+      "violations": [
+        "fake_contract_accepts_provider_invalid_option"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f14-future-promise-without-workflow"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F14",
+      "violations": [
+        "future_promise_without_durable_workflow"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f15-unicode-room-label-identity"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F15",
+      "violations": [
+        "typographic_label_breaks_selection"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f16-impossible-write-deadline"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F16",
+      "violations": [
+        "write_budget_impossible_by_configuration"
+      ]
+    },
+    {
+      "case_count": 9,
+      "cases": [
+        "f17-composite-outcome-flattening",
+        "f17-fault-01-before-event-persist",
+        "f17-fault-02-after-event-before-command",
+        "f17-fault-03-after-command-before-claim",
+        "f17-fault-04-after-claim-before-socket",
+        "f17-fault-05-after-socket-response-lost",
+        "f17-fault-06-after-provider-before-outcome",
+        "f17-fault-07-after-outcome-before-outbox",
+        "f17-fault-08-during-public-delivery"
+      ],
+      "classifications": [
+        "contract_characterized",
+        "reproduced"
+      ],
+      "incident_id": "F17",
+      "violations": [
+        "abandoned_claim_is_auto_retried",
+        "command_is_not_durable_before_claim",
+        "composite_outcome_is_not_monotonic",
+        "confirmed_event_has_no_recoverable_command",
+        "message_recovery_repeats_provider",
+        "public_continuation_without_persisted_event",
+        "uncertain_provider_call_is_auto_retried",
+        "uncertain_provider_call_loses_certainty"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f18-optional-email-blocks-public-handoff"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F18",
+      "violations": [
+        "optional_internal_email_blocks_public_handoff"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f19-local-capacity-flips-readiness"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F19",
+      "violations": [
+        "local_capacity_directly_flips_readiness"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f20-second-tool-consumes-turn-budget"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F20",
+      "violations": [
+        "accepted_summary_requires_second_confirmation",
+        "guard_retry_consumes_turn_budget"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f21-dirty-tree-unbound-image"
+      ],
+      "classifications": [
+        "contract_characterized"
+      ],
+      "incident_id": "F21",
+      "violations": [
+        "runtime_artifact_provenance_drift"
+      ]
+    },
+    {
+      "case_count": 1,
+      "cases": [
+        "f22-preseeded-canonical-state-false-green"
+      ],
+      "classifications": [
+        "reproduced"
+      ],
+      "incident_id": "F22",
+      "violations": [
+        "historical_test_preseeds_condition_under_test"
+      ]
+    }
+  ],
+  "phase": "phase-01-incident-characterization",
+  "required_fault_points": [
+    "after_claim_before_socket",
+    "after_command_before_claim",
+    "after_event_before_command",
+    "after_outcome_before_outbox",
+    "after_provider_before_outcome",
+    "after_socket_response_lost",
+    "before_event_persist",
+    "during_public_delivery"
+  ],
+  "scenario_count": 30,
+  "schema_version": 1
+}

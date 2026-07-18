@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "phase-01-incident-characterization",
+  "verified_at_utc": "2026-07-18T20:46:20Z",
+  "source_repository": "chapada-leads-hermes",
+  "source_mode": "read_only",
+  "source_head_at_phase_open": "57408d8b2040399bc25ee7957505208079458884",
+  "source_head_at_verification": "57408d8b2040399bc25ee7957505208079458884",
+  "working_tree_entries_at_phase_open": 80,
+  "working_tree_entries_at_verification": 80,
+  "phase_00_raw_status_sha256": "93c731af5f4c72911a00d4f7e1edb781259cbfbb5144ef85918b4c7a6bdbc659",
+  "phase_01_raw_status_sha256": "d8c62ec53a99cb2f7fc1fe8668f0428f9e68bb06a853701b8058be1025b9b515",
+  "canonical_status_sha256_at_phase_open": "15bfc6b0d3cb7248481027e5f736396b76206b0dd040358190f5545a7036a64a",
+  "canonical_status_sha256_at_verification": "15bfc6b0d3cb7248481027e5f736396b76206b0dd040358190f5545a7036a64a",
+  "canonical_status_match": true,
+  "raw_status_difference_explained": "The Phase 0 capture removed the leading index-space from the first porcelain line only; canonical lstrip-per-line content is identical.",
+  "source_reference_check": {
+    "status": "ok",
+    "paths_checked": 13,
+    "symbols_checked": 58,
+    "symbol_failures": 0
+  },
+  "runtime_actions": {
+    "legacy_files_edited": 0,
+    "tests_executed_in_legacy_repository": 0,
+    "provider_reads": 0,
+    "provider_writes": 0,
+    "messages_sent": 0,
+    "deploys": 0
+  }
+}

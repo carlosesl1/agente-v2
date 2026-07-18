@@ -1,0 +1,16 @@
+{
+  "fixture_id": "provider-composite-outcome",
+  "legacy_parent_outcome": "effect_confirmed",
+  "schema_version": 1,
+  "steps": [
+    {
+      "name": "create_reservation",
+      "outcome": "not_called"
+    },
+    {
+      "name": "add_optional_item",
+      "outcome": "not_called"
+    }
+  ],
+  "synthetic": true
+}

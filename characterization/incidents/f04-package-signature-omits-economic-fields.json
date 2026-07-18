@@ -1,0 +1,59 @@
+{
+  "case_id": "f04-package-signature-omits-economic-fields",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "confirmation_signature_omits_economic_fields"
+  ],
+  "incident_id": "F04",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A assinatura é uma projeção allowlisted do request e do progresso de pacote.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "reservation_confirmation_subject_signature",
+        "_reservation_confirmation_subject_value",
+        "derive_package_progress"
+      ]
+    }
+  ],
+  "title": "Assinatura do pacote omite campos econômicos mutáveis",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "draft_version": "package-alpha",
+      "kind": "summary_presented",
+      "seq": 2
+    },
+    {
+      "draft_version": "package-alpha",
+      "kind": "signature",
+      "omitted_economic_fields": [
+        "payment_method",
+        "optional_item_amount"
+      ],
+      "seq": 3
+    },
+    {
+      "decision": "accepted",
+      "draft_version": "package-alpha",
+      "kind": "confirmation_received",
+      "seq": 4
+    }
+  ]
+}

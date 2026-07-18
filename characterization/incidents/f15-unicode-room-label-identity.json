@@ -1,0 +1,59 @@
+{
+  "case_id": "f15-unicode-room-label-identity",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "typographic_label_breaks_selection"
+  ],
+  "incident_id": "F15",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "provider_fixture": "fixtures/provider/hostel-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "Facts conversacionais e label pública participam do matching da seleção.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "with_canonical_lookup_selections",
+        "_lookup_option_matches_selection_facts"
+      ]
+    },
+    {
+      "evidence": "A fixture histórica apresenta nº, mas preseeda opção com n° e ID.",
+      "path": "tests/test_manychat_single_confirmation_flow.py",
+      "symbols": [
+        "ManyChatSingleConfirmationClient"
+      ]
+    }
+  ],
+  "title": "n° e nº impedem binding apesar da mesma identidade técnica",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "event_id": "evt-hostel-choice",
+      "kind": "inbound",
+      "seq": 2
+    },
+    {
+      "identity_source": "public_label",
+      "kind": "selection",
+      "match_count": 0,
+      "public_labels_equal": false,
+      "selected": false,
+      "seq": 3,
+      "technical_identity_equal": true
+    }
+  ]
+}

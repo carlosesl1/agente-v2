@@ -1,0 +1,50 @@
+{
+  "case_id": "f13-fake-provider-contract-optimism",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "fake_contract_accepts_provider_invalid_option"
+  ],
+  "incident_id": "F13",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/agency-reservation.json",
+  "provider_fixture": "fixtures/provider/provider-rejects-synthetic-option.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O teste usa provider fake e estado canônico previamente montado.",
+      "path": "tests/test_manychat_single_confirmation_flow.py",
+      "symbols": [
+        "test_manychat_handler_uses_one_natural_confirmation_and_one_provider_write"
+      ]
+    },
+    {
+      "evidence": "O provider real valida um contrato mais rico que o shape mínimo do fake.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "with_selected_reservation_option"
+      ]
+    }
+  ],
+  "title": "Fake aceita opção que o snapshot de provider rejeita",
+  "trace": [
+    {
+      "event_id": "evt-agency-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "fake_accepts": true,
+      "kind": "provider_contract",
+      "provider_snapshot_accepts": false,
+      "seq": 2
+    }
+  ]
+}

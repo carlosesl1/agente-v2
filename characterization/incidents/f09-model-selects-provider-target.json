@@ -1,0 +1,51 @@
+{
+  "case_id": "f09-model-selects-provider-target",
+  "classification": "contract_characterized",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "model_owns_provider_target"
+  ],
+  "incident_id": "F09",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/agency-reservation.json",
+  "provider_fixture": "fixtures/provider/agency-available.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "A operação técnica ainda chega como nome de tool selecionado antes do binding canônico.",
+      "path": "domain/tool_executor.py",
+      "symbols": [
+        "with_selected_reservation_option",
+        "prepare_reservation_write_arguments"
+      ]
+    },
+    {
+      "evidence": "O modelo retorna o nome da tool executável.",
+      "path": "domain/hermes_native_runner.py",
+      "symbols": [
+        "NativeAgentToolCall"
+      ]
+    }
+  ],
+  "title": "Modelo escolhe adapter apesar de o estado já determinar o provider",
+  "trace": [
+    {
+      "event_id": "evt-agency-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "decision_source": "model",
+      "kind": "provider_target",
+      "seq": 2,
+      "state_determines_target": true
+    }
+  ]
+}

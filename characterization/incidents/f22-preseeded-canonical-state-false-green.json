@@ -1,0 +1,45 @@
+{
+  "case_id": "f22-preseeded-canonical-state-false-green",
+  "classification": "reproduced",
+  "clock_utc": "2026-09-01T12:00:00Z",
+  "expected_violations": [
+    "historical_test_preseeds_condition_under_test"
+  ],
+  "incident_id": "F22",
+  "initial_state": {},
+  "manychat_fixture": "fixtures/manychat/hostel-reservation.json",
+  "safety": {
+    "database": false,
+    "message_delivery": false,
+    "network": false,
+    "provider_reads": false,
+    "provider_writes": false
+  },
+  "schema_version": 1,
+  "source_refs": [
+    {
+      "evidence": "O repository é preenchido com selected_lodging_option, IDs e lookup antes do primeiro webhook.",
+      "path": "tests/test_manychat_single_confirmation_flow.py",
+      "symbols": [
+        "test_manychat_handler_uses_one_natural_confirmation_and_one_provider_write"
+      ]
+    }
+  ],
+  "title": "Teste histórico injeta a seleção que deveria construir",
+  "trace": [
+    {
+      "event_id": "evt-hostel-request",
+      "kind": "inbound",
+      "seq": 1
+    },
+    {
+      "historical_preseeded_fields": [
+        "selected_lodging_option",
+        "room_type_id",
+        "hostel_lookup_options"
+      ],
+      "kind": "test_fixture",
+      "seq": 2
+    }
+  ]
+}

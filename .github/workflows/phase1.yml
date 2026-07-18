@@ -1,0 +1,32 @@
+name: phase-1-characterization
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  characterize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate Phase 0 baseline
+        run: python3 scripts/validate_phase0.py
+      - name: Replay incident corpus
+        run: python3 -m characterization.harness
+      - name: Run characterization tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Validate Phase 1 artifacts
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: python3 scripts/validate_phase1.py
+      - name: Compile Python sources
+        run: python3 -m compileall -q characterization scripts tests
+      - name: Check whitespace
+        run: git diff --check
