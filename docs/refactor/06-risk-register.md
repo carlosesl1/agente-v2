@@ -23,6 +23,15 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R17 | Corpus de witness é interpretado como E2E do legado | 3 | 4 | claim “runtime reproduzido” | classificação explícita, source map e limites documentados | QA | monitorado |
 | R18 | Working tree legado muda e invalida o source map | 3 | 4 | HEAD/status canônico diverge | verificação read-only de HEAD/status e símbolos no closeout | tech lead | monitorado |
 | R19 | Trace sintético codifica uma premissa incorreta | 3 | 5 | cenário sem owner/fonte verificável | revisão independente, símbolo validado e futuro replay no boundary real | QA/domain | aberto |
+| R20 | Assinatura omite campo executável introduzido por adapter futuro | 3 | 5 | payload de comando contém campo sem projeção canônica | toda extensão de DTO exige teste metamórfico e revisão do canonical subject | domain/adapters | aberto |
+| R21 | Estado persistido combina draft/resumo/confirmação/comando inconsistentes | 2 | 5 | round-trip aceita objetos cruzados | invariantes cruzadas, identidade determinística e testes de JSON adulterado | domain | mitigado |
+| R22 | event IDs/fingerprints crescem sem limite em workflows anormalmente longos | 3 | 3 | estado serializado cresce linearmente | definir retenção/checkpoint com idempotência durável na Fase 5 | persistence | aberto |
+| R23 | Property generator compartilha premissas incorretas com o reducer | 3 | 4 | 100 mil sequências sem mutação adversarial relevante | testes unitários/metamórficos independentes, revisão externa e futura fuzzing de bytes/eventos | QA/domain | monitorado |
+| R24 | Schema v1 fica sem estratégia de migração ao surgir schema v2 | 3 | 4 | decoder apenas rejeita versão nova | definir upcaster explícito e fixtures de migração antes da persistência na Fase 5 | persistence | aberto |
+| R25 | SHA-256 semântico é interpretado como prova de autenticidade | 2 | 5 | claim de “assinatura segura” sem key/controle de store | documentar digest semântico; autenticidade vem de ACL/transação/ledger na Fase 5 | security/domain | monitorado |
+| R26 | Property gate passa sem exercer uma obrigação positiva | 2 | 5 | contadores críticos ficam zero e result segue `passed` | workload mínimo, counters positivos, oráculo bilateral e mutation tests | QA/domain | mitigado |
+| R27 | Wire JSON permissivo normaliza payload ambíguo | 2 | 5 | bool/float como versão, chave duplicada ou ISO compacto é aceito | parser de chaves únicas, tipos exatos e escalares canônicos | domain/persistence | mitigado |
+| R28 | Matriz estado/evento se autocertifica a partir dos handlers | 2 | 4 | tipo novo recebe `ignore` sem decisão humana | política literal fechada e comparação bidirecional com handlers | domain/QA | mitigado |
 
 ## Processo
 

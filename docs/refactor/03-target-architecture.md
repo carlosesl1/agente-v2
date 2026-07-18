@@ -114,9 +114,11 @@ draft_version
 subject_signature
 operation
 canonical_payload
-status: queued | claimed | executing | succeeded | failed_before_provider | uncertain
-attempt
 ```
+
+O comando é imutável. Lifecycle (`queued`, `executing`, `succeeded`,
+`failed_before_provider`, `failed_no_effect`, `uncertain`) e attempt pertencem
+ao estado/ledger, não são campos mutáveis do comando.
 
 ### `ExecutionOutcome`
 
@@ -149,6 +151,7 @@ stateDiagram-v2
     execution_queued --> executing: durable claim
     executing --> succeeded: effect confirmed
     executing --> failed_before_provider: proved not called
+    executing --> failed_no_effect: called with proved no effect
     executing --> uncertain: called/unknown
     failed_before_provider --> execution_queued: same command/idempotency
     uncertain --> manual_review

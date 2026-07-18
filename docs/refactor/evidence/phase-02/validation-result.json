@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "phase": "phase-02-typed-domain-and-reducer",
+  "recorded_at_utc": "2026-07-18T22:34:33Z",
+  "head_before_closeout": "9a730b55330bbd0577eeeed0b13ab8074136ae27",
+  "status": "passed",
+  "phase_0_validator": {
+    "exit_code": 0,
+    "status": "ok",
+    "failures": 0
+  },
+  "phase_1_validator": {
+    "exit_code": 0,
+    "status": "ok",
+    "failures": 0,
+    "legacy_source": "absent-ci-sentinel"
+  },
+  "unit_tests": {
+    "command": "python3 -m unittest discover -s tests -q",
+    "exit_code": 0,
+    "tests": 52,
+    "result": "OK"
+  },
+  "property_gate": {
+    "exit_code": 0,
+    "sequences": 100000,
+    "max_events": 20,
+    "transitions": 2000000,
+    "authorized_accepts": 48240,
+    "out_of_order_probes": 142114,
+    "missing_authorized_commands": 0,
+    "out_of_order_policy_violations": 0,
+    "violations": 0
+  },
+  "semantic_coverage": {
+    "lookup_positive": 115733,
+    "lookup_negative": 11346,
+    "lookup_expired": 11267,
+    "lookup_unavailable": 11186,
+    "lookup_multi_offer": 11168
+  },
+  "mutation_testing": {
+    "mutants": 11,
+    "killed": 11
+  },
+  "performance": {
+    "elapsed_seconds": 161.241,
+    "max_rss_kb": 25992,
+    "ci_timeout_seconds": 600
+  },
+  "static_checks": {
+    "compileall_exit_code": 0,
+    "git_diff_check_exit_code": 0,
+    "phase2_hash_targets": 27
+  },
+  "independent_review": {
+    "serializer_property": "completed-findings-reproduced-and-fixed",
+    "commercial_reducer": "provider-safety-filter-no-report",
+    "architecture_isolation": "timeout-no-report"
+  },
+  "live_effects_executed": false,
+  "failures": []
+}

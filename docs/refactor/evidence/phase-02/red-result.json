@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "phase-02-typed-domain-and-reducer",
+  "recorded_at_utc": "2026-07-18T21:05:49Z",
+  "command": "python3 -m unittest tests.test_phase2_domain tests.test_phase2_serialization tests.test_phase2_properties",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_domain_package",
+  "missing_module": "reservation_domain",
+  "test_modules": 3,
+  "output_sha256": "13965ed75f04a6003ea825d3be54732619ab7e8b037e38ccdb17bfca0e316ce8",
+  "interpretation": "The RED suite failed because the Phase 2 domain did not exist yet; no environment, provider or fixture failure was involved."
+}

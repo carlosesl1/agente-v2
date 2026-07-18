@@ -1,0 +1,45 @@
+{
+  "event_count": 12,
+  "files": [
+    {
+      "bytes": 1794,
+      "path": "reservation_domain/README.md",
+      "sha256": "d056b38e81dbe0eef64946ead3b6ff828c4e5646b85ad63f258dfd55ed3d99ef"
+    },
+    {
+      "bytes": 553,
+      "path": "reservation_domain/__init__.py",
+      "sha256": "cc9095fdfd9cd929b17a470b388075fc53cef9813b4063a1650a4c78455ff0d2"
+    },
+    {
+      "bytes": 21221,
+      "path": "reservation_domain/properties.py",
+      "sha256": "932512906ef25a93b240ede316ff1642b567966ac15e746b344e99937417b7aa"
+    },
+    {
+      "bytes": 21203,
+      "path": "reservation_domain/reducer.py",
+      "sha256": "16a67b455ce103b9efefeb7ef35abb59a10caf73d8873e69a32a0c370e16c0dc"
+    },
+    {
+      "bytes": 8204,
+      "path": "reservation_domain/serialization.py",
+      "sha256": "aee152be2708131bb5ae30013516101117f4734f89fd9d1eacefef4829982539"
+    },
+    {
+      "bytes": 5032,
+      "path": "reservation_domain/signature.py",
+      "sha256": "5884d6191f03669071efde7b2e9586bc7ae01e2e87e01b2c04fd425added8dff"
+    },
+    {
+      "bytes": 42161,
+      "path": "reservation_domain/types.py",
+      "sha256": "1df5883baf46edf474ca2aaa8f81db953f47edbed8a991a879bf1938eb23baad"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "phase": "phase-02-typed-domain-and-reducer",
+  "schema_version": 1,
+  "state_count": 15,
+  "state_event_pairs": 180
+}

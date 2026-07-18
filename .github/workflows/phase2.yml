@@ -1,0 +1,50 @@
+name: phase-2-domain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typed-domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate previous phase gates
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: |
+          python3 scripts/validate_phase0.py
+          python3 scripts/validate_phase1.py
+      - name: Regenerate deterministic Phase 2 reports
+        run: |
+          python3 scripts/generate_phase2_matrix.py \
+            --write docs/refactor/domain/phase2-state-event-matrix.md \
+            --manifest docs/refactor/evidence/phase-02/domain-manifest.json \
+            >/dev/null
+          git diff --exit-code -- \
+            docs/refactor/domain/phase2-state-event-matrix.md \
+            docs/refactor/evidence/phase-02/domain-manifest.json
+      - name: Run all unit and metamorphic tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Run 100k deterministic property sequences
+        run: |
+          python3 scripts/run_phase2_properties.py \
+            --sequences 100000 \
+            --max-events 20 \
+            --seed 20260718 \
+            --write docs/refactor/evidence/phase-02/property-result.json \
+            >/dev/null
+          git diff --exit-code -- docs/refactor/evidence/phase-02/property-result.json
+      - name: Validate Phase 2 artifacts and purity
+        run: python3 scripts/validate_phase2.py
+      - name: Compile Python sources
+        run: python3 -m compileall -q reservation_domain characterization scripts tests
+      - name: Check whitespace
+        run: git diff --check

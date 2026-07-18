@@ -46,3 +46,17 @@ python3 -m characterization.harness
 python3 -m unittest discover -s tests -v
 python3 scripts/validate_phase1.py
 ```
+
+## Fase 2
+
+`phase-02/property-result.json` registra o gate determinístico de 100 mil
+sequências. `domain-manifest.json` protege o package puro; a matriz completa
+estado/evento e o contrato canônico ficam em `../domain/`.
+
+Para verificar:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/run_phase2_properties.py --sequences 100000 --max-events 20 --seed 20260718
+python3 scripts/validate_phase2.py
+```

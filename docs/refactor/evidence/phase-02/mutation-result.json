@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "phase": "phase-02-typed-domain-and-reducer",
+  "scope": "temporary copies only; repository unchanged",
+  "mutants": [
+    {
+      "name": "confirmation-same-time",
+      "test": "tests.test_phase2_domain.ReducerContractTests.test_confirmation_must_be_strictly_after_summary",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "customer-name-excluded",
+      "test": "tests.test_phase2_domain.SignatureContractTests.test_every_execution_relevant_mutation_changes_signature",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "conflicting-id-ignored",
+      "test": "tests.test_phase2_domain.ReducerContractTests.test_conflicting_payload_with_reused_event_id_is_rejected",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "missing-required-command-not-counted",
+      "test": "tests.test_phase2_properties.PropertyContractTests.test_property_gate_detects_missing_required_command",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "out-of-order-policy-not-checked",
+      "test": "tests.test_phase2_properties.PropertyContractTests.test_property_gate_detects_out_of_order_policy_mutation",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "trivial-workload-accepted",
+      "test": "tests.test_phase2_properties.PropertyContractTests.test_cli_gate_rejects_trivial_workload_but_smoke_allows_it",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "schema-bool-float-accepted",
+      "test": "tests.test_phase2_serialization.SerializerContractTests.test_schema_version_requires_exact_json_integer",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "duplicate-json-keys-accepted",
+      "test": "tests.test_phase2_serialization.SerializerContractTests.test_duplicate_keys_fail_closed_at_every_depth",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "subclasses-accepted-by-encoder",
+      "test": "tests.test_phase2_serialization.SerializerContractTests.test_encoder_rejects_subclasses_outside_closed_universe",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "compact-iso-accepted",
+      "test": "tests.test_phase2_serialization.SerializerContractTests.test_invalid_wire_types_and_noncanonical_scalars_fail_closed",
+      "exit_code": 1,
+      "killed": true
+    },
+    {
+      "name": "auto-certified-transition-matrix",
+      "test": "tests.test_phase2_properties.PropertyContractTests.test_transition_matrix_rejects_undeclared_state_or_event",
+      "exit_code": 1,
+      "killed": true
+    }
+  ],
+  "all_killed": true
+}

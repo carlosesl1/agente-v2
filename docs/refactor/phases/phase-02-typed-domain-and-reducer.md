@@ -73,19 +73,23 @@ efeito externo.
 2. Oferta é escolhida somente por `offer_id`; label pública não é identidade.
 3. Evidência vencida ou não positiva não permite seleção.
 4. Assinatura muda com oferta, provider ref, datas, horário, pessoas, preço,
-   moeda, pagamento ou adicionais.
+   moeda, customer facts, pagamento ou adicionais.
 5. Alterar apenas label pública, ordem de componentes ou ordem de adicionais
    não muda a assinatura.
 6. Resumo sozinho produz zero comandos.
 7. Confirmação sem resumo, anterior ao resumo, ambígua, rejeitada, de outra
    versão ou assinatura produz zero comandos.
 8. Aceite válido produz exatamente um comando imutável e idempotente.
-9. Evento duplicado não muda estado nem reemite comando.
-10. Evento fora de ordem é ignorado ou rejeitado sem exception/efeito.
+9. Evento duplicado idêntico não muda estado nem reemite comando; reutilização
+   do mesmo ID com payload divergente é rejeitada.
+10. Evento fora de ordem é rejeitado sem exception, comando ou mutação
+    comercial; somente metadata auditável pode avançar.
 11. Nenhuma sequência produz segundo comando para o mesmo workflow.
 12. `called_unknown` nunca é reduzido a `not_called` e conduz a estado incerto.
-13. Serializer rejeita versão, tag ou campo desconhecido.
-14. Todos os pares estado/evento possuem política explícita na tabela.
+13. Serializer rejeita versão/tag/campo inválido, tipos JSON equivalentes porém
+    incorretos, chaves duplicadas, subclasses e escalares não canônicos.
+14. Todos os pares estado/evento possuem política declarada independentemente
+    dos handlers; tipo novo sem decisão explícita falha fechado.
 
 ## Entregáveis
 
@@ -110,8 +114,9 @@ efeito externo.
 
 1. Reducer é total para todos os tipos públicos de estado e evento.
 2. A matriz completa estado/evento está documentada e testada.
-3. Cem mil sequências passam com zero exception, write prematuro, segundo
-   comando ou violação de duplicidade/ordem.
+3. Cem mil sequências passam com zero exception, write prematuro, comando
+   obrigatório ausente, segundo comando ou violação de duplicidade/ordem, e
+   com cobertura positiva das classes semânticas obrigatórias.
 4. Testes provam que toda mutação econômica altera assinatura e mutações de
    apresentação não alteram.
 5. Round-trip do serializer preserva todos os estados/eventos/comandos e
