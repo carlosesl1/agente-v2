@@ -12,12 +12,12 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 2 — domínio tipado e reducer puro**.
+- Fase ativa: **nenhuma**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
-- Fase 2: **em execução**, sem integração com runtime ou providers.
+- Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
-- Implementação funcional: restrita ao domínio puro no novo repositório.
+- Implementação funcional concluída: domínio puro no novo repositório.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
 
 ## Navegação
@@ -49,4 +49,5 @@ Contrato central:
 ```bash
 python3 scripts/validate_phase0.py
 python3 scripts/validate_phase1.py
+python3 scripts/validate_phase2.py
 ```

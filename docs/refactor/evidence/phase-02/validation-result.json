@@ -3,6 +3,13 @@
   "phase": "phase-02-typed-domain-and-reducer",
   "recorded_at_utc": "2026-07-18T22:34:33Z",
   "head_before_closeout": "9a730b55330bbd0577eeeed0b13ab8074136ae27",
+  "implementation_commit": "212f2cf62541af0622fb16244bafcfb873d7832b",
+  "implementation_ci": {
+    "phase_0_run": 29663723717,
+    "phase_1_run": 29663723720,
+    "phase_2_run": 29663723713,
+    "result": "success"
+  },
   "status": "passed",
   "phase_0_validator": {
     "exit_code": 0,

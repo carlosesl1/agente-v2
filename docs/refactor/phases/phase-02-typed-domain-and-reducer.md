@@ -2,10 +2,15 @@
 
 ## Status
 
-`em execução`
+`concluída`
 
 Aberta em `2026-07-18T21:05:49Z`, a partir do commit-base
 `d949564c9a38474e0d634a4be8ac923680dc7e48`.
+
+Encerrada em `2026-07-18T22:38:27Z`. Implementação publicada em
+`212f2cf62541af0622fb16244bafcfb873d7832b`; os workflows
+`phase-0-validation`, `phase-1-characterization` e `phase-2-domain` passaram
+nesse SHA. Run da Fase 2: `29663723713`.
 
 ## Objetivo
 
@@ -93,22 +98,22 @@ efeito externo.
 
 ## Entregáveis
 
-- [ ] package de domínio puro;
-- [ ] estados discriminados e value objects fechados;
-- [ ] eventos discriminados;
-- [ ] reducer total;
-- [ ] assinatura canônica;
-- [ ] comando e outcome tipados;
-- [ ] serializer versionado e estrito;
-- [ ] tabela completa estado/evento;
-- [ ] testes RED registrados antes da implementação;
-- [ ] testes unitários, metamórficos e de serialização;
-- [ ] 100 mil sequências property-based;
-- [ ] validador local e CI da Fase 2;
-- [ ] evidências e hashes SHA-256;
-- [ ] revisão adversarial independente;
-- [ ] revisão de riscos;
-- [ ] commit de entrada, implementação e closeout enviados e verificados.
+- [x] package de domínio puro;
+- [x] estados discriminados e value objects fechados;
+- [x] eventos discriminados;
+- [x] reducer total;
+- [x] assinatura canônica;
+- [x] comando e outcome tipados;
+- [x] serializer versionado e estrito;
+- [x] tabela completa estado/evento;
+- [x] testes RED registrados antes da implementação;
+- [x] testes unitários, metamórficos e de serialização;
+- [x] 100 mil sequências property-based;
+- [x] validador local e CI da Fase 2;
+- [x] evidências e hashes SHA-256;
+- [x] revisão adversarial independente;
+- [x] revisão de riscos;
+- [x] commit de entrada, implementação e closeout enviados e verificados.
 
 ## Gate de aceite
 
@@ -134,4 +139,5 @@ repositório. Rollback é a reversão dos commits da Fase 2; não há ação liv
 
 ## Decisão de avanço
 
-Pendente. A Fase 3 permanece bloqueada até o closeout formal desta fase.
+A Fase 2 está concluída. A Fase 3 torna-se elegível, mas permanece **não
+iniciada** até direção explícita. Rollout comercial continua **NO-GO**.
