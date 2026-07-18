@@ -1,0 +1,80 @@
+M .dockerignore
+ D .env-backups/rollback-close-write-tools.sh
+ M .env.example
+ M .hermes/plugins/chapada_leads_tools/__init__.py
+ M .hermes/plugins/chapada_leads_tools/plugin.yaml
+ M DEPLOY_CHECKLIST.md
+ M Dockerfile
+ M HERMES.md
+ D IMPLEMENTATION_LOG.md
+ M README.md
+ M RUNBOOKS.md
+ D STATUS.md
+ D STATUS_CURRENT.md
+ M app.py
+ M config/cerebro_faq.yaml
+ M config/leads_agent.yaml
+ M deploy/production/deploy.sh
+ M deploy/production/docker-compose.yml
+ M docs/BEHAVIOR_OWNERSHIP.md
+ M docs/SOURCE_OF_TRUTH.md
+ M docs/behavior_rule_ownership.md
+ M docs/cleanup_manifest.md
+ M docs/controlled_full_access_fire_test.md
+ M docs/external_adapters.md
+ D docs/maya-production-readiness-plan.md
+ M docs/native_agent_behavior_surfaces.md
+ D docs/plans/2026-06-13-maya-atendimento-checklist-methodology.md
+ M domain/chapada_native_tools.py
+ M domain/hermes_native_runner.py
+ M domain/security_guardrails.py
+ M domain/slot_canonicalization.py
+ M domain/tool_executor.py
+ M hermes_profiles/leads/SOUL.md
+ M hermes_profiles/leads/skills/chapada-leads/chapada-leads-agencia-recomendacao/SKILL.md
+ M hermes_profiles/leads/skills/chapada-leads/chapada-leads-fechamento/SKILL.md
+ M hermes_profiles/leads/skills/chapada-leads/chapada-leads-hostel-vendas/SKILL.md
+ M hermes_profiles/leads/skills/chapada-leads/chapada-leads-recepcionista/SKILL.md
+ M hermes_profiles/leads/skills/chapada-leads/skills-manifest.json
+ D prompts/README.md
+ D prompts/legacy/agent_leads_full.md
+ D prompts/legacy/handoff_policy.md
+ D prompts/legacy/persona_maya.md
+ D prompts/legacy/response_contract_whatsapp.md
+ D prompts/legacy/router_policy.md
+ D prompts/legacy/tool_policy.md
+ M pyproject.toml
+ M qa/behavior_variant_lab/harness.py
+ M qa/full_access_fire_test/cancellation_checklist.md
+ M qa/maya_test_lab/scenarios/real_world_v1.json
+ M services/side_effect_ledger.py
+ M tests/test_agencia_migration.py
+ M tests/test_app_llm_central_webhook.py
+ M tests/test_app_shadow_webhook.py
+ M tests/test_behavior_surface_ownership.py
+ M tests/test_bokun_v2_tools.py
+ M tests/test_chapada_native_tools.py
+ M tests/test_fechamento_migration.py
+ M tests/test_hermes_live_context.py
+ M tests/test_hermes_native_runner.py
+ M tests/test_hostel_migration.py
+ M tests/test_maya_cloudbeds_v2_fake_conversation.py
+ M tests/test_maya_v2_fake_conversation.py
+ M tests/test_pix_payment_instructions.py
+ M tests/test_recepcionista_migration.py
+ M tests/test_requested_regressions.py
+ M tests/test_runtime_skill_sync.py
+ M tests/test_runtime_tool_policy.py
+ M tests/test_security_guardrails.py
+ M tests/test_side_effect_ledger.py
+ M tests/test_source_of_truth_docs.py
+ M tests/test_status_document_structure.py
+ M tests/test_tool_cache_and_turn_budget.py
+ M tests/test_tool_executor.py
+ M uv.lock
+?? docs/architecture/
+?? domain/agent_tool_feedback.py
+?? qa/model_benchmark/
+?? tests/test_agent_tool_feedback.py
+?? tests/test_manychat_single_confirmation_flow.py
+?? tests/test_model_benchmark.py

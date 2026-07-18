@@ -1,0 +1,114 @@
+[
+  {
+    "path": "app.py",
+    "working_tree_sha256": "a9c28307ed1e1669ed998eb17673a2a65c9924d6e1839ccc7e5b7053c342fd92",
+    "runtime_present": true,
+    "runtime_sha256": "a9c28307ed1e1669ed998eb17673a2a65c9924d6e1839ccc7e5b7053c342fd92",
+    "match": true
+  },
+  {
+    "path": "domain/lead_state.py",
+    "working_tree_sha256": "a3dd70fa29147a5d7dced610bcc23a14c2d53b6ef08ff2e1b5f8bd7a86411013",
+    "runtime_present": true,
+    "runtime_sha256": "a3dd70fa29147a5d7dced610bcc23a14c2d53b6ef08ff2e1b5f8bd7a86411013",
+    "match": true
+  },
+  {
+    "path": "domain/hermes_native_runner.py",
+    "working_tree_sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+    "runtime_present": true,
+    "runtime_sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+    "match": true
+  },
+  {
+    "path": "domain/chapada_native_tools.py",
+    "working_tree_sha256": "fa865cd7aca62a6369b94f7b89d8ae0ead1b8198544be28913cc4cea087942d4",
+    "runtime_present": true,
+    "runtime_sha256": "fa865cd7aca62a6369b94f7b89d8ae0ead1b8198544be28913cc4cea087942d4",
+    "match": true
+  },
+  {
+    "path": "domain/tool_executor.py",
+    "working_tree_sha256": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88",
+    "runtime_present": true,
+    "runtime_sha256": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88",
+    "match": true
+  },
+  {
+    "path": "tools/side_effect_guard.py",
+    "working_tree_sha256": "47ea2427a09a252eed721073ae71315fd4619a87d23105c4f65a85c2dbbd592e",
+    "runtime_present": true,
+    "runtime_sha256": "47ea2427a09a252eed721073ae71315fd4619a87d23105c4f65a85c2dbbd592e",
+    "match": true
+  },
+  {
+    "path": "services/side_effect_ledger.py",
+    "working_tree_sha256": "1e9955129a8b4e2bb94b79edf7da4b0a7325a2f2ec4fec402968c297861ae064",
+    "runtime_present": true,
+    "runtime_sha256": "1e9955129a8b4e2bb94b79edf7da4b0a7325a2f2ec4fec402968c297861ae064",
+    "match": true
+  },
+  {
+    "path": "services/public_message_outbox.py",
+    "working_tree_sha256": "8d2a2660b25768bd17447ef01ef71b1ab355babd4e17f84fef6a6018ae2b4524",
+    "runtime_present": true,
+    "runtime_sha256": "8d2a2660b25768bd17447ef01ef71b1ab355babd4e17f84fef6a6018ae2b4524",
+    "match": true
+  },
+  {
+    "path": "config/settings.py",
+    "working_tree_sha256": "7cc721ab22c41421652ee5a53b727c852ee6156e9d7df971b9a2ba8b07a9be5e",
+    "runtime_present": true,
+    "runtime_sha256": "7cc721ab22c41421652ee5a53b727c852ee6156e9d7df971b9a2ba8b07a9be5e",
+    "match": true
+  },
+  {
+    "path": "config/leads_agent.yaml",
+    "working_tree_sha256": "60cae55d0240127488653057c6e7c28607b1787ca312e910a0972d1b8a89ccc0",
+    "runtime_present": true,
+    "runtime_sha256": "60cae55d0240127488653057c6e7c28607b1787ca312e910a0972d1b8a89ccc0",
+    "match": true
+  },
+  {
+    "path": "HERMES.md",
+    "working_tree_sha256": "4e13e20e0ed5163c0489624a91f3afbbba612c3a8e158285f64b4c13e4f7ba85",
+    "runtime_present": true,
+    "runtime_sha256": "4e13e20e0ed5163c0489624a91f3afbbba612c3a8e158285f64b4c13e4f7ba85",
+    "match": true
+  },
+  {
+    "path": "hermes_profiles/leads/SOUL.md",
+    "working_tree_sha256": "b0f3fbab4a4a765835b39ebe97d7e2a1baac5812cebc16ac4b0f37c7a4273d08",
+    "runtime_present": true,
+    "runtime_sha256": "b0f3fbab4a4a765835b39ebe97d7e2a1baac5812cebc16ac4b0f37c7a4273d08",
+    "match": true
+  },
+  {
+    "path": ".hermes/plugins/chapada_leads_tools/__init__.py",
+    "working_tree_sha256": "91a6a1b9f883bc25f5e491243f249b81cd23ce142358be9eb48f117408855f6a",
+    "runtime_present": true,
+    "runtime_sha256": "91a6a1b9f883bc25f5e491243f249b81cd23ce142358be9eb48f117408855f6a",
+    "match": true
+  },
+  {
+    "path": ".hermes/plugins/chapada_leads_tools/plugin.yaml",
+    "working_tree_sha256": "ec79ba44a8c051a7c35e6f51a32f391224fd12a11e6168de395958b69f6699ab",
+    "runtime_present": true,
+    "runtime_sha256": "ec79ba44a8c051a7c35e6f51a32f391224fd12a11e6168de395958b69f6699ab",
+    "match": true
+  },
+  {
+    "path": "deploy/production/docker-compose.yml",
+    "working_tree_sha256": "615c33488ced925d80d671d7fe845ce1a8a4deaa14e434ed513af2c568e4ac2c",
+    "runtime_present": false,
+    "runtime_sha256": null,
+    "match": false
+  },
+  {
+    "path": "uv.lock",
+    "working_tree_sha256": "2314c20ab35065540658a88f7bc712e8905bae2f1b2f169e93aa4155fc67bcad",
+    "runtime_present": true,
+    "runtime_sha256": "2314c20ab35065540658a88f7bc712e8905bae2f1b2f169e93aa4155fc67bcad",
+    "match": true
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "phase-00-baseline-and-governance",
+  "validated_at_utc": "2026-07-18T19:49:32Z",
+  "checks": [
+    {
+      "name": "phase0_validator",
+      "command": "python3 scripts/validate_phase0.py",
+      "exit_code": 0
+    },
+    {
+      "name": "python_compile",
+      "command": "python3 -m compileall -q scripts",
+      "exit_code": 0
+    },
+    {
+      "name": "staged_diff_check",
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "result": "passed"
+}
