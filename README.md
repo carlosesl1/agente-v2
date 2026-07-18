@@ -12,9 +12,9 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma**.
+- Fase ativa: **Fase 1 — caracterização e corpus de incidentes**.
 - Fase 0: **concluída e publicada no GitHub**.
-- Próxima fase: **Fase 1 — caracterização**, ainda não iniciada.
+- Fase 1: **em execução**, limitada a testes, fixtures sanitizadas, harness e evidências.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional: ainda não iniciada.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
@@ -30,6 +30,7 @@ Contrato central:
 - [Validação, evidências e rollout](docs/refactor/05-validation-and-rollout.md)
 - [Registro de riscos](docs/refactor/06-risk-register.md)
 - [Execução da Fase 0](docs/refactor/phases/phase-00-baseline-and-governance.md)
+- [Execução da Fase 1](docs/refactor/phases/phase-01-incident-characterization.md)
 
 ## Regras de execução
 
