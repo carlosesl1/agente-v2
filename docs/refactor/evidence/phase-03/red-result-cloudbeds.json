@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "recorded_at_utc": "2026-07-18T23:41:01Z",
+  "test": "tests.test_phase3_cloudbeds_adapter",
+  "command": "python3 -m unittest tests.test_phase3_cloudbeds_adapter -v",
+  "exit_code": 1,
+  "expected_failure": "ModuleNotFoundError: No module named 'reservation_lookup.cloudbeds'",
+  "result": "red_confirmed"
+}

@@ -1,0 +1,26 @@
+{
+  "success": true,
+  "data": [
+    {
+      "roomTypeID": "101",
+      "roomTypeName": "Quarto sintético",
+      "roomsAvailable": 1,
+      "ratePlanID": "RP-MISSING",
+      "currency": "BRL",
+      "roomRateDetailed": [
+        {
+          "date": "2026-11-10",
+          "roomsAvailable": 1,
+          "rate": "210.00",
+          "currency": "BRL"
+        },
+        {
+          "date": "2026-11-11",
+          "roomsAvailable": 1,
+          "rate": "210.00",
+          "currency": "BRL"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "success": true,
+  "data": [
+    {
+      "roomTypeID": "101",
+      "roomTypeName": "Quarto nº 2",
+      "roomsAvailable": 3,
+      "ratePlanID": "RP1",
+      "currency": "BRL",
+      "roomRateDetailed": [
+        {
+          "date": "2026-11-10",
+          "roomsAvailable": 3,
+          "rate": "210.00",
+          "currency": "BRL"
+        },
+        {
+          "date": "2026-11-11",
+          "roomsAvailable": 2,
+          "rate": "210.00",
+          "currency": "BRL"
+        }
+      ]
+    }
+  ]
+}

@@ -10,9 +10,30 @@ from reservation_domain import OfferSnapshot, SearchQuery
 from .types import ProviderKind, ReadRequest, ReadResponse
 
 
+def _canonical_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _canonical_value(item)
+            for key, item in sorted(value.items())
+        }
+    if isinstance(value, (list, tuple)):
+        items = [_canonical_value(item) for item in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(
+                item,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ),
+        )
+    return value
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(
-        value,
+        _canonical_value(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

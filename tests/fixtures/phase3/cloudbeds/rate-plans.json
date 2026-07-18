@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "data": [
+    {
+      "ratePlanID": "RP1",
+      "ratePlanName": "Tarifa padrão"
+    }
+  ]
+}
