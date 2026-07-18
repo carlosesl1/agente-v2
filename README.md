@@ -12,7 +12,9 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 0 — baseline e governança (commit local criado; push remoto pendente de autenticação)**.
+- Fase ativa: **nenhuma**.
+- Fase 0: **concluída e publicada no GitHub**.
+- Próxima fase: **Fase 1 — caracterização**, ainda não iniciada.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional: ainda não iniciada.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.

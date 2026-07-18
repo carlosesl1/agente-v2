@@ -8,8 +8,8 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 
 | Fase | Estado | Objetivo |
 |---|---|---|
-| 0. Baseline e governança | **em execução — push pendente** | Criar trilha limpa, evidência reproduzível, arquitetura e gates |
-| 1. Caracterização | bloqueada | Reproduzir todos os incidentes históricos desde payload/estado vazio |
+| 0. Baseline e governança | **concluída** | Criar trilha limpa, evidência reproduzível, arquitetura e gates |
+| 1. Caracterização | próxima — não iniciada | Reproduzir todos os incidentes históricos desde payload/estado vazio |
 | 2. Domínio tipado e reducer | bloqueada | Criar a máquina de estados pura, sem integrar produção |
 | 3. Consultas e `OfferSnapshot` | bloqueada | Vincular seleção a `offer_id` e evidência fresca |
 | 4. Resumo e confirmação únicos | bloqueada | Uma versão, um resumo, uma confirmação posterior |

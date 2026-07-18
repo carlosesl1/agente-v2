@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "phase": "phase-00-baseline-and-governance",
-  "validated_at_utc": "2026-07-18T19:51:34Z",
+  "validated_at_utc": "2026-07-18T20:01:16Z",
   "checks": [
     {
       "name": "phase0_validator",
@@ -14,11 +14,17 @@
       "exit_code": 0
     },
     {
-      "name": "staged_diff_check",
-      "command": "git diff --cached --check",
+      "name": "working_diff_check",
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "name": "remote_pre_closeout_match",
+      "command": "test \"$(git rev-parse HEAD)\" = \"$(git rev-parse origin/main)\"",
       "exit_code": 0
     }
   ],
   "result": "passed",
-  "remote_delivery": "blocked_missing_github_auth"
+  "remote_delivery": "verified_before_closeout",
+  "verified_remote_head": "8e4b4815a3567f241fe4451eec85df162545888d"
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-`em execução — commit local criado; push remoto bloqueado por ausência de autenticação GitHub neste host`
+`concluída`
 
 ## Objetivo
 
@@ -40,7 +40,7 @@ Criar a base limpa e verificável da refatoração sem alterar o sistema atual.
 - [x] hashes da evidência;
 - [x] secret/PII scan local;
 - [x] commit criado;
-- [ ] push verificado — bloqueado: host sem token, credential helper ou chave SSH autorizada.
+- [x] push verificado — local e `origin/main` conferidos após fetch.
 
 ## Evidências capturadas
 
@@ -74,4 +74,4 @@ Conteúdo:
 
 ## Decisão de avanço
 
-A Fase 1 permanece bloqueada até este documento ser atualizado para `concluída`, com commit remoto e evidência de validação.
+A Fase 0 está concluída. A Fase 1 é a próxima fase elegível, mas deve começar em um novo ciclo explícito, preservando a regra de uma fase por vez.
