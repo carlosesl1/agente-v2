@@ -275,6 +275,36 @@ def claim_fixture(test_case):
     return store, claim_at
 
 
+def queued_store_fixture(test_case):
+    """Persist one queued authorized command in a file-backed local store."""
+
+    temporary = tempfile.TemporaryDirectory(prefix="phase5-reconcile-")
+    test_case.addCleanup(temporary.cleanup)
+    path = Path(temporary.name) / "phase5.db"
+    store = SQLiteUnitOfWork.open(path)
+    test_case.addCleanup(store.close)
+    workflow_id = _opaque_id("workflow", "reconcile", test_case.id())
+    initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+    store.create_workflow(initial)
+    persist_script(store, workflow_id, script)
+    command_id = store.load_workflow(workflow_id).command.command_id
+    return store, path, workflow_id, command_id
+
+
+def fenced_store_fixture(test_case, now: datetime):
+    """Persist one dispatch fence without invoking any execution adapter."""
+
+    store, path, workflow_id, command_id = queued_store_fixture(test_case)
+    claim = store.claim_command(
+        worker_id="worker:crashed",
+        now=now,
+        lease_ttl=timedelta(seconds=30),
+    )
+    request = DispatchRequest.from_command(claim.command, dumps_command(claim.command))
+    store.fence_dispatch(claim, request, now=now)
+    return store, path, workflow_id, command_id
+
+
 class ScriptedExecutionAdapter:
     """Finite execution adapter fake with no network or provider fallback."""
 

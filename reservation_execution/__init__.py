@@ -8,6 +8,7 @@ from .projection import (
     summary_outbox_message,
     summary_payload,
 )
+from .reconciliation import Reconciler, ReconciliationResult
 from .worker import CommandWorker, WorkerDisposition, WorkerResult
 from .types import (
     CommandClaim,
@@ -40,6 +41,8 @@ __all__ = [
     "summary_outbox_message",
     "project_preparation_failure_outbox",
     "project_outcome_outbox",
+    "Reconciler",
+    "ReconciliationResult",
     "CommandWorker",
     "WorkerDisposition",
     "WorkerResult",

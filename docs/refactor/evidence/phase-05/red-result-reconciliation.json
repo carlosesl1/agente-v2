@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "reconciliation_without_dispatch_capability",
+  "source_sha": "53aef329d14b52c15c620ea342554b6f8d16ca02",
+  "command": "python3 -m unittest tests.test_phase5_reconciliation -v",
+  "expected_failure": "reservation_execution.reconciliation is absent before Task 8 implementation",
+  "exit_code": 1,
+  "tests_run": 1,
+  "failures": 0,
+  "errors": 1,
+  "output_sha256": "561cef6453cda3dd44d50646a4ef4947c996e2f50fc3e7379caad9f1fa067f3c",
+  "raw_output_versioned": false,
+  "external_capabilities": [],
+  "provider_calls": 0,
+  "network_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "requeued_claim_counter_consistency",
+      "base_sha": "53aef329d14b52c15c620ea342554b6f8d16ca02",
+      "command": "python3 -m unittest tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_consistency_rejects_impossible_requeued_claim_counters -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 2,
+      "errors": 0,
+      "output_sha256": "a401905f849a2f384b6f6ff19c1244d282e50d1c47bd8064fd671b306f5f371e",
+      "raw_output_versioned": false
+    }
+  ]
+}

@@ -899,6 +899,153 @@ class SQLiteUnitOfWork:
         if message != expected:
             raise DataCorruption("execution outbox diverges from its durable outcome")
 
+    def assert_execution_consistency(self) -> None:
+        """Fail closed unless every execution projection agrees end to end."""
+
+        with self._transaction("assert_execution_consistency"):
+            workflow_ids = tuple(
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT workflow_id FROM workflows ORDER BY workflow_id"
+                )
+            )
+            command_rows = tuple(
+                self._connection.execute(
+                    "SELECT command_id, workflow_id FROM reservation_commands "
+                    "ORDER BY command_id"
+                )
+            )
+            command_ids = {row[0] for row in command_rows}
+            ledger_ids = {
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT command_id FROM execution_ledger"
+                )
+            }
+            if len(command_ids) != len(command_rows) or command_ids != ledger_ids:
+                raise DataCorruption("command and ledger identity sets disagree")
+            commands_by_workflow: dict[str, list[str]] = {}
+            for command_id, workflow_id in command_rows:
+                commands_by_workflow.setdefault(workflow_id, []).append(command_id)
+
+            represented: set[str] = set()
+            for workflow_id in workflow_ids:
+                state = self._replay_workflow_history(workflow_id)
+                durable_ids = commands_by_workflow.get(workflow_id, [])
+                if not state.meta.command_ids:
+                    if durable_ids:
+                        raise DataCorruption(
+                            "workflow without command metadata owns a durable command"
+                        )
+                    continue
+                if (
+                    len(state.meta.command_ids) != 1
+                    or durable_ids != [state.meta.command_ids[0]]
+                ):
+                    raise DataCorruption(
+                        "workflow command metadata disagrees with durable commands"
+                    )
+                command = self.load_command(state.meta.command_ids[0])
+                ledger = self.load_ledger(command.command_id)
+                represented.add(command.command_id)
+                if (
+                    ledger.fencing_token != ledger.claim_count
+                    or ledger.preparation_failures > ledger.claim_count
+                ):
+                    raise DataCorruption(
+                        "execution claim counters violate their monotonic history"
+                    )
+                if getattr(state, "command", None) != command:
+                    raise DataCorruption(
+                        "workflow state does not embed its authorized command"
+                    )
+                expected_request_hash = DispatchRequest.from_command(
+                    command,
+                    dumps_command(command),
+                ).payload_hash
+                if (
+                    ledger.dispatch_slots_consumed == 1
+                    and ledger.dispatch_request_hash != expected_request_hash
+                ):
+                    raise DataCorruption(
+                        "dispatch fence does not bind the canonical command request"
+                    )
+                if (
+                    ledger.dispatch_fenced_at is not None
+                    and ledger.dispatch_fenced_at > ledger.updated_at
+                ):
+                    raise DataCorruption("dispatch fence timestamp exceeds ledger update")
+
+                if type(state) is ExecutionQueuedState:
+                    valid_state = ledger.status is LedgerStatus.QUEUED
+                elif type(state) is ExecutingState:
+                    valid_state = ledger.status in (
+                        LedgerStatus.QUEUED,
+                        LedgerStatus.PREPARING,
+                        LedgerStatus.DISPATCH_FENCED,
+                    )
+                elif type(state) is FailedBeforeProviderState:
+                    valid_state = (
+                        ledger.status is LedgerStatus.OUTCOME_RECORDED
+                        and ledger.dispatch_slots_consumed == 0
+                    )
+                elif type(state) is SucceededState:
+                    valid_state = (
+                        ledger.status is LedgerStatus.OUTCOME_RECORDED
+                        and ledger.dispatch_slots_consumed == 1
+                    )
+                elif type(state) is FailedNoEffectState:
+                    valid_state = (
+                        ledger.status is LedgerStatus.OUTCOME_RECORDED
+                        and ledger.dispatch_slots_consumed == 1
+                    )
+                elif type(state) is ManualReviewState:
+                    valid_state = (
+                        ledger.status is LedgerStatus.MANUAL_REVIEW
+                        and ledger.dispatch_slots_consumed == 1
+                    )
+                elif type(state) is UncertainState:
+                    valid_state = False
+                else:
+                    valid_state = False
+                if not valid_state:
+                    raise DataCorruption(
+                        "workflow execution state disagrees with its ledger status"
+                    )
+
+                outcome_present = ledger.outcome_json is not None
+                if outcome_present:
+                    outcome = loads_outcome(ledger.outcome_json)
+                    if not self._terminal_state_matches_outcome(
+                        state,
+                        command,
+                        outcome,
+                    ):
+                        raise DataCorruption(
+                            "terminal workflow state disagrees with durable outcome"
+                        )
+                execution_messages = tuple(
+                    row[0]
+                    for row in self._connection.execute(
+                        "SELECT message_id FROM outbox_messages WHERE command_id=? "
+                        "ORDER BY message_id",
+                        (command.command_id,),
+                    )
+                )
+                if len(execution_messages) != (1 if outcome_present else 0):
+                    raise DataCorruption(
+                        "execution outcome and outbox cardinality disagree"
+                    )
+                for message_id in execution_messages:
+                    self.load_outbox(message_id)
+
+            if represented != command_ids:
+                raise DataCorruption("durable command is absent from its workflow state")
+            for row in self._connection.execute(
+                "SELECT message_id FROM outbox_messages ORDER BY message_id"
+            ):
+                self.load_outbox(row[0])
+
     def apply_event(
         self,
         workflow_id: str,
@@ -1135,6 +1282,79 @@ class SQLiteUnitOfWork:
         ):
             raise StaleLease("preparation lease is stale or expired")
         return command, ledger, state
+
+    def release_expired_pre_dispatch(self, *, now: datetime) -> int:
+        """Release every expired pre-fence lease without changing domain state."""
+
+        now = _require_utc_input(now, "now")
+        released = 0
+        with self._transaction("release_expired_pre_dispatch"):
+            candidates = tuple(
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT command_id FROM execution_ledger "
+                    "WHERE status='preparing' AND dispatch_slots_consumed=0 "
+                    "AND outcome_json IS NULL AND lease_expires_at<=? "
+                    "ORDER BY command_id",
+                    (now.isoformat(),),
+                )
+            )
+            for command_id in candidates:
+                command = self.load_command(command_id)
+                ledger = self.load_ledger(command.command_id)
+                state = self.load_workflow(command.workflow_id)
+                if (
+                    type(state) is not ExecutingState
+                    or state.command != command
+                    or state.meta.command_ids != (command.command_id,)
+                    or ledger.status is not LedgerStatus.PREPARING
+                    or ledger.dispatch_slots_consumed != 0
+                    or ledger.outcome_json is not None
+                    or ledger.claim_owner is None
+                    or ledger.lease_acquired_at is None
+                    or ledger.lease_expires_at is None
+                    or now < ledger.updated_at
+                    or now < ledger.lease_expires_at
+                ):
+                    raise DataCorruption(
+                        "expired pre-dispatch lease has an impossible projection"
+                    )
+                cursor = self._connection.execute(
+                    "UPDATE execution_ledger SET status='queued', "
+                    "claim_owner=NULL, lease_acquired_at=NULL, "
+                    "lease_expires_at=NULL, updated_at=? "
+                    "WHERE command_id=? AND status='preparing' "
+                    "AND claim_owner=? AND fencing_token=? "
+                    "AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND lease_expires_at<=? AND dispatch_slots_consumed=0 "
+                    "AND outcome_json IS NULL AND outcome_hash IS NULL",
+                    (
+                        now.isoformat(),
+                        command.command_id,
+                        ledger.claim_owner,
+                        ledger.fencing_token,
+                        ledger.lease_acquired_at.isoformat(),
+                        ledger.lease_expires_at.isoformat(),
+                        now.isoformat(),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ConcurrencyConflict(
+                        "expired pre-dispatch release lost its compare-and-swap"
+                    )
+                updated = self.load_ledger(command.command_id)
+                if (
+                    updated.status is not LedgerStatus.QUEUED
+                    or updated.claim_owner is not None
+                    or updated.dispatch_slots_consumed != 0
+                    or updated.fencing_token != ledger.fencing_token
+                    or updated.claim_count != ledger.claim_count
+                ):
+                    raise DataCorruption(
+                        "released pre-dispatch ledger projection is invalid"
+                    )
+                released += 1
+        return released
 
     def claim_command(
         self,
@@ -1532,6 +1752,163 @@ class SQLiteUnitOfWork:
             commands=(),
             duplicate=True,
         )
+
+    def mark_expired_fenced_unknown(self, *, now: datetime) -> int:
+        """Promote expired dispatch fences to manual review without redispatch."""
+
+        now = _require_utc_input(now, "now")
+        reconciled = 0
+        with self._transaction("mark_expired_fenced_unknown"):
+            candidates = tuple(
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT command_id FROM execution_ledger "
+                    "WHERE status='dispatch_fenced' "
+                    "AND dispatch_slots_consumed=1 "
+                    "AND outcome_json IS NULL AND lease_expires_at<=? "
+                    "ORDER BY command_id",
+                    (now.isoformat(),),
+                )
+            )
+            for command_id in candidates:
+                command = self.load_command(command_id)
+                ledger = self.load_ledger(command.command_id)
+                state = self.load_workflow(command.workflow_id)
+                expected_request = DispatchRequest.from_command(
+                    command,
+                    dumps_command(command),
+                )
+                if (
+                    type(state) is not ExecutingState
+                    or state.command != command
+                    or state.meta.command_ids != (command.command_id,)
+                    or ledger.status is not LedgerStatus.DISPATCH_FENCED
+                    or ledger.dispatch_slots_consumed != 1
+                    or ledger.dispatch_request_hash != expected_request.payload_hash
+                    or ledger.dispatch_fenced_at is None
+                    or ledger.claim_owner is None
+                    or ledger.lease_acquired_at is None
+                    or ledger.lease_expires_at is None
+                    or ledger.outcome_json is not None
+                    or now < ledger.updated_at
+                    or now < ledger.lease_expires_at
+                ):
+                    raise DataCorruption(
+                        "expired dispatch fence has an impossible projection"
+                    )
+                outcome = command.outcome(
+                    certainty=ExecutionCertainty.CALLED_UNKNOWN,
+                    normalized_status="dispatch_outcome_unknown_after_expiry",
+                    evidence=(ledger.dispatch_request_hash,),
+                )
+                raw_outcome = dumps_outcome(outcome)
+                outcome_hash = _sha256_text(raw_outcome)
+                finished = ExecutionFinished(
+                    event_id=_derived_id(
+                        "event",
+                        "execution_outcome",
+                        command.command_id,
+                        outcome_hash,
+                    ),
+                    occurred_at=now,
+                    command_id=command.command_id,
+                    outcome=outcome,
+                )
+                if self._event_row(finished.event_id) is not None:
+                    raise DataCorruption(
+                        "expired dispatch fence already has its outcome event"
+                    )
+                finished_transition = reduce(state, finished)
+                if (
+                    finished_transition.status is not TransitionStatus.APPLIED
+                    or type(finished_transition.state) is not UncertainState
+                    or finished_transition.commands
+                ):
+                    raise DataCorruption(
+                        "reconciled unknown did not produce uncertain state"
+                    )
+                review = ManualReviewRequested(
+                    event_id=_derived_id(
+                        "event",
+                        "manual_review",
+                        command.command_id,
+                        outcome_hash,
+                    ),
+                    occurred_at=now,
+                    reason="provider_effect_uncertain",
+                )
+                if self._event_row(review.event_id) is not None:
+                    raise DataCorruption(
+                        "expired dispatch fence already has its review event"
+                    )
+                final_transition = reduce(finished_transition.state, review)
+                if (
+                    final_transition.status is not TransitionStatus.APPLIED
+                    or type(final_transition.state) is not ManualReviewState
+                    or final_transition.commands
+                ):
+                    raise DataCorruption(
+                        "reconciled unknown did not produce mandatory manual review"
+                    )
+                message = project_outcome_outbox(
+                    command,
+                    outcome,
+                    created_at=now,
+                )
+                self._insert_event(
+                    command.workflow_id,
+                    finished,
+                    finished_transition.state.meta.revision,
+                )
+                self._insert_event(
+                    command.workflow_id,
+                    review,
+                    final_transition.state.meta.revision,
+                )
+                self._update_state_compare_and_swap(state, final_transition.state)
+                cursor = self._connection.execute(
+                    "UPDATE execution_ledger SET status='manual_review', "
+                    "claim_owner=NULL, lease_acquired_at=NULL, "
+                    "lease_expires_at=NULL, outcome_json=?, outcome_hash=?, "
+                    "updated_at=? WHERE command_id=? "
+                    "AND status='dispatch_fenced' AND claim_owner=? "
+                    "AND fencing_token=? AND lease_acquired_at=? "
+                    "AND lease_expires_at=? AND lease_expires_at<=? "
+                    "AND dispatch_slots_consumed=1 "
+                    "AND dispatch_request_hash=? AND dispatch_fenced_at=? "
+                    "AND outcome_json IS NULL AND outcome_hash IS NULL",
+                    (
+                        raw_outcome,
+                        outcome_hash,
+                        now.isoformat(),
+                        command.command_id,
+                        ledger.claim_owner,
+                        ledger.fencing_token,
+                        ledger.lease_acquired_at.isoformat(),
+                        ledger.lease_expires_at.isoformat(),
+                        now.isoformat(),
+                        ledger.dispatch_request_hash,
+                        ledger.dispatch_fenced_at.isoformat(),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ConcurrencyConflict(
+                        "expired dispatch reconciliation lost its compare-and-swap"
+                    )
+                self._insert_outbox(message)
+                persisted = self.load_ledger(command.command_id)
+                if (
+                    persisted.status is not LedgerStatus.MANUAL_REVIEW
+                    or persisted.dispatch_slots_consumed != 1
+                    or persisted.outcome_json != raw_outcome
+                    or persisted.outcome_hash != outcome_hash
+                    or persisted.claim_owner is not None
+                ):
+                    raise DataCorruption(
+                        "reconciled dispatch outcome projection is invalid"
+                    )
+                reconciled += 1
+        return reconciled
 
     def record_outcome(
         self,
