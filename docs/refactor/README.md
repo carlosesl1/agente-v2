@@ -14,7 +14,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 | 3. Consultas e `OfferSnapshot` | **concluída e remediada** | Vincular seleção a `offer_id` e evidência fresca |
 | 4. Resumo e confirmação únicos | **concluída** | Uma versão, um resumo, uma confirmação posterior |
 | 5. Comando e execução duráveis | **concluída e publicada; seis workflows verdes** | Retirar writes do turno síncrono da LLM |
-| 6. Handoff e pagamentos | **abertura autorizada; ainda não iniciada neste closeout** | Separar workflows e side effects obrigatórios/opcionais |
+| 6. Handoff e pagamentos | **design formalizado; implementação não iniciada** | Separar workflows e side effects obrigatórios/opcionais |
 | 7. Migração das fronteiras | bloqueada | Fazer runner/plugin/executor usarem o mesmo kernel |
 | 8. Shadow, canary e rollout | bloqueada | Validar e promover o mesmo digest gradualmente |
 | 9. Remoção do legado | bloqueada | Eliminar metadata, aliases e policies duplicadas |

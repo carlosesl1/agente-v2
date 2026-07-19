@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "phase": "phase-06-handoff-payments",
+  "opened_at_utc": "2026-07-19T17:48:53Z",
+  "base_commit": "6c65c2612aefce4b217dcd0308e33dd68e1dc7db",
+  "local_main": "6c65c2612aefce4b217dcd0308e33dd68e1dc7db",
+  "origin_main": "6c65c2612aefce4b217dcd0308e33dd68e1dc7db",
+  "remote_main": "6c65c2612aefce4b217dcd0308e33dd68e1dc7db",
+  "phase5_terminal_closeout_published": true,
+  "phase5_terminal_ci_all_success": true,
+  "workflow_count": 6,
+  "workflows": [
+    {
+      "id": 29697325790,
+      "name": "phase-0-validation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325790"
+    },
+    {
+      "id": 29697325785,
+      "name": "phase-1-characterization",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325785"
+    },
+    {
+      "id": 29697325791,
+      "name": "phase-2-domain",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325791"
+    },
+    {
+      "id": 29697325782,
+      "name": "phase-3-lookups",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325782"
+    },
+    {
+      "id": 29697325844,
+      "name": "phase-4-confirmation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325844"
+    },
+    {
+      "id": 29697325799,
+      "name": "phase-5-durable-execution",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29697325799"
+    }
+  ],
+  "user_authorized_phase6": true,
+  "payment_bootstrap_rule": "effect_confirmed_only",
+  "handoff_required_effects": [
+    "queue_state",
+    "customer_acknowledgement"
+  ],
+  "handoff_optional_effects": [
+    "internal_email"
+  ],
+  "legacy_repository_read_only": true,
+  "sqlite_execution_authorized": true,
+  "postgresql_executed": false,
+  "docker_executed": false,
+  "supabase_executed": false,
+  "redis_executed": false,
+  "provider_reads_executed": false,
+  "provider_writes_executed": false,
+  "message_delivery_executed": false,
+  "payment_settlement_executed": false,
+  "rollout": "NO-GO"
+}

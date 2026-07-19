@@ -114,3 +114,13 @@ python3 scripts/run_phase5_faults.py --seed 2026071905 --restart-schedules 2000 
 python3 scripts/run_phase5_mutations.py
 python3 scripts/validate_phase5.py
 ```
+
+## Fase 6
+
+`phase-06/entry-baseline.json` fixa o commit terminal publicado da Fase 5,
+os seis workflows remotos verdes, a autorização explícita de avanço e os
+limites sem capability live. A spec e a página da fase formalizam dois
+workflows irmãos: handoff e pagamento.
+
+Na abertura, nenhuma reserva, settlement, mensagem, e-mail, provider, banco ou
+runtime é executado; rollout permanece `NO-GO`.

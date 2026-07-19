@@ -10,6 +10,7 @@ As ADRs deste diretório registram decisões aceitas da refatoração. Mudanças
 | 0004 | Writes por comando durável fora do turno da LLM | aceita |
 | 0005 | Ledger e outbox separados | aceita |
 | 0006 | Mesmo digest OCI da canary ao rollout | aceita |
+| 0007 | Handoff e pagamento como workflows irmãos | aceita para a Fase 6 |
 
 Formato de novas ADRs:
 

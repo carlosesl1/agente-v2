@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 5 concluída, publicada e com CI remoto verde; abertura da Fase 6 autorizada**.
+- Fase ativa: **Fase 6 — design de handoff e pagamentos formalizado; implementação não iniciada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -24,6 +24,9 @@ Contrato central:
 - Fase 5: **concluída e publicada** no commit
   `9199b2c70fb3a26d9f12949b25d135f625b2317d`; seis workflows remotos verdes,
   sem Docker, PostgreSQL, Supabase, provider ou delivery live.
+- Fase 6: **aberta** no commit-base terminal da Fase 5
+  `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`; design separa
+  `HandoffWorkflow` e `PaymentWorkflow`, sem integração live.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
@@ -46,6 +49,7 @@ Contrato central:
 - [Execução da Fase 3](docs/refactor/phases/phase-03-lookups-and-offer-snapshots.md)
 - [Execução da Fase 4](docs/refactor/phases/phase-04-single-summary-and-confirmation.md)
 - [Execução da Fase 5](docs/refactor/phases/phase-05-durable-command-execution.md)
+- [Execução da Fase 6](docs/refactor/phases/phase-06-handoff-and-payments.md)
 
 ## Regras de execução
 
