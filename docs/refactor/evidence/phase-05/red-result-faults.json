@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "fault-injection-restart-multiprocess-contention",
+  "source_sha": "9a0d63af8d3d5b7fd4fd6101b6c1f38162dcad47",
+  "command": "python3 -m unittest tests.test_phase5_fault_injection tests.test_phase5_concurrency -v",
+  "exit_code": 1,
+  "tests_run": 2,
+  "failures": 0,
+  "errors": 2,
+  "expected_cause": "scripts.run_phase5_faults missing",
+  "output_sha256": "90b6ba6d025608f53a9b2698a4d775b3195c2f194a4607deddf421eae3d0394a",
+  "raw_output_versioned": false,
+  "provider_calls": 0,
+  "network_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "multiprocess_winner_token_envelope",
+      "base_sha": "9a0d63af8d3d5b7fd4fd6101b6c1f38162dcad47",
+      "command": "python3 -m unittest tests.test_phase5_concurrency.Phase5ConcurrencyTests.test_contention_envelope_is_deterministic -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 0,
+      "errors": 4,
+      "output_sha256": "20bbd9f283e17b6218e6cb03531fba904d7df88a565f5561baf4ed31f670b090",
+      "raw_output_versioned": false
+    }
+  ]
+}
