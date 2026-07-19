@@ -1,0 +1,142 @@
+{
+  "phase": 6,
+  "task": 5,
+  "title": "Schema Phase 6 and deterministic DDL",
+  "recorded_at_utc": "2026-07-19T22:31:04Z",
+  "base_sha": "27fec8d2734f4b07718300573c21e0fa1e34bf80",
+  "schema_version": 1,
+  "rollout": "NO-GO",
+  "postgresql_executed": false,
+  "original_red": {
+    "provenance": "timed-out implementer; uncommitted test survived while production module was absent",
+    "immutable_snapshot_available": false,
+    "intermediate_state": "untracked test only; HEAD remained base_sha",
+    "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-red.out 2>&1",
+    "exit_code": 1,
+    "raw_output_path": "/tmp/phase6-task5-red.out",
+    "raw_output_versioned": false,
+    "output_sha256": "7ebfba4ecb0f1dff4fc1812ebafd33c193bfb83140ae3c31ecac268c62bf5bb6",
+    "expected_failure": "ModuleNotFoundError: No module named 'reservation_followup.schema'"
+  },
+  "controller_red": {
+    "provenance": "controller corrected the claim lifecycle oracle to in_progress/completed/retryable/manual_review before creating production",
+    "immutable_snapshot_available": false,
+    "test_source_sha256_at_run": "64ea396a37196c42d84fab3ef3bbdcb8acdbb5e275e9cb9f39983837c5b790d2",
+    "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-controller-red.out 2>&1",
+    "exit_code": 1,
+    "raw_output_path": "/tmp/phase6-task5-controller-red.out",
+    "raw_output_versioned": false,
+    "output_sha256": "7ebfba4ecb0f1dff4fc1812ebafd33c193bfb83140ae3c31ecac268c62bf5bb6",
+    "expected_failure": "ModuleNotFoundError: No module named 'reservation_followup.schema'"
+  },
+  "harness_corrections": [
+    {
+      "attempt_output_sha256": "baf52b6e7e14b70be1adf6f5373fa9daa466ee3c709dbf48c3ccde3bca29f0c5",
+      "result": "22 tests: 19 passed and 3 fixture errors",
+      "root_causes": [
+        "synthetic Pix claim helper truncated distinct suffixes to the same key",
+        "command helper received payment_id both positionally and through overrides"
+      ],
+      "production_contract_changed": false
+    },
+    {
+      "attempt_output_sha256": "3a568c5a0064e9bc5e13088906feaf1589ddd8f41e668f73589fe97132078067",
+      "result": "22/22 passed after fixture correction and before the adversarial SQL NULL pass"
+    }
+  ],
+  "self_review_reds": [
+    {
+      "name": "sqlite_check_null_outcome_status_bypass",
+      "provenance": "controller-owned adversarial RED against the then-current uncommitted renderer",
+      "immutable_snapshot_available": false,
+      "command": "python3 -m unittest tests.test_phase6_schema.Phase6SchemaTests.test_payment_ledger_rejects_invalid_lease_slot_outcome_fence_matrix -v >/tmp/phase6-task5-outcome-null-red.out 2>&1",
+      "exit_code": 1,
+      "failures": 2,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task5-outcome-null-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "fbaddca80eb074478684134709f4ac2d4d4ea381e21c3724a3eb64ae00338510",
+      "counterexamples": [
+        "outcome_recorded with all outcome fields NULL",
+        "manual_review with dispatch fence but all outcome fields NULL"
+      ],
+      "root_cause": "SQLite accepts a CHECK whose expression evaluates to NULL",
+      "fix": "require outcome_json IS NOT NULL in both terminal status branches before certainty comparisons"
+    }
+  ],
+  "schema": {
+    "table_count": 11,
+    "ordered_tables": [
+      "handoff_workflows",
+      "handoff_events",
+      "handoff_outbox",
+      "handoff_receipts",
+      "payment_workflows",
+      "payment_events",
+      "payment_evidence_claims",
+      "payment_commands",
+      "payment_ledger",
+      "payment_outbox",
+      "payment_receipts"
+    ],
+    "sqlite": {
+      "path": "schemas/phase6/sqlite.sql",
+      "sha256": "4c7650fea86281ae57e715c5513c331f7d0e20b0835aefd3ffe729f7f47e6811",
+      "executed_in_memory": true,
+      "strict_tables": 11,
+      "foreign_keys_enabled": true,
+      "foreign_key_check": [],
+      "quick_check": "ok",
+      "triggers": []
+    },
+    "postgresql": {
+      "path": "schemas/phase6/postgresql.sql",
+      "sha256": "05de6b5dd4b7f391cbf4473bb4a366bbe7f5b2aab8ea007339d6d9e25d4e9e3d",
+      "executed": false,
+      "contract_only": true
+    },
+    "drift": {
+      "generator_command": "python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-task5-sqlite.sql --postgresql /tmp/phase6-task5-postgresql.sql",
+      "generator_output_sha256": "d1446ab039938f0a0e00a2a14e7b555736008c15a8ab5124e43d025ee05053d0",
+      "sqlite_diff_bytes": 0,
+      "postgresql_diff_bytes": 0,
+      "drift_zero": true
+    }
+  },
+  "green": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-focused-final.out 2>&1",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 0.935,
+      "output_sha256": "814b2cb2b54726516c060f42e5bf12f40838b2769a395db3e544b72f354013c2"
+    },
+    "regressions": {
+      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase5_schema -v >/tmp/phase6-task5-regressions-final.out 2>&1",
+      "tests": 124,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 0.708,
+      "output_sha256": "b3fd54cf48e01dc9a0f75c030ae587f9970159df894147cb3033e7611b3329c9"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task5-full-suite-final.out 2>&1",
+      "tests": 474,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 64.523,
+      "output_sha256": "1ddfa3135e29ac65a54bc51f8cd1698b07691cd265047f9ffe0bd298aad58183"
+    }
+  },
+  "scans": {
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "forbidden_imports": [],
+    "forbidden_cross_ledger_terms": [],
+    "sensitive_hits": [],
+    "forbidden_db_wal_shm_log_artifacts": []
+  },
+  "live_capabilities_executed": [],
+  "database_scope": "SQLite :memory: and temporary generated text files only"
+}
