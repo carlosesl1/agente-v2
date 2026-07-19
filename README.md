@@ -12,12 +12,12 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma**.
+- Fase ativa: **Fase 3 — remediação de revisão tardia**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
-- Fase 3: **concluída e publicada no GitHub**, com adapters read-only,
-  identidade opaca e seleção fail-closed; nenhuma rede real.
+- Fase 3: **reaberta para remediação**, após parecer independente tardio revelar
+  lacunas de identidade/provenance; nenhuma rede real.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída: domínio puro e boundary de consultas no
   novo repositório.

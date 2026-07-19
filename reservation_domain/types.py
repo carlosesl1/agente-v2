@@ -302,7 +302,7 @@ class LookupEvidence:
 
     def is_fresh(self, at: datetime) -> bool:
         instant = _require_utc(at, "at")
-        return self.observed_at <= instant <= self.expires_at
+        return self.observed_at <= instant < self.expires_at
 
 
 @dataclass(frozen=True, slots=True)

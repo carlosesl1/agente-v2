@@ -1,6 +1,6 @@
 {
   "all_killed": true,
-  "mutant_count": 13,
+  "mutant_count": 19,
   "mutants": [
     {
       "exit_code": 1,
@@ -71,6 +71,48 @@
       "name": "allow_bokun_metadata_id_mismatch",
       "path": "reservation_lookup/bokun.py",
       "test": "tests.test_phase3_bokun_adapter.BokunFailClosedTests.test_metadata_product_id_mismatch_is_uncertain"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "remove_cloudbeds_property_from_offer_target",
+      "path": "reservation_lookup/cloudbeds.py",
+      "test": "tests.test_phase3_cloudbeds_adapter.CloudbedsBoundaryTests.test_property_id_is_part_of_executable_offer_identity"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "unbind_responses_from_request_fingerprints",
+      "path": "reservation_lookup/identity.py",
+      "test": "tests.test_phase3_lookup_types.OpaqueIdentityTests.test_snapshot_hash_binds_each_response_to_its_request"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "accept_rebound_lookup_id",
+      "path": "reservation_lookup/types.py",
+      "test": "tests.test_phase3_lookup_types.LookupResultContractTests.test_result_rejects_rebound_noncanonical_lookup_id"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "accept_zero_total_positive_offer",
+      "path": "reservation_lookup/types.py",
+      "test": "tests.test_phase3_lookup_types.LookupResultContractTests.test_positive_result_rejects_zero_total"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "make_expiration_boundary_inclusive",
+      "path": "reservation_domain/types.py",
+      "test": "tests.test_phase3_selection.ExactOfferSelectionTests.test_negative_uncertain_and_expired_lookup_fail_closed"
+    },
+    {
+      "exit_code": 1,
+      "killed": true,
+      "name": "reuse_same_internal_target_in_cross_target_property",
+      "path": "reservation_lookup/properties.py",
+      "test": "tests.test_phase3_properties.Phase3PropertyTests.test_property_runner_exercises_both_authorization_directions"
     },
     {
       "exit_code": 1,

@@ -30,7 +30,7 @@ O package:
 - `BokunReadAdapter`;
 - `ReadTransport`, `ReadRequest`, `ReadResponse`;
 - `LookupResult`, `LookupProvenance`, `LookupFailure`;
-- `offer_id_for`, `lookup_id_for`;
+- `offer_id_for`, `lookup_id_for`, `canonical_exchanges`;
 - `select_offer`, `revalidate_offer`;
 - `run_lookup_properties`.
 
@@ -40,7 +40,14 @@ O package:
 pública e provenance não participam da identidade. Provider namespace/ref,
 serviço, data/hora, party, preço/moeda e disponibilidade participam.
 
-Um lookup é selecionável somente quando positivo, fresco e com exatamente um
+No Cloudbeds, o `provider_ref` inclui `property_id`, room e rate plan. No Bókun,
+inclui product, start time e rate. `lookup_id` é recomputado no contrato público
+a partir de provider, query, `observed_at` e pares canônicos
+`(request_fingerprint, response_hash)`; hashes de response nunca são tratados
+como conjunto desvinculado dos endpoints.
+
+Um lookup é selecionável somente quando positivo, fresco no intervalo
+`[observed_at, expires_at)` e com exatamente um
 match por `offer_id`. Negative, uncertain, vencido, zero match, múltiplos
 matches, label, índice e provider ref falham fechados.
 

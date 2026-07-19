@@ -54,8 +54,8 @@ with self.assertRaises(ValueError):
 Create two `OfferSnapshot` values equal except for `public_label` and assert
 `offer_id_for` is equal. Mutate each of provider ref, service, dates, time,
 party, total, currency and availability independently; each resulting ID must
-differ. Assert response order and JSON key order do not change
-`snapshot_hash_for`.
+differ. Assert exchange order and JSON key order do not change
+`snapshot_hash_for`, while swapping a response between endpoints changes it.
 
 - [ ] **Step 2: Run RED**
 
@@ -173,7 +173,7 @@ Required request paths and query:
 Normalize only canonical fixture fields. Require exactly one row per requested
 night, all daily units positive, referenced rate plan present and one currency.
 Build `provider_ref` as
-`cloudbeds.room.<room_id>.rate.<rate_plan_id>` and compute the opaque ID after
+`cloudbeds.property.<property_id>.room.<room_id>.rate.<rate_plan_id>` and compute the opaque ID after
 constructing the offer without trusting any provider/LLM option ID.
 
 - [ ] **Step 4: Run GREEN and provider-specific mutation probes**

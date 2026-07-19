@@ -8,7 +8,12 @@ from pathlib import Path
 import unittest
 
 from reservation_domain import LookupStatus, Party, SearchQuery, ServiceKind
-from reservation_lookup import CloudbedsLookupRequest, ReadResponse
+from reservation_lookup import (
+    CloudbedsLookupRequest,
+    ReadResponse,
+    SelectionRejected,
+    revalidate_offer,
+)
 from reservation_lookup.cloudbeds import CloudbedsReadAdapter
 
 UTC = timezone.utc
@@ -110,7 +115,10 @@ class CloudbedsBoundaryTests(unittest.TestCase):
         self.assertEqual(len(result.offers), 1)
         offer = result.offers[0]
         self.assertRegex(offer.offer_id, r"^offer:[a-f0-9]{64}$")
-        self.assertEqual(offer.provider_ref, "cloudbeds.room.101.rate.RP1")
+        self.assertEqual(
+            offer.provider_ref,
+            "cloudbeds.property.property.42.room.101.rate.RP1",
+        )
         self.assertEqual(offer.public_label, "Quarto nº 2")
         self.assertEqual(offer.total.amount, Decimal("420.00"))
         self.assertEqual(offer.total.currency, "BRL")
@@ -142,6 +150,26 @@ class CloudbedsBoundaryTests(unittest.TestCase):
             ttl=timedelta(minutes=5),
         )
         self.assertNotEqual(first.offers[0].offer_id, price_result.offers[0].offer_id)
+
+    def test_property_id_is_part_of_executable_offer_identity(self) -> None:
+        first_adapter, _ = adapter_for()
+        second_adapter, _ = adapter_for()
+        first = first_adapter.lookup(
+            CloudbedsLookupRequest(property_id="property.42", query=query()),
+            observed_at=T0,
+            ttl=timedelta(minutes=5),
+        )
+        second = second_adapter.lookup(
+            CloudbedsLookupRequest(property_id="property.43", query=query()),
+            observed_at=T0,
+            ttl=timedelta(minutes=5),
+        )
+
+        self.assertNotEqual(first.evidence.lookup_id, second.evidence.lookup_id)
+        self.assertNotEqual(first.offers[0].provider_ref, second.offers[0].provider_ref)
+        self.assertNotEqual(first.offers[0].offer_id, second.offers[0].offer_id)
+        with self.assertRaises(SelectionRejected):
+            revalidate_offer(first.offers[0], second, at=T0)
 
     def test_provider_option_order_does_not_change_result_order_or_snapshot_hash(self) -> None:
         first_body = fixture("available-room-types.json")

@@ -7,11 +7,15 @@
   "mode": "gate",
   "phase": "phase-03-lookups-and-offer-snapshots",
   "report": {
+    "bokun_adapter_cases": 31250,
     "cases": 50000,
+    "cloudbeds_adapter_cases": 18750,
+    "cross_target_rejections": 50000,
     "executable_mutation_cases": 50000,
     "expired_cases": 50000,
     "false_authorizations": 0,
     "label_equivalence_cases": 50000,
+    "lookup_rebinding_rejections": 50000,
     "missed_invalidations": 0,
     "multiple_match_cases": 50000,
     "mutation_counts": {
@@ -25,10 +29,12 @@
       "time": 6250
     },
     "positive_authorizations": 50000,
+    "response_pair_swap_rejections": 50000,
     "seed": 20260718,
     "unexpected_exceptions": 0,
     "violations": [],
-    "zero_match_cases": 50000
+    "zero_match_cases": 50000,
+    "zero_total_rejections": 50000
   },
   "result": "passed",
   "schema_version": 1

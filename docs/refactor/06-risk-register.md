@@ -39,6 +39,11 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R33 | DTO `frozen` retém subestrutura JSON mutável e altera digest após construção | 2 | 5 | `response_hash` muda após mutação do objeto-fonte | detach por JSON, deep-freeze recursivo, teste RED e mutante dedicado | adapters/domain | mitigado |
 | R34 | Mutation evidence é preenchida manualmente e pode ficar stale | 2 | 4 | JSON não corresponde ao código/teste atual | catálogo fechado executável em cópias temporárias; CI regenera e exige diff vazio | QA | mitigado |
 | R35 | Request DTO permite path traversal ou query injection em transporte futuro | 2 | 5 | path contém dot-segment/controle ou value contém delimitador | alfabetos fechados, path canônico, testes negativos e mutante dedicado | adapters/security | mitigado |
+| R36 | Target interno do provider é omitido da identidade da oferta | 2 | 5 | properties/products distintos geram mesmo `offer_id` | provider ref canônico inclui property/product; cross-target property e mutante | adapters/domain | mitigado |
+| R37 | Request e response são hashed como conjuntos independentes | 2 | 5 | troca entre endpoints preserva snapshot | pares canônicos request fingerprint/response hash, teste metamórfico e mutante | adapters/domain | mitigado |
+| R38 | `lookup_id` coerente localmente, mas não derivado, é aceito | 2 | 5 | evidence/offer compartilham ID arbitrário | recomputação obrigatória em `LookupResult`, property probe e mutante | domain/adapters | mitigado |
+| R39 | Property gate constrói DTO abaixo do adapter e não observa IDs internos | 3 | 5 | 50 mil casos passam sem request builder/normalizer | baselines adapter-backed para ambos providers e contadores obrigatórios | QA/adapters | mitigado |
+| R40 | Limite temporal inclusivo permite uso exatamente no vencimento | 2 | 4 | seleção em `expires_at` autoriza | intervalo semiaberto, testes Fases 2/3 e mutante inclusivo | domain/QA | mitigado |
 
 ## Processo
 

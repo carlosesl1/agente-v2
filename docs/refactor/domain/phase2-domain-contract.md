@@ -126,6 +126,9 @@ vinculada à mesma query e todas as ofertas correspondem ao service, período,
 horário e party. `OfferChosen` revalida frescor e busca exatamente um
 `offer_id`.
 
+Frescor usa o intervalo semiaberto `[observed_at, expires_at)`: exatamente em
+`expires_at`, a evidência já está vencida e falha fechada.
+
 ## Idempotência e ordem
 
 `StateMeta` mantém:

@@ -1,12 +1,13 @@
 from .bokun import BokunReadAdapter
 from .cloudbeds import CloudbedsReadAdapter
 from .identity import (
+    canonical_exchanges,
     lookup_id_for,
     offer_id_for,
     request_fingerprint,
     response_hash,
     snapshot_hash_for,
-    snapshot_hash_from_hashes,
+    snapshot_hash_from_exchanges,
 )
 from .properties import Phase3PropertyReport, run_lookup_properties
 from .selection import (
@@ -42,6 +43,7 @@ __all__ = [
     "ReadTransport",
     "SelectionErrorCode",
     "SelectionRejected",
+    "canonical_exchanges",
     "lookup_id_for",
     "offer_id_for",
     "request_fingerprint",
@@ -50,5 +52,5 @@ __all__ = [
     "run_lookup_properties",
     "select_offer",
     "snapshot_hash_for",
-    "snapshot_hash_from_hashes",
+    "snapshot_hash_from_exchanges",
 ]

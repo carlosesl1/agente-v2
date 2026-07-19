@@ -151,7 +151,10 @@ def _normalize_offers(
             currency=currency,
             room_index=index,
         )
-        provider_ref = f"cloudbeds.room.{room_id}.rate.{rate_plan_id}"
+        provider_ref = (
+            f"cloudbeds.property.{request.property_id}."
+            f"room.{room_id}.rate.{rate_plan_id}"
+        )
         base = OfferSnapshot(
             offer_id="offer:pending",
             lookup_id=lookup_id,

@@ -115,6 +115,7 @@ def lookup_id_from(
         provider=provider,
         query=query,
         observed_at=observed_at,
+        request_fingerprints=provenance.request_fingerprints,
         response_hashes=provenance.response_hashes,
     )
 

@@ -36,9 +36,16 @@ def main() -> int:
         report.expired_cases,
         report.zero_match_cases,
         report.multiple_match_cases,
+        report.cross_target_rejections,
+        report.lookup_rebinding_rejections,
+        report.response_pair_swap_rejections,
+        report.zero_total_rejections,
     )
     passed = (
         all(value == args.cases for value in expected_case_counters)
+        and report.cloudbeds_adapter_cases + report.bokun_adapter_cases == args.cases
+        and report.cloudbeds_adapter_cases > 0
+        and report.bokun_adapter_cases > 0
         and sum(report.mutation_counts.values()) == args.cases
         and all(value > 0 for value in report.mutation_counts.values())
         and report.false_authorizations == 0

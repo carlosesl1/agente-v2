@@ -2,13 +2,17 @@
 
 ## Status
 
-`concluída`
+`remediação de revisão tardia`
 
 Aberta em `2026-07-18T23:24:58Z`, a partir do commit-base
 `e318a2f1cad6fbeda3db11a0368f7b762ae84cdf`.
 
 Implementação publicada em `2026-07-19T00:40:28Z` no commit
 `33b1975dd660963b242f961721d8117404654893`.
+
+O closeout `e19d0e571ec4f19f6f3979a88b9ddb559a4994f5` foi reaberto quando um
+parecer independente tardio reproduziu colisões de target/provenance. Ele não é
+mais tratado como encerramento definitivo.
 
 ## Objetivo
 
@@ -124,17 +128,21 @@ Reverter somente os commits da Fase 3 no repositório novo. Não há ação live
 
 ## Evidência de fechamento
 
-- suíte integral: `99` testes, `OK`;
+- suíte integral após remediação: `103` testes, `OK`;
 - property gate: `50.000` casos, seed `20260718`;
 - obrigações positivas: `50.000` autorizações e `50.000` equivalências de
   label;
-- rejeições exercidas: `50.000` mutações executáveis, `50.000` TTLs vencidos,
-  `50.000` zero-match e `50.000` multiple-match;
+- baselines produzidos por adapters in-memory: `18.750` Cloudbeds e `31.250`
+  Bókun;
+- rejeições exercidas: `50.000` mutações executáveis, `50.000` TTLs no limite
+  exclusivo, `50.000` zero-match, `50.000` multiple-match, `50.000`
+  cross-target, `50.000` lookup rebindings, `50.000` response swaps e `50.000`
+  totals zero;
 - falsos positivos, invalidações perdidas e exceções inesperadas: `0`;
-- mutation gate: `13/13` mutantes mortos por runner reproduzível;
+- mutation gate: `19/19` mutantes mortos por runner reproduzível;
 - fixtures: `8`, quatro Cloudbeds e quatro Bókun, todas sintéticas;
 - package: `8` módulos Python, nenhum import de rede/env/filesystem/provider;
-- hashes: `37` artefatos verificados;
+- hashes: pendentes de regeneração final após remediação;
 - validadores das Fases 0–3: `ok`, zero failures;
 - legado somente leitura: HEAD/status/status-hash inalterados;
 - nenhuma rede, auth, provider, write, banco, fila, Docker ou deploy executado.
@@ -146,11 +154,11 @@ GitHub Actions do commit de implementação:
 - `phase-2-domain`: run `29667240862`, `success`;
 - `phase-3-lookups`: run `29667240868`, `success`.
 
-O batch externo read-only disparado durante a implementação não entregou
-summary utilizável na sessão de fechamento e não é contado como evidência
-positiva. A revisão direta reproduziu em RED e corrigiu os achados A06–A09.
+Uma das três frentes externas entregou parecer tardio após o closeout; duas
+expiraram sem summary. Os achados materiais foram reproduzidos em RED e estão
+documentados em A10–A15. O parecer útil integra a evidência; os timeouts não.
 
 ## Decisão de avanço
 
-A Fase 3 está encerrada. A Fase 4 fica elegível, mas permanece **não iniciada**
-até direção explícita.
+A Fase 4 voltou a ficar bloqueada até novo commit de remediação, CI e closeout
+remoto da Fase 3.

@@ -1,38 +1,18 @@
 {
-  "closeout_ready_at_utc": "2026-07-19T00:40:28Z",
-  "evidence_hashes_checked": 37,
+  "evidence_hashes_checked": 38,
   "failures": [],
-  "implementation_ci": {
-    "phase-0-validation": {
-      "conclusion": "success",
-      "run_id": 29667240880
-    },
-    "phase-1-characterization": {
-      "conclusion": "success",
-      "run_id": 29667240879
-    },
-    "phase-2-domain": {
-      "conclusion": "success",
-      "run_id": 29667240862
-    },
-    "phase-3-lookups": {
-      "conclusion": "success",
-      "run_id": 29667240868
-    }
-  },
-  "implementation_commit": "33b1975dd660963b242f961721d8117404654893",
   "manifests": {
     "fixture_count": 8,
     "python_file_count": 8
   },
   "mutation": {
     "all_killed": true,
-    "mutants": 13
+    "mutants": 19
   },
   "performance": {
-    "elapsed_seconds": 33.548,
+    "elapsed_seconds": 146.788,
     "exit_code": 0,
-    "max_rss_kb": 25432,
+    "max_rss_kb": 25924,
     "result": "passed"
   },
   "phase": "phase-03-lookups-and-offer-snapshots",
@@ -42,16 +22,22 @@
     "phase2": "ok"
   },
   "properties": {
+    "bokun_adapter_cases": 31250,
     "cases": 50000,
+    "cloudbeds_adapter_cases": 18750,
+    "cross_target_rejections": 50000,
     "executable_mutation_cases": 50000,
     "expired_cases": 50000,
     "false_authorizations": 0,
     "label_equivalence_cases": 50000,
+    "lookup_rebinding_rejections": 50000,
     "missed_invalidations": 0,
     "multiple_match_cases": 50000,
     "positive_authorizations": 50000,
+    "response_pair_swap_rejections": 50000,
     "unexpected_exceptions": 0,
-    "zero_match_cases": 50000
+    "zero_match_cases": 50000,
+    "zero_total_rejections": 50000
   },
   "purity": {
     "forbidden_calls": [],
@@ -78,16 +64,16 @@
     ],
     "python_files": 8,
     "transport_classes": [
-      "reservation_lookup/types.py:83:ReadTransport"
+      "reservation_lookup/types.py:93:ReadTransport"
     ],
     "transport_send_owners": [
       "reservation_lookup/_common.py:45"
     ]
   },
-  "recorded_at_utc": "2026-07-19T00:35:32Z",
+  "recorded_at_utc": "2026-07-19T01:16:51Z",
   "red": {
-    "expected": 5,
-    "valid": 5
+    "expected": 6,
+    "valid": 6
   },
   "relative_links_checked": 13,
   "schema_version": 1,
@@ -96,6 +82,7 @@
     "symbols": 6
   },
   "status": "ok",
-  "text_files_scanned": 159,
-  "validation_record": "self_recorded_after_zero_failure_preflight"
+  "supersedes_closeout": "e19d0e571ec4f19f6f3979a88b9ddb559a4994f5",
+  "text_files_scanned": 160,
+  "validation_record": "late_review_remediation_preflight"
 }

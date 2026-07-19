@@ -69,6 +69,7 @@ REQUIRED = (
     "docs/refactor/evidence/phase-03/red-result-bokun.json",
     "docs/refactor/evidence/phase-03/red-result-selection.json",
     "docs/refactor/evidence/phase-03/red-result-properties.json",
+    "docs/refactor/evidence/phase-03/red-result-late-review.json",
     "docs/refactor/evidence/phase-03/property-result.json",
     "docs/refactor/evidence/phase-03/mutation-result.json",
     "docs/refactor/evidence/phase-03/performance-result.json",
@@ -275,9 +276,17 @@ def check_property_result(failures: list[str]) -> dict[str, Any]:
         "expired_cases",
         "zero_match_cases",
         "multiple_match_cases",
+        "cross_target_rejections",
+        "lookup_rebinding_rejections",
+        "response_pair_swap_rejections",
+        "zero_total_rejections",
     ):
         if report.get(key) != 50_000:
             failures.append(f"property case counter mismatch: {key}")
+    if report.get("cloudbeds_adapter_cases") != 18_750:
+        failures.append("property Cloudbeds adapter coverage mismatch")
+    if report.get("bokun_adapter_cases") != 31_250:
+        failures.append("property Bokun adapter coverage mismatch")
     for key in (
         "false_authorizations",
         "missed_invalidations",
@@ -322,9 +331,9 @@ def check_mutation_result(failures: list[str]) -> dict[str, Any]:
     ]
     if mutants != expected_catalog:
         failures.append("mutation evidence does not match the closed catalog")
-    if payload.get("all_killed") is not True or payload.get("mutant_count") != 13:
-        failures.append("mutation evidence must contain thirteen killed mutants")
-    if len(mutants) != 13 or any(
+    if payload.get("all_killed") is not True or payload.get("mutant_count") != 19:
+        failures.append("mutation evidence must contain nineteen killed mutants")
+    if len(mutants) != 19 or any(
         item.get("killed") is not True or item.get("exit_code") == 0
         for item in mutants
     ):
@@ -385,7 +394,33 @@ def check_red_results(failures: list[str]) -> dict[str, int]:
             failures.append(f"invalid RED evidence: {name}")
         else:
             valid += 1
-    return {"expected": len(names), "valid": valid}
+    late_name = "red-result-late-review.json"
+    try:
+        late = _load_json_strict(EVIDENCE / late_name)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        failures.append(f"cannot read {late_name}: {exc}")
+    else:
+        expected_reproductions = [
+            "cloudbeds_property_id_collision",
+            "response_endpoint_pairing_collision",
+            "lookup_id_rebinding_accepted",
+            "positive_zero_total_accepted",
+            "expires_at_boundary_accepted",
+        ]
+        if (
+            late.get("schema_version") != 1
+            or late.get("phase") != PHASE
+            or late.get("exit_code") == 0
+            or late.get("result") != "red_confirmed"
+            or late.get("tests_run") != 5
+            or late.get("failures") != 5
+            or late.get("reproduced") != expected_reproductions
+            or not HASH_RE.fullmatch(str(late.get("raw_output_sha256", "")))
+        ):
+            failures.append(f"invalid RED evidence: {late_name}")
+        else:
+            valid += 1
+    return {"expected": len(names) + 1, "valid": valid}
 
 
 def check_source_map(failures: list[str]) -> dict[str, Any]:
@@ -512,6 +547,12 @@ def main() -> int:
                 "expired_cases",
                 "zero_match_cases",
                 "multiple_match_cases",
+                "cloudbeds_adapter_cases",
+                "bokun_adapter_cases",
+                "cross_target_rejections",
+                "lookup_rebinding_rejections",
+                "response_pair_swap_rejections",
+                "zero_total_rejections",
                 "false_authorizations",
                 "missed_invalidations",
                 "unexpected_exceptions",

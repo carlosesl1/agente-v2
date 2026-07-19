@@ -108,6 +108,14 @@ class ExactOfferSelectionTests(unittest.TestCase):
             lambda: select_offer(
                 positive,
                 offer_id=positive.offers[0].offer_id,
+                at=T0 + timedelta(minutes=5),
+            ),
+        )
+        self.assert_code(
+            SelectionErrorCode.LOOKUP_EXPIRED,
+            lambda: select_offer(
+                positive,
+                offer_id=positive.offers[0].offer_id,
                 at=T0 + timedelta(minutes=5, microseconds=1),
             ),
         )

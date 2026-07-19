@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "recorded_at_utc": "2026-07-19T00:49:37Z",
+  "source": "late independent identity/selection review",
+  "command": "python3 -m unittest <five late-review reproductions> -v",
+  "exit_code": 1,
+  "result": "red_confirmed",
+  "tests_run": 5,
+  "failures": 5,
+  "reproduced": [
+    "cloudbeds_property_id_collision",
+    "response_endpoint_pairing_collision",
+    "lookup_id_rebinding_accepted",
+    "positive_zero_total_accepted",
+    "expires_at_boundary_accepted"
+  ],
+  "raw_output_sha256": "0403393569fddaea8e9b72ad76288604b3999e729cb5fbcb7e73f661d541c0b9"
+}

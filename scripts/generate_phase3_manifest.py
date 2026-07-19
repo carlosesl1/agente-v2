@@ -84,6 +84,7 @@ def checksum_paths() -> tuple[Path, ...]:
         "docs/refactor/evidence/phase-03/red-result-bokun.json",
         "docs/refactor/evidence/phase-03/red-result-selection.json",
         "docs/refactor/evidence/phase-03/red-result-properties.json",
+        "docs/refactor/evidence/phase-03/red-result-late-review.json",
         "docs/refactor/evidence/phase-03/property-result.json",
         "docs/refactor/evidence/phase-03/mutation-result.json",
         "docs/refactor/evidence/phase-03/performance-result.json",

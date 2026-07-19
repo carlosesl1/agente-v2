@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
   "phase": "phase-03-lookups-and-offer-snapshots",
-  "recorded_at_utc": "2026-07-19T00:23:06Z",
+  "recorded_at_utc": "2026-07-19T01:05:21Z",
   "command": "python3 scripts/run_phase3_properties.py --cases 50000 --seed 20260718 --write docs/refactor/evidence/phase-03/property-result.json",
   "cases": 50000,
   "seed": 20260718,
-  "elapsed_seconds": 33.548,
-  "max_rss_kb": 25432,
+  "elapsed_seconds": 146.788,
+  "max_rss_kb": 25924,
   "exit_code": 0,
-  "result": "passed"
+  "result": "passed",
+  "measurement": "Python time.monotonic + resource.getrusage(RUSAGE_CHILDREN)",
+  "workload": "adapter-backed in-memory Cloudbeds/Bokun lookups and fail-closed selection properties"
 }

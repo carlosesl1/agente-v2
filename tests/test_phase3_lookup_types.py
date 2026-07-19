@@ -59,7 +59,7 @@ def lodging_offer(**changes) -> OfferSnapshot:
         offer_id="offer:placeholder",
         lookup_id="lookup:placeholder",
         service=ServiceKind.LODGING,
-        provider_ref="cloudbeds.room.101.rate.standard",
+        provider_ref="cloudbeds.property.property.42.room.101.rate.standard",
         public_label="Quarto nº 2",
         start_date=date(2026, 11, 10),
         end_date=date(2026, 11, 12),
@@ -184,7 +184,10 @@ class OpaqueIdentityTests(unittest.TestCase):
         original = lodging_offer()
         original_id = offer_id_for(provider=ProviderKind.CLOUDBEDS, offer=original)
         mutations = (
-            replace(original, provider_ref="cloudbeds.room.102.rate.standard"),
+            replace(
+                original,
+                provider_ref="cloudbeds.property.property.42.room.102.rate.standard",
+            ),
             replace(original, service=ServiceKind.ACTIVITY),
             replace(original, start_date=date(2026, 11, 11)),
             replace(original, end_date=date(2026, 11, 13)),
@@ -211,7 +214,9 @@ class OpaqueIdentityTests(unittest.TestCase):
             offer_id_for(provider=ProviderKind.BOKUN, offer=original),
         )
 
-    def test_snapshot_hash_is_canonical_for_keys_and_response_order(self) -> None:
+    def test_snapshot_hash_is_canonical_for_keys_and_exchange_order(self) -> None:
+        available_request = ReadRequest(method="GET", path="/available", query=())
+        rates_request = ReadRequest(method="GET", path="/rates", query=())
         first = ReadResponse(
             status_code=200,
             body={"data": [{"b": 2, "a": 1}]},
@@ -222,21 +227,48 @@ class OpaqueIdentityTests(unittest.TestCase):
         )
         second = ReadResponse(status_code=200, body={"data": [{"id": "rate.1"}]})
         self.assertEqual(
-            snapshot_hash_for((first, second)),
-            snapshot_hash_for((second, same_first)),
+            snapshot_hash_for(
+                (available_request, rates_request),
+                (first, second),
+            ),
+            snapshot_hash_for(
+                (rates_request, available_request),
+                (second, same_first),
+            ),
         )
         changed = ReadResponse(status_code=200, body={"data": [{"id": "rate.2"}]})
         self.assertNotEqual(
-            snapshot_hash_for((first, second)),
-            snapshot_hash_for((first, changed)),
+            snapshot_hash_for(
+                (available_request, rates_request),
+                (first, second),
+            ),
+            snapshot_hash_for(
+                (available_request, rates_request),
+                (first, changed),
+            ),
         )
 
-    def test_lookup_id_binds_provider_query_time_and_responses(self) -> None:
+    def test_snapshot_hash_binds_each_response_to_its_request(self) -> None:
+        left = LookupProvenance(
+            provider=ProviderKind.CLOUDBEDS,
+            request_fingerprints=("a" * 64, "b" * 64),
+            response_hashes=("c" * 64, "d" * 64),
+        )
+        swapped = LookupProvenance(
+            provider=ProviderKind.CLOUDBEDS,
+            request_fingerprints=("a" * 64, "b" * 64),
+            response_hashes=("d" * 64, "c" * 64),
+        )
+        self.assertNotEqual(left.snapshot_hash, swapped.snapshot_hash)
+
+    def test_lookup_id_binds_provider_query_time_and_exchanges(self) -> None:
+        requests = ("c" * 64, "d" * 64)
         hashes = ("a" * 64, "b" * 64)
         value = lookup_id_for(
             provider=ProviderKind.CLOUDBEDS,
             query=lodging_query(),
             observed_at=T0,
+            request_fingerprints=requests,
             response_hashes=hashes,
         )
         self.assertRegex(value, r"^lookup:[a-f0-9]{64}$")
@@ -246,6 +278,7 @@ class OpaqueIdentityTests(unittest.TestCase):
                 provider=ProviderKind.CLOUDBEDS,
                 query=lodging_query(),
                 observed_at=T0 + timedelta(seconds=1),
+                request_fingerprints=requests,
                 response_hashes=hashes,
             ),
         )
@@ -255,20 +288,41 @@ class OpaqueIdentityTests(unittest.TestCase):
                 provider=ProviderKind.BOKUN,
                 query=lodging_query(),
                 observed_at=T0,
+                request_fingerprints=requests,
+                response_hashes=hashes,
+            ),
+        )
+        self.assertNotEqual(
+            value,
+            lookup_id_for(
+                provider=ProviderKind.CLOUDBEDS,
+                query=lodging_query(),
+                observed_at=T0,
+                request_fingerprints=tuple(reversed(requests)),
                 response_hashes=hashes,
             ),
         )
 
 
 class LookupResultContractTests(unittest.TestCase):
-    def evidence(self, status: LookupStatus, snapshot_hash: str) -> LookupEvidence:
+    def evidence(
+        self,
+        status: LookupStatus,
+        provenance: LookupProvenance,
+    ) -> LookupEvidence:
         return LookupEvidence(
-            lookup_id="lookup:contract-result",
+            lookup_id=lookup_id_for(
+                provider=provenance.provider,
+                query=lodging_query(),
+                observed_at=T0,
+                request_fingerprints=provenance.request_fingerprints,
+                response_hashes=provenance.response_hashes,
+            ),
             service=ServiceKind.LODGING,
             query_signature=lodging_query().signature,
             observed_at=T0,
             expires_at=T0 + timedelta(minutes=5),
-            snapshot_hash=snapshot_hash,
+            snapshot_hash=provenance.snapshot_hash,
             status=status,
         )
 
@@ -282,15 +336,16 @@ class LookupResultContractTests(unittest.TestCase):
         )
 
     def test_positive_result_requires_matching_complete_offers(self) -> None:
-        base = lodging_offer(lookup_id="lookup:contract-result")
+        provenance = self.provenance()
+        evidence = self.evidence(LookupStatus.POSITIVE, provenance)
+        base = lodging_offer(lookup_id=evidence.lookup_id)
         offer = replace(
             base,
             offer_id=offer_id_for(provider=ProviderKind.CLOUDBEDS, offer=base),
         )
-        provenance = self.provenance()
         result = LookupResult(
             query=lodging_query(),
-            evidence=self.evidence(LookupStatus.POSITIVE, provenance.snapshot_hash),
+            evidence=evidence,
             provenance=provenance,
             offers=(offer,),
         )
@@ -298,15 +353,60 @@ class LookupResultContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LookupResult(
                 query=lodging_query(),
-                evidence=self.evidence(LookupStatus.POSITIVE, provenance.snapshot_hash),
+                evidence=evidence,
                 provenance=provenance,
                 offers=(),
             )
 
+    def test_result_rejects_rebound_noncanonical_lookup_id(self) -> None:
+        provenance = self.provenance()
+        rebound_id = "lookup:" + "f" * 64
+        evidence = LookupEvidence(
+            lookup_id=rebound_id,
+            service=ServiceKind.LODGING,
+            query_signature=lodging_query().signature,
+            observed_at=T0,
+            expires_at=T0 + timedelta(minutes=5),
+            snapshot_hash=provenance.snapshot_hash,
+            status=LookupStatus.POSITIVE,
+        )
+        base = lodging_offer(lookup_id=rebound_id)
+        offer = replace(
+            base,
+            offer_id=offer_id_for(provider=ProviderKind.CLOUDBEDS, offer=base),
+        )
+        with self.assertRaises(ValueError):
+            LookupResult(
+                query=lodging_query(),
+                evidence=evidence,
+                provenance=provenance,
+                offers=(offer,),
+            )
+
+    def test_positive_result_rejects_zero_total(self) -> None:
+        provenance = self.provenance()
+        evidence = self.evidence(LookupStatus.POSITIVE, provenance)
+        base = lodging_offer(
+            lookup_id=evidence.lookup_id,
+            total=Money(amount=Decimal("0.00"), currency="BRL"),
+        )
+        offer = replace(
+            base,
+            offer_id=offer_id_for(provider=ProviderKind.CLOUDBEDS, offer=base),
+        )
+        with self.assertRaises(ValueError):
+            LookupResult(
+                query=lodging_query(),
+                evidence=evidence,
+                provenance=provenance,
+                offers=(offer,),
+            )
+
     def test_result_rejects_provider_ref_and_service_namespace_mismatch(self) -> None:
         provenance = self.provenance()
+        evidence = self.evidence(LookupStatus.POSITIVE, provenance)
         wrong_ref_base = lodging_offer(
-            lookup_id="lookup:contract-result",
+            lookup_id=evidence.lookup_id,
             provider_ref="bokun.product.913776.start.3210363.rate.RATE1",
         )
         wrong_ref = replace(
@@ -319,17 +419,16 @@ class LookupResultContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LookupResult(
                 query=lodging_query(),
-                evidence=self.evidence(
-                    LookupStatus.POSITIVE,
-                    provenance.snapshot_hash,
-                ),
+                evidence=evidence,
                 provenance=provenance,
                 offers=(wrong_ref,),
             )
 
         bokun_provenance = self.provenance(ProviderKind.BOKUN)
+        bokun_evidence = self.evidence(LookupStatus.POSITIVE, bokun_provenance)
         bokun_ref_base = replace(
             wrong_ref_base,
+            lookup_id=bokun_evidence.lookup_id,
             provider_ref="bokun.product.913776.start.3210363.rate.RATE1",
         )
         bokun_ref = replace(
@@ -339,10 +438,7 @@ class LookupResultContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LookupResult(
                 query=lodging_query(),
-                evidence=self.evidence(
-                    LookupStatus.POSITIVE,
-                    bokun_provenance.snapshot_hash,
-                ),
+                evidence=bokun_evidence,
                 provenance=bokun_provenance,
                 offers=(bokun_ref,),
             )
@@ -351,14 +447,14 @@ class LookupResultContractTests(unittest.TestCase):
         provenance = self.provenance()
         negative = LookupResult(
             query=lodging_query(),
-            evidence=self.evidence(LookupStatus.NEGATIVE, provenance.snapshot_hash),
+            evidence=self.evidence(LookupStatus.NEGATIVE, provenance),
             provenance=provenance,
             offers=(),
         )
         self.assertEqual(negative.failures, ())
         uncertain = LookupResult(
             query=lodging_query(),
-            evidence=self.evidence(LookupStatus.UNCERTAIN, provenance.snapshot_hash),
+            evidence=self.evidence(LookupStatus.UNCERTAIN, provenance),
             provenance=provenance,
             offers=(),
             failures=(LookupFailure(code="provider_error", detail="http_non_2xx"),),
@@ -367,7 +463,7 @@ class LookupResultContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LookupResult(
                 query=lodging_query(),
-                evidence=self.evidence(LookupStatus.NEGATIVE, provenance.snapshot_hash),
+                evidence=self.evidence(LookupStatus.NEGATIVE, provenance),
                 provenance=provenance,
                 offers=(),
                 failures=uncertain.failures,

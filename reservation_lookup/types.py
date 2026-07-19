@@ -15,6 +15,16 @@ _QUERY_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
 _QUERY_VALUE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 _PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]{1,255}$")
 _FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_CLOUDBEDS_REF_RE = re.compile(
+    r"^cloudbeds\.property\.[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
+    r"\.room\.[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+    r"\.rate\.[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+)
+_BOKUN_REF_RE = re.compile(
+    r"^bokun\.product\.[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+    r"\.start\.[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+    r"\.rate\.[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+)
 
 
 class ProviderKind(str, Enum):
@@ -118,9 +128,12 @@ class LookupProvenance:
 
     @property
     def snapshot_hash(self) -> str:
-        from .identity import snapshot_hash_from_hashes
+        from .identity import snapshot_hash_from_exchanges
 
-        return snapshot_hash_from_hashes(self.response_hashes)
+        return snapshot_hash_from_exchanges(
+            request_fingerprints=self.request_fingerprints,
+            response_hashes=self.response_hashes,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +185,17 @@ class LookupResult:
             raise ValueError("evidence query signature does not match query")
         if self.evidence.snapshot_hash != self.provenance.snapshot_hash:
             raise ValueError("evidence snapshot hash does not match provenance")
+        from .identity import lookup_id_for
+
+        expected_lookup_id = lookup_id_for(
+            provider=self.provenance.provider,
+            query=self.query,
+            observed_at=self.evidence.observed_at,
+            request_fingerprints=self.provenance.request_fingerprints,
+            response_hashes=self.provenance.response_hashes,
+        )
+        if self.evidence.lookup_id != expected_lookup_id:
+            raise ValueError("evidence lookup_id is not canonical")
         expected_service = {
             ProviderKind.CLOUDBEDS: ServiceKind.LODGING,
             ProviderKind.BOKUN: ServiceKind.ACTIVITY,
@@ -195,10 +219,12 @@ class LookupResult:
         from .identity import offer_id_for
 
         for offer in self.offers:
-            if not offer.provider_ref.startswith(
-                f"{self.provenance.provider.value}."
-            ):
-                raise ValueError("offer provider_ref namespace does not match provider")
+            provider_ref_pattern = {
+                ProviderKind.CLOUDBEDS: _CLOUDBEDS_REF_RE,
+                ProviderKind.BOKUN: _BOKUN_REF_RE,
+            }[self.provenance.provider]
+            if not provider_ref_pattern.fullmatch(offer.provider_ref):
+                raise ValueError("offer provider_ref is not canonical for provider")
             if offer.lookup_id != self.evidence.lookup_id:
                 raise ValueError("offer lookup_id does not match evidence")
             if offer.service is not self.query.service:
@@ -225,6 +251,8 @@ class LookupResult:
                 raise ValueError("offer party does not match query")
             if not offer.available:
                 raise ValueError("positive offers must be available")
+            if offer.total.amount <= 0:
+                raise ValueError("positive offers must have positive total")
             expected = offer_id_for(provider=self.provenance.provider, offer=offer)
             if offer.offer_id != expected:
                 raise ValueError("offer_id is not canonical")

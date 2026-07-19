@@ -4,11 +4,14 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any, Iterable
 
 from reservation_domain import OfferSnapshot, SearchQuery
 
 from .types import ProviderKind, ReadRequest, ReadResponse
+
+_HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
 def _canonical_value(value: Any) -> Any:
@@ -64,17 +67,52 @@ def response_hash(response: ReadResponse) -> str:
     return _sha256({"status_code": response.status_code, "body": response.body})
 
 
-def snapshot_hash_from_hashes(response_hashes: Iterable[str]) -> str:
-    values = tuple(sorted(response_hashes))
-    if not values:
-        raise ValueError("at least one response hash is required")
-    return _sha256({"response_hashes": list(values)})
+def canonical_exchanges(
+    *,
+    request_fingerprints: Iterable[str],
+    response_hashes: Iterable[str],
+) -> tuple[tuple[str, str], ...]:
+    requests = tuple(request_fingerprints)
+    responses = tuple(response_hashes)
+    if not requests or len(requests) != len(responses):
+        raise ValueError("request/response provenance must be non-empty and paired")
+    if any(
+        type(value) is not str or not _HASH_RE.fullmatch(value)
+        for value in requests + responses
+    ):
+        raise ValueError("provenance values must be sha256 hex digests")
+    return tuple(sorted(zip(requests, responses, strict=True)))
 
 
-def snapshot_hash_for(responses: tuple[ReadResponse, ...]) -> str:
-    if type(responses) is not tuple or not responses:
-        raise ValueError("responses must be a non-empty tuple")
-    return snapshot_hash_from_hashes(response_hash(item) for item in responses)
+def snapshot_hash_from_exchanges(
+    *,
+    request_fingerprints: Iterable[str],
+    response_hashes: Iterable[str],
+) -> str:
+    pairs = canonical_exchanges(
+        request_fingerprints=request_fingerprints,
+        response_hashes=response_hashes,
+    )
+    return _sha256(
+        {
+            "exchanges": [
+                {"request_fingerprint": request, "response_hash": response}
+                for request, response in pairs
+            ]
+        }
+    )
+
+
+def snapshot_hash_for(
+    requests: tuple[ReadRequest, ...],
+    responses: tuple[ReadResponse, ...],
+) -> str:
+    if type(requests) is not tuple or type(responses) is not tuple:
+        raise TypeError("requests and responses must be tuples")
+    return snapshot_hash_from_exchanges(
+        request_fingerprints=(request_fingerprint(item) for item in requests),
+        response_hashes=(response_hash(item) for item in responses),
+    )
 
 
 def offer_id_for(*, provider: ProviderKind, offer: OfferSnapshot) -> str:
@@ -107,6 +145,7 @@ def lookup_id_for(
     provider: ProviderKind,
     query: SearchQuery,
     observed_at: datetime,
+    request_fingerprints: tuple[str, ...],
     response_hashes: tuple[str, ...],
 ) -> str:
     if type(provider) is not ProviderKind:
@@ -119,8 +158,12 @@ def lookup_id_for(
         or observed_at.utcoffset() != timezone.utc.utcoffset(observed_at)
     ):
         raise ValueError("observed_at must be UTC")
-    if type(response_hashes) is not tuple or not response_hashes:
-        raise ValueError("response_hashes must be a non-empty tuple")
+    if type(request_fingerprints) is not tuple or type(response_hashes) is not tuple:
+        raise TypeError("request_fingerprints and response_hashes must be tuples")
+    exchanges = canonical_exchanges(
+        request_fingerprints=request_fingerprints,
+        response_hashes=response_hashes,
+    )
     payload = {
         "provider": provider.value,
         "query": {
@@ -134,6 +177,9 @@ def lookup_id_for(
             },
         },
         "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
-        "response_hashes": sorted(response_hashes),
+        "exchanges": [
+            {"request_fingerprint": request, "response_hash": response}
+            for request, response in exchanges
+        ],
     }
     return f"lookup:{_sha256(payload)}"

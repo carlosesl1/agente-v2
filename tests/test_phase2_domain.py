@@ -326,7 +326,7 @@ class ReducerContractTests(unittest.TestCase):
             state,
             LookupRecorded(
                 event_id="stale-lookup",
-                occurred_at=event_time(20),
+                occurred_at=event_time(10),
                 evidence=evidence(expires_delta=10),
                 offers=(offer(),),
             ),

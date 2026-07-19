@@ -24,8 +24,8 @@ def tracked_runtime_digest() -> str:
 class MutationRunnerTests(unittest.TestCase):
     def test_mutant_catalog_is_closed_unique_and_complete(self) -> None:
         names = tuple(mutant.name for mutant in MUTANTS)
-        self.assertEqual(len(names), 13)
-        self.assertEqual(len(set(names)), 13)
+        self.assertEqual(len(names), 19)
+        self.assertEqual(len(set(names)), 19)
         self.assertEqual(
             names[-2:],
             (

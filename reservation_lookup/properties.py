@@ -15,16 +15,26 @@ from reservation_domain import (
     ServiceKind,
 )
 
-from .identity import lookup_id_for, offer_id_for
+from .bokun import BokunReadAdapter
+from .cloudbeds import CloudbedsReadAdapter
+from .identity import offer_id_for
 from .selection import (
     SelectionErrorCode,
     SelectionRejected,
     revalidate_offer,
     select_offer,
 )
-from .types import LookupProvenance, LookupResult, ProviderKind
+from .types import (
+    BokunLookupRequest,
+    CloudbedsLookupRequest,
+    LookupProvenance,
+    LookupResult,
+    ProviderKind,
+    ReadResponse,
+)
 
 _BASE_TIME = datetime(2027, 1, 1, tzinfo=timezone.utc)
+_BASE_DATE = date(2027, 2, 1)
 _MUTATION_KINDS = (
     "provider",
     "provider_ref",
@@ -47,6 +57,12 @@ class Phase3PropertyReport:
     expired_cases: int
     zero_match_cases: int
     multiple_match_cases: int
+    cloudbeds_adapter_cases: int
+    bokun_adapter_cases: int
+    cross_target_rejections: int
+    lookup_rebinding_rejections: int
+    response_pair_swap_rejections: int
+    zero_total_rejections: int
     mutation_counts: dict[str, int]
     false_authorizations: int
     missed_invalidations: int
@@ -63,6 +79,12 @@ class Phase3PropertyReport:
             "expired_cases": self.expired_cases,
             "zero_match_cases": self.zero_match_cases,
             "multiple_match_cases": self.multiple_match_cases,
+            "cloudbeds_adapter_cases": self.cloudbeds_adapter_cases,
+            "bokun_adapter_cases": self.bokun_adapter_cases,
+            "cross_target_rejections": self.cross_target_rejections,
+            "lookup_rebinding_rejections": self.lookup_rebinding_rejections,
+            "response_pair_swap_rejections": self.response_pair_swap_rejections,
+            "zero_total_rejections": self.zero_total_rejections,
             "mutation_counts": dict(sorted(self.mutation_counts.items())),
             "false_authorizations": self.false_authorizations,
             "missed_invalidations": self.missed_invalidations,
@@ -71,30 +93,60 @@ class Phase3PropertyReport:
         }
 
 
+class _Responses:
+    def __init__(self, responses: tuple[ReadResponse, ...]):
+        self._responses = list(responses)
+
+    def send(self, request):
+        if not self._responses:
+            raise RuntimeError("synthetic response underflow")
+        return self._responses.pop(0)
+
+
 def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
     if type(cases) is not int or cases <= 0:
         raise ValueError("cases must be a positive integer")
     if type(seed) is not int or isinstance(seed, bool):
         raise TypeError("seed must be an integer")
 
-    counters = {
-        "positive_authorizations": 0,
-        "label_equivalence_cases": 0,
-        "executable_mutation_cases": 0,
-        "expired_cases": 0,
-        "zero_match_cases": 0,
-        "multiple_match_cases": 0,
-        "false_authorizations": 0,
-        "missed_invalidations": 0,
-        "unexpected_exceptions": 0,
-    }
+    counter_names = (
+        "positive_authorizations",
+        "label_equivalence_cases",
+        "executable_mutation_cases",
+        "expired_cases",
+        "zero_match_cases",
+        "multiple_match_cases",
+        "cloudbeds_adapter_cases",
+        "bokun_adapter_cases",
+        "cross_target_rejections",
+        "lookup_rebinding_rejections",
+        "response_pair_swap_rejections",
+        "zero_total_rejections",
+        "false_authorizations",
+        "missed_invalidations",
+        "unexpected_exceptions",
+    )
+    counters = {name: 0 for name in counter_names}
     mutation_counts = {name: 0 for name in _MUTATION_KINDS}
     violations: list[str] = []
 
     for index in range(cases):
         observed_at = _BASE_TIME + timedelta(seconds=index * 10)
-        base = _positive_result(index=index, observed_at=observed_at)
-        offer = base.offers[0]
+        mutation_kind = _MUTATION_KINDS[(index + seed) % len(_MUTATION_KINDS)]
+        provider = _provider_for_case(index=index, seed=seed, kind=mutation_kind)
+        mutation_counts[mutation_kind] += 1
+        try:
+            base = _adapter_result(
+                index=index,
+                observed_at=observed_at,
+                provider=provider,
+            )
+            offer = base.offers[0]
+            counters[f"{provider.value}_adapter_cases"] += 1
+        except Exception as exc:
+            counters["unexpected_exceptions"] += 1
+            _violate(violations, index, f"base_adapter_exception:{type(exc).__name__}")
+            continue
 
         try:
             selected = select_offer(
@@ -110,12 +162,13 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
             counters["unexpected_exceptions"] += 1
             _violate(violations, index, f"exact_selection_exception:{type(exc).__name__}")
 
-        relabeled = _positive_result(
-            index=index,
-            observed_at=observed_at + timedelta(seconds=2),
-            label=_label_variant(index),
-        )
         try:
+            relabeled = _adapter_result(
+                index=index,
+                observed_at=observed_at + timedelta(seconds=2),
+                provider=provider,
+                label=_label_variant(index=index, provider=provider),
+            )
             selected = revalidate_offer(
                 offer,
                 relabeled,
@@ -129,14 +182,13 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
             counters["unexpected_exceptions"] += 1
             _violate(violations, index, f"label_revalidation_exception:{type(exc).__name__}")
 
-        mutation_kind = _MUTATION_KINDS[(index + seed) % len(_MUTATION_KINDS)]
-        mutation_counts[mutation_kind] += 1
-        mutated = _mutated_result(
-            index=index,
-            observed_at=observed_at + timedelta(seconds=3),
-            kind=mutation_kind,
-        )
         try:
+            mutated = _mutated_result(
+                index=index,
+                observed_at=observed_at + timedelta(seconds=3),
+                provider=provider,
+                kind=mutation_kind,
+            )
             revalidate_offer(
                 offer,
                 mutated,
@@ -167,7 +219,7 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
         _expect_rejection(
             result=base,
             offer_id=offer.offer_id,
-            at=base.evidence.expires_at + timedelta(microseconds=1),
+            at=base.evidence.expires_at,
             expected=SelectionErrorCode.LOOKUP_EXPIRED,
             counter="expired_cases",
             index=index,
@@ -195,6 +247,32 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
             counters=counters,
             violations=violations,
         )
+        _expect_cross_target_rejection(
+            base=base,
+            index=index,
+            observed_at=observed_at,
+            provider=provider,
+            counters=counters,
+            violations=violations,
+        )
+        _expect_lookup_rebinding_rejection(
+            base=base,
+            index=index,
+            counters=counters,
+            violations=violations,
+        )
+        _expect_response_pair_swap_rejection(
+            base=base,
+            index=index,
+            counters=counters,
+            violations=violations,
+        )
+        _expect_zero_total_rejection(
+            base=base,
+            index=index,
+            counters=counters,
+            violations=violations,
+        )
 
     return Phase3PropertyReport(
         cases=cases,
@@ -205,6 +283,12 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
         expired_cases=counters["expired_cases"],
         zero_match_cases=counters["zero_match_cases"],
         multiple_match_cases=counters["multiple_match_cases"],
+        cloudbeds_adapter_cases=counters["cloudbeds_adapter_cases"],
+        bokun_adapter_cases=counters["bokun_adapter_cases"],
+        cross_target_rejections=counters["cross_target_rejections"],
+        lookup_rebinding_rejections=counters["lookup_rebinding_rejections"],
+        response_pair_swap_rejections=counters["response_pair_swap_rejections"],
+        zero_total_rejections=counters["zero_total_rejections"],
         mutation_counts=mutation_counts,
         false_authorizations=counters["false_authorizations"],
         missed_invalidations=counters["missed_invalidations"],
@@ -213,183 +297,310 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
     )
 
 
-def _base_query(
-    *, provider: ProviderKind, party: Party | None = None
-) -> SearchQuery:
-    resolved_party = party or Party(adults=2, children=0)
-    if provider is ProviderKind.CLOUDBEDS:
-        return SearchQuery(
-            service=ServiceKind.LODGING,
-            start_date=date(2027, 2, 1),
-            end_date=date(2027, 2, 3),
-            start_time=None,
-            party=resolved_party,
-        )
-    return SearchQuery(
-        service=ServiceKind.ACTIVITY,
-        start_date=date(2027, 2, 1),
-        end_date=date(2027, 2, 8),
-        start_time=None,
-        party=resolved_party,
+def _provider_for_case(*, index: int, seed: int, kind: str) -> ProviderKind:
+    if kind == "currency":
+        return ProviderKind.CLOUDBEDS
+    if kind in {"date", "time"}:
+        return ProviderKind.BOKUN
+    return (
+        ProviderKind.CLOUDBEDS
+        if (index + seed) % 2 == 0
+        else ProviderKind.BOKUN
     )
 
 
-def _positive_result(
+def _adapter_result(
     *,
     index: int,
     observed_at: datetime,
-    label: str = "Passeio nº 2",
-    provider: ProviderKind = ProviderKind.BOKUN,
-    provider_ref: str | None = None,
-    offer_date: date = date(2027, 2, 1),
+    provider: ProviderKind,
+    label: str | None = None,
+    target_variant: int = 0,
+    ref_variant: int = 0,
+    offer_date: date = _BASE_DATE,
     start_time: str = "07:30",
     party: Party | None = None,
     amount: Decimal = Decimal("500.00"),
     currency: str = "BRL",
+    available: bool = True,
 ) -> LookupResult:
     resolved_party = party or Party(adults=2, children=0)
-    query = _base_query(provider=provider, party=resolved_party)
-    provenance = _provenance(index=index, observed_at=observed_at, provider=provider)
-    lookup_id = lookup_id_for(
-        provider=provider,
-        query=query,
-        observed_at=observed_at,
-        response_hashes=provenance.response_hashes,
-    )
     if provider is ProviderKind.CLOUDBEDS:
-        resolved_ref = provider_ref or "cloudbeds.room.100.rate.standard"
-        service = ServiceKind.LODGING
-        resolved_end_date = query.end_date
-        resolved_start_time = None
-        resolved_label = "Quarto nº 2" if label == "Passeio nº 2" else label
-    else:
-        resolved_ref = (
-            provider_ref or "bokun.product.100.start.0730.rate.standard"
+        query = SearchQuery(
+            service=ServiceKind.LODGING,
+            start_date=offer_date,
+            end_date=offer_date + timedelta(days=2),
+            start_time=None,
+            party=resolved_party,
         )
-        service = ServiceKind.ACTIVITY
-        resolved_end_date = None
-        resolved_start_time = start_time
-        resolved_label = label
-    base = OfferSnapshot(
-        offer_id="offer:pending",
-        lookup_id=lookup_id,
-        service=service,
-        provider_ref=resolved_ref,
-        public_label=resolved_label,
-        start_date=offer_date,
-        end_date=resolved_end_date,
-        start_time=resolved_start_time,
-        party=resolved_party,
-        total=Money(amount=amount, currency=currency),
-        available=True,
-    )
-    offer = replace(base, offer_id=offer_id_for(provider=provider, offer=base))
-    evidence = LookupEvidence(
-        lookup_id=lookup_id,
-        service=query.service,
-        query_signature=query.signature,
-        observed_at=observed_at,
-        expires_at=observed_at + timedelta(minutes=5),
-        snapshot_hash=provenance.snapshot_hash,
-        status=LookupStatus.POSITIVE,
-    )
-    return LookupResult(
-        query=query,
-        evidence=evidence,
-        provenance=provenance,
-        offers=(offer,),
-    )
-
-
-def _negative_result(*, index: int, observed_at: datetime) -> LookupResult:
-    provider = ProviderKind.BOKUN
-    query = _base_query(provider=provider)
-    provenance = _provenance(index=index, observed_at=observed_at, provider=provider)
-    lookup_id = lookup_id_for(
-        provider=provider,
-        query=query,
-        observed_at=observed_at,
-        response_hashes=provenance.response_hashes,
-    )
-    return LookupResult(
-        query=query,
-        evidence=LookupEvidence(
-            lookup_id=lookup_id,
-            service=query.service,
-            query_signature=query.signature,
+        property_id = f"property.{index}.{target_variant}"
+        room_id = f"ROOM{index}_{ref_variant}"
+        rate_id = "RATE1"
+        night = amount / Decimal("2")
+        room_data = []
+        if available:
+            room_data = [
+                {
+                    "roomTypeID": room_id,
+                    "roomTypeName": label or "Quarto sintético",
+                    "roomsAvailable": 2,
+                    "ratePlanID": rate_id,
+                    "currency": currency,
+                    "roomRateDetailed": [
+                        {
+                            "date": offer_date.isoformat(),
+                            "rate": format(night, "f"),
+                            "currency": currency,
+                            "roomsAvailable": 2,
+                        },
+                        {
+                            "date": (offer_date + timedelta(days=1)).isoformat(),
+                            "rate": format(night, "f"),
+                            "currency": currency,
+                            "roomsAvailable": 2,
+                        },
+                    ],
+                }
+            ]
+        transport = _Responses(
+            (
+                ReadResponse(200, {"success": True, "data": room_data}),
+                ReadResponse(
+                    200,
+                    {
+                        "success": True,
+                        "data": [
+                            {"ratePlanID": rate_id, "ratePlanName": "Sintético"}
+                        ],
+                    },
+                ),
+            )
+        )
+        result = CloudbedsReadAdapter(transport).lookup(
+            CloudbedsLookupRequest(property_id=property_id, query=query),
             observed_at=observed_at,
-            expires_at=observed_at + timedelta(minutes=5),
-            snapshot_hash=provenance.snapshot_hash,
-            status=LookupStatus.NEGATIVE,
-        ),
-        provenance=provenance,
-        offers=(),
-    )
+            ttl=timedelta(minutes=5),
+        )
+    else:
+        query = SearchQuery(
+            service=ServiceKind.ACTIVITY,
+            start_date=_BASE_DATE,
+            end_date=_BASE_DATE + timedelta(days=7),
+            start_time=None,
+            party=resolved_party,
+        )
+        product_id = f"PRODUCT{index}_{target_variant}"
+        start_time_id = f"START{index}_{ref_variant}"
+        availability_data = []
+        if available:
+            availability_data = [
+                {
+                    "date": offer_date.isoformat(),
+                    "startTimeId": start_time_id,
+                    "startTime": start_time,
+                    "availabilityCount": 8,
+                    "available": True,
+                    "soldOut": False,
+                    "unavailable": False,
+                    "totalAmount": format(amount, "f"),
+                    "currency": currency,
+                    "defaultRateId": "RATE1",
+                }
+            ]
+        transport = _Responses(
+            (
+                ReadResponse(200, {"id": product_id, "title": label or "Passeio sintético"}),
+                ReadResponse(200, {"success": True, "data": availability_data}),
+            )
+        )
+        result = BokunReadAdapter(transport).lookup(
+            BokunLookupRequest(product_id=product_id, query=query),
+            observed_at=observed_at,
+            ttl=timedelta(minutes=5),
+        )
+    expected = LookupStatus.POSITIVE if available else LookupStatus.NEGATIVE
+    if result.evidence.status is not expected:
+        raise AssertionError(
+            f"synthetic {provider.value} adapter returned {result.evidence.status.value}"
+        )
+    if available and len(result.offers) != 1:
+        raise AssertionError("synthetic positive adapter must return one offer")
+    return result
 
 
-def _mutated_result(*, index: int, observed_at: datetime, kind: str) -> LookupResult:
+def _mutated_result(
+    *,
+    index: int,
+    observed_at: datetime,
+    provider: ProviderKind,
+    kind: str,
+) -> LookupResult:
     if kind == "provider":
-        return _positive_result(
+        other = (
+            ProviderKind.BOKUN
+            if provider is ProviderKind.CLOUDBEDS
+            else ProviderKind.CLOUDBEDS
+        )
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
-            provider=ProviderKind.CLOUDBEDS,
+            provider=other,
         )
     if kind == "provider_ref":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
-            provider_ref="bokun.product.101.start.0730.rate.standard",
+            provider=provider,
+            ref_variant=1,
         )
     if kind == "date":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
-            offer_date=date(2027, 2, 2),
+            provider=ProviderKind.BOKUN,
+            offer_date=_BASE_DATE + timedelta(days=1),
         )
     if kind == "time":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
+            provider=ProviderKind.BOKUN,
             start_time="08:00",
         )
     if kind == "party":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
+            provider=provider,
             party=Party(adults=3, children=0),
         )
     if kind == "amount":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
+            provider=provider,
             amount=Decimal("501.00"),
         )
     if kind == "currency":
-        return _positive_result(
+        return _adapter_result(
             index=index,
             observed_at=observed_at,
+            provider=ProviderKind.CLOUDBEDS,
             currency="USD",
         )
     if kind == "availability":
-        return _negative_result(index=index, observed_at=observed_at)
+        return _adapter_result(
+            index=index,
+            observed_at=observed_at,
+            provider=provider,
+            available=False,
+        )
     raise AssertionError(f"unknown mutation kind: {kind}")
 
 
-def _provenance(
-    *, index: int, observed_at: datetime, provider: ProviderKind
-) -> LookupProvenance:
-    suffix = observed_at.isoformat()
-    return LookupProvenance(
-        provider=provider,
-        request_fingerprints=(
-            _digest(f"request:0:{index}:{suffix}"),
-            _digest(f"request:1:{index}:{suffix}"),
-        ),
-        response_hashes=(
-            _digest(f"response:0:{index}:{suffix}"),
-            _digest(f"response:1:{index}:{suffix}"),
-        ),
+def _expect_cross_target_rejection(
+    *,
+    base: LookupResult,
+    index: int,
+    observed_at: datetime,
+    provider: ProviderKind,
+    counters: dict[str, int],
+    violations: list[str],
+) -> None:
+    try:
+        other_target = _adapter_result(
+            index=index,
+            observed_at=observed_at + timedelta(seconds=4),
+            provider=provider,
+            target_variant=1,
+        )
+        if other_target.offers[0].offer_id == base.offers[0].offer_id:
+            raise AssertionError("target change preserved offer identity")
+        revalidate_offer(
+            base.offers[0],
+            other_target,
+            at=observed_at + timedelta(seconds=4),
+        )
+    except SelectionRejected as exc:
+        if exc.code is SelectionErrorCode.OFFER_CHANGED:
+            counters["cross_target_rejections"] += 1
+        else:
+            _violate(violations, index, f"cross_target_wrong_code:{exc.code.value}")
+    except Exception as exc:
+        counters["unexpected_exceptions"] += 1
+        _violate(violations, index, f"cross_target_exception:{type(exc).__name__}")
+    else:
+        counters["false_authorizations"] += 1
+        _violate(violations, index, "cross_target_authorized")
+
+
+def _expect_lookup_rebinding_rejection(
+    *,
+    base: LookupResult,
+    index: int,
+    counters: dict[str, int],
+    violations: list[str],
+) -> None:
+    rebound_id = "lookup:" + _digest(f"rebound:{index}")
+    evidence = replace(base.evidence, lookup_id=rebound_id)
+    offers = tuple(replace(offer, lookup_id=rebound_id) for offer in base.offers)
+    try:
+        replace(base, evidence=evidence, offers=offers)
+    except ValueError:
+        counters["lookup_rebinding_rejections"] += 1
+    except Exception as exc:
+        counters["unexpected_exceptions"] += 1
+        _violate(violations, index, f"lookup_rebind_exception:{type(exc).__name__}")
+    else:
+        counters["false_authorizations"] += 1
+        _violate(violations, index, "lookup_rebind_accepted")
+
+
+def _expect_response_pair_swap_rejection(
+    *,
+    base: LookupResult,
+    index: int,
+    counters: dict[str, int],
+    violations: list[str],
+) -> None:
+    swapped = LookupProvenance(
+        provider=base.provenance.provider,
+        request_fingerprints=base.provenance.request_fingerprints,
+        response_hashes=tuple(reversed(base.provenance.response_hashes)),
     )
+    if swapped.snapshot_hash != base.provenance.snapshot_hash:
+        counters["response_pair_swap_rejections"] += 1
+    else:
+        counters["missed_invalidations"] += 1
+        _violate(violations, index, "response_pair_swap_preserved_snapshot")
+
+
+def _expect_zero_total_rejection(
+    *,
+    base: LookupResult,
+    index: int,
+    counters: dict[str, int],
+    violations: list[str],
+) -> None:
+    original = base.offers[0]
+    zero_base = replace(
+        original,
+        total=Money(amount=Decimal("0.00"), currency=original.total.currency),
+    )
+    zero = replace(
+        zero_base,
+        offer_id=offer_id_for(provider=base.provenance.provider, offer=zero_base),
+    )
+    try:
+        replace(base, offers=(zero,))
+    except ValueError:
+        counters["zero_total_rejections"] += 1
+    except Exception as exc:
+        counters["unexpected_exceptions"] += 1
+        _violate(violations, index, f"zero_total_exception:{type(exc).__name__}")
+    else:
+        counters["false_authorizations"] += 1
+        _violate(violations, index, "zero_total_authorized")
 
 
 def _expect_rejection(
@@ -418,12 +629,19 @@ def _expect_rejection(
         _violate(violations, index, f"{counter}_authorized")
 
 
-def _label_variant(index: int) -> str:
+def _label_variant(*, index: int, provider: ProviderKind) -> str:
+    if provider is ProviderKind.CLOUDBEDS:
+        return (
+            "QUARTO SINTÉTICO",
+            "Quarto sintético relabel",
+            "  Quarto   sintético  ",
+            "Quarto de teste",
+        )[index % 4]
     return (
-        "PASSEIO N° 2",
-        "Passeio n.º 2",
-        "  Passeio   nº 2  ",
-        "Passeio 2",
+        "PASSEIO SINTÉTICO",
+        "Passeio sintético relabel",
+        "  Passeio   sintético  ",
+        "Passeio de teste",
     )[index % 4]
 
 

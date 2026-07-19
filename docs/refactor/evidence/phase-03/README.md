@@ -2,7 +2,7 @@
 
 Fase: `phase-03-lookups-and-offer-snapshots`.
 
-Status: **concluída**, implementação `33b1975dd660963b242f961721d8117404654893`.
+Status: **remediação pós-closeout**, após parecer independente tardio.
 
 Este diretório prova adapters read-only e seleção por identidade opaca. Não
 contém payload live, credencial, header, PII, mensagem real ou write de
@@ -11,12 +11,14 @@ provider.
 ## Artefatos
 
 - `entry-baseline.json` — base da fase e fonte legada somente leitura;
-- `red-result-*.json` — cinco REDs observados antes dos respectivos módulos;
+- `red-result-*.json` — cinco REDs iniciais e um RED tardio com cinco
+  reproduções materiais;
 - `source-map.json` — símbolos legados que informaram o contrato, sem import;
 - `lookup-manifest.json` — hashes do package `reservation_lookup`;
 - `fixture-manifest.json` — hashes das oito fixtures sintéticas/sanitizadas;
-- `property-result.json` — 50 mil casos bilaterais de autorização/invalidação;
-- `mutation-result.json` — treze mutantes críticos mortos;
+- `property-result.json` — 50 mil casos adapter-backed de autorização e
+  invalidação;
+- `mutation-result.json` — dezenove mutantes críticos mortos;
 - `performance-result.json` — duração, RSS e exit code do gate integral;
 - `adversarial-review.md` — revisão de boundary, identidade e falso verde;
 - `validation-result.json` — resultado consolidado dos gates;

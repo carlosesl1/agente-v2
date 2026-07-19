@@ -67,8 +67,11 @@ Funções canônicas:
 ```python
 def offer_id_for(*, provider: ProviderKind, offer: OfferSnapshot) -> str: ...
 def lookup_id_for(*, provider: ProviderKind, query: SearchQuery,
-                  observed_at: datetime, response_hashes: tuple[str, ...]) -> str: ...
-def snapshot_hash_for(responses: tuple[ReadResponse, ...]) -> str: ...
+                  observed_at: datetime,
+                  request_fingerprints: tuple[str, ...],
+                  response_hashes: tuple[str, ...]) -> str: ...
+def snapshot_hash_for(requests: tuple[ReadRequest, ...],
+                      responses: tuple[ReadResponse, ...]) -> str: ...
 ```
 
 Formato:
@@ -133,7 +136,8 @@ Contrato de resposta sanitizada:
 - rate plan referenciado precisa existir na segunda resposta;
 - cada noite solicitada precisa de linha diária disponível e preço finito;
 - total é soma determinística das noites;
-- `provider_ref` é `cloudbeds.room.<room>.rate.<rate>`;
+- `provider_ref` é
+  `cloudbeds.property.<property>.room.<room>.rate.<rate>`;
 - somente opções completas, com preço e disponibilidade positivas, entram no
   resultado.
 
@@ -210,9 +214,11 @@ respostas zera offers e produz `UNCERTAIN`.
 - `observed_at` é fornecido pelo caller; não há relógio global;
 - TTL explícito deve ser maior que zero e no máximo 15 minutos;
 - `expires_at = observed_at + ttl`;
-- `snapshot_hash` cobre as duas responses sanitizadas em JSON canônico;
-- request fingerprints cobrem método/path/query;
-- response hashes ficam na provenance;
+- `snapshot_hash` cobre pares canônicos de request fingerprint e response hash;
+- request fingerprints cobrem método/path/query, incluindo property/product ID;
+- trocar responses entre endpoints altera snapshot e lookup ID;
+- `lookup_id` é recomputado por `LookupResult`, sem aceitar rebinding;
+- frescor usa intervalo semiaberto `[observed_at, expires_at)`;
 - body bruto, headers e credenciais não entram em `LookupResult`.
 
 ## Fixtures
@@ -247,7 +253,8 @@ live.
 8. lookup vencido, negativo ou incerto não autoriza;
 9. mudança executável invalida seleção; label-only não;
 10. malformed/partial/provider error retorna `UNCERTAIN` e zero offers;
-11. resultado determinístico independe da ordem das opções/respostas internas;
+11. resultado independe da ordem das opções e da ordem de exchanges completos,
+    mas cada response permanece vinculada ao request correspondente;
 12. imports de rede, provider SDK, filesystem write, env e legado são proibidos
     no package.
 
@@ -261,13 +268,20 @@ Mutation tests mínimos:
 - tolerar rate plan ausente;
 - transformar schema error em negativo;
 - permitir método diferente de GET.
+- omitir property ID do target Cloudbeds;
+- desvincular response do request fingerprint;
+- aceitar lookup ID rebindado;
+- aceitar total zero;
+- tornar o limite de expiração inclusivo;
+- reutilizar o mesmo target no property probe cross-target.
 
 Todos devem ser mortos.
 
 ## Validação
 
 - testes unitários e contract tests;
-- pelo menos 50 mil casos metamórficos/property de identidade e seleção;
+- pelo menos 50 mil casos adapter-backed/metamórficos de identidade e seleção,
+  cobrindo ambos providers e IDs internos;
 - fixture manifest e source map;
 - validador da Fase 3 exige arquivos tracked/staged, pure imports, hashes e gates
   das Fases 0–2;

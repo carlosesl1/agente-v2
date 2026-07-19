@@ -22,6 +22,16 @@ class Phase3PropertyTests(unittest.TestCase):
         self.assertEqual(report.expired_cases, 250)
         self.assertEqual(report.zero_match_cases, 250)
         self.assertEqual(report.multiple_match_cases, 250)
+        self.assertEqual(report.cloudbeds_adapter_cases, 94)
+        self.assertEqual(report.bokun_adapter_cases, 156)
+        self.assertEqual(
+            report.cloudbeds_adapter_cases + report.bokun_adapter_cases,
+            250,
+        )
+        self.assertEqual(report.cross_target_rejections, 250)
+        self.assertEqual(report.lookup_rebinding_rejections, 250)
+        self.assertEqual(report.response_pair_swap_rejections, 250)
+        self.assertEqual(report.zero_total_rejections, 250)
         self.assertEqual(sum(report.mutation_counts.values()), 250)
         self.assertTrue(all(value > 0 for value in report.mutation_counts.values()))
         self.assertEqual(report.false_authorizations, 0)
