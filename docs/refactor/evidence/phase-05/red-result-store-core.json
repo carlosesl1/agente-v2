@@ -57,6 +57,36 @@
       "failure_class": "derived_event_id_exceeded_domain_limit",
       "output_sha256": "d495f7c78f2128fbea3734a53d72c6879e75f17cb6659b57a615528040025013",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_store_boundary_hardening",
+      "base_head": "f469bdc37b48fbcfabadfec4d908972d39edcbb8",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_open_initializes_and_validates_exact_migration tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_constructor_is_factory_guarded tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_duplicate_detects_event_revision_swapped_against_history_order tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_task4_rejects_outbox_and_command_effects_with_full_rollback tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_commit_failure_rolls_back_and_leaves_connection_reusable tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_sqlite_failures_are_mapped_to_stable_store_error -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 4,
+      "error_count": 2,
+      "failure_classes": [
+        "summary_recorded_without_required_outbox_was_persisted",
+        "duplicate_event_revision_order_corruption_was_accepted",
+        "commit_failure_escaped_without_mapped_rollback_boundary",
+        "sqlite_begin_failure_escaped_raw",
+        "connection_was_publicly_exposed",
+        "constructor_was_not_factory_guarded"
+      ],
+      "output_sha256": "cedadccc8e8f785cbd489c92025a4b25ff288d502c3beb10f45894616c851cc0",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "close_must_map_sqlite_failure_and_become_idempotent",
+      "base_head": "f469bdc37b48fbcfabadfec4d908972d39edcbb8",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_close_maps_sqlite_failure_and_becomes_idempotent -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "error_count": 1,
+      "failure_class": "closed_sqlite_handle_escaped_raw_programming_error",
+      "output_sha256": "8ca94cecb4cb38d47347e68d2089362cb36aa102201e57da40aaabc517f9c022",
+      "raw_output_versioned": false
     }
   ]
 }

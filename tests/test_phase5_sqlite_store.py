@@ -24,6 +24,7 @@ from reservation_execution.sqlite_store import (
     IdentityConflict,
     PersistedTransition,
     SQLiteUnitOfWork,
+    StoreError,
     UnsupportedEffect,
     WorkflowNotFound,
 )
@@ -48,20 +49,21 @@ class Phase5SQLiteStoreTests(unittest.TestCase):
 
     def test_open_initializes_and_validates_exact_migration(self) -> None:
         store = self.open_store()
-        row = store.connection.execute(
+        self.assertFalse(hasattr(store, "connection"))
+        row = store._connection.execute(  # internal configuration assertion
             "SELECT version, schema_hash FROM schema_migrations"
         ).fetchone()
         self.assertEqual(row, (SCHEMA_VERSION, schema_hash("sqlite")))
         self.assertEqual(
-            store.connection.execute("PRAGMA foreign_keys").fetchone()[0],
+            store._connection.execute("PRAGMA foreign_keys").fetchone()[0],
             1,
         )
         self.assertEqual(
-            store.connection.execute("PRAGMA journal_mode").fetchone()[0],
+            store._connection.execute("PRAGMA journal_mode").fetchone()[0],
             "wal",
         )
         self.assertEqual(
-            store.connection.execute("PRAGMA synchronous").fetchone()[0],
+            store._connection.execute("PRAGMA synchronous").fetchone()[0],
             2,
         )
 
@@ -75,6 +77,18 @@ class Phase5SQLiteStoreTests(unittest.TestCase):
         connection.close()
         with self.assertRaises(DataCorruption):
             SQLiteUnitOfWork.open(self.path)
+
+    def test_constructor_is_factory_guarded(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        with self.assertRaises(TypeError):
+            SQLiteUnitOfWork(self.path, connection)  # type: ignore[call-arg]
+        with self.assertRaises(TypeError):
+            SQLiteUnitOfWork(
+                self.path,
+                connection,
+                _factory_token=object(),
+            )
 
     def test_partial_or_unknown_schema_fails_without_repair(self) -> None:
         connection = sqlite3.connect(self.path)
@@ -242,6 +256,40 @@ class Phase5SQLiteStoreTests(unittest.TestCase):
                 conflict,
             )
         self.assertEqual(database_counts(self.path)[1], 1)
+
+    def test_duplicate_detects_event_revision_swapped_against_history_order(self) -> None:
+        store = self.open_store()
+        initial, script = workflow_events(
+            "cloudbeds", workflow_id="workflow:store:revision-tamper"
+        )
+        store.create_workflow(initial)
+        first = store.apply_event(initial.meta.workflow_id, 0, script[0][0])
+        second = store.apply_event(
+            initial.meta.workflow_id,
+            first.state.meta.revision,
+            script[1][0],
+        )
+        connection = sqlite3.connect(self.path)
+        connection.execute(
+            "UPDATE domain_events SET revision=3 WHERE event_id=?",
+            (script[0][0].event_id,),
+        )
+        connection.execute(
+            "UPDATE domain_events SET revision=1 WHERE event_id=?",
+            (script[1][0].event_id,),
+        )
+        connection.execute(
+            "UPDATE domain_events SET revision=2 WHERE event_id=?",
+            (script[0][0].event_id,),
+        )
+        connection.commit()
+        connection.close()
+        with self.assertRaises(DataCorruption):
+            store.apply_event(
+                initial.meta.workflow_id,
+                second.state.meta.revision,
+                script[0][0],
+            )
 
     def test_old_duplicate_after_later_event_returns_current_state_without_write(self) -> None:
         store = self.open_store()
@@ -411,6 +459,30 @@ class Phase5SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(database_counts(self.path), before)
         self.assertEqual(store.load_workflow(initial.meta.workflow_id), initial)
 
+        for event, outbox in script[:4]:
+            state = store.load_workflow(initial.meta.workflow_id)
+            store.apply_event(
+                initial.meta.workflow_id,
+                state.meta.revision,
+                event,
+                outbox=outbox,
+            )
+        before_summary_state = store.load_workflow(initial.meta.workflow_id)
+        before_summary_counts = database_counts(self.path)
+        summary_event, _ = script[4]
+        with self.assertRaisesRegex(UnsupportedEffect, "summary.*outbox"):
+            store.apply_event(
+                initial.meta.workflow_id,
+                before_summary_state.meta.revision,
+                summary_event,
+                outbox=(),
+            )
+        self.assertEqual(
+            store.load_workflow(initial.meta.workflow_id),
+            before_summary_state,
+        )
+        self.assertEqual(database_counts(self.path), before_summary_counts)
+
         state = initial
         for event, _ in script[:-1]:
             state = reduce(state, event).state
@@ -440,6 +512,54 @@ class Phase5SQLiteStoreTests(unittest.TestCase):
             command_store.load_workflow(revision_zero.meta.workflow_id),
             revision_zero,
         )
+
+    def test_commit_failure_rolls_back_and_leaves_connection_reusable(self) -> None:
+        store = self.open_store()
+        initial, _ = workflow_events(
+            "cloudbeds", workflow_id="workflow:store:commit-failure"
+        )
+
+        def deny_commit(action, arg1, arg2, database, trigger):
+            if action == sqlite3.SQLITE_TRANSACTION and arg1 == "COMMIT":
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        store._connection.set_authorizer(deny_commit)
+        with self.assertRaises(StoreError) as raised:
+            store.create_workflow(initial)
+        self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
+        self.assertFalse(store._connection.in_transaction)
+        store._connection.set_authorizer(None)
+        self.assertEqual(database_counts(self.path), (0, 0, 0, 0, 0))
+        store.create_workflow(initial)
+        self.assertEqual(store.load_workflow(initial.meta.workflow_id), initial)
+
+    def test_sqlite_failures_are_mapped_to_stable_store_error(self) -> None:
+        store = self.open_store()
+        initial, _ = workflow_events(
+            "bokun", workflow_id="workflow:store:sqlite-error"
+        )
+
+        def deny_begin(action, arg1, arg2, database, trigger):
+            if action == sqlite3.SQLITE_TRANSACTION and arg1 == "BEGIN":
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        store._connection.set_authorizer(deny_begin)
+        with self.assertRaises(StoreError) as raised:
+            store.create_workflow(initial)
+        self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
+        self.assertFalse(store._connection.in_transaction)
+        store._connection.set_authorizer(None)
+
+    def test_close_maps_sqlite_failure_and_becomes_idempotent(self) -> None:
+        path = Path(self.temporary.name) / "close-failure.db"
+        store = SQLiteUnitOfWork.open(path)
+        store._connection.close()
+        with self.assertRaises(StoreError) as raised:
+            store.close()
+        self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
+        store.close()
 
     def test_closed_type_universes_are_enforced(self) -> None:
         store = self.open_store()

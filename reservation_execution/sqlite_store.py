@@ -17,6 +17,7 @@ from reservation_domain import (
     Event,
     ReservationCommand,
     State,
+    SummaryRecorded,
     Transition,
     TransitionStatus,
     dumps_event,
@@ -31,10 +32,15 @@ from .types import OutboxMessage
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
+_FACTORY_TOKEN = object()
 
 
 class StoreError(RuntimeError):
     """Base class for durable store failures."""
+
+
+class StoreUnavailable(StoreError):
+    """SQLite could not complete an operation without claiming domain conflict."""
 
 
 class DataCorruption(StoreError):
@@ -110,6 +116,17 @@ def _canonical_utc(value: str, field_name: str) -> datetime:
     return parsed
 
 
+def _sqlite_store_error(exc: sqlite3.Error, operation: str) -> StoreError:
+    detail = str(exc).casefold()
+    if isinstance(exc, sqlite3.IntegrityError):
+        return DataCorruption(f"{operation} violated SQLite integrity")
+    if isinstance(exc, sqlite3.OperationalError) and (
+        "locked" in detail or "busy" in detail
+    ):
+        return ConcurrencyConflict(f"{operation} could not acquire the SQLite lock")
+    return StoreUnavailable(f"{operation} failed in SQLite")
+
+
 def _schema_statements(sql: str) -> tuple[str, ...]:
     statements: list[str] = []
     buffer = ""
@@ -130,7 +147,15 @@ def _schema_statements(sql: str) -> tuple[str, ...]:
 class SQLiteUnitOfWork:
     """One durable SQLite connection and its atomic workflow operations."""
 
-    def __init__(self, path: Path, connection: sqlite3.Connection):
+    def __init__(
+        self,
+        path: Path,
+        connection: sqlite3.Connection,
+        *,
+        _factory_token: object,
+    ):
+        if _factory_token is not _FACTORY_TOKEN:
+            raise TypeError("SQLiteUnitOfWork must be created with open()")
         self._path = path
         self._connection = connection
         self._closed = False
@@ -157,9 +182,13 @@ class SQLiteUnitOfWork:
                 raise DataCorruption("SQLite WAL mode could not be enabled")
             if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
                 raise DataCorruption("SQLite FULL synchronous mode could not be enabled")
-            store = cls(path, connection)
+            store = cls(path, connection, _factory_token=_FACTORY_TOKEN)
             store._initialize_or_validate_schema()
             return store
+        except sqlite3.Error as exc:
+            if connection is not None:
+                connection.close()
+            raise _sqlite_store_error(exc, "open") from exc
         except BaseException:
             if connection is not None:
                 connection.close()
@@ -168,11 +197,6 @@ class SQLiteUnitOfWork:
     @property
     def path(self) -> Path:
         return self._path
-
-    @property
-    def connection(self) -> sqlite3.Connection:
-        self._ensure_open()
-        return self._connection
 
     def __enter__(self) -> "SQLiteUnitOfWork":
         self._ensure_open()
@@ -184,9 +208,17 @@ class SQLiteUnitOfWork:
     def close(self) -> None:
         if self._closed:
             return
-        if self._connection.in_transaction:
-            self._connection.rollback()
-        self._connection.close()
+        try:
+            if self._connection.in_transaction:
+                self._connection.rollback()
+            self._connection.close()
+        except sqlite3.Error as exc:
+            try:
+                self._connection.close()
+            except sqlite3.Error:
+                pass
+            self._closed = True
+            raise _sqlite_store_error(exc, "close") from exc
         self._closed = True
 
     def _ensure_open(self) -> None:
@@ -198,14 +230,24 @@ class SQLiteUnitOfWork:
         self._ensure_open()
         if self._connection.in_transaction:
             raise StoreError("nested SQLiteUnitOfWork transactions are forbidden")
-        self._connection.execute("BEGIN IMMEDIATE")
         try:
+            self._connection.execute("BEGIN IMMEDIATE")
             yield
-        except BaseException:
-            self._connection.rollback()
-            raise
-        else:
             self._connection.commit()
+        except BaseException as exc:
+            rollback_error: sqlite3.Error | None = None
+            try:
+                if self._connection.in_transaction:
+                    self._connection.rollback()
+            except sqlite3.Error as rollback_exc:
+                rollback_error = rollback_exc
+            if rollback_error is not None:
+                raise StoreUnavailable(
+                    "SQLite transaction failed and rollback was not possible"
+                ) from rollback_error
+            if isinstance(exc, sqlite3.Error):
+                raise _sqlite_store_error(exc, "transaction") from exc
+            raise
 
     def _table_names(self) -> tuple[str, ...]:
         return tuple(
@@ -291,7 +333,10 @@ class SQLiteUnitOfWork:
     def load_workflow(self, workflow_id: str) -> State:
         self._ensure_open()
         workflow_id = _require_id(workflow_id, "workflow_id")
-        row = self._workflow_row(workflow_id)
+        try:
+            row = self._workflow_row(workflow_id)
+        except sqlite3.Error as exc:
+            raise _sqlite_store_error(exc, "load_workflow") from exc
         if row is None:
             raise WorkflowNotFound(f"workflow not found: {workflow_id}")
         return self._state_from_row(row)
@@ -354,6 +399,10 @@ class SQLiteUnitOfWork:
             if row is None:
                 raise WorkflowNotFound(f"workflow not found: {workflow_id}")
             current = self._state_from_row(row)
+            if type(event) is SummaryRecorded:
+                raise UnsupportedEffect(
+                    "summary outbox persistence is owned by Task 5"
+                )
             if outbox:
                 raise UnsupportedEffect(
                     "outbox persistence is owned by Task 5 and cannot be discarded"
@@ -439,6 +488,8 @@ class SQLiteUnitOfWork:
             index = current.meta.seen_event_ids.index(event.event_id)
         except ValueError as exc:
             raise DataCorruption("event row is absent from workflow event history") from exc
+        if existing_revision != index + 1:
+            raise DataCorruption("event row revision disagrees with workflow history order")
         if current.meta.seen_event_hashes[index] != row[6]:
             raise DataCorruption("event row hash disagrees with workflow event history")
         return PersistedTransition(
@@ -497,6 +548,7 @@ __all__ = [
     "SQLiteUnitOfWork",
     "PersistedTransition",
     "StoreError",
+    "StoreUnavailable",
     "DataCorruption",
     "ConcurrencyConflict",
     "IdentityConflict",
