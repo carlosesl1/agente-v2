@@ -130,8 +130,10 @@ status
 
 A oferta só entra em `OfferedState` quando a evidência é positiva, fresca,
 vinculada à mesma query e todas as ofertas correspondem ao service, período,
-horário e party. `OfferChosen` revalida frescor e busca exatamente um
-`offer_id`.
+horário e party. Para hospedagem, check-in/check-out são exatos. Para atividade,
+cada oferta é uma ocorrência pontual (`end_date=None`) que deve cair dentro da
+janela inclusiva da query; horário informado continua exato e horário ausente é
+wildcard. `OfferChosen` revalida frescor e busca exatamente um `offer_id`.
 
 Frescor usa o intervalo semiaberto `[observed_at, expires_at)`: exatamente em
 `expires_at`, a evidência já está vencida e falha fechada.

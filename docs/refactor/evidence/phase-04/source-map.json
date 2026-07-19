@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "classification": "source_informed_contract",
+  "phase3_dependency": {
+    "path": "docs/refactor/evidence/phase-03/lookup-manifest.json",
+    "sha256": "19a41df51cf4bf58564f576535bb7ea7896d1b046a9144c4791c35d7b6983883",
+    "purpose": "Cloudbeds/Bokun in-memory property baseline",
+    "validated_by": "scripts/validate_phase3.py"
+  },
+  "legacy_readonly": {
+    "head": "57408d8b2040399bc25ee7957505208079458884",
+    "status_entries": 80,
+    "status_sha256": "77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b"
+  },
+  "symbols": [
+    {
+      "source_path": "domain/hermes_native_runner.py",
+      "source_sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+      "symbol": "_prepare_single_service_confirmation_reply",
+      "line": 1031,
+      "target": "reservation_confirmation/renderer.py::render_summary"
+    },
+    {
+      "source_path": "domain/hermes_native_runner.py",
+      "source_sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+      "symbol": "_reservation_confirmation_phase_from_results",
+      "line": 2507,
+      "target": "reservation_confirmation/presentation.py::prepare_summary"
+    },
+    {
+      "source_path": "domain/hermes_native_runner.py",
+      "source_sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+      "symbol": "_single_service_confirmation_phase_from_state",
+      "line": 2558,
+      "target": "reservation_confirmation/binding.py::classification_context"
+    },
+    {
+      "source_path": "domain/tool_executor.py",
+      "source_sha256": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88",
+      "symbol": "reservation_write_confirmation_guard_action",
+      "line": 850,
+      "target": "reservation_confirmation/binding.py::classify_and_bind"
+    }
+  ],
+  "claims": {
+    "legacy_imported": false,
+    "legacy_runtime_executed": false,
+    "provider_network_executed": false,
+    "provider_write_executed": false,
+    "llm_provider_executed": false,
+    "hermes_runtime_integrated": false,
+    "fixtures_synthetic_sanitized": true
+  }
+}

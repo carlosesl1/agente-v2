@@ -335,6 +335,71 @@ class ReducerContractTests(unittest.TestCase):
         self.assertIsInstance(transition.state, SearchingState)
         self.assertFalse(transition.commands)
 
+    def test_activity_occurrence_must_fall_inside_query_window(self) -> None:
+        activity_query = SearchQuery(
+            service=ServiceKind.ACTIVITY,
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 17),
+            start_time=None,
+            party=Party(adults=1, children=0),
+        )
+
+        def lookup_transition(*, workflow: str, occurrence: date):
+            state = new_workflow(workflow_id=workflow, started_at=T0)
+            state = reduce(
+                state,
+                StartSearch(
+                    event_id=f"{workflow}:search",
+                    occurred_at=event_time(1),
+                    query=activity_query,
+                ),
+            ).state
+            return reduce(
+                state,
+                LookupRecorded(
+                    event_id=f"{workflow}:lookup",
+                    occurred_at=event_time(6),
+                    evidence=LookupEvidence(
+                        lookup_id=f"{workflow}:lookup-id",
+                        service=ServiceKind.ACTIVITY,
+                        query_signature=activity_query.signature,
+                        observed_at=event_time(5),
+                        expires_at=event_time(600),
+                        snapshot_hash="b" * 64,
+                        status=LookupStatus.POSITIVE,
+                    ),
+                    offers=(
+                        OfferSnapshot(
+                            offer_id=f"{workflow}:offer",
+                            lookup_id=f"{workflow}:lookup-id",
+                            service=ServiceKind.ACTIVITY,
+                            provider_ref=f"{workflow}:provider-ref",
+                            public_label="Synthetic activity occurrence",
+                            start_date=occurrence,
+                            end_date=None,
+                            start_time="07:30",
+                            party=activity_query.party,
+                            total=Money(amount=Decimal("100.00"), currency="BRL"),
+                            available=True,
+                        ),
+                    ),
+                ),
+            )
+
+        inside = lookup_transition(
+            workflow="workflow-activity-inside",
+            occurrence=date(2026, 9, 14),
+        )
+        self.assertEqual(inside.status, TransitionStatus.APPLIED)
+        self.assertIsInstance(inside.state, OfferedState)
+
+        outside = lookup_transition(
+            workflow="workflow-activity-outside",
+            occurrence=date(2026, 9, 18),
+        )
+        self.assertEqual(outside.status, TransitionStatus.REJECTED)
+        self.assertIsInstance(outside.state, SearchingState)
+
     def test_offer_is_chosen_only_by_opaque_offer_id(self) -> None:
         state = new_workflow(workflow_id="workflow-choice", started_at=T0)
         state = reduce(

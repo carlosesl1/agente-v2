@@ -1,0 +1,44 @@
+{
+  "files": [
+    {
+      "bytes": 1142,
+      "path": "reservation_confirmation/__init__.py",
+      "sha256": "51c1645c13719605044799137bb265571a8062eeb981ff9a7155e3b63ac676bd"
+    },
+    {
+      "bytes": 5719,
+      "path": "reservation_confirmation/binding.py",
+      "sha256": "2c0949cfd58dad0c98ddf08c01b441ab2ce5bfa4de94d27b6fdb87676aa4847d"
+    },
+    {
+      "bytes": 7010,
+      "path": "reservation_confirmation/classifier.py",
+      "sha256": "90be8c2ba487e02a4aaf41433039d951061256c716890ed4e41d26a3dd6e7af1"
+    },
+    {
+      "bytes": 2502,
+      "path": "reservation_confirmation/presentation.py",
+      "sha256": "148092a547fe5974f673b081a2e4c7bb8c8ec9492f4d9be3747e6e5590cd0497"
+    },
+    {
+      "bytes": 22835,
+      "path": "reservation_confirmation/properties.py",
+      "sha256": "92966c71ec8f02f5fb4adf3f735d2fddd93d5ae1bb4c3dc9df1ec39608dc5a4b"
+    },
+    {
+      "bytes": 7677,
+      "path": "reservation_confirmation/renderer.py",
+      "sha256": "a1ccb9b37aefc33271198ad7b2c908fd043f7263f6bef39d8b7c6c78c697fdb3"
+    },
+    {
+      "bytes": 11797,
+      "path": "reservation_confirmation/types.py",
+      "sha256": "7b0bcd69797652511a42d4864f871d1775e152c4ba69c86149f4d1c95c4dd4be"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "package": "reservation_confirmation",
+  "phase": "phase-04-single-summary-and-confirmation",
+  "python_file_count": 7,
+  "schema_version": 1
+}

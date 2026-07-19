@@ -158,7 +158,10 @@ def classify_and_bind(
         )
 
     digest = _event_identity(context, source_event_id)
-    confirmation_event_id = f"confirmation:{digest}"
+    decision_digest = hashlib.sha256(
+        f"{digest}|{candidate.decision.value}".encode("utf-8")
+    ).hexdigest()
+    confirmation_event_id = f"confirmation:{decision_digest}"
     event = ConfirmationReceived(
         event_id=f"event:confirmation:{digest}",
         occurred_at=received_at,

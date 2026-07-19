@@ -17,9 +17,9 @@
       "sha256": "0e73659500edfb689bad36f1ac78b3f6e675468571f517bc9accb13487ac00d0"
     },
     {
-      "bytes": 21793,
+      "bytes": 22183,
       "path": "reservation_domain/reducer.py",
-      "sha256": "884257d8b5e6e57f2d4139d63828b65d4d0bfc524ddd0da4df09f22e1a8034ec"
+      "sha256": "76e6a31aab9093d1383f58ce29a7f0ea019044bb4f6bd53c3d91e82b5c895dfb"
     },
     {
       "bytes": 8204,
@@ -32,9 +32,9 @@
       "sha256": "5884d6191f03669071efde7b2e9586bc7ae01e2e87e01b2c04fd425added8dff"
     },
     {
-      "bytes": 43298,
+      "bytes": 43643,
       "path": "reservation_domain/types.py",
-      "sha256": "03bec7bf4f4da0193bf67636c9e8aba65f6d4d93f433817b620234baafcc58ca"
+      "sha256": "9c5aa0682bcdf5b3eda20908ab1ded3368b50c45e2c7e4c2b3a42c23c2dd4261"
     }
   ],
   "hash_algorithm": "sha256",

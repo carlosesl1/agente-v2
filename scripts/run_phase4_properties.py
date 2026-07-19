@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from reservation_confirmation.properties import run_confirmation_properties
+from reservation_confirmation import run_phase4_properties
 
 _MIN_GATE_CASES = 50_000
 
@@ -28,7 +28,7 @@ def main() -> int:
             f"gate mode requires --cases >= {_MIN_GATE_CASES}; use --smoke for smaller runs"
         )
 
-    report = run_confirmation_properties(cases=args.cases, seed=args.seed)
+    report = run_phase4_properties(cases=args.cases, seed=args.seed)
     payload = {
         "schema_version": 1,
         "phase": "phase-04-single-summary-and-confirmation",

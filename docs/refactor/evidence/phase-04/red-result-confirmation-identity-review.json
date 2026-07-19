@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T03:48:22Z",
+  "command": "python3 -m unittest tests.test_phase4_replays.BindingReplayTests.test_same_source_event_with_different_decision_is_conflicting_duplicate -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "confirmation_identity_omitted_decision",
+  "output_sha256": "80d1f92faaf7ab68f3eda58b5e383af4cce529c2e4e0bdc060af6bbb9e5e3c24",
+  "raw_output_versioned": false
+}

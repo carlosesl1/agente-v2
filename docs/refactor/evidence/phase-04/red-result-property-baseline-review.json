@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T03:40:42Z",
+  "command": "python3 -m unittest tests.test_phase4_properties.Phase4PropertyTests.test_properties_cover_authorization_and_fail_closed_directions -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "property_baseline_bypassed_actual_adapters",
+  "exception": "AttributeError",
+  "missing_contract": "cloudbeds_cases",
+  "output_sha256": "a3d55838edfcbb045e0d74a5701dac9a9e72163a11f3e3d5804eecdda13398a9",
+  "raw_output_versioned": false
+}

@@ -1,0 +1,27 @@
+{
+  "case_count": 32,
+  "categories": [
+    "adjust",
+    "ambiguous",
+    "colloquial",
+    "contextual",
+    "explicit",
+    "negative"
+  ],
+  "files": [
+    {
+      "bytes": 4638,
+      "path": "tests/fixtures/phase4/confirmation-corpus.json",
+      "sha256": "81a4ee40ec64f29db82e24ba39f422f505687b56c843cd297ae72355f8ea53b7"
+    }
+  ],
+  "fixture_count": 1,
+  "hash_algorithm": "sha256",
+  "locales": [
+    "en",
+    "pt_BR"
+  ],
+  "phase": "phase-04-single-summary-and-confirmation",
+  "schema_version": 1,
+  "synthetic_sanitized_only": true
+}

@@ -7,6 +7,7 @@ from .classifier import (
     classify_safely,
 )
 from .presentation import prepare_summary
+from .properties import Phase4PropertyReport, run_phase4_properties
 from .renderer import RENDERER_ID, RENDERER_VERSION, render_summary
 from .types import (
     BoundConfirmation,
@@ -32,6 +33,8 @@ __all__ = [
     "RENDERER_VERSION",
     "render_summary",
     "prepare_summary",
+    "Phase4PropertyReport",
+    "run_phase4_properties",
     "ConfirmationClassifier",
     "ReferenceConfirmationClassifier",
     "classify_safely",

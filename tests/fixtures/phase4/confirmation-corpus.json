@@ -31,10 +31,14 @@
     {"case_id":"pt-mixed","locale":"pt_BR","category":"ambiguous","text":"Sim, mas não confirme ainda.","has_context":true,"decision":"ambiguous"},
     {"case_id":"pt-question","locale":"pt_BR","category":"ambiguous","text":"Isso já está confirmado?","has_context":true,"decision":"ambiguous"},
     {"case_id":"pt-unknown","locale":"pt_BR","category":"ambiguous","text":"Vou pensar e aviso.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"pt-positive-unknown","locale":"pt_BR","category":"ambiguous","text":"Sim, talvez.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"pt-explicit-question","locale":"pt_BR","category":"ambiguous","text":"Confirmo esse resumo?","has_context":true,"decision":"ambiguous"},
     {"case_id":"pt-context-free","locale":"pt_BR","category":"ambiguous","text":"Pode fazer.","has_context":false,"decision":"ambiguous"},
     {"case_id":"en-mixed","locale":"en","category":"ambiguous","text":"Yes, but do not book it yet.","has_context":true,"decision":"ambiguous"},
     {"case_id":"en-question","locale":"en","category":"ambiguous","text":"Is this confirmed?","has_context":true,"decision":"ambiguous"},
     {"case_id":"en-unknown","locale":"en","category":"ambiguous","text":"Let me think about it.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"en-positive-unknown","locale":"en","category":"ambiguous","text":"Yes, maybe.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"en-explicit-question","locale":"en","category":"ambiguous","text":"I confirm this summary?","has_context":true,"decision":"ambiguous"},
     {"case_id":"en-context-free","locale":"en","category":"ambiguous","text":"Go ahead.","has_context":false,"decision":"ambiguous"}
   ]
 }

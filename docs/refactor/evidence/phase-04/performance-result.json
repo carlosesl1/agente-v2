@@ -1,0 +1,17 @@
+{
+  "cases": 50000,
+  "command": "python3 scripts/run_phase4_properties.py --cases 50000 --seed 20260719 --write docs/refactor/evidence/phase-04/property-result.json",
+  "elapsed_seconds": 105.558,
+  "exit_code": 0,
+  "ci_timeout_seconds": 600,
+  "input_hashes": {
+    "package_manifest_sha256": "499e2e69987249ac34f25ec3b17e5aa42ebdab7276ec23f34912395ef7a14d4a",
+    "phase3_lookup_manifest_sha256": "19a41df51cf4bf58564f576535bb7ea7896d1b046a9144c4791c35d7b6983883",
+    "runner_sha256": "dfe6b694be3463479da3d3809b46ea4e955ab62dabb261a9784d97c8804b1330"
+  },
+  "max_rss_kb": 26584,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "result": "passed",
+  "schema_version": 1,
+  "seed": 20260719
+}

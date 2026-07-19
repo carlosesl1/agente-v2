@@ -294,6 +294,11 @@ class BindingReplayTests(unittest.TestCase):
             content_hash=prepared.rendered.content_hash,
             classifier=ReferenceConfirmationClassifier(),
         )
+        self.assertEqual(ambiguous.event.event_id, accepted.event.event_id)
+        self.assertNotEqual(
+            ambiguous.confirmation_event_id,
+            accepted.confirmation_event_id,
+        )
         conflict = reduce(first.state, accepted.event)
         self.assertEqual(conflict.status, TransitionStatus.REJECTED)
         self.assertEqual(conflict.reason, "conflicting_duplicate_event")

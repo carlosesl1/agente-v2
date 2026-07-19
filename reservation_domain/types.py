@@ -633,10 +633,20 @@ class WorkflowState:
 
 
 def _offer_matches_query(offer: OfferSnapshot, query: SearchQuery) -> bool:
-    return bool(
+    if query.service is ServiceKind.ACTIVITY:
+        dates_match = (
+            offer.end_date is None
+            and offer.start_date >= query.start_date
+            and (query.end_date is None or offer.start_date <= query.end_date)
+        )
+    else:
+        dates_match = (
+            offer.start_date == query.start_date
+            and offer.end_date == query.end_date
+        )
+    return (
         offer.service is query.service
-        and offer.start_date == query.start_date
-        and offer.end_date == query.end_date
+        and dates_match
         and (query.start_time is None or offer.start_time == query.start_time)
         and offer.party == query.party
     )

@@ -44,6 +44,11 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R38 | `lookup_id` coerente localmente, mas não derivado, é aceito | 2 | 5 | evidence/offer compartilham ID arbitrário | recomputação obrigatória em `LookupResult`, property probe e mutante | domain/adapters | mitigado |
 | R39 | Property gate constrói DTO abaixo do adapter e não observa IDs internos | 3 | 5 | 50 mil casos passam sem request builder/normalizer | baselines adapter-backed para ambos providers e contadores obrigatórios | QA/adapters | mitigado |
 | R40 | Limite temporal inclusivo permite uso exatamente no vencimento | 2 | 4 | seleção em `expires_at` autoriza | intervalo semiaberto, testes Fases 2/3 e mutante inclusivo | domain/QA | mitigado |
+| R41 | Classificador semântico escolhe versão, assinatura ou target comercial | 2 | 5 | DTO/prompt contém IDs executáveis | DTO de decisão fechado; trusted binding recompõe target do estado; scan de assinatura pública e mutantes | domain/AI | mitigado |
+| R42 | Confirmação é vinculada a texto/locale diferente do resumo persistido | 2 | 5 | hash ou outbox não corresponde ao artefato | rerender determinístico, recomposição dos três IDs, hash/locale no identity material e tamper properties | domain/messaging | mitigado |
+| R43 | Pedido de ajuste deixa resumo antigo autorizável | 2 | 5 | aceite posterior ao `ADJUST` cria comando | estado `awaiting_adjustment`, sem handler de confirmação; nova assinatura/versão/resumo obrigatórios | domain/QA | mitigado |
+| R44 | Consulta de atividade com janela/sem horário é rejeitada ao retornar ocorrência concreta | 3 | 4 | adapter positivo falha no `OfferedState` | ocorrência dentro da janela inclusiva; `start_time=None` como wildcard; replay/property Bókun desde workflow vazio | domain/adapters | mitigado |
+| R45 | Marcador positivo desconhecido ou pergunta é aceito como confirmação | 2 | 5 | “sim, talvez”/“confirmo?” gera `ACCEPT` | conjunto fechado; `?` ambíguo; corpus PT/EN, RED tardio e mutantes independentes | domain/AI/QA | mitigado |
 
 ## Processo
 

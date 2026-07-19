@@ -7,14 +7,15 @@ import sys
 import tempfile
 import unittest
 
-from reservation_confirmation.properties import run_confirmation_properties
+from reservation_confirmation import Phase4PropertyReport, run_phase4_properties
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class Phase4PropertyTests(unittest.TestCase):
     def test_properties_cover_authorization_and_fail_closed_directions(self) -> None:
-        report = run_confirmation_properties(cases=264, seed=20260719)
+        report = run_phase4_properties(cases=264, seed=20260719)
+        self.assertIsInstance(report, Phase4PropertyReport)
         self.assertEqual(report.cases, 264)
         self.assertEqual(sum(report.locale_counts.values()), 264)
         self.assertEqual(set(report.locale_counts), {"pt_BR", "en"})
@@ -25,6 +26,33 @@ class Phase4PropertyTests(unittest.TestCase):
             {"accept", "reject", "adjust", "ambiguous"},
         )
         self.assertTrue(all(value > 0 for value in report.decision_counts.values()))
+        self.assertEqual(report.cloudbeds_cases + report.bokun_cases, 264)
+        self.assertEqual(report.pt_cases + report.en_cases, 264)
+        required_positive = (
+            "cloudbeds_cases",
+            "bokun_cases",
+            "explicit_cases",
+            "colloquial_cases",
+            "contextual_cases",
+            "negative_cases",
+            "ambiguous_cases",
+            "adjust_cases",
+            "deterministic_summaries",
+            "private_field_safe_summaries",
+            "posterior_accept_commands",
+            "same_time_rejections",
+            "stale_version_rejections",
+            "context_free_rejections",
+            "adjustment_disarms",
+            "semantic_version_increments",
+            "noop_adjustment_rejections",
+            "duplicate_zero_additional",
+            "classifier_error_rejections",
+        )
+        for field in required_positive:
+            self.assertGreater(getattr(report, field), 0, field)
+        self.assertEqual(report.false_commands, 0)
+        self.assertEqual(report.missing_required_commands, 0)
         self.assertGreater(report.authorized_accepts, 0)
         self.assertEqual(report.commands_emitted, report.authorized_accepts)
         self.assertGreater(report.duplicate_probes, 0)
@@ -43,15 +71,15 @@ class Phase4PropertyTests(unittest.TestCase):
         self.assertTrue(report.passed)
 
     def test_property_runner_is_deterministic_for_seed(self) -> None:
-        left = run_confirmation_properties(cases=48, seed=17)
-        right = run_confirmation_properties(cases=48, seed=17)
+        left = run_phase4_properties(cases=48, seed=17)
+        right = run_phase4_properties(cases=48, seed=17)
         self.assertEqual(left.to_dict(), right.to_dict())
 
     def test_property_runner_rejects_invalid_inputs(self) -> None:
         for cases, seed in ((0, 1), (-1, 1), (1, True)):
             with self.subTest(cases=cases, seed=seed):
                 with self.assertRaises(ValueError):
-                    run_confirmation_properties(cases=cases, seed=seed)
+                    run_phase4_properties(cases=cases, seed=seed)
 
     def test_cli_rejects_trivial_gate_and_allows_explicit_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

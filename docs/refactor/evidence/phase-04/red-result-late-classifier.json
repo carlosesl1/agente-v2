@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T03:31:31Z",
+  "command": "python3 -m unittest tests.test_phase4_classifier.ClassifierTests.test_positive_looking_unknowns_and_questions_fail_closed -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "positive_prefix_and_question_false_acceptance",
+  "failures": 4,
+  "reproduced": [
+    "pt_positive_unknown",
+    "en_positive_unknown",
+    "pt_explicit_question",
+    "en_explicit_question"
+  ],
+  "output_sha256": "071f31ba9e56d5dcd3930091023a3aefe2d54c7414d4589b5bfb1f4bf9625501",
+  "raw_output_versioned": false
+}

@@ -37,6 +37,7 @@ class Phase4MutationRunnerTests(unittest.TestCase):
                 "reservation_confirmation/binding.py",
                 "reservation_confirmation/classifier.py",
                 "reservation_confirmation/presentation.py",
+                "reservation_confirmation/properties.py",
                 "reservation_confirmation/renderer.py",
                 "reservation_domain/reducer.py",
             },

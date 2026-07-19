@@ -30,10 +30,14 @@ def _contains(tokens: tuple[str, ...], phrase: tuple[str, ...]) -> bool:
 
 
 _EXPLICIT = {
+    "sim",
+    "confirmo",
     "sim confirmo exatamente esse resumo",
     "confirmo exatamente esse resumo",
     "confirmo esse resumo",
     "sim confirmo",
+    "yes",
+    "i confirm",
     "yes i confirm this exact summary",
     "i confirm this exact summary",
     "yes i confirm this summary",
@@ -154,7 +158,7 @@ def _signals(item: ClassificationInput) -> tuple[set[str], str]:
         }
         if starts_positive or unnegated_confirm or contextual_prefix:
             signals.add("accept")
-            accept_kind = "explicit" if starts_positive or unnegated_confirm else "contextual"
+            accept_kind = "marker"
     return signals, accept_kind
 
 
@@ -169,6 +173,12 @@ class ReferenceConfirmationClassifier:
             return _candidate(
                 ConfirmationDecisionKind.AMBIGUOUS,
                 "context_missing",
+                confidence=10_000,
+            )
+        if "?" in unicodedata.normalize("NFKC", item.text):
+            return _candidate(
+                ConfirmationDecisionKind.AMBIGUOUS,
+                "mixed_or_unknown",
                 confidence=10_000,
             )
         signals, accept_kind = _signals(item)
@@ -190,6 +200,12 @@ class ReferenceConfirmationClassifier:
                 ConfirmationDecisionKind.REJECT,
                 "reject_explicit",
                 confidence=10_000,
+            )
+        if accept_kind == "marker":
+            return _candidate(
+                ConfirmationDecisionKind.AMBIGUOUS,
+                "mixed_or_unknown",
+                confidence=8_000,
             )
         return _candidate(
             ConfirmationDecisionKind.ACCEPT,

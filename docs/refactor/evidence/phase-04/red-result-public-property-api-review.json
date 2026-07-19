@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T04:04:25Z",
+  "command": "python3 -m unittest tests.test_phase4_properties -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "public_property_api_missing",
+  "missing_exports": [
+    "Phase4PropertyReport",
+    "run_phase4_properties"
+  ],
+  "output_sha256": "5ad33c6d51f01dafacd6c3e63262ba58eb50f4852d8da986e7b3e7e1ba18a4b1",
+  "raw_output_versioned": false
+}

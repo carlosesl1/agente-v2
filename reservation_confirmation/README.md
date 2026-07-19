@@ -23,3 +23,7 @@ mistos, exception ou retorno inválido produzem `AMBIGUOUS`.
 O trusted binding recompõe o renderer e os IDs do artefato persistido antes de
 converter uma decisão em `ConfirmationReceived`. O classificador nunca fornece
 versão, assinatura, oferta, provider ou operação comercial.
+
+`properties.py` é suporte de verificação, não runtime: atravessa os adapters
+Cloudbeds/Bókun da Fase 3 usando somente transports sintéticos in-memory para
+provar o baseline desde `new_workflow`; nenhum request externo é feito.

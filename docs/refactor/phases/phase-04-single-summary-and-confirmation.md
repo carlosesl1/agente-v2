@@ -2,7 +2,7 @@
 
 ## Status
 
-`plano aprovado; implementação não iniciada`
+`implementação concluída localmente; fechamento em validação`
 
 Aberta em `2026-07-19T02:21:03Z`, a partir do commit-base
 `18588cf2d9d771decd4e7c56540fabd79ed4ebcc`.
@@ -13,7 +13,7 @@ Provar deterministicamente uma versão comercial, um resumo persistível e uma
 confirmação natural posterior que produz no máximo um `ReservationCommand`, sem
 provider, rede ou side effect.
 
-## Design proposto
+## Design e plano executados
 
 - [spec da Fase 4](../../superpowers/specs/2026-07-19-phase-4-summary-confirmation-design.md)
 - [plano da Fase 4](../../superpowers/plans/2026-07-19-phase-4-summary-confirmation.md)
@@ -99,6 +99,39 @@ ReadyToSummarizeState
 8. validadores 0–4, scans, hashes e CI passam;
 9. commits e remoto são verificados;
 10. rollout permanece `NO-GO`.
+
+Estado local antes do CI remoto:
+
+- [x] renderer PT-BR/EN e `PreparedSummary` determinísticos;
+- [x] corpus sintético com 32 casos nas seis categorias;
+- [x] trusted binding recompõe hash/locale/IDs antes do evento;
+- [x] `awaiting_adjustment` desarma o resumo antigo;
+- [x] replays Cloudbeds e Bókun começam em workflow vazio;
+- [x] property gate: 50.000 casos, 12.500 autorizações, zero violações;
+- [x] mutation gate: 19/19 mortos em cópias temporárias;
+- [x] regressões pesadas, validators 0–4, hashes e scans finais;
+- [ ] commits publicados e CI remoto verificado.
+
+## Implementação
+
+- package puro `reservation_confirmation` com DTOs fechados, renderer,
+  apresentação, classifier Protocol/referência, binding e properties;
+- domínio ampliado para 16 estados e 192 pares explícitos, sem evento novo;
+- `start_time=None` é filtro aberto para opções de atividade; horário explícito
+  continua sendo igualdade exata;
+- o classificador retorna somente decisão/evidência; o reducer continua único
+  owner de autorização e construção de `ReservationCommand`.
+
+## Evidência local principal
+
+- 50.000 casos, seed `20260719`;
+- elapsed `105.558s`, max RSS `26584 KB`, exit code `0`;
+- 25.000 baselines Cloudbeds e 25.000 Bókun, todos desde `new_workflow`;
+- 12.500 comandos para 12.500 aceites autorizados;
+- zero comando prematuro, segundo comando, reemissão, stale acceptance,
+  falha de desarme, evento em falha de contexto, exceção ou violação;
+- 19/19 mutantes mortos;
+- legado permaneceu somente leitura no fingerprint canônico.
 
 ## Baseline legado somente leitura
 

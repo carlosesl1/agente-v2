@@ -63,6 +63,13 @@ MUTANTS = (
         test="tests.test_phase4_replays.BindingReplayTests.test_valid_contextual_acceptance_creates_one_command_for_both_providers",
     ),
     Mutant(
+        name="omit_decision_from_confirmation_identity",
+        path="reservation_confirmation/binding.py",
+        old='''        f"{digest}|{candidate.decision.value}".encode("utf-8")\n''',
+        new='''        f"{digest}".encode("utf-8")\n''',
+        test="tests.test_phase4_replays.BindingReplayTests.test_same_source_event_with_different_decision_is_conflicting_duplicate",
+    ),
+    Mutant(
         name="emit_event_after_classifier_failure",
         path="reservation_confirmation/binding.py",
         old="    if boundary_failures.intersection(candidate.evidence_codes):\n",
@@ -82,6 +89,20 @@ MUTANTS = (
         old="        if len(signals) != 1:\n",
         new="        if not signals:\n",
         test="tests.test_phase4_classifier.ClassifierTests.test_mixed_signals_fail_closed",
+    ),
+    Mutant(
+        name="accept_positive_marker_as_closed_phrase",
+        path="reservation_confirmation/classifier.py",
+        old='''        if accept_kind == "marker":\n''',
+        new='''        if False and accept_kind == "marker":\n''',
+        test="tests.test_phase4_classifier.ClassifierTests.test_positive_looking_unknowns_and_questions_fail_closed",
+    ),
+    Mutant(
+        name="ignore_confirmation_question_mark",
+        path="reservation_confirmation/classifier.py",
+        old='''        if "?" in unicodedata.normalize("NFKC", item.text):\n''',
+        new='''        if False and "?" in unicodedata.normalize("NFKC", item.text):\n''',
+        test="tests.test_phase4_classifier.ClassifierTests.test_positive_looking_unknowns_and_questions_fail_closed",
     ),
     Mutant(
         name="omit_addons_from_summary_total",
@@ -131,6 +152,13 @@ MUTANTS = (
         old='''        event.target_draft_version == state.draft.version\n        and event.subject_signature == state.draft.subject_signature\n        and event.subject_signature == state.summary.subject_signature\n''',
         new='''        event.target_draft_version == state.draft.version\n        and state.draft.subject_signature == state.draft.subject_signature\n        and state.summary.subject_signature == state.summary.subject_signature\n''',
         test="tests.test_phase2_domain.ReducerContractTests.test_mismatched_version_or_signature_never_emits_command",
+    ),
+    Mutant(
+        name="force_cloudbeds_property_baseline",
+        path="reservation_confirmation/properties.py",
+        old="        if (index + seed) % 2 == 0\n",
+        new="        if True\n",
+        test="tests.test_phase4_properties.Phase4PropertyTests.test_properties_cover_authorization_and_fail_closed_directions",
     ),
 )
 

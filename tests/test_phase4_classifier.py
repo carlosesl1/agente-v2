@@ -138,6 +138,19 @@ class ClassifierTests(unittest.TestCase):
                 self.assertIs(candidate.decision, ConfirmationDecisionKind.AMBIGUOUS)
                 self.assertIn("mixed_or_unknown", candidate.evidence_codes)
 
+    def test_positive_looking_unknowns_and_questions_fail_closed(self) -> None:
+        classifier = ReferenceConfirmationClassifier()
+        for text in (
+            "Sim, talvez.",
+            "Yes, maybe.",
+            "Confirmo esse resumo?",
+            "I confirm this summary?",
+        ):
+            with self.subTest(text=text):
+                candidate = classifier.classify(classification_input(text))
+                self.assertIs(candidate.decision, ConfirmationDecisionKind.AMBIGUOUS)
+                self.assertIn("mixed_or_unknown", candidate.evidence_codes)
+
     def test_context_is_required_even_for_explicit_acceptance(self) -> None:
         candidate = ReferenceConfirmationClassifier().classify(
             classification_input("Sim, confirmo.", has_context=False)

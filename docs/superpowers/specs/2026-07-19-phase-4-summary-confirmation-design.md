@@ -211,8 +211,11 @@ Ela usa conjuntos fechados e precedência fail-closed:
 6. aceite coloquial/contextual, somente com contexto → `ACCEPT`;
 7. qualquer outro texto → `AMBIGUOUS`.
 
-A normalização usa NFKC, `casefold`, whitespace canônico e pontuação periférica.
-Não há match de substring capaz de transformar “não confirmo” em aceite.
+A normalização usa NFKC, `casefold`, whitespace canônico e pontuação periférica
+não interrogativa. `?` é sinal semântico e falha como ambíguo; marcadores como
+“sim/yes” só ajudam a detectar sinais mistos e não autorizam complementos fora
+do conjunto fechado. Não há match de substring capaz de transformar “não
+confirmo” em aceite.
 
 Cobertura de referência:
 

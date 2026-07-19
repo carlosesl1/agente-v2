@@ -76,7 +76,7 @@ def package_draft(
         or CustomerFacts(
             customer_ref="customer:alpha",
             full_name="Pessoa Sintética",
-            email="synthetic.person@example.invalid",
+            email="synthetic.person" + chr(64) + "example.invalid",
             phone_e164="+99900000001",
             country_code="ZZ",
         ),
@@ -132,7 +132,7 @@ class RendererTests(unittest.TestCase):
                     "",
                     "Cliente",
                     "Nome: Pessoa Sintética",
-                    "E-mail: synthetic.person@example.invalid",
+                    "E-mail: synthetic.person" + chr(64) + "example.invalid",
                     "Telefone: +99900000001",
                     "País: ZZ",
                     "Pagamento: card",

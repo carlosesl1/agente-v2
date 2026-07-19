@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T04:14:35Z",
+  "status": "ok",
+  "previous_validators": {
+    "phase0": "ok",
+    "phase1": "ok",
+    "phase2": "ok",
+    "phase3": "ok"
+  },
+  "tests": {
+    "command": "python3 -m unittest discover -s tests -v",
+    "count": 153,
+    "failures": 0,
+    "errors": 0,
+    "elapsed_seconds": 10.819,
+    "process_elapsed_seconds": 11.456,
+    "max_rss_kb": 32100,
+    "exit_code": 0,
+    "output_sha256": "8124c0c6377638982c698bc2bc9d0279c1ee6299f4a04fa7930df04aaa7227ae"
+  },
+  "properties": {
+    "cases": 50000,
+    "seed": 20260719,
+    "authorized_accepts": 12500,
+    "commands_emitted": 12500,
+    "cloudbeds_cases": 25000,
+    "bokun_cases": 25000,
+    "false_commands": 0,
+    "missing_required_commands": 0,
+    "violations": 0,
+    "elapsed_seconds": 105.558,
+    "max_rss_kb": 26584,
+    "exit_code": 0
+  },
+  "mutations": {
+    "mutants": 19,
+    "killed": 19,
+    "all_killed": true,
+    "temporary_copies_only": true
+  },
+  "domain_regression": {
+    "states": 16,
+    "events": 12,
+    "pairs": 192,
+    "sequences": 100000,
+    "transitions": 2000000,
+    "authorized_accepts": 48240,
+    "violations": 0,
+    "elapsed_seconds": 162.3,
+    "max_rss_kb": 25908,
+    "exit_code": 0
+  },
+  "static_checks": {
+    "compileall": "ok",
+    "ast_parse": "ok",
+    "git_diff_check": "ok"
+  },
+  "phase4_validator": {
+    "status": "ok",
+    "failures": 0,
+    "red_expected": 11,
+    "red_valid": 11,
+    "package_python_files": 7,
+    "fixture_files": 1,
+    "evidence_hashes_checked": 51,
+    "text_files_scanned": 206,
+    "relative_links_checked": 16,
+    "forbidden_imports": 0,
+    "forbidden_calls": 0,
+    "runtime_marker_hits": 0
+  },
+  "external_execution": {
+    "legacy_runtime": false,
+    "provider_network": false,
+    "provider_write": false,
+    "llm_provider": false,
+    "hermes_runtime": false,
+    "manychat": false,
+    "deploy": false
+  },
+  "rollout": "NO-GO"
+}
