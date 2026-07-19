@@ -2,7 +2,9 @@
 
 Fase: `phase-03-lookups-and-offer-snapshots`.
 
-Status: **remediação pós-closeout**, após parecer independente tardio.
+Status: **concluída e remediada**. Implementação inicial
+`33b1975dd660963b242f961721d8117404654893`; remediação tardia
+`b7c4cb2d6376d9ad3513477fc056a0ba978f77e7`.
 
 Este diretório prova adapters read-only e seleção por identidade opaca. Não
 contém payload live, credencial, header, PII, mensagem real ou write de

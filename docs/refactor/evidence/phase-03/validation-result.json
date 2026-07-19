@@ -70,12 +70,31 @@
       "reservation_lookup/_common.py:45"
     ]
   },
-  "recorded_at_utc": "2026-07-19T01:16:51Z",
+  "recorded_at_utc": "2026-07-19T01:27:07Z",
   "red": {
     "expected": 6,
     "valid": 6
   },
   "relative_links_checked": 13,
+  "remediation_ci": {
+    "phase-0-validation": {
+      "conclusion": "success",
+      "run_id": 29668429210
+    },
+    "phase-1-characterization": {
+      "conclusion": "success",
+      "run_id": 29668429221
+    },
+    "phase-2-domain": {
+      "conclusion": "success",
+      "run_id": 29668429255
+    },
+    "phase-3-lookups": {
+      "conclusion": "success",
+      "run_id": 29668429234
+    }
+  },
+  "remediation_commit": "b7c4cb2d6376d9ad3513477fc056a0ba978f77e7",
   "schema_version": 1,
   "source_map": {
     "legacy_head": "57408d8b2040399bc25ee7957505208079458884",
@@ -84,5 +103,5 @@
   "status": "ok",
   "supersedes_closeout": "e19d0e571ec4f19f6f3979a88b9ddb559a4994f5",
   "text_files_scanned": 160,
-  "validation_record": "late_review_remediation_preflight"
+  "validation_record": "late_review_remediation_remote_verified"
 }

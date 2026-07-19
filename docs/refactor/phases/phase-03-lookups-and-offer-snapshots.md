@@ -2,7 +2,7 @@
 
 ## Status
 
-`remediação de revisão tardia`
+`concluída e remediada`
 
 Aberta em `2026-07-18T23:24:58Z`, a partir do commit-base
 `e318a2f1cad6fbeda3db11a0368f7b762ae84cdf`.
@@ -13,6 +13,9 @@ Implementação publicada em `2026-07-19T00:40:28Z` no commit
 O closeout `e19d0e571ec4f19f6f3979a88b9ddb559a4994f5` foi reaberto quando um
 parecer independente tardio reproduziu colisões de target/provenance. Ele não é
 mais tratado como encerramento definitivo.
+
+Remediação publicada em `2026-07-19T01:20:25Z` no commit
+`b7c4cb2d6376d9ad3513477fc056a0ba978f77e7` e validada nos quatro workflows.
 
 ## Objetivo
 
@@ -142,7 +145,7 @@ Reverter somente os commits da Fase 3 no repositório novo. Não há ação live
 - mutation gate: `19/19` mutantes mortos por runner reproduzível;
 - fixtures: `8`, quatro Cloudbeds e quatro Bókun, todas sintéticas;
 - package: `8` módulos Python, nenhum import de rede/env/filesystem/provider;
-- hashes: pendentes de regeneração final após remediação;
+- hashes: `38` artefatos verificados;
 - validadores das Fases 0–3: `ok`, zero failures;
 - legado somente leitura: HEAD/status/status-hash inalterados;
 - nenhuma rede, auth, provider, write, banco, fila, Docker ou deploy executado.
@@ -154,11 +157,18 @@ GitHub Actions do commit de implementação:
 - `phase-2-domain`: run `29667240862`, `success`;
 - `phase-3-lookups`: run `29667240868`, `success`.
 
+GitHub Actions do commit de remediação:
+
+- `phase-0-validation`: run `29668429210`, `success`;
+- `phase-1-characterization`: run `29668429221`, `success`;
+- `phase-2-domain`: run `29668429255`, `success`;
+- `phase-3-lookups`: run `29668429234`, `success`.
+
 Uma das três frentes externas entregou parecer tardio após o closeout; duas
 expiraram sem summary. Os achados materiais foram reproduzidos em RED e estão
 documentados em A10–A15. O parecer útil integra a evidência; os timeouts não.
 
 ## Decisão de avanço
 
-A Fase 4 voltou a ficar bloqueada até novo commit de remediação, CI e closeout
-remoto da Fase 3.
+A Fase 3 está novamente encerrada. A Fase 4 fica elegível, mas permanece **não
+iniciada** até direção explícita.
