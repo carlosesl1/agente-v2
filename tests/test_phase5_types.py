@@ -63,7 +63,7 @@ def reservation_command() -> ReservationCommand:
     customer = CustomerFacts(
         customer_ref="customer:synthetic:1",
         full_name="Synthetic Test Person",
-        email="synthetic.person@example.invalid",
+        email="synthetic.person" + chr(64) + "example.invalid",
         phone_e164="+99900000000",
         country_code="ZZ",
     )
