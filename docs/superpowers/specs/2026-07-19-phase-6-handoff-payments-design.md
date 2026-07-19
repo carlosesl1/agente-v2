@@ -1,7 +1,7 @@
 # Fase 6 — Handoff e pagamentos separados — Design
 
 - Data: 2026-07-19
-- Status: proposto e formalizado; aguardando revisão do documento
+- Status: aprovado por Carlos; plano TDD escrito e aguardando aprovação
 - Base imutável da fase: `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`
 - Branch: `phase6-handoff-payments`
 - Rollout: `NO-GO`

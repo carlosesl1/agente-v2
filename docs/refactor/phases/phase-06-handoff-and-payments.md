@@ -2,7 +2,7 @@
 
 ## Status
 
-`design formalizado; implementação não iniciada`
+`design aprovado; plano TDD escrito e aguardando aprovação; implementação não iniciada`
 
 Aberta em `2026-07-19T17:48:53Z`, a partir do commit-base
 `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`.
@@ -16,6 +16,7 @@ a reserva.
 ## Design
 
 - [spec da Fase 6](../../superpowers/specs/2026-07-19-phase-6-handoff-payments-design.md)
+- [plano TDD da Fase 6](../../superpowers/plans/2026-07-19-phase-6-handoff-payments.md)
 
 ## Decisões de entrada
 
@@ -40,7 +41,7 @@ a reserva.
 - [x] `/home/ubuntu/chapada-leads-hermes` permanece somente leitura;
 - [x] SQLite local autorizado;
 - [x] rollout `NO-GO`;
-- [ ] spec revisada pelo usuário;
+- [x] spec revisada e aprovada pelo usuário;
 - [ ] plano TDD aprovado.
 
 ## Escopo autorizado
