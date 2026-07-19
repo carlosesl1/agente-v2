@@ -4,6 +4,11 @@ Fase: `phase-05-durable-command-execution`.
 
 Status: **aberta documentalmente; nenhuma implementação funcional iniciada**.
 
+Design e plano TDD versionados:
+
+- `../../../superpowers/specs/2026-07-19-phase-5-durable-command-execution-design.md`;
+- `../../../superpowers/plans/2026-07-19-phase-5-durable-command-execution.md`.
+
 ## Entrada
 
 `entry-baseline.json` fixa:

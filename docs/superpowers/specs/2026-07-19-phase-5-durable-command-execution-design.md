@@ -1,7 +1,7 @@
 # Fase 5 — Design de comando e execução duráveis
 
 **Data:** 2026-07-19
-**Status:** aprovado conceitualmente; especificação aguardando revisão final do usuário
+**Status:** aprovado e consolidado; plano TDD escrito, implementação não iniciada
 **Fase anterior:** Fase 4 concluída no SHA `e51259ea0d19a2d07d3d14ee086b0766776cbeab`
 
 ## 1. Objetivo
@@ -566,14 +566,15 @@ limite mais conservador: dispatch slots possíveis.
 | Situação | Ação |
 |---|---|
 | `PREPARING`, lease expirado, zero dispatch | libera para novo claim |
-| `DISPATCH_FENCED`, lease expirado, sem outcome | cria `called_unknown` sem chamar adapter |
-| outcome persistido e state ainda `executing` | reaplica somente a transição local |
-| `uncertain` sem manual review | aplica `ManualReviewRequested` |
+| `DISPATCH_FENCED`, lease expirado, sem outcome | cria `called_unknown` e manual review atomicamente, sem chamar adapter |
+| outcome persistido com state anterior | corrupção impossível sob o contrato; falha fechado |
+| state `uncertain` sem ledger/manual review correspondente | corrupção impossível sob o contrato; falha fechado |
 | outbox pending/lease expirado | deixa para `OutboxWorker` |
 | token antigo | rejeita sem mudança |
 
 O reconciler nunca recebe `ExecutionAdapter` e, portanto, é estruturalmente
-incapaz de redispatch.
+incapaz de redispatch. Ele não repara combinações que uma transação válida não
+poderia produzir; essas combinações são corrupção e bloqueiam processamento.
 
 ## 13. Outcome e reducer
 

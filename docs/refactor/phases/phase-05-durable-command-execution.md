@@ -2,7 +2,7 @@
 
 ## Status
 
-`design aprovado; especificação aguardando revisão do usuário`
+`design e plano TDD aprovados; implementação não iniciada`
 
 Aberta em `2026-07-19T04:50:49Z`, a partir do commit-base
 `e51259ea0d19a2d07d3d14ee086b0766776cbeab`.
@@ -15,6 +15,7 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 ## Design
 
 - [spec da Fase 5](../../superpowers/specs/2026-07-19-phase-5-durable-command-execution-design.md)
+- [plano TDD da Fase 5](../../superpowers/plans/2026-07-19-phase-5-durable-command-execution.md)
 
 ## Decisões aprovadas
 
@@ -39,8 +40,8 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - [x] arquitetura/ownership aprovados;
 - [x] política de dispatch conservadora aceita por melhor julgamento;
 - [x] design completo aprovado;
-- [ ] especificação escrita revisada pelo usuário;
-- [ ] plano TDD escrito e aprovado para execução.
+- [x] especificação consolidada e autorrevisada;
+- [x] plano TDD escrito, autorrevisado e aprovado para execução por melhor julgamento.
 
 ## Escopo autorizado após aprovação do plano
 

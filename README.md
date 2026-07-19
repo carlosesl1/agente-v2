@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 5 — design aprovado; especificação em revisão**.
+- Fase ativa: **Fase 5 — design e plano TDD aprovados; implementação não iniciada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
