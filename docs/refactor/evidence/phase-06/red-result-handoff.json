@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "phase": "phase-06-handoff-and-payments",
+  "task": "pure_handoff_workflow",
+  "command": "python3 -m unittest tests.test_phase6_handoff -v >/tmp/phase6-task2-red.out 2>&1",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_reservation_followup_handoff_module",
+  "failure_reason": "ModuleNotFoundError: No module named 'reservation_followup.handoff'",
+  "tests": 1,
+  "failures": 0,
+  "errors": 1,
+  "output_sha256": "e2553dc689836755263b2ed39b633db9173bf06c56fc4485e5b39c92ca1fca5e",
+  "raw_output_path": "/tmp/phase6-task2-red.out",
+  "raw_output_versioned": false,
+  "self_review_reds": [
+    {
+      "name": "closed_projection_input_and_nested_workflow_bindings",
+      "command": "python3 -m unittest tests.test_phase6_handoff.Phase6HandoffReducerTests.test_reducer_api_has_no_lead_text_or_lexical_routing_input tests.test_phase6_handoff.Phase6HandoffSerializationTests.test_workflow_wire_reapplies_effect_bindings_and_policy -v >/tmp/phase6-task2-self-review-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 2,
+      "failures": 3,
+      "errors": 0,
+      "failure_reason": "projection accepted arbitrary safety text and workflow wire accepted divergent acknowledgement effect ID or disabled e-mail failure",
+      "output_sha256": "dc98d09de47ea29c813b0cc43a5addc92ee6c075503856ac83cc423d4c653bed",
+      "raw_output_path": "/tmp/phase6-task2-self-review-red.out",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "anchor_chronology_conflict_immutability_and_ack_monotonicity",
+      "command": "python3 -m unittest tests.test_phase6_handoff.Phase6HandoffContractTests.test_request_validates_exact_ids_hash_reason_time_and_optional_anchor tests.test_phase6_handoff.Phase6HandoffReducerTests.test_divergent_incident_conflicts_without_overwriting_original tests.test_phase6_handoff.Phase6HandoffReducerTests.test_late_required_ack_failure_cannot_regress_acknowledged_state -v >/tmp/phase6-task2-monotonic-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 3,
+      "failures": 3,
+      "errors": 0,
+      "failure_reason": "future anchor was accepted, second conflict overwrote the first and late acknowledgement failure regressed acknowledged state",
+      "output_sha256": "ff03662c2bcd7766a79601e3dfca50542c3a807adfdb506d6e25e0b5aeeac4cf",
+      "raw_output_path": "/tmp/phase6-task2-monotonic-red.out",
+      "raw_output_versioned": false
+    }
+  ],
+  "synthetic_fixtures_only": true,
+  "rollout": "NO-GO"
+}

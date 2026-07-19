@@ -13,11 +13,26 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from reservation_domain import ExecutionCertainty, ExecutionOutcome, ServiceKind
 
+from .handoff import (
+    HandoffAcknowledged,
+    HandoffCancellationCode,
+    HandoffCancelled,
+    HandoffEffectFailed,
+    HandoffEffectFailureCode,
+    HandoffEffectJob,
+    HandoffEffectKind,
+    HandoffReasonCode,
+    HandoffRequested,
+    HandoffWorkflow,
+    PublicHandoffProjection,
+    PublicNextAction,
+)
 from .types import (
     BusinessUnit,
     ConfirmedReservationAnchor,
     EffectRequirement,
     HandoffEffectPolicy,
+    HandoffStatus,
     PaymentEffectPolicy,
     PaymentMethod,
     PaymentSubject,
@@ -30,6 +45,13 @@ _TYPE_TAGS = {
     HandoffEffectPolicy: "handoff_effect_policy",
     PaymentEffectPolicy: "payment_effect_policy",
     PaymentSubject: "payment_subject",
+    HandoffRequested: "handoff_requested",
+    HandoffAcknowledged: "handoff_acknowledged",
+    HandoffEffectFailed: "handoff_effect_failed",
+    HandoffCancelled: "handoff_cancelled",
+    HandoffEffectJob: "handoff_effect_job",
+    HandoffWorkflow: "handoff_workflow",
+    PublicHandoffProjection: "public_handoff_projection",
 }
 _NESTED_DATACLASSES = frozenset((*_TYPE_TAGS, ExecutionOutcome))
 _ENUM_TYPES = frozenset(
@@ -37,8 +59,14 @@ _ENUM_TYPES = frozenset(
         BusinessUnit,
         PaymentMethod,
         EffectRequirement,
+        HandoffStatus,
         ServiceKind,
         ExecutionCertainty,
+        HandoffReasonCode,
+        HandoffEffectKind,
+        HandoffEffectFailureCode,
+        HandoffCancellationCode,
+        PublicNextAction,
     )
 )
 
