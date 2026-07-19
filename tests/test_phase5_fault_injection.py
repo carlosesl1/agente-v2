@@ -9,6 +9,7 @@ import unittest
 
 from scripts.run_phase5_faults import (
     FAULT_POINTS,
+    _schedule_violations,
     run_fault_matrix,
     run_restart_schedules,
 )
@@ -64,6 +65,79 @@ class Phase5FaultInjectionTests(unittest.TestCase):
                 else:
                     self.assertEqual(schedule["mechanism"], "process_crash")
                     self.assertEqual(schedule["child_exit_code"], 91)
+
+        by_point = {item["fault_point"]: item for item in report["schedules"]}
+        for point in (
+            "after_claim_before_prepare",
+            "during_prepare",
+            "after_prepare_before_fence",
+        ):
+            with self.subTest(exact_pre_fence_recovery=point):
+                schedule = by_point[point]
+                self.assertEqual(schedule["pre_dispatch_released"], 1)
+                self.assertEqual(schedule["called_unknown"], 0)
+                self.assertEqual(schedule["final_ledger_status"], "outcome_recorded")
+                self.assertEqual(schedule["final_fencing_token"], 2)
+                self.assertEqual(schedule["final_claim_count"], 2)
+                self.assertEqual(schedule["provider_calls"], 1)
+                self.assertEqual(schedule["worker_disposition"], "completed")
+        for point, expected_provider_calls in (
+            ("after_fence_before_dispatch", 0),
+            ("during_dispatch", 1),
+            ("after_dispatch_before_outcome", 1),
+        ):
+            with self.subTest(exact_post_fence_recovery=point):
+                schedule = by_point[point]
+                self.assertEqual(schedule["pre_dispatch_released"], 0)
+                self.assertEqual(schedule["called_unknown"], 1)
+                self.assertEqual(schedule["final_ledger_status"], "manual_review")
+                self.assertEqual(schedule["dispatch_slots_consumed"], 1)
+                self.assertEqual(schedule["provider_calls"], expected_provider_calls)
+                self.assertEqual(schedule["followup_worker_disposition"], "idle")
+        for point in ("during_delivery", "after_delivery_before_receipt"):
+            with self.subTest(exact_delivery_recovery=point):
+                schedule = by_point[point]
+                self.assertEqual(schedule["provider_calls_baseline"], 1)
+                self.assertEqual(schedule["provider_calls"], 1)
+                self.assertEqual(schedule["provider_calls_during_recovery"], 0)
+                self.assertEqual(schedule["delivery_calls"], 2)
+                self.assertEqual(schedule["recovered_outbox_status"], "delivered")
+                self.assertEqual(schedule["recovered_outbox_fencing_token"], 2)
+                self.assertEqual(schedule["recovered_outbox_attempts"], 2)
+                self.assertTrue(schedule["receipt_persisted"])
+
+    def test_restart_oracle_rejects_permissive_false_greens(self) -> None:
+        base = {
+            "mechanism": "process_crash",
+            "command_count": 1,
+            "dispatch_slots_consumed": 1,
+            "provider_calls": 0,
+            "delivery_calls": 0,
+            "partial_transactions": 0,
+            "called_unknown_redispatches": 0,
+            "child_exit_code": 91,
+            "pre_dispatch_released": 0,
+            "called_unknown": 0,
+            "final_ledger_status": "dispatch_fenced",
+            "final_fencing_token": 1,
+            "final_claim_count": 1,
+            "worker_disposition": None,
+            "followup_worker_disposition": None,
+            "provider_calls_baseline": 0,
+            "provider_calls_during_recovery": 0,
+            "recovered_outbox_status": None,
+            "recovered_outbox_fencing_token": None,
+            "recovered_outbox_attempts": None,
+            "receipt_persisted": False,
+        }
+        for point in (
+            "after_claim_before_prepare",
+            "after_fence_before_dispatch",
+            "during_delivery",
+        ):
+            schedule = {**base, "fault_point": point}
+            with self.subTest(fault_point=point):
+                self.assertTrue(_schedule_violations(schedule))
 
     def test_restart_schedules_are_deterministic_and_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase5-restarts-a-") as first_dir:

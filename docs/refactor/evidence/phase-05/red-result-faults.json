@@ -26,6 +26,17 @@
       "errors": 4,
       "output_sha256": "20bbd9f283e17b6218e6cb03531fba904d7df88a565f5561baf4ed31f670b090",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_exact_restart_delivery_contention_oracles",
+      "base_sha": "85a76d03fcbe58990fb68b847d8619660287f854",
+      "command": "python3 -m unittest tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_all_fault_points_survive_rollback_or_crash_restart tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_restart_oracle_rejects_permissive_false_greens tests.test_phase5_concurrency.Phase5ConcurrencyTests.test_contention_oracle_requires_exact_provider_delta_by_kind -v",
+      "exit_code": 1,
+      "tests_run": 3,
+      "failures": 4,
+      "errors": 8,
+      "output_sha256": "2c1fe6229c0c9ff480358b8432160c6032274d0cd09ab63d6ea254f503fbc5ee",
+      "raw_output_versioned": false
     }
   ]
 }

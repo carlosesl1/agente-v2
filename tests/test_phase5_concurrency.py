@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from scripts.run_phase5_faults import run_contention
+from scripts.run_phase5_faults import _contention_violations, run_contention
 
 SEED = 2026071905
 
@@ -41,8 +41,38 @@ class Phase5ConcurrencyTests(unittest.TestCase):
             with self.subTest(kind=round_result["kind"], round=round_result["round"]):
                 self.assertEqual(round_result["winners"], 1)
                 self.assertEqual(round_result["winning_tokens"], [1])
-                self.assertLessEqual(round_result["provider_calls"], 1)
+                self.assertEqual(
+                    round_result["provider_calls"],
+                    1 if round_result["kind"] == "command" else 0,
+                )
                 self.assertEqual(round_result["partial_transactions"], 0)
+
+    def test_contention_oracle_requires_exact_provider_delta_by_kind(self) -> None:
+        common = {
+            "winners": 1,
+            "winning_tokens": [1],
+            "partial_transactions": 0,
+            "child_errors": 0,
+            "nonzero_child_exits": 0,
+        }
+        missing_command_call = {
+            **common,
+            "kind": "command",
+            "provider_calls": 0,
+        }
+        unexpected_outbox_call = {
+            **common,
+            "kind": "outbox",
+            "provider_calls": 1,
+        }
+        self.assertIn(
+            "provider_call_count",
+            _contention_violations(missing_command_call),
+        )
+        self.assertIn(
+            "provider_call_count",
+            _contention_violations(unexpected_outbox_call),
+        )
 
 
 if __name__ == "__main__":

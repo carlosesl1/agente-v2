@@ -207,14 +207,17 @@ def _setup_fenced(path: Path, label: str):
     return store, workflow_id, command_id, permit, request
 
 
-def _setup_outbox(path: Path, label: str) -> tuple[str, str]:
+def _setup_outbox(
+    path: Path,
+    label: str,
+    provider_log: Path,
+) -> tuple[str, str]:
     workflow_id, command_id = _setup_queued(path, label)
-    setup_log = path.with_name(path.stem + "-setup-provider.log")
     store = SQLiteUnitOfWork.open(path)
     try:
         worker = CommandWorker(
             store=store,
-            adapter=_AppendingExecutionAdapter(setup_log),
+            adapter=_AppendingExecutionAdapter(provider_log),
             worker_id="worker:outbox-setup",
             lease_ttl=LEASE_TTL,
         )
@@ -281,17 +284,34 @@ def _snapshot(
         "SELECT COUNT(*) FROM execution_ledger WHERE outcome_json LIKE ?",
         ('%"certainty":"called_unknown"%',),
     ).fetchone()[0]
+    ledger_row = store._connection.execute(
+        "SELECT status, fencing_token, claim_count FROM execution_ledger "
+        "ORDER BY command_id LIMIT 1"
+    ).fetchone()
     return {
         "fault_point": fault_point,
         "mechanism": mechanism,
         "command_count": command_count,
         "dispatch_slots_consumed": slots,
         "provider_calls": provider_calls,
+        "provider_calls_baseline": 0,
+        "provider_calls_during_recovery": provider_calls,
         "delivery_calls": _line_count(delivery_log),
         "partial_transactions": _partial_transaction_count(store),
+        "pre_dispatch_released": 0,
+        "called_unknown": unknown_rows,
         "called_unknown_redispatches": (
             max(0, provider_calls - 1) if unknown_rows else 0
         ),
+        "final_ledger_status": None if ledger_row is None else ledger_row[0],
+        "final_fencing_token": None if ledger_row is None else ledger_row[1],
+        "final_claim_count": None if ledger_row is None else ledger_row[2],
+        "worker_disposition": None,
+        "followup_worker_disposition": None,
+        "recovered_outbox_status": None,
+        "recovered_outbox_fencing_token": None,
+        "recovered_outbox_attempts": None,
+        "receipt_persisted": False,
         "child_exit_code": child_exit_code,
     }
 
@@ -310,6 +330,75 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
         violations.append("called_unknown_redispatch")
     if schedule["mechanism"] == "process_crash" and schedule["child_exit_code"] != 91:
         violations.append("wrong_child_exit")
+
+    point = schedule["fault_point"]
+    expected: dict[str, object] = {}
+    if point == "after_commit_before_claim":
+        expected = {
+            "pre_dispatch_released": 0,
+            "called_unknown": 0,
+            "final_ledger_status": "outcome_recorded",
+            "final_fencing_token": 1,
+            "final_claim_count": 1,
+            "provider_calls": 1,
+            "provider_calls_baseline": 0,
+            "provider_calls_during_recovery": 1,
+            "worker_disposition": "completed",
+        }
+    elif point in {
+        "after_claim_before_prepare",
+        "during_prepare",
+        "after_prepare_before_fence",
+    }:
+        expected = {
+            "pre_dispatch_released": 1,
+            "called_unknown": 0,
+            "final_ledger_status": "outcome_recorded",
+            "final_fencing_token": 2,
+            "final_claim_count": 2,
+            "provider_calls": 1,
+            "provider_calls_baseline": 0,
+            "provider_calls_during_recovery": 1,
+            "worker_disposition": "completed",
+        }
+    elif point in {
+        "after_fence_before_dispatch",
+        "during_dispatch",
+        "after_dispatch_before_outcome",
+    }:
+        provider_calls = 0 if point == "after_fence_before_dispatch" else 1
+        expected = {
+            "pre_dispatch_released": 0,
+            "called_unknown": 1,
+            "final_ledger_status": "manual_review",
+            "final_fencing_token": 1,
+            "final_claim_count": 1,
+            "dispatch_slots_consumed": 1,
+            "provider_calls": provider_calls,
+            "provider_calls_baseline": 0,
+            "provider_calls_during_recovery": provider_calls,
+            "followup_worker_disposition": "idle",
+        }
+    elif point in {"during_delivery", "after_delivery_before_receipt"}:
+        expected = {
+            "pre_dispatch_released": 0,
+            "called_unknown": 0,
+            "final_ledger_status": "outcome_recorded",
+            "final_fencing_token": 1,
+            "final_claim_count": 1,
+            "provider_calls_baseline": 1,
+            "provider_calls": 1,
+            "provider_calls_during_recovery": 0,
+            "delivery_calls": 2,
+            "worker_disposition": "delivered",
+            "recovered_outbox_status": "delivered",
+            "recovered_outbox_fencing_token": 2,
+            "recovered_outbox_attempts": 2,
+            "receipt_persisted": True,
+        }
+    for field_name, expected_value in expected.items():
+        if schedule.get(field_name) != expected_value:
+            violations.append(f"unexpected_{field_name}")
     return tuple(violations)
 
 
@@ -489,13 +578,24 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
     delivery_log = directory / f"restart-{index}-delivery.log"
     label = f"{index}:{point}"
     if point in {"during_delivery", "after_delivery_before_receipt"}:
-        _setup_outbox(db_path, label)
+        _setup_outbox(db_path, label, provider_log)
     else:
         _setup_queued(db_path, label)
+    provider_calls_baseline = _line_count(provider_log)
     exit_code = _spawn_crash(point, db_path, provider_log, delivery_log)
     store = SQLiteUnitOfWork.open(db_path)
     try:
+        reconciliation = None
+        worker_result = None
+        followup_result = None
+        recovered_snapshot = None
         if point in {"during_delivery", "after_delivery_before_receipt"}:
+            recovered_row = store._connection.execute(
+                "SELECT message_id FROM outbox_messages "
+                "WHERE status='leased' AND claim_owner='delivery:crashed'"
+            ).fetchone()
+            if recovered_row is None:
+                raise AssertionError("crashed delivery did not leave its durable lease")
             delivery_at = DELIVERY_AT + timedelta(seconds=31)
             worker = OutboxWorker(
                 store=store,
@@ -503,7 +603,8 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
                 worker_id="delivery:restart",
                 lease_ttl=LEASE_TTL,
             )
-            worker.run_once(now=delivery_at)
+            worker_result = worker.run_once(now=delivery_at)
+            recovered_snapshot = store.load_outbox_snapshot(recovered_row[0])
         elif point == "after_commit_before_claim":
             worker = CommandWorker(
                 store=store,
@@ -511,23 +612,36 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
                 worker_id="worker:restart",
                 lease_ttl=LEASE_TTL,
             )
-            worker.run_once(now=COMMAND_AT)
+            worker_result = worker.run_once(now=COMMAND_AT)
         elif point in {
             "after_claim_before_prepare",
             "during_prepare",
             "after_prepare_before_fence",
         }:
-            Reconciler(store).run_once(now=COMMAND_AT + timedelta(seconds=30))
+            reconciliation = Reconciler(store).run_once(
+                now=COMMAND_AT + timedelta(seconds=30)
+            )
             worker = CommandWorker(
                 store=store,
                 adapter=_AppendingExecutionAdapter(provider_log),
                 worker_id="worker:restart",
                 lease_ttl=LEASE_TTL,
             )
-            worker.run_once(now=COMMAND_AT + timedelta(seconds=31))
+            worker_result = worker.run_once(now=COMMAND_AT + timedelta(seconds=31))
         else:
-            Reconciler(store).run_once(now=COMMAND_AT + timedelta(seconds=30))
-        return _snapshot(
+            reconciliation = Reconciler(store).run_once(
+                now=COMMAND_AT + timedelta(seconds=30)
+            )
+            followup = CommandWorker(
+                store=store,
+                adapter=_AppendingExecutionAdapter(provider_log),
+                worker_id="worker:post-fence-probe",
+                lease_ttl=LEASE_TTL,
+            )
+            followup_result = followup.run_once(
+                now=COMMAND_AT + timedelta(seconds=31)
+            )
+        schedule = _snapshot(
             store,
             fault_point=point,
             mechanism="process_crash",
@@ -535,6 +649,54 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
             delivery_log=delivery_log,
             child_exit_code=exit_code,
         )
+        schedule.update(
+            {
+                "provider_calls_baseline": provider_calls_baseline,
+                "provider_calls_during_recovery": (
+                    schedule["provider_calls"] - provider_calls_baseline
+                ),
+                "pre_dispatch_released": (
+                    0 if reconciliation is None else reconciliation.pre_dispatch_released
+                ),
+                "called_unknown": (
+                    schedule["called_unknown"]
+                    if reconciliation is None
+                    else reconciliation.called_unknown
+                ),
+                "worker_disposition": (
+                    None
+                    if worker_result is None
+                    else worker_result.disposition.value
+                ),
+                "followup_worker_disposition": (
+                    None
+                    if followup_result is None
+                    else followup_result.disposition.value
+                ),
+                "recovered_outbox_status": (
+                    None
+                    if recovered_snapshot is None
+                    else recovered_snapshot.status.value
+                ),
+                "recovered_outbox_fencing_token": (
+                    None
+                    if recovered_snapshot is None
+                    else recovered_snapshot.fencing_token
+                ),
+                "recovered_outbox_attempts": (
+                    None
+                    if recovered_snapshot is None
+                    else recovered_snapshot.delivery_attempts
+                ),
+                "receipt_persisted": (
+                    False
+                    if recovered_snapshot is None
+                    else recovered_snapshot.receipt_hash is not None
+                    and recovered_snapshot.delivered_at is not None
+                ),
+            }
+        )
+        return schedule
     finally:
         store.close()
 
@@ -729,7 +891,13 @@ def _command_contention_round(directory: Path, round_index: int) -> dict[str, ob
 
 def _outbox_contention_round(directory: Path, round_index: int) -> dict[str, object]:
     db_path = directory / f"outbox-{round_index}.db"
-    _setup_outbox(db_path, f"outbox-contention:{round_index}")
+    provider_log = directory / f"outbox-{round_index}-provider.log"
+    _setup_outbox(
+        db_path,
+        f"outbox-contention:{round_index}",
+        provider_log,
+    )
+    provider_calls_baseline = _line_count(provider_log)
     blocker = SQLiteUnitOfWork.open(db_path)
     try:
         blocker.claim_outbox(
@@ -762,7 +930,9 @@ def _outbox_contention_round(directory: Path, round_index: int) -> dict[str, obj
         "winning_tokens": sorted(
             item["token"] for item in results if item["winner"] == 1
         ),
-        "provider_calls": 0,
+        "provider_calls": _line_count(provider_log) - provider_calls_baseline,
+        "provider_calls_baseline": provider_calls_baseline,
+        "provider_calls_final": _line_count(provider_log),
         "partial_transactions": partial,
         "child_errors": sum(item["error"] is not None for item in results),
         "nonzero_child_exits": sum(code != 0 for code in exit_codes),
@@ -775,8 +945,9 @@ def _contention_violations(result: dict[str, object]) -> tuple[str, ...]:
         violations.append("claim_winner_count")
     if result["winning_tokens"] != [1]:
         violations.append("claim_winner_token")
-    if result["provider_calls"] > 1:
-        violations.append("second_provider_call")
+    expected_provider_calls = 1 if result["kind"] == "command" else 0
+    if result["provider_calls"] != expected_provider_calls:
+        violations.append("provider_call_count")
     if result["partial_transactions"] != 0:
         violations.append("partial_transaction")
     if result["child_errors"] != 0 or result["nonzero_child_exits"] != 0:
