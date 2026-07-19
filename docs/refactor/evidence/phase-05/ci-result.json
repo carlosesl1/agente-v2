@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "implementation_commit": "9199b2c70fb3a26d9f12949b25d135f625b2317d",
+  "checked_at_utc": "2026-07-19T17:28:39Z",
+  "all_success": true,
+  "workflow_count": 6,
+  "workflows": [
+    {
+      "id": 29696736864,
+      "name": "phase-0-validation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736864"
+    },
+    {
+      "id": 29696736830,
+      "name": "phase-1-characterization",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736830"
+    },
+    {
+      "id": 29696736870,
+      "name": "phase-2-domain",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736870"
+    },
+    {
+      "id": 29696736832,
+      "name": "phase-3-lookups",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736832"
+    },
+    {
+      "id": 29696736866,
+      "name": "phase-4-confirmation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736866"
+    },
+    {
+      "id": 29696736855,
+      "name": "phase-5-durable-execution",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29696736855",
+      "jobs": [
+        {
+          "id": 88218679556,
+          "name": "static-validation",
+          "conclusion": "success"
+        },
+        {
+          "id": 88218679513,
+          "name": "full-suite",
+          "conclusion": "success"
+        },
+        {
+          "id": 88218679535,
+          "name": "properties",
+          "conclusion": "success"
+        },
+        {
+          "id": 88218679526,
+          "name": "fault-restart-contention",
+          "conclusion": "success"
+        },
+        {
+          "id": 88218679552,
+          "name": "mutations",
+          "conclusion": "success"
+        },
+        {
+          "id": 88219008481,
+          "name": "phase5-gate",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "phase6_authorized_after_closeout": true,
+  "phase6_started": false,
+  "rollout": "NO-GO"
+}

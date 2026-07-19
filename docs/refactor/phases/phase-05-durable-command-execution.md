@@ -2,15 +2,14 @@
 
 ## Status
 
-`Task 12 aprovada localmente; publicação e CI remoto pendentes`
+`concluída, publicada e com CI remoto verde`
 
 Aberta em `2026-07-19T04:50:49Z`, a partir do commit-base
 `e51259ea0d19a2d07d3d14ee086b0766776cbeab`.
 
-As Tasks 1–12 foram concluídas localmente e aprovadas por gates read-only
-independentes, sem finding Critical ou Important aberto. Workloads integrais,
-manifests, validator e prova terminal estão fechados; a fase só muda para
-`concluída` após publicação e CI remoto verde.
+As Tasks 1–12 foram concluídas e aprovadas por gates read-only independentes,
+sem finding Critical ou Important aberto. O commit de implementação foi
+publicado, conferido no remoto e validado pelos seis workflows da Fase 5.
 
 ## Objetivo
 
@@ -82,9 +81,23 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - [x] catálogo completo de 20 mutantes mortos com baseline verde;
 - [x] schema/package manifests e `SHA256SUMS` regeneráveis;
 - [x] validators 0–5 locais verdes;
-- [ ] workflow CI paralelo da Fase 5 e cinco workflows regressivos verdes;
-- [ ] commit de implementação publicado e conferido no remoto;
-- [ ] commit documental terminal publicado e conferido no remoto.
+- [x] workflow CI paralelo da Fase 5 e cinco workflows regressivos verdes;
+- [x] commit de implementação publicado e conferido no remoto;
+- [x] commit documental terminal preparado para publicação e conferência.
+
+## Closeout remoto
+
+- commit de implementação e documentação local aprovada:
+  `9199b2c70fb3a26d9f12949b25d135f625b2317d`;
+- `main == origin/main == remote` verificado após o push;
+- seis workflows do commit concluíram em `success`;
+- o workflow `phase-5-durable-execution` concluiu os jobs
+  `static-validation`, `full-suite`, `properties`,
+  `fault-restart-contention`, `mutations` e `phase5-gate` em `success`;
+- IDs e URLs estão em `evidence/phase-05/ci-result.json`;
+- Carlos autorizou abrir a Fase 6 somente após este closeout;
+- a Fase 6 ainda não foi iniciada neste commit;
+- rollout comercial permanece `NO-GO`.
 
 ## Fora do escopo
 
@@ -109,5 +122,6 @@ banco externo, provider effect, delivery ou deploy para desfazer.
 
 ## Decisão de avanço
 
-A Fase 6 não foi iniciada e não é autorizada automaticamente pelo closeout da
-Fase 5. Rollout comercial permanece **NO-GO**.
+A Fase 6 não foi iniciada neste closeout. Carlos autorizou sua abertura após a
+publicação e conferência deste fechamento. Rollout comercial permanece
+**NO-GO**.

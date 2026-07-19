@@ -1112,6 +1112,38 @@
                 }
               },
               "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
             }
           ],
           "type": "list"

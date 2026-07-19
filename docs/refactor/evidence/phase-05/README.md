@@ -2,7 +2,7 @@
 
 Fase: `phase-05-durable-command-execution`.
 
-Status: **Task 12 aprovada localmente; publicação e CI remoto pendentes**.
+Status: **Fase 5 concluída, publicada e com seis workflows remotos verdes**.
 
 Design e plano TDD versionados:
 
@@ -55,3 +55,14 @@ Design e plano TDD versionados:
 - 20 mutantes materiais em cópias temporárias;
 - manifests, validator fechado, workflow CI e revisão adversarial;
 - rollout `NO-GO`; Fase 6 não iniciada.
+
+## Gate remoto fechado
+
+- implementação publicada em
+  `9199b2c70fb3a26d9f12949b25d135f625b2317d`;
+- `main`, `origin/main` e remoto iguais após o push;
+- workflows 0–5 concluídos em `success`;
+- os seis jobs do workflow da Fase 5 concluíram em `success`;
+- IDs e URLs verificáveis em `ci-result.json`;
+- abertura da Fase 6 autorizada somente depois deste fechamento;
+- rollout comercial permanece `NO-GO`.

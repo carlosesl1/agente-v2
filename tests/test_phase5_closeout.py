@@ -92,6 +92,32 @@ class Phase5CloseoutContractTests(unittest.TestCase):
             check_property_payload(failures, payload)
             self.assertTrue(failures, f"invalid schema version accepted: {bad_version!r}")
 
+    def test_ci_validator_requires_exact_six_successful_workflows_and_phase5_jobs(self) -> None:
+        actual = self._evidence("ci-result.json")
+        failures: list[str] = []
+        phase5_validator.check_ci_payload(failures, actual)
+        self.assertEqual(failures, [])
+
+        mutations = []
+        payload = copy.deepcopy(actual)
+        payload["workflow_count"] = 5
+        mutations.append(("wrong workflow count", payload))
+        payload = copy.deepcopy(actual)
+        payload["workflows"][0]["conclusion"] = "failure"
+        mutations.append(("failed regression workflow", payload))
+        payload = copy.deepcopy(actual)
+        payload["workflows"][-1]["jobs"] = payload["workflows"][-1]["jobs"][:-1]
+        mutations.append(("missing phase5 gate job", payload))
+        payload = copy.deepcopy(actual)
+        payload["phase6_started"] = True
+        mutations.append(("phase6 prematurely started", payload))
+
+        for label, payload in mutations:
+            with self.subTest(label=label):
+                failures = []
+                phase5_validator.check_ci_payload(failures, payload)
+                self.assertTrue(failures, f"{label} false-greened")
+
     def test_fault_validator_rejects_hollow_schedules_duplicate_ids_and_wrong_kinds(self) -> None:
         actual = (
             self._evidence("fault-matrix.json"),

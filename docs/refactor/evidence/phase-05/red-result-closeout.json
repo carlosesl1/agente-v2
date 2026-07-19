@@ -83,6 +83,17 @@
       "errors": 0,
       "output_sha256": "8bc7b15cc118b020bee3682cd1fbec8107262620894a5d225bdbdbc1498f1233",
       "raw_output_versioned": false
+    },
+    {
+      "name": "remote_ci_closeout_contract",
+      "base_sha": "9199b2c70fb3a26d9f12949b25d135f625b2317d",
+      "command": "python3 -m unittest tests.test_phase5_closeout.Phase5CloseoutContractTests.test_ci_validator_requires_exact_six_successful_workflows_and_phase5_jobs -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 0,
+      "errors": 1,
+      "output_sha256": "200368909252af70bbf2fbce353488639136d3ad3abd4bcd20087d0dd9fc8be6",
+      "raw_output_versioned": false
     }
   ]
 }

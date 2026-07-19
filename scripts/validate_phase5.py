@@ -114,6 +114,7 @@ REQUIRED = (
     "docs/refactor/evidence/phase-05/package-manifest.json",
     "docs/refactor/evidence/phase-05/performance-result.json",
     "docs/refactor/evidence/phase-05/validation-result.json",
+    "docs/refactor/evidence/phase-05/ci-result.json",
     "docs/refactor/evidence/phase-05/adversarial-review.md",
     "docs/refactor/evidence/phase-05/SHA256SUMS",
 )
@@ -872,6 +873,104 @@ def check_metrics(failures: list[str]) -> dict[str, Any]:
     }
 
 
+def check_ci_payload(failures: list[str], payload: dict[str, Any]) -> dict[str, Any]:
+    expected_workflows = (
+        (29696736864, "phase-0-validation"),
+        (29696736830, "phase-1-characterization"),
+        (29696736870, "phase-2-domain"),
+        (29696736832, "phase-3-lookups"),
+        (29696736866, "phase-4-confirmation"),
+        (29696736855, "phase-5-durable-execution"),
+    )
+    expected_jobs = (
+        (88218679556, "static-validation"),
+        (88218679513, "full-suite"),
+        (88218679535, "properties"),
+        (88218679526, "fault-restart-contention"),
+        (88218679552, "mutations"),
+        (88219008481, "phase5-gate"),
+    )
+    expected_keys = {
+        "schema_version",
+        "phase",
+        "implementation_commit",
+        "checked_at_utc",
+        "all_success",
+        "workflow_count",
+        "workflows",
+        "phase6_authorized_after_closeout",
+        "phase6_started",
+        "rollout",
+    }
+    valid = (
+        set(payload) == expected_keys
+        and _exact_int(payload.get("schema_version"), 1)
+        and payload.get("phase") == PHASE
+        and payload.get("implementation_commit")
+        == "9199b2c70fb3a26d9f12949b25d135f625b2317d"
+        and re.fullmatch(
+            r"2026-07-19T\d{2}:\d{2}:\d{2}Z",
+            str(payload.get("checked_at_utc", "")),
+        )
+        is not None
+        and payload.get("all_success") is True
+        and _exact_int(payload.get("workflow_count"), 6)
+        and payload.get("phase6_authorized_after_closeout") is True
+        and payload.get("phase6_started") is False
+        and payload.get("rollout") == "NO-GO"
+    )
+    workflows = payload.get("workflows")
+    if type(workflows) is not list or len(workflows) != len(expected_workflows):
+        valid = False
+        workflows = []
+    for index, (expected_id, expected_name) in enumerate(expected_workflows):
+        if index >= len(workflows) or type(workflows[index]) is not dict:
+            valid = False
+            continue
+        workflow = workflows[index]
+        expected_workflow_keys = {"id", "name", "conclusion", "url"}
+        if expected_name == "phase-5-durable-execution":
+            expected_workflow_keys.add("jobs")
+        if (
+            set(workflow) != expected_workflow_keys
+            or not _exact_int(workflow.get("id"), expected_id)
+            or workflow.get("name") != expected_name
+            or workflow.get("conclusion") != "success"
+            or workflow.get("url")
+            != f"https://github.com/carlosesl1/agente-v2/actions/runs/{expected_id}"
+        ):
+            valid = False
+        if expected_name != "phase-5-durable-execution":
+            continue
+        jobs = workflow.get("jobs")
+        if type(jobs) is not list or len(jobs) != len(expected_jobs):
+            valid = False
+            jobs = []
+        for job_index, (expected_job_id, expected_job_name) in enumerate(expected_jobs):
+            if job_index >= len(jobs) or type(jobs[job_index]) is not dict:
+                valid = False
+                continue
+            job = jobs[job_index]
+            if (
+                set(job) != {"id", "name", "conclusion"}
+                or not _exact_int(job.get("id"), expected_job_id)
+                or job.get("name") != expected_job_name
+                or job.get("conclusion") != "success"
+            ):
+                valid = False
+    if not valid:
+        failures.append("CI evidence diverges from the verified remote closeout")
+    return {
+        "implementation_commit": payload.get("implementation_commit"),
+        "workflow_count": payload.get("workflow_count"),
+        "all_success": payload.get("all_success"),
+        "phase6_authorized_after_closeout": payload.get(
+            "phase6_authorized_after_closeout"
+        ),
+        "phase6_started": payload.get("phase6_started"),
+    }
+
+
 def check_entry_claims(failures: list[str]) -> dict[str, Any]:
     payload = _read_evidence(failures, "entry-baseline.json")
     for key in (
@@ -953,6 +1052,7 @@ def main() -> int:
     mutation = _read_evidence(failures, "mutation-result.json")
     check_mutation_payload(failures, mutation)
     metrics = check_metrics(failures)
+    ci = check_ci_payload(failures, _read_evidence(failures, "ci-result.json"))
     red = check_red_evidence(failures)
     claims = check_entry_claims(failures)
     live_claims = check_live_execution_claims(failures)
@@ -995,6 +1095,7 @@ def main() -> int:
             "all_killed": mutation.get("all_killed"),
         },
         "metrics": metrics,
+        "ci": ci,
         "red": red,
         "claims": claims,
         "live_claims": live_claims,
