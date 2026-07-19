@@ -2,7 +2,7 @@
 
 ## Status
 
-`design aprovado; plano TDD escrito e aguardando aprovação; implementação não iniciada`
+`design e plano TDD aprovados; Task 1 em execução`
 
 Aberta em `2026-07-19T17:48:53Z`, a partir do commit-base
 `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`.
@@ -42,7 +42,8 @@ a reserva.
 - [x] SQLite local autorizado;
 - [x] rollout `NO-GO`;
 - [x] spec revisada e aprovada pelo usuário;
-- [ ] plano TDD aprovado.
+- [x] plano TDD aprovado sob a autorização contínua de avanço;
+- [x] implementação iniciada somente após worktree limpa e pre-flight sem conflitos.
 
 ## Escopo autorizado
 
