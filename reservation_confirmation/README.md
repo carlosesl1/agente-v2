@@ -20,5 +20,6 @@ deriva IDs de resumo/outbox/evento e entrega o texto exato junto ao
 um corpus sintético PT/EN com precedência fail-closed; contexto ausente, sinais
 mistos, exception ou retorno inválido produzem `AMBIGUOUS`.
 
-O trusted binding será adicionado em ciclo TDD separado. A API pública permanece
-fechada e tipada.
+O trusted binding recompõe o renderer e os IDs do artefato persistido antes de
+converter uma decisão em `ConfirmationReceived`. O classificador nunca fornece
+versão, assinatura, oferta, provider ou operação comercial.

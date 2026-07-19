@@ -211,7 +211,7 @@ def _offer_matches_query(offer, query) -> bool:
         offer.service is query.service
         and offer.start_date == query.start_date
         and offer.end_date == query.end_date
-        and offer.start_time == query.start_time
+        and (query.start_time is None or offer.start_time == query.start_time)
         and offer.party == query.party
     )
 

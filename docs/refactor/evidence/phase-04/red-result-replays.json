@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T02:55:41Z",
+  "command": "python3 -m unittest tests.test_phase4_replays -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_trusted_binding_api",
+  "missing_symbol": "classification_context",
+  "output_sha256": "6766acfb4d7f370b10fcd994df37c305f05546e5929de4f70cfdd890ea57385d",
+  "raw_output_versioned": false
+}

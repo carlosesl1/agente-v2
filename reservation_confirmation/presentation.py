@@ -5,16 +5,38 @@ from __future__ import annotations
 from datetime import datetime
 import hashlib
 
-from reservation_domain import ReadyToSummarizeState, SummaryRecorded
+from reservation_domain import CommercialDraft, ReadyToSummarizeState, SummaryRecorded
 from reservation_domain.types import _require_utc
 
 from .renderer import render_summary
-from .types import PreparedSummary, SummaryLocale
+from .types import PreparedSummary, RenderedSummary, SummaryLocale
 
 
 def _artifact_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
     return f"{prefix}:{digest}"
+
+
+def _summary_artifact_ids(
+    *,
+    workflow_id: str,
+    draft: CommercialDraft,
+    rendered: RenderedSummary,
+) -> tuple[str, str, str]:
+    identity_parts = (
+        workflow_id,
+        draft.draft_id,
+        str(draft.version),
+        draft.subject_signature,
+        rendered.locale.value,
+        str(rendered.renderer_version),
+        rendered.content_hash,
+    )
+    return (
+        _artifact_id("summary", *identity_parts),
+        _artifact_id("outbox", *identity_parts),
+        _artifact_id("event", "summary_recorded", *identity_parts),
+    )
 
 
 def prepare_summary(
@@ -33,18 +55,11 @@ def prepare_summary(
     if instant < state.draft.created_at:
         raise ValueError("summary presentation predates commercial draft")
     rendered = render_summary(state.draft, locale=locale)
-    identity_parts = (
-        state.meta.workflow_id,
-        state.draft.draft_id,
-        str(state.draft.version),
-        state.draft.subject_signature,
-        locale.value,
-        str(rendered.renderer_version),
-        rendered.content_hash,
+    summary_event_id, outbox_message_id, domain_event_id = _summary_artifact_ids(
+        workflow_id=state.meta.workflow_id,
+        draft=state.draft,
+        rendered=rendered,
     )
-    summary_event_id = _artifact_id("summary", *identity_parts)
-    outbox_message_id = _artifact_id("outbox", *identity_parts)
-    domain_event_id = _artifact_id("event", "summary_recorded", *identity_parts)
     event = SummaryRecorded(
         event_id=domain_event_id,
         occurred_at=instant,
