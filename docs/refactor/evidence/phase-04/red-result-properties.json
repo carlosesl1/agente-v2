@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T03:00:38Z",
+  "command": "python3 -m unittest tests.test_phase4_properties -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_property_module",
+  "missing_module": "reservation_confirmation.properties",
+  "output_sha256": "9916ff7fd87d8ece5a12ddb632cceda5e59ad292e8b15b005580d6ec8f7fcb95",
+  "raw_output_versioned": false
+}
