@@ -10,8 +10,16 @@ import tempfile
 import unittest
 
 from reservation_domain import (
+    CancelledState,
+    ConfirmationDecisionKind,
+    DraftAdjusted,
+    EconomicTerms,
     EVENT_TYPES,
+    ExecutionCertainty,
+    ExecutionFinished,
     ExecutionQueuedState,
+    ExecutionStarted,
+    ManualReviewRequested,
     STATE_TYPES,
     SummaryRecorded,
     TransitionStatus,
@@ -798,6 +806,223 @@ class Phase5AtomicCommandTests(unittest.TestCase):
             self.store.load_outbox(message_id)
         self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
         self.store._connection.set_authorizer(None)
+
+    def test_store_managed_operational_events_are_blocked_before_any_write(self) -> None:
+        workflow_id = "workflow:atomic:operational-guard"
+        initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+        self.store.create_workflow(initial)
+        final = persist_script(self.store, workflow_id, script)[-1]
+        command = final.commands[0]
+        before_state = self.store.load_workflow(workflow_id)
+        before_counts = database_counts(self.path)
+        before_fingerprint = self._fingerprint(self.path)
+        operational_events = (
+            ExecutionStarted(
+                event_id="event:atomic:execution-started",
+                occurred_at=T0 + timedelta(seconds=6),
+                command_id=command.command_id,
+            ),
+            ExecutionFinished(
+                event_id="event:atomic:execution-finished",
+                occurred_at=T0 + timedelta(seconds=7),
+                command_id=command.command_id,
+                outcome=command.outcome(
+                    certainty=ExecutionCertainty.NOT_CALLED,
+                    normalized_status="synthetic_not_called",
+                ),
+            ),
+            ManualReviewRequested(
+                event_id="event:atomic:manual-review",
+                occurred_at=T0 + timedelta(seconds=8),
+                reason="synthetic_manual_review",
+            ),
+        )
+        for event in operational_events:
+            with self.subTest(event=event.TYPE):
+                with self.assertRaisesRegex(StoreError, "specialized"):
+                    self.store.apply_event(
+                        workflow_id,
+                        before_state.meta.revision,
+                        event,
+                    )
+                self.assertEqual(self.store.load_workflow(workflow_id), before_state)
+                self.assertEqual(database_counts(self.path), before_counts)
+                self.assertEqual(self._fingerprint(self.path), before_fingerprint)
+
+    def test_historical_summary_survives_reject_and_remains_idempotent(self) -> None:
+        workflow_id = "workflow:atomic:historical-reject"
+        initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+        self.store.create_workflow(initial)
+        persist_script(self.store, workflow_id, script[:5])
+        reject = replace(
+            script[-1][0],
+            decision=ConfirmationDecisionKind.REJECT,
+        )
+        before_reject = self.store.load_workflow(workflow_id)
+        rejected = self.store.apply_event(
+            workflow_id,
+            before_reject.meta.revision,
+            reject,
+        )
+        self.assertIsInstance(rejected.state, CancelledState)
+        message = script[4][1][0]
+        self.assertEqual(self.store.load_outbox(message.message_id), message)
+        before_counts = database_counts(self.path)
+        replay = self.store.apply_event(
+            workflow_id,
+            rejected.state.meta.revision,
+            script[4][0],
+            outbox=script[4][1],
+        )
+        self.assertTrue(replay.duplicate)
+        self.assertEqual(database_counts(self.path), before_counts)
+
+    def test_old_summary_is_reconstructed_after_adjustment_and_detects_tamper(self) -> None:
+        from reservation_confirmation import SummaryLocale, prepare_summary
+        from reservation_execution import summary_outbox_message
+
+        workflow_id = "workflow:atomic:historical-adjust"
+        initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+        self.store.create_workflow(initial)
+        persist_script(self.store, workflow_id, script[:5])
+        adjust_confirmation = replace(
+            script[-1][0],
+            decision=ConfirmationDecisionKind.ADJUST,
+        )
+        state = self.store.load_workflow(workflow_id)
+        self.store.apply_event(
+            workflow_id,
+            state.meta.revision,
+            adjust_confirmation,
+        )
+        state = self.store.load_workflow(workflow_id)
+        adjustment = DraftAdjusted(
+            event_id="event:atomic:draft-adjusted",
+            occurred_at=T0 + timedelta(seconds=6),
+            customer=state.draft.customer,
+            terms=EconomicTerms(payment_method="cash"),
+        )
+        self.store.apply_event(workflow_id, state.meta.revision, adjustment)
+        state = self.store.load_workflow(workflow_id)
+        prepared = prepare_summary(
+            state,
+            locale=SummaryLocale.PT_BR,
+            presented_at=T0 + timedelta(seconds=7),
+        )
+        new_message = summary_outbox_message(
+            workflow_id=workflow_id,
+            prepared=prepared,
+        )
+        self.store.apply_event(
+            workflow_id,
+            state.meta.revision,
+            prepared.event,
+            outbox=(new_message,),
+        )
+
+        old_message = script[4][1][0]
+        payload = json.loads(old_message.canonical_payload)
+        payload["content"] += " synthetic historical alteration"
+        divergent = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        connection = sqlite3.connect(self.path)
+        connection.execute(
+            "UPDATE outbox_messages SET payload_json=?, payload_hash=? "
+            "WHERE message_id=?",
+            (
+                divergent,
+                hashlib.sha256(divergent.encode("utf-8")).hexdigest(),
+                old_message.message_id,
+            ),
+        )
+        connection.commit()
+        connection.close()
+        with self.assertRaises(DataCorruption):
+            self.store.load_outbox(old_message.message_id)
+
+    def test_out_of_order_summary_cannot_persist_message_without_summary_state(self) -> None:
+        workflow_id = "workflow:atomic:out-of-order-summary"
+        initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+        self.store.create_workflow(initial)
+        persist_script(self.store, workflow_id, script[:4])
+        state = self.store.load_workflow(workflow_id)
+        ignored = self.store.apply_event(
+            workflow_id,
+            state.meta.revision,
+            script[-1][0],
+        )
+        self.assertEqual(ignored.status, TransitionStatus.IGNORED)
+        before_state = ignored.state
+        before_counts = database_counts(self.path)
+        before_fingerprint = self._fingerprint(self.path)
+        with self.assertRaisesRegex(StoreError, "applied summary"):
+            self.store.apply_event(
+                workflow_id,
+                before_state.meta.revision,
+                script[4][0],
+                outbox=script[4][1],
+            )
+        self.assertEqual(self.store.load_workflow(workflow_id), before_state)
+        self.assertEqual(database_counts(self.path), before_counts)
+        self.assertEqual(self._fingerprint(self.path), before_fingerprint)
+
+    def test_outbox_loader_rejects_sql_bytes_normalized_by_dto(self) -> None:
+        cases = (
+            ("idempotency_key", " idempotency "),
+            ("workflow_id", " workflow "),
+            ("template_id", " template "),
+        )
+        for index, (column, padded) in enumerate(cases):
+            with self.subTest(column=column):
+                path = Path(self.temporary.name) / f"normalized-{index}.db"
+                store = SQLiteUnitOfWork.open(path)
+                self.addCleanup(store.close)
+                workflow_id = f"workflow:atomic:normalized:{index}"
+                initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+                store.create_workflow(initial)
+                persist_script(store, workflow_id, script[:5])
+                message = script[4][1][0]
+                original = getattr(message, column)
+                connection = sqlite3.connect(path)
+                connection.execute(
+                    f"UPDATE outbox_messages SET {column}=? WHERE message_id=?",
+                    (f" {original} ", message.message_id),
+                )
+                connection.commit()
+                connection.close()
+                with self.assertRaises(DataCorruption):
+                    store.load_outbox(message.message_id)
+
+    def test_divergent_summary_event_is_identity_conflict_before_outbox_lookup(self) -> None:
+        workflow_id = "workflow:atomic:conflict-order"
+        initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+        self.store.create_workflow(initial)
+        persist_script(self.store, workflow_id, script[:5])
+        canonical_event, canonical_outbox = script[4]
+        divergent_id = "outbox:" + "f" * 64
+        divergent_event = replace(
+            canonical_event,
+            outbox_message_id=divergent_id,
+        )
+        divergent_outbox = replace(
+            canonical_outbox[0],
+            message_id=divergent_id,
+            idempotency_key=divergent_id,
+        )
+        state = self.store.load_workflow(workflow_id)
+        before = database_counts(self.path)
+        with self.assertRaises(IdentityConflict):
+            self.store.apply_event(
+                workflow_id,
+                state.meta.revision,
+                divergent_event,
+                outbox=(divergent_outbox,),
+            )
+        self.assertEqual(database_counts(self.path), before)
 
     def test_every_statement_fault_rolls_back_after_reopen(self) -> None:
         statement_cases = (

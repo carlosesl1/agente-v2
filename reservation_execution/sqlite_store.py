@@ -12,9 +12,13 @@ import sqlite3
 from typing import Iterator
 
 from reservation_domain import (
+    AwaitingConfirmationState,
     EVENT_TYPES,
     STATE_TYPES,
     Event,
+    ExecutionFinished,
+    ExecutionStarted,
+    ManualReviewRequested,
     ReservationCommand,
     State,
     SummaryRecorded,
@@ -26,14 +30,11 @@ from reservation_domain import (
     loads_command,
     loads_event,
     loads_state,
+    new_workflow,
     reduce,
 )
 
-from .projection import (
-    LedgerSnapshot,
-    validate_summary_outbox,
-    validate_summary_outbox_for_draft,
-)
+from .projection import LedgerSnapshot, validate_summary_outbox
 from .schema import SCHEMA_VERSION, render_sqlite, schema_contract, schema_hash
 from .types import LedgerStatus, OutboxKind, OutboxMessage, OutboxStatus
 
@@ -60,6 +61,10 @@ class ConcurrencyConflict(StoreError):
 
 class IdentityConflict(StoreError):
     """A durable identity already exists with divergent content or ownership."""
+
+
+class UnsupportedEffect(StoreError):
+    """An operational event must use its specialized atomic store method."""
 
 
 class WorkflowNotFound(StoreError):
@@ -535,6 +540,20 @@ class SQLiteUnitOfWork:
             status = OutboxStatus(row[8])
         except (TypeError, ValueError) as exc:
             raise DataCorruption("outbox message row is invalid") from exc
+        immutable = (
+            message.message_id,
+            message.idempotency_key,
+            message.workflow_id,
+            message.command_id,
+            message.kind.value,
+            message.template_id,
+            message.canonical_payload,
+            message.payload_hash,
+            message.created_at.isoformat(),
+        )
+        persisted = (*row[:8], row[16])
+        if immutable != persisted:
+            raise DataCorruption("outbox immutable SQL bytes were normalized or changed")
         if type(row[10]) is not int or type(row[13]) is not int:
             raise DataCorruption("outbox counters have wrong SQLite types")
         optional_times = tuple(
@@ -578,6 +597,49 @@ class SQLiteUnitOfWork:
         except sqlite3.Error as exc:
             raise _sqlite_store_error(exc, "load_outbox") from exc
 
+    def _historical_state_before_revision(
+        self,
+        workflow_id: str,
+        revision: int,
+    ) -> State:
+        row = self._workflow_row(workflow_id)
+        if row is None:
+            raise DataCorruption("historical event references a missing workflow")
+        current = self._state_from_row(row)
+        if type(revision) is not int or not 1 <= revision <= current.meta.revision:
+            raise DataCorruption("historical target revision is outside the workflow")
+        state: State = new_workflow(
+            workflow_id=workflow_id,
+            started_at=_canonical_utc(row[5], "workflow.created_at"),
+        )
+        rows = tuple(
+            self._connection.execute(
+                "SELECT event_id, workflow_id, revision, occurred_at, event_type, "
+                "event_json, event_hash FROM domain_events "
+                "WHERE workflow_id=? ORDER BY revision",
+                (workflow_id,),
+            )
+        )
+        if len(rows) != current.meta.revision:
+            raise DataCorruption("workflow event row count disagrees with revision")
+        for expected_revision, event_row in enumerate(rows, start=1):
+            if event_row[1] != workflow_id or event_row[2] != expected_revision:
+                raise DataCorruption("workflow event history has a revision gap or owner mismatch")
+            event = self._verified_event(event_row)
+            index = expected_revision - 1
+            if (
+                current.meta.seen_event_ids[index] != event.event_id
+                or current.meta.seen_event_hashes[index] != event_row[6]
+            ):
+                raise DataCorruption("workflow metadata disagrees with durable event history")
+            if expected_revision == revision:
+                return state
+            transition = reduce(state, event)
+            if transition.state.meta.revision != expected_revision:
+                raise DataCorruption("historical reducer replay did not advance one revision")
+            state = transition.state
+        raise DataCorruption("historical target revision was not found")
+
     def _verify_summary_outbox_projection(self, message: OutboxMessage) -> None:
         rows = tuple(
             self._connection.execute(
@@ -587,34 +649,26 @@ class SQLiteUnitOfWork:
                 (message.workflow_id,),
             )
         )
-        matched: SummaryRecorded | None = None
+        matched: tuple[SummaryRecorded, int] | None = None
         for row in rows:
             event = self._verified_event(row)
             if type(event) is SummaryRecorded and event.outbox_message_id == message.message_id:
                 if matched is not None:
                     raise DataCorruption("multiple summary events reference one outbox message")
-                matched = event
+                matched = (event, row[2])
         if matched is None:
             raise DataCorruption("summary outbox has no owning SummaryRecorded event")
-        state = self.load_workflow(message.workflow_id)
-        draft = getattr(state, "draft", None)
-        if draft is None:
-            raise DataCorruption("summary outbox workflow has no commercial draft")
-        if (
-            draft.version == matched.draft_version
-            and draft.subject_signature == matched.subject_signature
-        ):
-            try:
-                validate_summary_outbox_for_draft(
-                    workflow_id=message.workflow_id,
-                    draft=draft,
-                    event=matched,
-                    message=message,
-                )
-            except (TypeError, ValueError) as exc:
-                raise DataCorruption(
-                    "summary outbox diverges from its Phase 4 artifact"
-                ) from exc
+        event, revision = matched
+        historical = self._historical_state_before_revision(
+            message.workflow_id,
+            revision,
+        )
+        try:
+            validate_summary_outbox(historical, event, message)
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption(
+                "summary outbox diverges from its historical Phase 4 artifact"
+            ) from exc
 
     def apply_event(
         self,
@@ -629,6 +683,10 @@ class SQLiteUnitOfWork:
             raise ValueError("expected_revision must be an integer >= 0")
         if type(event) not in EVENT_TYPES:
             raise TypeError("event must be an exact closed-universe event type")
+        if type(event) in (ExecutionStarted, ExecutionFinished, ManualReviewRequested):
+            raise UnsupportedEffect(
+                "operational event requires a specialized atomic store method"
+            )
         if type(outbox) is not tuple or any(
             type(message) is not OutboxMessage for message in outbox
         ):
@@ -641,13 +699,14 @@ class SQLiteUnitOfWork:
             current = self._state_from_row(row)
             existing = self._event_row(event.event_id)
             if existing is not None:
-                self._validate_duplicate_outbox(event, outbox)
+                self._validate_duplicate_outbox_shape(event, outbox)
                 result = self._resolve_duplicate(
                     existing,
                     workflow_id=workflow_id,
                     event=event,
                     current=current,
                 )
+                self._validate_duplicate_outbox(event, outbox)
                 self._assert_current_command_projection(current)
                 return result
             if current.meta.revision != expected_revision:
@@ -657,6 +716,12 @@ class SQLiteUnitOfWork:
                 )
             validated_outbox = self._validate_new_outbox(current, event, outbox)
             transition = reduce(current, event)
+            if type(event) is SummaryRecorded:
+                self._validate_applied_summary_transition(
+                    event,
+                    validated_outbox[0],
+                    transition,
+                )
             if len(transition.commands) > 1:
                 raise DataCorruption("reducer emitted more than one authorized command")
             if transition.state.meta.revision != current.meta.revision + 1:
@@ -693,6 +758,29 @@ class SQLiteUnitOfWork:
             raise ValueError("caller-provided outbox is only allowed for SummaryRecorded")
         return ()
 
+    def _validate_applied_summary_transition(
+        self,
+        event: SummaryRecorded,
+        message: OutboxMessage,
+        transition: Transition,
+    ) -> None:
+        if (
+            transition.status is not TransitionStatus.APPLIED
+            or type(transition.state) is not AwaitingConfirmationState
+        ):
+            raise IdentityConflict(
+                "SummaryRecorded must produce an applied summary transition"
+            )
+        summary = transition.state.summary
+        if (
+            summary.summary_event_id != event.summary_event_id
+            or summary.outbox_message_id != message.message_id
+            or summary.draft_version != event.draft_version
+            or summary.subject_signature != event.subject_signature
+            or summary.presented_at != message.created_at
+        ):
+            raise DataCorruption("applied summary state disagrees with event/outbox")
+
     def _validate_duplicate_outbox(
         self,
         event: Event,
@@ -710,6 +798,17 @@ class SQLiteUnitOfWork:
                 raise DataCorruption("summary event has no durable outbox message") from exc
             if candidate != persisted:
                 raise IdentityConflict("summary replay contains divergent outbox content")
+        elif outbox:
+            raise ValueError("caller-provided outbox is only allowed for SummaryRecorded")
+
+    def _validate_duplicate_outbox_shape(
+        self,
+        event: Event,
+        outbox: tuple[OutboxMessage, ...],
+    ) -> None:
+        if type(event) is SummaryRecorded:
+            if len(outbox) != 1:
+                raise ValueError("SummaryRecorded requires exactly one outbox message")
         elif outbox:
             raise ValueError("caller-provided outbox is only allowed for SummaryRecorded")
 
@@ -936,6 +1035,7 @@ __all__ = [
     "DataCorruption",
     "ConcurrencyConflict",
     "IdentityConflict",
+    "UnsupportedEffect",
     "WorkflowNotFound",
     "CommandNotFound",
     "OutboxNotFound",

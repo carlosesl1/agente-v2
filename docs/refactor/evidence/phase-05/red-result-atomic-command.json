@@ -61,6 +61,25 @@
       "failure_class": "ledger_snapshot_and_summary_projection_were_not_exported",
       "output_sha256": "1f26ad8a3d16ceffd7249a54a51c585e94e495cbb57534aea71896c9cf8fb47a",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_atomic_history_and_boundary_hardening",
+      "base_head": "aa18f7eaba2369ee248d2ed0cdfa919c759b0256",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_store_managed_operational_events_are_blocked_before_any_write tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_historical_summary_survives_reject_and_remains_idempotent tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_old_summary_is_reconstructed_after_adjustment_and_detects_tamper tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_out_of_order_summary_cannot_persist_message_without_summary_state tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_outbox_loader_rejects_sql_bytes_normalized_by_dto tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_divergent_summary_event_is_identity_conflict_before_outbox_lookup -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 8,
+      "error_count": 2,
+      "failure_classes": [
+        "operational_events_advanced_state_without_ledger_protocol",
+        "cancelled_workflow_invalidated_historical_summary",
+        "old_summary_coherent_payload_tamper_was_accepted_after_adjustment",
+        "out_of_order_summary_persisted_message_without_summary_state",
+        "outbox_immutable_sql_bytes_were_normalized",
+        "divergent_event_was_misclassified_as_database_corruption"
+      ],
+      "output_sha256": "1ab9c468c702b7b843df0b5ee7db2788bd3e6fed1c521315913e9431e22a10f7",
+      "raw_output_versioned": false
     }
   ]
 }
