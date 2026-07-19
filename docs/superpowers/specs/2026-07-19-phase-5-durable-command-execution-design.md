@@ -211,6 +211,14 @@ class DispatchPermit:
 
 Regras:
 
+- `canonical_payload` é um objeto JSON canônico: chaves duplicadas, `NaN`/`Infinity`
+  e root não-objeto são rejeitados; reserializar com `ensure_ascii=False`,
+  `sort_keys=True` e `separators=(",", ":")` precisa reproduzir exatamente a
+  string recebida;
+- `payload_hash` é o SHA-256 lowercase do UTF-8 de `canonical_payload`;
+- `DispatchRequest.from_command(command, canonical_payload)` copia somente
+  `command_id`, `idempotency_key` e `operation` do comando imutável e recompõe o
+  hash; não recebe nem escolhe provider;
 - `dispatch_slot` é exatamente `1`;
 - request hash é recomputado antes do fence;
 - permit é persistido antes de chamar `dispatch`;
@@ -236,6 +244,31 @@ A mensagem não contém segredo, token, auth, payload bruto de provider nem
 referência técnica privada destinada ao cliente. O payload persistido pode conter
 fatos pessoais necessários ao uso futuro, mas fixtures/evidências desta fase são
 exclusivamente sintéticas e nunca são copiadas para relatórios.
+
+`canonical_payload` e `payload_hash` seguem exatamente as mesmas regras fechadas
+de JSON canônico e SHA-256 de `DispatchRequest`.
+
+### 6.6 DeliveryReceipt
+
+```python
+@dataclass(frozen=True, slots=True)
+class DeliveryReceipt:
+    message_id: str
+    delivery_reference: str
+    receipt_hash: str
+    delivered_at: datetime
+```
+
+Regras:
+
+- IDs são opacos e `delivered_at` usa UTC canônico;
+- o material canônico do receipt é o objeto JSON com `message_id`,
+  `delivery_reference` e `delivered_at` em ISO UTC, nas mesmas regras de
+  serialização canônica;
+- `receipt_hash` é o SHA-256 lowercase do UTF-8 desse material e é recomputado no
+  construtor;
+- receipt idêntico é idempotente; hash ou referência divergente para o mesmo
+  `message_id` é conflito permanente.
 
 ## 7. Ports sem implementação default
 

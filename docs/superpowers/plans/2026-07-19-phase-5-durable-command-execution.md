@@ -375,6 +375,20 @@ Implementar as dataclasses exatamente como a spec, com validações:
 - `DispatchPermit.dispatch_slot == 1`;
 - `OutboxMessage.payload_hash` igual ao hash do payload.
 
+O contrato fechado adicional é:
+
+- `DispatchRequest.from_command(command, canonical_payload)` copia identidade e
+  operação somente do `ReservationCommand` e recompõe `payload_hash`;
+- payloads são objetos JSON canônicos sem duplicate keys, `NaN` ou `Infinity`;
+- `DeliveryReceipt` possui exatamente `message_id`, `delivery_reference`,
+  `receipt_hash` e `delivered_at`;
+- `receipt_hash` é recomposto do JSON canônico de `message_id`,
+  `delivery_reference` e `delivered_at`.
+
+Expandir o RED para verificar os universos exatos de campos de `CommandClaim`,
+`DispatchRequest`, `DispatchPermit`, `OutboxMessage` e `DeliveryReceipt`, além de
+payload/hash adulterado, JSON não canônico, root não-objeto e receipt divergente.
+
 ```python
 @runtime_checkable
 class ExecutionAdapter(Protocol):
