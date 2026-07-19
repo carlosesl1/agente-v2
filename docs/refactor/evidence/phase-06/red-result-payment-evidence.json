@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "phase": "phase-06-handoff-payments",
+  "task": 3,
+  "recorded_at_utc": "2026-07-19T20:01:45Z",
+  "base_commit": "e881ff8577607d27420ec35e67f84fb05306fe7f",
+  "original_red": {
+    "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests -v >/tmp/phase6-task3-red.out 2>&1",
+    "exit_code": 1,
+    "tests": 1,
+    "failures": 0,
+    "errors": 1,
+    "failure_class": "ModuleNotFoundError",
+    "failure_reason": "reservation_followup.payment did not exist before production implementation",
+    "output_sha256": "aaa329d24f2a4a6d4e5231657bfab9bf288b14c9b83e90df543332d158ee2dbe",
+    "raw_output_path": "/tmp/phase6-task3-red.out",
+    "raw_output_versioned": false
+  },
+  "self_review_reds": [
+    {
+      "name": "economic_version_and_verified_wrapper_wire_boundary",
+      "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_payment_subject_factory_and_wire_close_economic_version tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_payment_evidence_union_and_wire_round_trip_are_closed -v >/tmp/phase6-task3-self-review-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 2,
+      "failures": 5,
+      "errors": 0,
+      "failure_reason": "factory accepted non-integer payment_version, wire accepted version/economics mismatch and standalone verified wrapper crossed the wire without its validating subject",
+      "output_sha256": "d4a7e24ef33f705c1d8d712786bad4d264e10e9b0c33a5aaeb230dc8a2d881fd",
+      "raw_output_path": "/tmp/phase6-task3-self-review-red.out",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "mutated_anchor_and_claim_identity",
+      "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_payment_bootstrap_rejects_mutated_anchor_instead_of_normalizing_it tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_claim_keys_are_global_and_do_not_include_target_or_caller_key -v >/tmp/phase6-task3-mutation-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 2,
+      "failures": 2,
+      "errors": 1,
+      "failure_reason": "mutated nested anchor raised AttributeError, noncanonical anchor ID was normalized and mutated low-entropy Pix identity produced a claim",
+      "output_sha256": "9a79375413a34e03bb3d6c4ba99e9bfed86cd4726350909403891b533497072c",
+      "raw_output_path": "/tmp/phase6-task3-mutation-red.out",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "future_economic_revision_not_false_rejected",
+      "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_payment_subject_factory_and_wire_close_economic_version -v >/tmp/phase6-task3-version-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "failure_reason": "standalone subject rejected legitimate payment_version 3 for economics already revised from the reservation anchor",
+      "output_sha256": "da93e0dfd20ee61d85a4afa5155372cf8c531f42d75d370ca9daa3f9c9241943",
+      "raw_output_path": "/tmp/phase6-task3-version-red.out",
+      "raw_output_versioned": false
+    }
+  ],
+  "green": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_payment tests.test_phase6_types -v",
+      "tests": 43,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "3368edea5e1b9e3d2d37c0042a46dae830467360aad52ac97e1eabf7b5ecf0b6"
+    },
+    "regressions": {
+      "command": "python3 -m unittest tests.test_phase2_serialization tests.test_phase4_replays tests.test_phase5_types tests.test_phase5_properties -v",
+      "tests": 48,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "57d8ff48a25f552eb3ff61950e6ac04d4dd72e4e65c2a624c688f35a0a5da537"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 425,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 62.703,
+      "output_sha256": "8f1892d70310eae87377ac2dd5b73c87f83328904cf78ee0518774269201f90b"
+    }
+  },
+  "known_answer_economic_signature": {
+    "amount_minor": 12500,
+    "currency": "BRL",
+    "receiver_profile_id": "receiver:profile:synthetic:1",
+    "business_unit": "hostel",
+    "payment_target_id": "target:reservation:synthetic:1",
+    "sha256": "9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb"
+  },
+  "capabilities_live": false,
+  "synthetic_fixtures_only": true,
+  "forbidden_imports": [],
+  "forbidden_artifacts": [],
+  "sensitive_hits": [],
+  "rollout": "NO-GO"
+}

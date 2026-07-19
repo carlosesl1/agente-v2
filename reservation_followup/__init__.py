@@ -1,6 +1,18 @@
 """Pure closed contracts for independent handoff and payment follow-up."""
 
 from .serialization import from_wire_json, semantic_hash, to_wire_json
+from .payment import (
+    PaymentEvidence,
+    PixProofStatus,
+    PixVisualEvidence,
+    StripeEventType,
+    VerifiedPaymentEvidence,
+    VerifiedStripeEvent,
+    VerifiedWiseCredit,
+    evidence_claim_key,
+    stripe_target_fingerprint,
+    validate_evidence,
+)
 from .handoff import (
     HandoffAcknowledged,
     HandoffCancellationCode,
@@ -47,6 +59,16 @@ __all__ = [
     "HandoffEffectPolicy",
     "PaymentEffectPolicy",
     "PaymentSubject",
+    "PixProofStatus",
+    "StripeEventType",
+    "PixVisualEvidence",
+    "VerifiedWiseCredit",
+    "VerifiedStripeEvent",
+    "PaymentEvidence",
+    "VerifiedPaymentEvidence",
+    "stripe_target_fingerprint",
+    "evidence_claim_key",
+    "validate_evidence",
     "HandoffReasonCode",
     "HandoffEffectKind",
     "HandoffEffectFailureCode",

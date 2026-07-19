@@ -333,9 +333,13 @@ class Phase6SharedTypeTests(unittest.TestCase):
         without_method = payment_subject(method=None)
         self.assertEqual(pix.economic_signature, wise.economic_signature)
         self.assertEqual(pix.economic_signature, without_method.economic_signature)
-        changed_amount = payment_subject(amount_minor=pix.amount_minor + 1)
+        changed_amount = payment_subject(
+            amount_minor=pix.amount_minor + 1,
+            payment_version=2,
+        )
         changed_receiver = payment_subject(
-            receiver_profile_id="receiver:profile:synthetic:2"
+            receiver_profile_id="receiver:profile:synthetic:2",
+            payment_version=2,
         )
         self.assertNotEqual(pix.economic_signature, changed_amount.economic_signature)
         self.assertNotEqual(pix.economic_signature, changed_receiver.economic_signature)

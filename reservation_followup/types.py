@@ -297,6 +297,114 @@ class PaymentSubject:
     method: PaymentMethod | None
     economic_signature: str
 
+    @classmethod
+    def from_anchor(
+        cls,
+        anchor: ConfirmedReservationAnchor,
+        *,
+        payment_id: str,
+        method: PaymentMethod | None = None,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        receiver_profile_id: str | None = None,
+        business_unit: BusinessUnit | None = None,
+        payment_target_id: str | None = None,
+        payment_version: int | None = None,
+    ) -> PaymentSubject:
+        """Build a financial subject only from a revalidated confirmed anchor."""
+
+        if type(anchor) is not ConfirmedReservationAnchor:
+            raise ValueError("anchor must be the exact ConfirmedReservationAnchor type")
+        original_anchor = anchor
+        if type(anchor.reservation_outcome) is not ExecutionOutcome:
+            raise ValueError("anchor outcome must be the exact ExecutionOutcome type")
+        clean_outcome = ExecutionOutcome(
+            command_id=anchor.reservation_outcome.command_id,
+            certainty=anchor.reservation_outcome.certainty,
+            normalized_status=anchor.reservation_outcome.normalized_status,
+            provider_reference=anchor.reservation_outcome.provider_reference,
+            evidence=anchor.reservation_outcome.evidence,
+        )
+        anchor = ConfirmedReservationAnchor(
+            reservation_workflow_id=anchor.reservation_workflow_id,
+            reservation_command_id=anchor.reservation_command_id,
+            reservation_subject_signature=anchor.reservation_subject_signature,
+            reservation_outcome_hash=anchor.reservation_outcome_hash,
+            reservation_outcome=clean_outcome,
+            provider_reference=anchor.provider_reference,
+            service=anchor.service,
+            business_unit=anchor.business_unit,
+            payment_target_id=anchor.payment_target_id,
+            amount_minor=anchor.amount_minor,
+            currency=anchor.currency,
+            receiver_profile_id=anchor.receiver_profile_id,
+            confirmed_at=anchor.confirmed_at,
+            payment_deadline=anchor.payment_deadline,
+        )
+        if anchor != original_anchor:
+            raise ValueError("anchor contains noncanonical values")
+        selected_amount = anchor.amount_minor if amount_minor is None else amount_minor
+        selected_currency = anchor.currency if currency is None else currency
+        selected_receiver = (
+            anchor.receiver_profile_id
+            if receiver_profile_id is None
+            else receiver_profile_id
+        )
+        selected_unit = anchor.business_unit if business_unit is None else business_unit
+        selected_target = (
+            anchor.payment_target_id
+            if payment_target_id is None
+            else payment_target_id
+        )
+        _require_positive_int(selected_amount, "payment_subject.amount_minor")
+        _require_currency(selected_currency, "payment_subject.currency")
+        selected_receiver = _require_id(
+            selected_receiver,
+            "payment_subject.receiver_profile_id",
+        )
+        _require_enum(
+            selected_unit,
+            BusinessUnit,
+            "payment_subject.business_unit",
+        )
+        selected_target = _require_id(
+            selected_target,
+            "payment_subject.payment_target_id",
+        )
+        if method is not None:
+            _require_enum(method, PaymentMethod, "payment_subject.method")
+        economics_changed = (
+            selected_amount != anchor.amount_minor
+            or selected_currency != anchor.currency
+            or selected_receiver != anchor.receiver_profile_id
+            or selected_unit is not anchor.business_unit
+            or selected_target != anchor.payment_target_id
+        )
+        expected_version = 2 if economics_changed else 1
+        if payment_version is not None:
+            _require_positive_int(payment_version, "payment_subject.payment_version")
+            if payment_version != expected_version:
+                raise ValueError("payment_version does not match the economic version")
+        signature = _economic_signature(
+            amount_minor=selected_amount,
+            currency=selected_currency,
+            receiver_profile_id=selected_receiver,
+            business_unit=selected_unit,
+            payment_target_id=selected_target,
+        )
+        return cls(
+            payment_id=payment_id,
+            payment_version=expected_version,
+            confirmed_reservation_anchor=anchor,
+            amount_minor=selected_amount,
+            currency=selected_currency,
+            receiver_profile_id=selected_receiver,
+            business_unit=selected_unit,
+            payment_target_id=selected_target,
+            method=method,
+            economic_signature=signature,
+        )
+
     def __post_init__(self) -> None:
         payment_id = _require_id(self.payment_id, "payment_subject.payment_id")
         _require_positive_int(self.payment_version, "payment_subject.payment_version")
@@ -337,6 +445,18 @@ class PaymentSubject:
             raise ValueError(
                 "payment_subject.economic_signature does not match canonical economics"
             )
+        anchor = self.confirmed_reservation_anchor
+        economics_match_anchor = (
+            self.amount_minor == anchor.amount_minor
+            and self.currency == anchor.currency
+            and receiver_profile_id == anchor.receiver_profile_id
+            and self.business_unit is anchor.business_unit
+            and payment_target_id == anchor.payment_target_id
+        )
+        if economics_match_anchor and self.payment_version != 1:
+            raise ValueError("anchor economics require payment_version 1")
+        if not economics_match_anchor and self.payment_version < 2:
+            raise ValueError("revised economics require payment_version >= 2")
         object.__setattr__(self, "payment_id", payment_id)
         object.__setattr__(self, "receiver_profile_id", receiver_profile_id)
         object.__setattr__(self, "payment_target_id", payment_target_id)

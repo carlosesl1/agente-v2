@@ -13,6 +13,14 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from reservation_domain import ExecutionCertainty, ExecutionOutcome, ServiceKind
 
+from .payment import (
+    PixProofStatus,
+    PixVisualEvidence,
+    StripeEventType,
+    VerifiedPaymentEvidence,
+    VerifiedStripeEvent,
+    VerifiedWiseCredit,
+)
 from .handoff import (
     HandoffAcknowledged,
     HandoffCancellationCode,
@@ -52,8 +60,13 @@ _TYPE_TAGS = {
     HandoffEffectJob: "handoff_effect_job",
     HandoffWorkflow: "handoff_workflow",
     PublicHandoffProjection: "public_handoff_projection",
+    PixVisualEvidence: "pix_visual_evidence",
+    VerifiedWiseCredit: "verified_wise_credit",
+    VerifiedStripeEvent: "verified_stripe_event",
 }
-_NESTED_DATACLASSES = frozenset((*_TYPE_TAGS, ExecutionOutcome))
+_NESTED_DATACLASSES = frozenset(
+    (*_TYPE_TAGS, ExecutionOutcome, VerifiedPaymentEvidence)
+)
 _ENUM_TYPES = frozenset(
     (
         BusinessUnit,
@@ -67,6 +80,8 @@ _ENUM_TYPES = frozenset(
         HandoffEffectFailureCode,
         HandoffCancellationCode,
         PublicNextAction,
+        PixProofStatus,
+        StripeEventType,
     )
 )
 
