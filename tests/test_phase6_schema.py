@@ -412,6 +412,24 @@ INTEGER_COLUMNS = {
     "payment_receipts": set(),
 }
 
+EXPECTED_POSTGRESQL_DDL_SHA256 = (
+    "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe"
+)
+
+EXPECTED_POSTGRESQL_BLOCK_SHA256 = {
+    "handoff_workflows": "1806f243640f15e8d483a7112f2aeb0af4104213321fa7b8f251847575442ce3",
+    "handoff_events": "04364593ac89ae6cc3a4343e235696d7d610752e80032f138926711341f8d8f9",
+    "handoff_outbox": "546e527a46050bf7ce34edfaa2e0a6606fc081e4690c5fb377a676703a4965cc",
+    "handoff_receipts": "e0f5d23ba80f667b6bd06c1644e9c5644e13e9aa38f95f789f793f7d0e0468b6",
+    "payment_workflows": "f4c1f38bd6b7269cda779aa9f6f3aa1674345fda5b8c9b41c12e4a15f3282a66",
+    "payment_events": "7945ae415cde0c8eb8e77499e93a0f9813380aff5fb817bea36e260126ab97c1",
+    "payment_evidence_claims": "7fc64fa56d374f27e2b68c415aabf2ebaf86d5a7fabf9a453c5e9b0d0d590b13",
+    "payment_commands": "4b64d1eccc930ac67a01465796ca8c12714a4e9e64d763858d454582ed7edcbe",
+    "payment_ledger": "d6ab8fbfad492d0990745f6308c074a9283ba7245c65127048be3cc7671c6bd8",
+    "payment_outbox": "ace68e509242a572e2586815d4cf1a4cab0d504b26c3f5b66a3c81970983836a",
+    "payment_receipts": "53407389f3c21e5aee00d4466fcc28533bcc8f96282a87de00318fcf8918f53d",
+}
+
 NONEMPTY_COLUMNS = {
     "handoff_workflows": {"handoff_id", "incident_key", "state_json"},
     "handoff_events": {"event_id", "handoff_id", "event_type", "event_json"},
@@ -520,6 +538,25 @@ TIMESTAMP_COLUMNS = {
 
 
 class Phase6SchemaTests(unittest.TestCase):
+    def assert_postgresql_contract_exact(self, sql: str) -> None:
+        matches = tuple(
+            re.finditer(
+                r"(?ms)^CREATE TABLE ([a-z][a-z0-9_]*) \(\n.*?^\);$",
+                sql,
+            )
+        )
+        names = tuple(match.group(1) for match in matches)
+        self.assertEqual(names, tuple(EXPECTED_POSTGRESQL_BLOCK_SHA256))
+        actual_block_hashes = {
+            match.group(1): hashlib.sha256(match.group(0).encode("utf-8")).hexdigest()
+            for match in matches
+        }
+        self.assertEqual(actual_block_hashes, EXPECTED_POSTGRESQL_BLOCK_SHA256)
+        self.assertEqual(
+            hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+            EXPECTED_POSTGRESQL_DDL_SHA256,
+        )
+
     def open_database(self) -> sqlite3.Connection:
         connection = sqlite3.connect(":memory:")
         self.addCleanup(connection.close)
@@ -991,20 +1028,19 @@ class Phase6SchemaTests(unittest.TestCase):
             schema_hash("mysql")
 
     def test_postgresql_contains_exact_contract_constraints_columns_and_nullability(self) -> None:
+        self.assert_postgresql_contract_exact(render_postgresql())
+
+    def test_postgresql_exact_oracle_rejects_additional_restrictions(self) -> None:
         sql = render_postgresql()
-        for table in schema_contract():
-            start = sql.index(f"CREATE TABLE {table.name} (")
-            end = sql.index(");", start)
-            block = sql[start:end]
-            for column in table.columns:
-                nullable = "" if column.nullable else " NOT NULL"
-                check = "" if column.check is None else f" CHECK ({column.check})"
-                expected = f"    {column.name} {column.postgresql_type}{nullable}{check}"
-                with self.subTest(table=table.name, column=column.name):
-                    self.assertIn(expected, block)
-            for constraint in table.table_constraints:
-                with self.subTest(table=table.name, constraint=constraint):
-                    self.assertIn(f"    {constraint}", block)
+        expected = "    method text NOT NULL CHECK (method IN ('pix', 'wise', 'stripe'))"
+        mutated = sql.replace(
+            expected,
+            expected + " CHECK (method = 'pix')",
+            1,
+        )
+        self.assertNotEqual(mutated, sql)
+        with self.assertRaises(AssertionError):
+            self.assert_postgresql_contract_exact(mutated)
 
     def test_sqlite_executes_strict_with_exact_columns_types_and_nullability(self) -> None:
         connection = self.open_database()

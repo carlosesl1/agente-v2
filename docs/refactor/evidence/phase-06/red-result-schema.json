@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 5,
   "title": "Schema Phase 6 and deterministic DDL",
-  "recorded_at_utc": "2026-07-19T23:06:11Z",
+  "recorded_at_utc": "2026-07-19T23:25:50Z",
   "base_sha": "27fec8d2734f4b07718300573c21e0fa1e34bf80",
   "schema_version": 1,
   "rollout": "NO-GO",
@@ -97,8 +97,8 @@
       "contract_only": true
     },
     "drift": {
-      "generator_command": "python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-task5-review-sqlite.sql --postgresql /tmp/phase6-task5-review-postgresql.sql",
-      "generator_output_sha256": "9bb11fe3b77d0ac7a8738001910748de246354c744ac37caf936f344645d67a6",
+      "generator_command": "python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-task5-pg-sqlite.sql --postgresql /tmp/phase6-task5-pg-postgresql.sql",
+      "generator_output_sha256": "dd4a65ee559b916303e81eba10d52f95196112828e3553762bc8bb6731c9a26a",
       "sqlite_diff_bytes": 0,
       "postgresql_diff_bytes": 0,
       "drift_zero": true
@@ -106,28 +106,28 @@
   },
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-review-focused-final.out 2>&1",
-      "tests": 25,
+      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-pg-focused-final.out 2>&1",
+      "tests": 26,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 1.038,
-      "output_sha256": "a6825881df35c5a94dcc3022cbea7c8d02b9305f20d57ea2378ea7a003642595"
+      "duration_seconds": 1.049,
+      "output_sha256": "400354e0bc5c0522266138ef8596a3ae201ca7fba7de402a4ca89e782b6cac0d"
     },
     "regressions": {
-      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase5_schema -v >/tmp/phase6-task5-review-regressions-final.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase5_schema -v >/tmp/phase6-task5-pg-regressions-final.out 2>&1",
       "tests": 124,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 0.685,
-      "output_sha256": "4231ae8afab16e68f4675aaefa3d42873e2e52ecff763986c2a04bca540c63a2"
+      "duration_seconds": 0.771,
+      "output_sha256": "06692d3942fcad2c2fb655d37d3bef9a5f607f4d7221b89cd27355921480b2ef"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task5-review-full-suite-final.out 2>&1",
-      "tests": 477,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task5-pg-full-suite-final.out 2>&1",
+      "tests": 478,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 64.946,
-      "output_sha256": "adae2b25e3f6256028d188189a97ce167b49e5b7044e52a95019a013d5b038ec"
+      "duration_seconds": 64.802,
+      "output_sha256": "430efd1ab08f985fed6582edc651f25d246d381f92c1117399fb18d864c8b697"
     }
   },
   "scans": {
@@ -142,7 +142,8 @@
       "receipts reference exact delivered outbox message/hash/timestamp tuples",
       "payment ledger fencing token equals claim count",
       "outbox fencing token never trails delivery attempts",
-      "test oracles close type, nullable guard, positive method/outcome, PostgreSQL, non-empty and unique-key false-greens"
+      "test oracles close type, nullable guard, positive method/outcome, PostgreSQL, non-empty and unique-key false-greens",
+      "PostgreSQL exactness uses independent full-block and full-DDL known-answer hashes and rejects extra restrictions"
     ]
   },
   "live_capabilities_executed": [],
@@ -177,6 +178,24 @@
         "literal non-empty operational column universe with isolated empty-string probes",
         "independent unique-key probes"
       ]
+    },
+    {
+      "name": "postgresql_exact_oracle_false_green",
+      "unfixed_base_sha": "874b3c620e961297f3e81bce5844f7400e005177",
+      "test_tree_sha": "d1f2a71996c13df7f3ca150bf934b44030759626",
+      "reproduction_patch_path": "docs/refactor/evidence/phase-06/task5-postgresql-oracle-red.patch",
+      "reproduction_patch_sha256": "ecc1e0babaa142e3bd7fdaa092616931b65ab570181b381f6639377d7339caf4",
+      "reproduction_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task5-postgresql-oracle-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_schema.Phase6SchemaTests.test_postgresql_exact_oracle_rejects_additional_restrictions -v >/tmp/phase6-task5-postgresql-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task5-postgresql-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "e7109068df66fc1088432ba4a668897f09c7f75533342f15e74b48fdf06fbe01",
+      "counterexample": "PostgreSQL method column with an extra CHECK (method = 'pix') still satisfied inclusion-only assertions while rejecting Wise and Stripe",
+      "fix": "literal known-answer SHA-256 for each complete ordered PostgreSQL table block plus the complete DDL; negative mutation must raise AssertionError"
     }
   ]
 }
