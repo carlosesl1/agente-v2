@@ -6,6 +6,8 @@ from decimal import Decimal
 import json
 import unittest
 
+from reservation_domain.serialization import _cached_type_hints
+
 from reservation_domain import (
     AddOn,
     AwaitingAdjustmentState,
@@ -280,6 +282,18 @@ def all_domain_samples():
 
 
 class SerializerContractTests(unittest.TestCase):
+    def test_deserialization_reuses_immutable_type_metadata(self) -> None:
+        raw = dumps_state(
+            new_workflow(workflow_id="workflow-cache-probe", started_at=T0)
+        )
+        _cached_type_hints.cache_clear()
+        self.assertEqual(loads_state(raw), loads_state(raw))
+        info = _cached_type_hints.cache_info()
+        self.assertGreater(info.misses, 0)
+        self.assertGreater(info.hits, 0)
+        with self.assertRaises(TypeError):
+            _cached_type_hints(type(loads_state(raw)))["injected"] = str
+
     def test_every_reachable_state_round_trips(self) -> None:
         states, _, _ = all_domain_samples()
         self.assertEqual({type(state) for state in states}, set(STATE_TYPES))

@@ -8,12 +8,44 @@ import tempfile
 import unittest
 
 from reservation_execution import Phase5PropertyReport, run_phase5_properties
+from scripts.run_phase5_properties import (
+    _partition_ranges,
+    run_sharded_phase5_properties,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = 2026071905
 
 
 class Phase5PropertyTests(unittest.TestCase):
+    def test_gate_partition_covers_each_global_case_exactly_once(self) -> None:
+        ranges = _partition_ranges(cases=20_000, shard_cases=32)
+        self.assertEqual(ranges[0], (0, 32))
+        self.assertEqual(ranges[-1], (19_968, 32))
+        self.assertEqual(sum(count for _, count in ranges), 20_000)
+        self.assertEqual(
+            tuple(start for start, _ in ranges),
+            tuple(range(0, 20_000, 32)),
+        )
+
+    def test_sharded_report_matches_direct_global_index_report(self) -> None:
+        direct = run_phase5_properties(cases=16, seed=SEED)
+        sharded = run_sharded_phase5_properties(
+            cases=16,
+            seed=SEED,
+            max_workers=2,
+            shard_cases=8,
+        )
+        self.assertEqual(sharded.to_dict(), direct.to_dict())
+
+    def test_case_identity_oracles_are_nonvacuous(self) -> None:
+        report = run_phase5_properties(cases=8, seed=SEED)
+        self.assertEqual(report.recovered_command_matches, 1)
+        self.assertEqual(report.delivery_target_matches, 1)
+        self.assertEqual(report.wrong_command_claims, 0)
+        self.assertEqual(report.wrong_delivery_targets, 0)
+        self.assertTrue(report.passed)
+
     def test_smoke_covers_both_providers_and_all_outcomes(self) -> None:
         report = run_phase5_properties(cases=160, seed=SEED)
         self.assertIsInstance(report, Phase5PropertyReport)
@@ -56,6 +88,8 @@ class Phase5PropertyTests(unittest.TestCase):
             "stale_token_writes",
             "missing_terminals",
             "unexpected_exceptions",
+            "wrong_command_claims",
+            "wrong_delivery_targets",
         ):
             self.assertEqual(getattr(report, field), 0, field)
         self.assertEqual(report.violations, ())

@@ -6,6 +6,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
+from functools import lru_cache
 import json
 import types
 from typing import Any, Union, get_args, get_origin, get_type_hints
@@ -26,6 +27,11 @@ from .types import (
 _STATE_BY_TAG = {item.TYPE: item for item in STATE_TYPES}
 _EVENT_BY_TAG = {item.TYPE: item for item in EVENT_TYPES}
 _TOP_LEVEL_KEYS = {"schema_version", "type", "data"}
+
+
+@lru_cache(maxsize=None)
+def _cached_type_hints(cls: type) -> types.MappingProxyType[str, Any]:
+    return types.MappingProxyType(get_type_hints(cls))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -66,7 +72,7 @@ def _decode_dataclass(cls: type, value: Any):
         raise ValueError(
             f"{cls.__name__} fields mismatch; missing={missing}, unknown={unknown}"
         )
-    hints = get_type_hints(cls)
+    hints = _cached_type_hints(cls)
     return cls(
         **{
             field.name: _decode_value(hints[field.name], value[field.name])

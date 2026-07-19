@@ -18,7 +18,7 @@
     "exception_count": 0
   },
   "hashes": {
-    "domain_manifest_sha256": "4577ddd61072133df9019000e360ad67da35eb4a5312d4a3b8bc30a1e83ffef5",
+    "domain_manifest_sha256": "3daee085dd2e602b56440457e072ee4f59fd3c2fe62fd3cc5558400e4b89550f",
     "runner_sha256": "25063a0fd5ac4100a1eff1a90d7323b39309059e0ddf479fe244929279ba3aeb",
     "properties_sha256": "bcd967f34c9ee20dff3bc780d5c6b0d8fb4b03c22f5ad9c9cfbf4f83c7ec681d"
   }

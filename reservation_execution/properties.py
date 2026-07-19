@@ -63,6 +63,9 @@ _POSITIVE_FIELDS = (
     "delivery_retries",
     "duplicate_probes",
     "conflict_probes",
+    "recovered_command_matches",
+    "delivery_target_matches",
+    "consistency_probes",
 )
 _SAFETY_FIELDS = (
     "unauthorized_commands",
@@ -75,6 +78,8 @@ _SAFETY_FIELDS = (
     "stale_token_writes",
     "missing_terminals",
     "unexpected_exceptions",
+    "wrong_command_claims",
+    "wrong_delivery_targets",
 )
 
 
@@ -96,6 +101,9 @@ class Phase5PropertyReport:
     delivery_retries: int
     duplicate_probes: int
     conflict_probes: int
+    recovered_command_matches: int
+    delivery_target_matches: int
+    consistency_probes: int
     unauthorized_commands: int
     second_commands: int
     second_dispatch_slots: int
@@ -106,6 +114,8 @@ class Phase5PropertyReport:
     stale_token_writes: int
     missing_terminals: int
     unexpected_exceptions: int
+    wrong_command_claims: int
+    wrong_delivery_targets: int
     violations: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -210,23 +220,35 @@ class _ScriptedExecutionAdapter:
             evidence=(request.payload_hash,),
         )
 
+    @property
+    def command_id(self) -> str | None:
+        return None if self._command is None else self._command.command_id
+
 
 class _ScriptedDelivery:
     delivery_id = "phase5-property-delivery"
     delivery_version = 1
 
-    def __init__(self, *, fail_first: bool, delivered_at: datetime):
-        self._fail_first = fail_first
-        self._delivered_at = delivered_at
+    def __init__(self, *, target_message_id: str):
+        self._target_message_id = target_message_id
+        self._now: datetime | None = None
         self.calls = 0
+        self.target_calls = 0
+
+    def set_now(self, now: datetime) -> None:
+        self._now = now
 
     def deliver(self, message):
         self.calls += 1
-        if self._fail_first and self.calls == 1:
+        if message.message_id == self._target_message_id:
+            self.target_calls += 1
+        if message.message_id == self._target_message_id and self.target_calls == 1:
             raise RuntimeError("synthetic delivery failure")
+        if self._now is None:
+            raise AssertionError("delivery clock was not set")
         material = json.dumps(
             {
-                "delivered_at": self._delivered_at.isoformat(),
+                "delivered_at": self._now.isoformat(),
                 "delivery_reference": "delivery:property-synthetic",
                 "message_id": message.message_id,
             },
@@ -238,7 +260,7 @@ class _ScriptedDelivery:
             message_id=message.message_id,
             delivery_reference="delivery:property-synthetic",
             receipt_hash=hashlib.sha256(material.encode("utf-8")).hexdigest(),
-            delivered_at=self._delivered_at,
+            delivered_at=self._now,
         )
 
 
@@ -404,15 +426,16 @@ def _persist_case(
 ) -> tuple[str, str]:
     store.create_workflow(script.initial)
     workflow_id = script.initial.meta.workflow_id
+    state = script.initial
     command_id = ""
     for offset, (event, outbox) in enumerate(script.events):
-        state = store.load_workflow(workflow_id)
         persisted = store.apply_event(
             workflow_id,
             state.meta.revision,
             event,
             outbox=outbox,
         )
+        state = persisted.state
         is_confirmation = offset == len(script.events) - 1
         if not is_confirmation and persisted.commands:
             counters["unauthorized_commands"] += len(persisted.commands)
@@ -463,11 +486,21 @@ def _probe_duplicate_and_conflict(
         _violate(violations, index, "divergent_duplicate_accepted")
 
 
-def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
+def _run_phase5_property_range(
+    *,
+    start: int,
+    cases: int,
+    seed: int,
+    deep_consistency: bool = True,
+) -> Phase5PropertyReport:
+    if type(start) is not int or start < 0:
+        raise ValueError("start must be a non-negative exact integer")
     if type(cases) is not int or cases < 1:
         raise ValueError("cases must be a positive exact integer")
     if type(seed) is not int:
         raise TypeError("seed must be an exact integer")
+    if type(deep_consistency) is not bool:
+        raise TypeError("deep_consistency must be an exact bool")
 
     counters = {
         "cloudbeds_cases": 0,
@@ -477,7 +510,8 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
     }
     outcome_counts = {key: 0 for key in _OUTCOME_KEYS}
     violations: list[str] = []
-    execution_at = _BASE_TIME + timedelta(seconds=cases * 10 + 600)
+    end = start + cases
+    execution_at = _BASE_TIME + timedelta(seconds=end * 10 + 600)
     pending_recoveries: dict[str, list[tuple[int, object]]] = {
         "cloudbeds": [],
         "bokun": [],
@@ -490,7 +524,17 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
             for provider in ("cloudbeds", "bokun")
         }
         try:
-            for index in range(cases):
+            indexes = tuple(range(start, end))
+            ordered_indexes = tuple(
+                sorted(
+                    indexes,
+                    key=lambda index: (
+                        0 if index % 8 == 6 else 2 if index % 8 == 7 else 1,
+                        index,
+                    ),
+                )
+            )
+            for index in ordered_indexes:
                 mode = index % 8
                 provider = (
                     ProviderKind.CLOUDBEDS
@@ -547,14 +591,18 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
                     )
                     if result.disposition is not expected_disposition:
                         _violate(violations, index, "wrong_worker_disposition")
+                    if adapter.command_id != command_id:
+                        counters["wrong_command_claims"] += 1
+                        _violate(violations, index, "worker_claimed_another_command")
                     counters["second_provider_calls"] += max(0, adapter.dispatch_calls - 1)
                     if mode == 6:
                         before_dispatches = adapter.dispatch_calls
-                        first_delivery_at = execution_at + timedelta(seconds=2)
-                        completed_delivery_at = first_delivery_at + timedelta(seconds=1)
+                        target_message_id = store._connection.execute(
+                            "SELECT message_id FROM outbox_messages WHERE command_id=?",
+                            (command_id,),
+                        ).fetchone()[0]
                         delivery = _ScriptedDelivery(
-                            fail_first=True,
-                            delivered_at=completed_delivery_at,
+                            target_message_id=target_message_id,
                         )
                         outbox_worker = OutboxWorker(
                             store=store,
@@ -562,17 +610,34 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
                             worker_id=f"delivery:property:{index}",
                             lease_ttl=_LEASE_TTL,
                         )
-                        failed = outbox_worker.run_once(now=first_delivery_at)
-                        succeeded = outbox_worker.run_once(
-                            now=completed_delivery_at
-                        )
-                        if (
-                            failed.disposition is OutboxWorkerDisposition.RETRYABLE_FAILURE
-                            and succeeded.disposition is OutboxWorkerDisposition.DELIVERED
-                            and delivery.calls == 2
-                        ):
+                        pending = store._connection.execute(
+                            "SELECT COUNT(*) FROM outbox_messages "
+                            "WHERE status IN ('pending', 'leased')"
+                        ).fetchone()[0]
+                        target_failed = False
+                        target_delivered = False
+                        delivery_now = execution_at + timedelta(seconds=2)
+                        for _ in range(pending + 2):
+                            delivery.set_now(delivery_now)
+                            delivery_result = outbox_worker.run_once(now=delivery_now)
+                            if delivery_result.message_id == target_message_id:
+                                if (
+                                    delivery_result.disposition
+                                    is OutboxWorkerDisposition.RETRYABLE_FAILURE
+                                ):
+                                    target_failed = True
+                                elif (
+                                    delivery_result.disposition
+                                    is OutboxWorkerDisposition.DELIVERED
+                                ):
+                                    target_delivered = True
+                                    break
+                            delivery_now += timedelta(microseconds=1)
+                        if target_failed and target_delivered and delivery.target_calls == 2:
                             counters["delivery_retries"] += 1
+                            counters["delivery_target_matches"] += 1
                         else:
+                            counters["wrong_delivery_targets"] += 1
                             _violate(violations, index, "delivery_retry_did_not_converge")
                         counters["outbox_provider_retries"] += (
                             adapter.dispatch_calls - before_dispatches
@@ -620,16 +685,31 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
                     )
                     if result.disposition is not WorkerDisposition.COMPLETED:
                         _violate(violations, index, "recovered_claim_not_completed")
+                    if adapter.command_id == stale_claim.command.command_id:
+                        counters["recovered_command_matches"] += 1
+                    else:
+                        counters["wrong_command_claims"] += 1
+                        _violate(violations, index, "recovery_claimed_another_command")
                     counters["second_provider_calls"] += max(
                         0, adapter.dispatch_calls - 1
                     )
 
             for provider_name, store in stores.items():
                 try:
-                    store.assert_execution_consistency()
+                    quick_check = store._connection.execute(
+                        "PRAGMA quick_check"
+                    ).fetchone()[0]
+                    foreign_keys = store._connection.execute(
+                        "PRAGMA foreign_key_check"
+                    ).fetchall()
+                    if quick_check != "ok" or foreign_keys:
+                        raise StoreError("SQLite structural consistency failed")
+                    if deep_consistency:
+                        store.assert_execution_consistency()
+                        counters["consistency_probes"] += 1
                 except StoreError:
                     counters["partial_transactions"] += 1
-                    _violate(violations, cases, f"{provider_name}_consistency_failure")
+                    _violate(violations, end, f"{provider_name}_consistency_failure")
                 idle_adapter = _ScriptedExecutionAdapter(
                     (RuntimeError("unexpected redispatch"),)
                 )
@@ -644,7 +724,7 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
                 )
                 if idle.disposition is not WorkerDisposition.IDLE:
                     counters["unknown_redispatches"] += 1
-                    _violate(violations, cases, f"{provider_name}_terminal_redispatch")
+                    _violate(violations, end, f"{provider_name}_terminal_redispatch")
 
                 rows = store._connection.execute(
                     "SELECT c.workflow_id, l.status, l.dispatch_slots_consumed, "
@@ -702,6 +782,48 @@ def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
         **{field_name: counters[field_name] for field_name in _POSITIVE_FIELDS},
         **{field_name: counters[field_name] for field_name in _SAFETY_FIELDS},
         violations=tuple(violations),
+    )
+
+
+def _merge_phase5_property_reports(
+    reports: tuple[Phase5PropertyReport, ...],
+    *,
+    cases: int,
+    seed: int,
+) -> Phase5PropertyReport:
+    if not reports:
+        raise ValueError("reports must not be empty")
+    if sum(report.cases for report in reports) != cases:
+        raise ValueError("report case counts do not match the requested total")
+    if any(report.seed != seed for report in reports):
+        raise ValueError("all report seeds must match")
+    return Phase5PropertyReport(
+        cases=cases,
+        seed=seed,
+        cloudbeds_cases=sum(report.cloudbeds_cases for report in reports),
+        bokun_cases=sum(report.bokun_cases for report in reports),
+        outcome_counts={
+            key: sum(report.outcome_counts[key] for report in reports)
+            for key in _OUTCOME_KEYS
+        },
+        **{
+            field_name: sum(getattr(report, field_name) for report in reports)
+            for field_name in (*_POSITIVE_FIELDS, *_SAFETY_FIELDS)
+        },
+        violations=tuple(
+            violation
+            for report in reports
+            for violation in report.violations
+        ),
+    )
+
+
+def run_phase5_properties(*, cases: int, seed: int) -> Phase5PropertyReport:
+    return _run_phase5_property_range(
+        start=0,
+        cases=cases,
+        seed=seed,
+        deep_consistency=True,
     )
 
 

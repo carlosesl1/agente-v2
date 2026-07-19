@@ -27,6 +27,17 @@
       "survivors": 4,
       "output_sha256": "3d5feed9122ac243241d95e11e0b18d7c08b4375e62f8b05aaf48a5936ae7f04",
       "raw_output_versioned": false
+    },
+    {
+      "name": "timeout_review_baseline_and_materiality",
+      "base_sha": "71e5463983e067c228fdf4f6117f566c927ed35e",
+      "command": "python3 -m unittest tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_runner_refuses_baseline_failing_test_as_a_kill tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_catalog_tests_pass_on_the_unmodified_tree tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_second_slot_mutant_targets_the_permit_contract -v",
+      "exit_code": 1,
+      "tests_run": 3,
+      "failures": 3,
+      "errors": 0,
+      "output_sha256": "a5805aa735dd77dddc68cd1866fcd75f14c4289fc8d41d6989a7aa13fbdef6dc",
+      "raw_output_versioned": false
     }
   ]
 }

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 from reservation_execution.sqlite_store import DataCorruption, SQLiteUnitOfWork
-from scripts.run_phase5_mutations import MUTANTS, run_mutants
+from scripts.run_phase5_mutations import MUTANTS, Mutant, _run_one, run_mutants
 from scripts.run_phase5_properties import _MIN_GATE_CASES
 from tests.phase5_helpers import persist_script, workflow_events
 
@@ -57,6 +57,43 @@ def runtime_digest() -> str:
 
 
 class Phase5MutationRunnerTests(unittest.TestCase):
+    def test_runner_refuses_baseline_failing_test_as_a_kill(self) -> None:
+        mutant = Mutant(
+            name="synthetic_baseline_failure",
+            path="scripts/run_phase5_properties.py",
+            old="_MIN_GATE_CASES = 20_000\n",
+            new="_MIN_GATE_CASES = 1\n",
+            test="tests.test_phase5_types.NonexistentCase.test_missing",
+        )
+        result = _run_one(root=ROOT, mutant=mutant)
+        self.assertFalse(result["killed"])
+        self.assertNotEqual(result["baseline_exit_code"], 0)
+        self.assertEqual(result["exit_code"], -1)
+
+    def test_catalog_tests_pass_on_the_unmodified_tree(self) -> None:
+        targets = tuple(dict.fromkeys(mutant.test for mutant in MUTANTS))
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", *targets, "-v"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_second_slot_mutant_targets_the_permit_contract(self) -> None:
+        mutant = next(
+            item for item in MUTANTS if item.name == "allow_second_dispatch_slot"
+        )
+        self.assertEqual(mutant.path, "reservation_execution/types.py")
+        self.assertIn("dispatch_slot", mutant.old)
+        self.assertEqual(
+            mutant.test,
+            "tests.test_phase5_types.Phase5ExecutionTypeTests."
+            "test_dispatch_permit_requires_exact_lease_slot_hash_and_utc",
+        )
+
     def test_event_hash_guard_rejects_digest_only_tamper(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase5-event-hash-") as directory:
             path = Path(directory) / "store.db"

@@ -57,17 +57,17 @@ MUTANTS = (
     ),
     Mutant(
         name="allow_second_dispatch_slot",
-        path="reservation_execution/sqlite_store.py",
-        old="            if ledger.dispatch_slots_consumed == 1:\n",
-        new="            if False and ledger.dispatch_slots_consumed == 1:\n",
-        test="tests.test_phase5_claims.Phase5ClaimTests.test_fence_persists_exact_request_and_only_one_permit",
+        path="reservation_execution/types.py",
+        old="        if type(self.dispatch_slot) is not int or self.dispatch_slot != 1:\n",
+        new="        if type(self.dispatch_slot) is not int or self.dispatch_slot not in (1, 2):\n",
+        test="tests.test_phase5_types.Phase5ExecutionTypeTests.test_dispatch_permit_requires_exact_lease_slot_hash_and_utc",
     ),
     Mutant(
         name="ignore_fencing_token",
         path="reservation_execution/types.py",
         old='        _require_int_at_least(self.fencing_token, "lease.fencing_token", 1)\n',
         new='        _require_int_at_least(self.fencing_token, "lease.fencing_token", 0)\n',
-        test="tests.test_phase5_types.Phase5TypeContractTests.test_lease_requires_opaque_owner_exact_positive_token_and_positive_ttl",
+        test="tests.test_phase5_types.Phase5ExecutionTypeTests.test_lease_requires_opaque_owner_exact_positive_token_and_positive_ttl",
     ),
     Mutant(
         name="recover_post_fence_as_retry",
@@ -183,7 +183,37 @@ def _ignore_copy(path: str, names: list[str]) -> set[str]:
     return ignored
 
 
+def _run_test(*, root: Path, test: str) -> tuple[int, str | None]:
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", test, "-v"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=240,
+        )
+        return completed.returncode, None
+    except subprocess.TimeoutExpired:
+        return -2, "test timed out"
+
+
 def _run_one(*, root: Path, mutant: Mutant) -> dict[str, Any]:
+    baseline_exit_code, baseline_error = _run_test(root=root, test=mutant.test)
+    if baseline_exit_code != 0:
+        result: dict[str, Any] = {
+            "name": mutant.name,
+            "path": mutant.path,
+            "test": mutant.test,
+            "target_count": 0,
+            "baseline_exit_code": baseline_exit_code,
+            "exit_code": -1,
+            "killed": False,
+            "error": "mutant test does not pass on the unmodified tree",
+        }
+        if baseline_error is not None:
+            result["baseline_error"] = baseline_error
+        return result
     with tempfile.TemporaryDirectory(prefix=f"phase5-mutant-{mutant.name}-") as temp:
         copy_root = Path(temp) / "repo"
         shutil.copytree(root, copy_root, ignore=_ignore_copy)
@@ -196,30 +226,19 @@ def _run_one(*, root: Path, mutant: Mutant) -> dict[str, Any]:
                 "path": mutant.path,
                 "test": mutant.test,
                 "target_count": target_count,
+                "baseline_exit_code": baseline_exit_code,
                 "exit_code": -1,
                 "killed": False,
                 "error": f"mutation target count was {target_count}, expected 1",
             }
         target.write_text(source.replace(mutant.old, mutant.new, 1), encoding="utf-8")
-        try:
-            completed = subprocess.run(
-                [sys.executable, "-m", "unittest", mutant.test, "-v"],
-                cwd=copy_root,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=240,
-            )
-            exit_code = completed.returncode
-            error = None
-        except subprocess.TimeoutExpired:
-            exit_code = -2
-            error = "mutant test timed out"
+        exit_code, error = _run_test(root=copy_root, test=mutant.test)
         result: dict[str, Any] = {
             "name": mutant.name,
             "path": mutant.path,
             "test": mutant.test,
             "target_count": target_count,
+            "baseline_exit_code": baseline_exit_code,
             "exit_code": exit_code,
             "killed": exit_code > 0,
         }
