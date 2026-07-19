@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "sqlite_store_core",
+  "source_sha": "ed005be1756c78c065cc70dbbea2e6098dfa094c",
+  "command": "python3 -m unittest tests.test_phase5_sqlite_store -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_reservation_execution_sqlite_store_module",
+  "observed_error": "ModuleNotFoundError: No module named 'reservation_execution.sqlite_store'",
+  "red_scope": [
+    "schema_migration_initialization_and_validation",
+    "restart_and_exact_state_roundtrip",
+    "workflow_identity_idempotency",
+    "optimistic_revision_and_atomic_rollback",
+    "event_identity_idempotency_and_divergence",
+    "state_and_event_corruption_detection",
+    "task4_command_and_outbox_effect_rejection",
+    "closed_state_and_event_type_universes"
+  ],
+  "output_sha256": "59440a94aa0d31c8229328e49d68c2949d00d8ac8f6bb35a90335c2caf471cc6",
+  "raw_output_versioned": false,
+  "synthetic_fixtures_only": true,
+  "sqlite_target": "temporary_file",
+  "postgresql_executed": false,
+  "provider_calls": 0,
+  "network_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "duplicate_outbox_must_not_be_silently_discarded",
+      "base_head": "ed005be1756c78c065cc70dbbea2e6098dfa094c",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_duplicate_cannot_silently_discard_caller_outbox tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_two_connections_serialize_and_only_one_expected_revision_wins tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_event_transition_survives_close_and_reopen -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 1,
+      "output_sha256": "1a9600b64c4b4089fc542a92874d8c90dcbf05cbc3a3fb370dc5f94bcc72c45d",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "workflow_sql_timestamps_must_match_canonical_state",
+      "base_head": "ed005be1756c78c065cc70dbbea2e6098dfa094c",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_tampered_state_hash_or_serialization_fails_before_reduce tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_helper_sequence_is_exact_and_authorizes_only_on_final_event -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 2,
+      "output_sha256": "32aafb97de810be417d12967fb176adbfa757bc78a25aa1d319cea635a960679",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "synthetic_helper_ids_must_fit_closed_domain_alphabet",
+      "base_head": "ed005be1756c78c065cc70dbbea2e6098dfa094c",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_helper_accepts_maximum_length_valid_workflow_id -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 1,
+      "failure_class": "derived_event_id_exceeded_domain_limit",
+      "output_sha256": "d495f7c78f2128fbea3734a53d72c6879e75f17cb6659b57a615528040025013",
+      "raw_output_versioned": false
+    }
+  ]
+}
