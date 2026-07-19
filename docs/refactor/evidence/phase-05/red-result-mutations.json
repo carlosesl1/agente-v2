@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "temporary-mutation-catalog",
+  "source_sha": "3659c98f35cf4a59a9efe40c99bd5e9cfdcb9496",
+  "command": "python3 -m unittest tests.test_phase5_mutation_runner -v",
+  "exit_code": 1,
+  "tests_run": 1,
+  "failures": 0,
+  "errors": 1,
+  "expected_failure": "scripts.run_phase5_mutations is absent",
+  "output_sha256": "820b4989b448d53c56e711d4aa3fb4d9c0a07fb3d87ff45649833f9e7ae56ced",
+  "raw_output_versioned": false,
+  "mutated_working_tree": false,
+  "live_provider_calls": 0,
+  "network_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "full_catalog_survivors",
+      "base_sha": "3659c98f35cf4a59a9efe40c99bd5e9cfdcb9496",
+      "command": "python3 scripts/run_phase5_mutations.py --write /tmp/phase5-task11-all-mutants.json",
+      "exit_code": 1,
+      "mutants_run": 20,
+      "mutants_killed": 16,
+      "survivors": 4,
+      "output_sha256": "3d5feed9122ac243241d95e11e0b18d7c08b4375e62f8b05aaf48a5936ae7f04",
+      "raw_output_versioned": false
+    }
+  ]
+}

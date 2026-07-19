@@ -15,6 +15,7 @@ from .outbox import (
     OutboxWorkerResult,
 )
 from .reconciliation import Reconciler, ReconciliationResult
+from .properties import Phase5PropertyReport, run_phase5_properties
 from .worker import CommandWorker, WorkerDisposition, WorkerResult
 from .types import (
     CommandClaim,
@@ -57,6 +58,8 @@ __all__ = [
     "OutboxWorkerResult",
     "Reconciler",
     "ReconciliationResult",
+    "Phase5PropertyReport",
+    "run_phase5_properties",
     "CommandWorker",
     "WorkerDisposition",
     "WorkerResult",

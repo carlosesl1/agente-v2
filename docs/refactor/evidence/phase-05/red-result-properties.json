@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "operational-properties",
+  "source_sha": "3659c98f35cf4a59a9efe40c99bd5e9cfdcb9496",
+  "command": "python3 -m unittest tests.test_phase5_properties -v",
+  "exit_code": 1,
+  "tests_run": 1,
+  "failures": 0,
+  "errors": 1,
+  "expected_failure": "reservation_execution.properties is absent",
+  "output_sha256": "19937e404b11cd4c853b574318b40699d1dfdcb86f56e77911d78ca48714de52",
+  "raw_output_versioned": false,
+  "live_provider_calls": 0,
+  "network_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "public_property_api",
+      "base_sha": "3659c98f35cf4a59a9efe40c99bd5e9cfdcb9496",
+      "command": "python3 -m unittest tests.test_phase5_properties.Phase5PropertyTests.test_property_runner_rejects_invalid_inputs -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 0,
+      "errors": 1,
+      "output_sha256": "5f59676b6fb406b3ceb20414c68d2d6e724d893aa9afa31e799b794127fbe72d",
+      "raw_output_versioned": false
+    }
+  ]
+}
