@@ -91,9 +91,12 @@ class OutboxWorker:
         )
         if claim is None:
             return OutboxWorkerResult.idle()
+        delivery_failed = False
         try:
             receipt = self._delivery.deliver(claim.message)
         except Exception:
+            delivery_failed = True
+        if delivery_failed:
             self._store.release_outbox(claim, now=now)
             return OutboxWorkerResult.retryable_failure(claim.message.message_id)
         self._store.complete_outbox(claim, receipt, now=now)

@@ -4,12 +4,18 @@ from dataclasses import replace
 from datetime import timedelta
 import unittest
 from pathlib import Path
+import traceback
 
 from reservation_execution import Lease, OutboxStatus
 from reservation_execution.outbox import (
     OutboxWorkerDisposition,
 )
-from reservation_execution.sqlite_store import IdentityConflict, SQLiteUnitOfWork, StaleLease
+from reservation_execution.sqlite_store import (
+    DataCorruption,
+    IdentityConflict,
+    SQLiteUnitOfWork,
+    StaleLease,
+)
 from tests.phase5_helpers import (
     T0,
     outbox_fixture,
@@ -67,6 +73,26 @@ class Phase5OutboxTests(unittest.TestCase):
         self.assertEqual(snapshot.delivery_attempts, 1)
         self.assertIsNone(snapshot.claim_owner)
         self.assertEqual(delivery.calls, 1)
+
+    def test_release_failure_does_not_chain_raw_delivery_exception(self) -> None:
+        sentinel = "raw-provider-secret-sentinel"
+        store, worker, _, _, _ = outbox_fixture(
+            self,
+            [RuntimeError(sentinel)],
+        )
+
+        def fail_release(*_args, **_kwargs):
+            raise StaleLease("synthetic release failure")
+
+        store.release_outbox = fail_release
+
+        with self.assertRaises(StaleLease) as caught:
+            worker.run_once(now=NOW)
+
+        self.assertIsNone(caught.exception.__context__)
+        self.assertNotIn(sentinel, repr(caught.exception.__context__))
+        rendered = "".join(traceback.format_exception(caught.exception))
+        self.assertNotIn(sentinel, rendered)
 
     def test_expired_outbox_lease_is_reclaimable_at_exact_expiry(self) -> None:
         store, _, _, command_id, message_id = outbox_fixture(self, [])
@@ -228,6 +254,26 @@ class Phase5OutboxTests(unittest.TestCase):
         )
         self.assertIsNotNone(second)
         self.assertNotEqual(second.message.message_id, first.message.message_id)
+
+    def test_snapshot_rejects_receipt_before_message_creation(self) -> None:
+        store, _, _, _, _ = outbox_fixture(self, [])
+        claim = store.claim_outbox(
+            worker_id="delivery:one",
+            now=NOW,
+            lease_ttl=timedelta(seconds=30),
+        )
+        receipt = receipt_for(claim.message, delivered_at=NOW + timedelta(seconds=1))
+        store.complete_outbox(claim, receipt, now=receipt.delivered_at)
+        store._connection.execute(
+            "UPDATE outbox_messages SET delivered_at=? WHERE message_id=?",
+            (
+                (claim.message.created_at - timedelta(microseconds=1)).isoformat(),
+                claim.message.message_id,
+            ),
+        )
+
+        with self.assertRaises(DataCorruption):
+            store.load_outbox_snapshot(claim.message.message_id)
 
     def test_worker_is_idle_after_all_messages_are_delivered(self) -> None:
         store, worker, delivery, _, _ = outbox_fixture(

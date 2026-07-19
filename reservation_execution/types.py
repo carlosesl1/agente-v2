@@ -405,6 +405,7 @@ class OutboxSnapshot:
                 self.lease is None
                 and attempts >= 1
                 and delivered_at is not None
+                and self.message.created_at <= delivered_at
                 and delivered_at <= updated_at
                 and receipt_hash is not None
             )

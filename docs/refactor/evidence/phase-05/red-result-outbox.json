@@ -37,6 +37,17 @@
       "errors": 0,
       "output_sha256": "000c5d0f72608e89e1b76f6d6d893e3fc49ebe783fed18e872e588a67b371824",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_release_privacy_and_receipt_timeline",
+      "base_sha": "9b71c2bfc004eb83f820e6b083a8e65d2fa88401",
+      "command": "python3 -m unittest tests.test_phase5_outbox.Phase5OutboxTests.test_release_failure_does_not_chain_raw_delivery_exception tests.test_phase5_outbox.Phase5OutboxTests.test_snapshot_rejects_receipt_before_message_creation -v",
+      "exit_code": 1,
+      "tests_run": 2,
+      "failures": 2,
+      "errors": 0,
+      "output_sha256": "2f2fdf303b79fd40596e011908e47549d2c45dca6d73fab599b3722d0e99051e",
+      "raw_output_versioned": false
     }
   ]
 }
