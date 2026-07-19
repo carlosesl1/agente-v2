@@ -327,29 +327,6 @@ class Phase5ExecutionTypeTests(unittest.TestCase):
     def test_hash_fields_reject_surrounding_whitespace_without_normalization(self) -> None:
         command = reservation_command()
         digest = sha256_text(CANONICAL_PAYLOAD)
-        for padded in (" " + digest, digest + " ", "\t" + digest + "\n"):
-            with self.subTest(dto="DispatchRequest", padded=repr(padded)):
-                with self.assertRaises(ValueError):
-                    DispatchRequest(
-                        command_id=command.command_id,
-                        idempotency_key=command.idempotency_key,
-                        operation=command.operation,
-                        canonical_payload=CANONICAL_PAYLOAD,
-                        payload_hash=padded,
-                    )
-            with self.subTest(dto="DispatchPermit", padded=repr(padded)):
-                with self.assertRaises(ValueError):
-                    DispatchPermit(
-                        command_id=command.command_id,
-                        lease=lease(),
-                        dispatch_slot=1,
-                        request_hash=padded,
-                        fenced_at=T0,
-                    )
-            with self.subTest(dto="OutboxMessage", padded=repr(padded)):
-                with self.assertRaises(ValueError):
-                    outbox_message(payload_hash=padded)
-
         message_id = "message:synthetic:1"
         reference = "delivery:synthetic:reference:1"
         receipt_digest = receipt_hash(
@@ -357,19 +334,68 @@ class Phase5ExecutionTypeTests(unittest.TestCase):
             delivery_reference=reference,
             delivered_at=T0,
         )
-        with self.assertRaises(ValueError):
-            DeliveryReceipt(
-                message_id=message_id,
-                delivery_reference=reference,
-                receipt_hash=" " + receipt_digest,
-                delivered_at=T0,
-            )
-        with self.assertRaises(ValueError):
-            PreparationFailure(
-                reason="synthetic_timeout",
-                retryable=True,
-                evidence=(receipt_digest + " ",),
-            )
+        for whitespace in (" ", "\t", "\n"):
+            for position in ("prefix", "suffix"):
+                padded = (
+                    whitespace + digest
+                    if position == "prefix"
+                    else digest + whitespace
+                )
+                padded_receipt = (
+                    whitespace + receipt_digest
+                    if position == "prefix"
+                    else receipt_digest + whitespace
+                )
+                for dto, construct in (
+                    (
+                        "DispatchRequest",
+                        lambda: DispatchRequest(
+                            command_id=command.command_id,
+                            idempotency_key=command.idempotency_key,
+                            operation=command.operation,
+                            canonical_payload=CANONICAL_PAYLOAD,
+                            payload_hash=padded,
+                        ),
+                    ),
+                    (
+                        "DispatchPermit",
+                        lambda: DispatchPermit(
+                            command_id=command.command_id,
+                            lease=lease(),
+                            dispatch_slot=1,
+                            request_hash=padded,
+                            fenced_at=T0,
+                        ),
+                    ),
+                    (
+                        "OutboxMessage",
+                        lambda: outbox_message(payload_hash=padded),
+                    ),
+                    (
+                        "DeliveryReceipt",
+                        lambda: DeliveryReceipt(
+                            message_id=message_id,
+                            delivery_reference=reference,
+                            receipt_hash=padded_receipt,
+                            delivered_at=T0,
+                        ),
+                    ),
+                    (
+                        "PreparationFailure.evidence",
+                        lambda: PreparationFailure(
+                            reason="synthetic_timeout",
+                            retryable=True,
+                            evidence=(padded,),
+                        ),
+                    ),
+                ):
+                    with self.subTest(
+                        dto=dto,
+                        whitespace=repr(whitespace),
+                        position=position,
+                    ):
+                        with self.assertRaises(ValueError):
+                            construct()
 
     def test_canonical_payload_rejects_noncanonical_duplicate_nonfinite_and_nonobject_json(self) -> None:
         command = reservation_command()
