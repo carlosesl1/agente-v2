@@ -16,5 +16,9 @@ Boundary puro da Fase 4 para apresentação e classificação de confirmação.
 deriva IDs de resumo/outbox/evento e entrega o texto exato junto ao
 `SummaryRecorded`; não envia nem persiste nada.
 
-Classifier e binding serão adicionados em ciclos TDD separados. A API pública
-permanece fechada e tipada.
+`ConfirmationClassifier` é model-agnostic. A implementação de referência cobre
+um corpus sintético PT/EN com precedência fail-closed; contexto ausente, sinais
+mistos, exception ou retorno inválido produzem `AMBIGUOUS`.
+
+O trusted binding será adicionado em ciclo TDD separado. A API pública permanece
+fechada e tipada.

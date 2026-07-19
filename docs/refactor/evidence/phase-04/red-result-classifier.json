@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T02:43:09Z",
+  "command": "python3 -m unittest tests.test_phase4_classifier -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_classifier_api",
+  "missing_symbol": "ConfirmationClassifier",
+  "output_sha256": "e714e52320d9ae14bfb5f1d37db92a7a37d5fd305b261fa8fca43e2d12eaeaf3",
+  "raw_output_versioned": false
+}

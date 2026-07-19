@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "fixture_id": "phase4-confirmation-corpus",
+  "synthetic": true,
+  "cases": [
+    {"case_id":"pt-explicit-1","locale":"pt_BR","category":"explicit","text":"Sim, confirmo exatamente esse resumo.","has_context":true,"decision":"accept"},
+    {"case_id":"pt-explicit-2","locale":"pt_BR","category":"explicit","text":"Confirmo esse resumo.","has_context":true,"decision":"accept"},
+    {"case_id":"en-explicit-1","locale":"en","category":"explicit","text":"I confirm this exact summary.","has_context":true,"decision":"accept"},
+    {"case_id":"en-explicit-2","locale":"en","category":"explicit","text":"Yes, I confirm this summary.","has_context":true,"decision":"accept"},
+
+    {"case_id":"pt-colloquial-1","locale":"pt_BR","category":"colloquial","text":"Fechado, pode seguir.","has_context":true,"decision":"accept"},
+    {"case_id":"pt-colloquial-2","locale":"pt_BR","category":"colloquial","text":"Tudo certo, pode seguir!","has_context":true,"decision":"accept"},
+    {"case_id":"en-colloquial-1","locale":"en","category":"colloquial","text":"Sounds good, go ahead.","has_context":true,"decision":"accept"},
+    {"case_id":"en-colloquial-2","locale":"en","category":"colloquial","text":"All good, go ahead!","has_context":true,"decision":"accept"},
+
+    {"case_id":"pt-contextual-1","locale":"pt_BR","category":"contextual","text":"Pode fazer.","has_context":true,"decision":"accept"},
+    {"case_id":"pt-contextual-2","locale":"pt_BR","category":"contextual","text":"Pode seguir.","has_context":true,"decision":"accept"},
+    {"case_id":"en-contextual-1","locale":"en","category":"contextual","text":"Go ahead.","has_context":true,"decision":"accept"},
+    {"case_id":"en-contextual-2","locale":"en","category":"contextual","text":"You can do it.","has_context":true,"decision":"accept"},
+
+    {"case_id":"pt-negative-1","locale":"pt_BR","category":"negative","text":"Não confirme.","has_context":true,"decision":"reject"},
+    {"case_id":"pt-negative-2","locale":"pt_BR","category":"negative","text":"Não reserve isso.","has_context":true,"decision":"reject"},
+    {"case_id":"en-negative-1","locale":"en","category":"negative","text":"Do not book it.","has_context":true,"decision":"reject"},
+    {"case_id":"en-negative-2","locale":"en","category":"negative","text":"Do not confirm.","has_context":true,"decision":"reject"},
+
+    {"case_id":"pt-adjust-1","locale":"pt_BR","category":"adjust","text":"Troque para cartão.","has_context":true,"decision":"adjust"},
+    {"case_id":"pt-adjust-2","locale":"pt_BR","category":"adjust","text":"Quero ajustar a data.","has_context":true,"decision":"adjust"},
+    {"case_id":"en-adjust-1","locale":"en","category":"adjust","text":"Change it to card.","has_context":true,"decision":"adjust"},
+    {"case_id":"en-adjust-2","locale":"en","category":"adjust","text":"I want to adjust the date.","has_context":true,"decision":"adjust"},
+
+    {"case_id":"pt-mixed","locale":"pt_BR","category":"ambiguous","text":"Sim, mas não confirme ainda.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"pt-question","locale":"pt_BR","category":"ambiguous","text":"Isso já está confirmado?","has_context":true,"decision":"ambiguous"},
+    {"case_id":"pt-unknown","locale":"pt_BR","category":"ambiguous","text":"Vou pensar e aviso.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"pt-context-free","locale":"pt_BR","category":"ambiguous","text":"Pode fazer.","has_context":false,"decision":"ambiguous"},
+    {"case_id":"en-mixed","locale":"en","category":"ambiguous","text":"Yes, but do not book it yet.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"en-question","locale":"en","category":"ambiguous","text":"Is this confirmed?","has_context":true,"decision":"ambiguous"},
+    {"case_id":"en-unknown","locale":"en","category":"ambiguous","text":"Let me think about it.","has_context":true,"decision":"ambiguous"},
+    {"case_id":"en-context-free","locale":"en","category":"ambiguous","text":"Go ahead.","has_context":false,"decision":"ambiguous"}
+  ]
+}
