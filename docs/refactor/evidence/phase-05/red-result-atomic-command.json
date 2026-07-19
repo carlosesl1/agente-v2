@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "atomic_summary_command_persistence",
+  "source_sha": "86a9f0cb2de242b44478e7b3ab759f6d144c5d07",
+  "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5AtomicCommandTests -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "tests_run": 6,
+  "failure_count": 0,
+  "error_count": 11,
+  "failure_classes": [
+    "summary_outbox_persistence_was_unsupported",
+    "command_and_ledger_persistence_were_unsupported",
+    "public_summary_projection_module_was_absent",
+    "durable_command_ledger_outbox_loaders_were_absent",
+    "statement_fault_matrix_could_not_reach_task5_writes"
+  ],
+  "output_sha256": "41d074f67d0aa5a1dc04e0add440a4cfa519d0b4cdc3cc6d190b755f678472e4",
+  "raw_output_versioned": false,
+  "fixture_class": "synthetic_local_only",
+  "sqlite_mode": "temporary_file",
+  "postgresql_executed": false,
+  "provider_calls": 0,
+  "network_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "coherent_outbox_payload_and_hash_tampering",
+      "base_head": "86a9f0cb2de242b44478e7b3ab759f6d144c5d07",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_coherently_tampered_outbox_payload_and_hash_is_detected -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 1,
+      "failure_class": "coherently_rehashed_summary_payload_was_accepted",
+      "output_sha256": "bfa5cf0e1a64d8bd8e261a93d12cd287486a747d3c951889dabf7720a43725d5",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "ledger_snapshot_and_secondary_loader_boundaries",
+      "base_head": "86a9f0cb2de242b44478e7b3ab759f6d144c5d07",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_ledger_snapshot_rejects_invalid_status_matrix_and_non_utc_values tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_secondary_outbox_projection_query_maps_sqlite_failure -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 1,
+      "error_count": 1,
+      "failure_classes": [
+        "ledger_status_matrix_and_non_utc_snapshot_were_accepted",
+        "secondary_outbox_projection_sqlite_error_escaped_raw"
+      ],
+      "output_sha256": "0e4e363a5ae0761d52b88bb7f731419b6545e6444f23c7080de1feb7db996823",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "projection_contract_must_be_public",
+      "base_head": "86a9f0cb2de242b44478e7b3ab759f6d144c5d07",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_public_summary_projection_recomposes_phase4_artifact -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "error_count": 1,
+      "failure_class": "ledger_snapshot_and_summary_projection_were_not_exported",
+      "output_sha256": "1f26ad8a3d16ceffd7249a54a51c585e94e495cbb57534aea71896c9cf8fb47a",
+      "raw_output_versioned": false
+    }
+  ]
+}

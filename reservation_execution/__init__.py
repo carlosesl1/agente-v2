@@ -1,6 +1,7 @@
 """Immutable contracts for durable reservation command execution."""
 
 from .adapter import ExecutionAdapter, PreparationFailure
+from .projection import LedgerSnapshot, summary_outbox_message, summary_payload
 from .types import (
     CommandClaim,
     DeliveryReceipt,
@@ -27,4 +28,7 @@ __all__ = [
     "PreparationDisposition",
     "PreparationFailure",
     "ExecutionAdapter",
+    "LedgerSnapshot",
+    "summary_payload",
+    "summary_outbox_message",
 ]

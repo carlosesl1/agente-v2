@@ -30,7 +30,8 @@ from reservation_domain import (
     new_workflow,
     reduce,
 )
-from reservation_execution import OutboxKind, OutboxMessage
+from reservation_execution import OutboxMessage
+from reservation_execution.projection import summary_outbox_message
 from reservation_execution.sqlite_store import PersistedTransition, SQLiteUnitOfWork
 from reservation_lookup import (
     BokunLookupRequest,
@@ -122,34 +123,7 @@ def _lookup(provider: str):
 
 
 def _summary_outbox(workflow_id: str, prepared) -> OutboxMessage:
-    rendered = prepared.rendered
-    canonical_payload = json.dumps(
-        {
-            "claim_status": rendered.claim_status,
-            "content": rendered.content,
-            "content_hash": rendered.content_hash,
-            "draft_id": rendered.draft_id,
-            "draft_version": rendered.draft_version,
-            "locale": rendered.locale.value,
-            "renderer_id": rendered.renderer_id,
-            "renderer_version": rendered.renderer_version,
-            "subject_signature": rendered.subject_signature,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return OutboxMessage(
-        message_id=prepared.outbox_message_id,
-        idempotency_key=prepared.outbox_message_id,
-        workflow_id=workflow_id,
-        command_id=None,
-        kind=OutboxKind.SUMMARY_PRESENTED,
-        template_id="reservation.summary.v1",
-        canonical_payload=canonical_payload,
-        payload_hash=hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
-        created_at=prepared.presented_at,
-    )
+    return summary_outbox_message(workflow_id=workflow_id, prepared=prepared)
 
 
 def workflow_events(

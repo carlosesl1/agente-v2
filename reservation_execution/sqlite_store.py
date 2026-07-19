@@ -20,15 +20,22 @@ from reservation_domain import (
     SummaryRecorded,
     Transition,
     TransitionStatus,
+    dumps_command,
     dumps_event,
     dumps_state,
+    loads_command,
     loads_event,
     loads_state,
     reduce,
 )
 
+from .projection import (
+    LedgerSnapshot,
+    validate_summary_outbox,
+    validate_summary_outbox_for_draft,
+)
 from .schema import SCHEMA_VERSION, render_sqlite, schema_contract, schema_hash
-from .types import OutboxMessage
+from .types import LedgerStatus, OutboxKind, OutboxMessage, OutboxStatus
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
@@ -55,12 +62,16 @@ class IdentityConflict(StoreError):
     """A durable identity already exists with divergent content or ownership."""
 
 
-class UnsupportedEffect(StoreError):
-    """The reducer produced an effect owned by a later implementation task."""
-
-
 class WorkflowNotFound(StoreError):
     """The requested workflow does not exist."""
+
+
+class CommandNotFound(StoreError):
+    """The requested authorized command does not exist."""
+
+
+class OutboxNotFound(StoreError):
+    """The requested durable outbox message does not exist."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,6 +387,235 @@ class SQLiteUnitOfWork:
             raise DataCorruption("workflow created_at is inconsistent with its revision")
         return state
 
+    def _command_row(self, command_id: str):
+        command_id = _require_id(command_id, "command_id")
+        return self._connection.execute(
+            "SELECT command_id, idempotency_key, workflow_id, draft_id, "
+            "draft_version, subject_signature, operation, command_json, "
+            "command_hash, created_at FROM reservation_commands WHERE command_id=?",
+            (command_id,),
+        ).fetchone()
+
+    def _command_from_row(self, row) -> ReservationCommand:
+        (
+            command_id,
+            idempotency_key,
+            workflow_id,
+            draft_id,
+            draft_version,
+            subject_signature,
+            operation,
+            raw,
+            digest,
+            created_at,
+        ) = row
+        if type(raw) is not str or type(digest) is not str:
+            raise DataCorruption("command bytes/hash have wrong SQLite types")
+        if _sha256_text(raw) != digest:
+            raise DataCorruption("command hash mismatch")
+        try:
+            command = loads_command(raw)
+            canonical = dumps_command(command)
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("command serialization is invalid") from exc
+        if canonical != raw:
+            raise DataCorruption("command serialization is noncanonical")
+        created = _canonical_utc(created_at, "command.created_at")
+        if (
+            command.command_id != command_id
+            or command.idempotency_key != idempotency_key
+            or command.workflow_id != workflow_id
+            or command.draft_id != draft_id
+            or command.draft_version != draft_version
+            or command.subject_signature != subject_signature
+            or command.operation.value != operation
+            or command.created_at != created
+        ):
+            raise DataCorruption("command row metadata disagrees with serialized command")
+        return command
+
+    def load_command(self, command_id: str) -> ReservationCommand:
+        self._ensure_open()
+        command_id = _require_id(command_id, "command_id")
+        try:
+            row = self._command_row(command_id)
+        except sqlite3.Error as exc:
+            raise _sqlite_store_error(exc, "load_command") from exc
+        if row is None:
+            raise CommandNotFound(f"command not found: {command_id}")
+        return self._command_from_row(row)
+
+    def _ledger_row(self, command_id: str):
+        command_id = _require_id(command_id, "command_id")
+        return self._connection.execute(
+            "SELECT command_id, status, claim_owner, fencing_token, "
+            "lease_acquired_at, lease_expires_at, claim_count, "
+            "preparation_failures, dispatch_slots_consumed, "
+            "dispatch_request_hash, dispatch_fenced_at, outcome_json, "
+            "outcome_hash, updated_at FROM execution_ledger WHERE command_id=?",
+            (command_id,),
+        ).fetchone()
+
+    def load_ledger(self, command_id: str) -> LedgerSnapshot:
+        self._ensure_open()
+        command = self.load_command(command_id)
+        try:
+            row = self._ledger_row(command.command_id)
+        except sqlite3.Error as exc:
+            raise _sqlite_store_error(exc, "load_ledger") from exc
+        if row is None:
+            raise DataCorruption("authorized command has no execution ledger")
+        try:
+            snapshot = LedgerSnapshot(
+                command_id=row[0],
+                status=LedgerStatus(row[1]),
+                claim_owner=row[2],
+                fencing_token=row[3],
+                lease_acquired_at=(
+                    None
+                    if row[4] is None
+                    else _canonical_utc(row[4], "ledger.lease_acquired_at")
+                ),
+                lease_expires_at=(
+                    None
+                    if row[5] is None
+                    else _canonical_utc(row[5], "ledger.lease_expires_at")
+                ),
+                claim_count=row[6],
+                preparation_failures=row[7],
+                dispatch_slots_consumed=row[8],
+                dispatch_request_hash=row[9],
+                dispatch_fenced_at=(
+                    None
+                    if row[10] is None
+                    else _canonical_utc(row[10], "ledger.dispatch_fenced_at")
+                ),
+                outcome_json=row[11],
+                outcome_hash=row[12],
+                updated_at=_canonical_utc(row[13], "ledger.updated_at"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("execution ledger row is invalid") from exc
+        if snapshot.command_id != command.command_id:
+            raise DataCorruption("execution ledger belongs to another command")
+        if snapshot.updated_at < command.created_at:
+            raise DataCorruption("execution ledger predates its command")
+        if (
+            snapshot.status is LedgerStatus.QUEUED
+            and snapshot.claim_count == 0
+            and snapshot.updated_at != command.created_at
+        ):
+            raise DataCorruption("initial queued ledger timestamp disagrees with command")
+        return snapshot
+
+    def _outbox_row(self, message_id: str):
+        message_id = _require_id(message_id, "message_id")
+        return self._connection.execute(
+            "SELECT message_id, idempotency_key, workflow_id, command_id, kind, "
+            "template_id, payload_json, payload_hash, status, claim_owner, "
+            "fencing_token, lease_acquired_at, lease_expires_at, "
+            "delivery_attempts, delivered_at, receipt_hash, created_at, "
+            "updated_at FROM outbox_messages WHERE message_id=?",
+            (message_id,),
+        ).fetchone()
+
+    def _outbox_from_row(self, row) -> OutboxMessage:
+        try:
+            message = OutboxMessage(
+                message_id=row[0],
+                idempotency_key=row[1],
+                workflow_id=row[2],
+                command_id=row[3],
+                kind=OutboxKind(row[4]),
+                template_id=row[5],
+                canonical_payload=row[6],
+                payload_hash=row[7],
+                created_at=_canonical_utc(row[16], "outbox.created_at"),
+            )
+            status = OutboxStatus(row[8])
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("outbox message row is invalid") from exc
+        if type(row[10]) is not int or type(row[13]) is not int:
+            raise DataCorruption("outbox counters have wrong SQLite types")
+        optional_times = tuple(
+            None if row[index] is None else _canonical_utc(row[index], field_name)
+            for index, field_name in (
+                (11, "outbox.lease_acquired_at"),
+                (12, "outbox.lease_expires_at"),
+                (14, "outbox.delivered_at"),
+            )
+        )
+        updated_at = _canonical_utc(row[17], "outbox.updated_at")
+        if updated_at < message.created_at:
+            raise DataCorruption("outbox updated_at predates created_at")
+        if status is OutboxStatus.PENDING and (
+            row[9] is not None
+            or optional_times[0] is not None
+            or optional_times[1] is not None
+            or optional_times[2] is not None
+            or row[15] is not None
+        ):
+            raise DataCorruption("pending outbox message has lease or receipt state")
+        if row[10] < 0 or row[13] < 0:
+            raise DataCorruption("outbox counters are negative")
+        if message.command_id is not None:
+            command = self.load_command(message.command_id)
+            if command.workflow_id != message.workflow_id:
+                raise DataCorruption("outbox command belongs to another workflow")
+        return message
+
+    def load_outbox(self, message_id: str) -> OutboxMessage:
+        self._ensure_open()
+        message_id = _require_id(message_id, "message_id")
+        try:
+            row = self._outbox_row(message_id)
+            if row is None:
+                raise OutboxNotFound(f"outbox message not found: {message_id}")
+            message = self._outbox_from_row(row)
+            if message.kind is OutboxKind.SUMMARY_PRESENTED:
+                self._verify_summary_outbox_projection(message)
+            return message
+        except sqlite3.Error as exc:
+            raise _sqlite_store_error(exc, "load_outbox") from exc
+
+    def _verify_summary_outbox_projection(self, message: OutboxMessage) -> None:
+        rows = tuple(
+            self._connection.execute(
+                "SELECT event_id, workflow_id, revision, occurred_at, event_type, "
+                "event_json, event_hash FROM domain_events "
+                "WHERE workflow_id=? AND event_type='summary_recorded' ORDER BY revision",
+                (message.workflow_id,),
+            )
+        )
+        matched: SummaryRecorded | None = None
+        for row in rows:
+            event = self._verified_event(row)
+            if type(event) is SummaryRecorded and event.outbox_message_id == message.message_id:
+                if matched is not None:
+                    raise DataCorruption("multiple summary events reference one outbox message")
+                matched = event
+        if matched is None:
+            raise DataCorruption("summary outbox has no owning SummaryRecorded event")
+        state = self.load_workflow(message.workflow_id)
+        draft = getattr(state, "draft", None)
+        if draft is None:
+            raise DataCorruption("summary outbox workflow has no commercial draft")
+        if (
+            draft.version == matched.draft_version
+            and draft.subject_signature == matched.subject_signature
+        ):
+            try:
+                validate_summary_outbox_for_draft(
+                    workflow_id=message.workflow_id,
+                    draft=draft,
+                    event=matched,
+                    message=message,
+                )
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption(
+                    "summary outbox diverges from its Phase 4 artifact"
+                ) from exc
+
     def apply_event(
         self,
         workflow_id: str,
@@ -399,41 +639,185 @@ class SQLiteUnitOfWork:
             if row is None:
                 raise WorkflowNotFound(f"workflow not found: {workflow_id}")
             current = self._state_from_row(row)
-            if type(event) is SummaryRecorded:
-                raise UnsupportedEffect(
-                    "summary outbox persistence is owned by Task 5"
-                )
-            if outbox:
-                raise UnsupportedEffect(
-                    "outbox persistence is owned by Task 5 and cannot be discarded"
-                )
             existing = self._event_row(event.event_id)
             if existing is not None:
-                return self._resolve_duplicate(
+                self._validate_duplicate_outbox(event, outbox)
+                result = self._resolve_duplicate(
                     existing,
                     workflow_id=workflow_id,
                     event=event,
                     current=current,
                 )
+                self._assert_current_command_projection(current)
+                return result
             if current.meta.revision != expected_revision:
                 raise ConcurrencyConflict(
                     f"expected revision {expected_revision}, "
                     f"found {current.meta.revision}"
                 )
+            validated_outbox = self._validate_new_outbox(current, event, outbox)
             transition = reduce(current, event)
-            if transition.commands:
-                raise UnsupportedEffect(
-                    "command persistence is owned by Task 5 and cannot be discarded"
-                )
+            if len(transition.commands) > 1:
+                raise DataCorruption("reducer emitted more than one authorized command")
             if transition.state.meta.revision != current.meta.revision + 1:
                 raise DataCorruption("reducer transition did not advance exactly one revision")
+            self._validate_transition_commands(current, transition)
             self._insert_event(
                 workflow_id,
                 event,
                 transition.state.meta.revision,
             )
             self._update_state_compare_and_swap(current, transition.state)
+            for command in transition.commands:
+                self._insert_immutable_command(command)
+                self._insert_initial_ledger(command)
+            for message in validated_outbox:
+                self._insert_outbox(message)
             return PersistedTransition.from_domain(transition)
+
+    def _validate_new_outbox(
+        self,
+        current: State,
+        event: Event,
+        outbox: tuple[OutboxMessage, ...],
+    ) -> tuple[OutboxMessage, ...]:
+        if type(event) is SummaryRecorded:
+            if len(outbox) != 1:
+                raise ValueError("SummaryRecorded requires exactly one outbox message")
+            try:
+                validated = validate_summary_outbox(current, event, outbox[0])
+            except (TypeError, ValueError) as exc:
+                raise IdentityConflict("summary outbox does not match event/artifact") from exc
+            return (validated,)
+        if outbox:
+            raise ValueError("caller-provided outbox is only allowed for SummaryRecorded")
+        return ()
+
+    def _validate_duplicate_outbox(
+        self,
+        event: Event,
+        outbox: tuple[OutboxMessage, ...],
+    ) -> None:
+        if type(event) is SummaryRecorded:
+            if len(outbox) != 1:
+                raise ValueError("SummaryRecorded requires exactly one outbox message")
+            candidate = outbox[0]
+            if candidate.message_id != event.outbox_message_id:
+                raise IdentityConflict("summary replay references another outbox identity")
+            try:
+                persisted = self.load_outbox(event.outbox_message_id)
+            except OutboxNotFound as exc:
+                raise DataCorruption("summary event has no durable outbox message") from exc
+            if candidate != persisted:
+                raise IdentityConflict("summary replay contains divergent outbox content")
+        elif outbox:
+            raise ValueError("caller-provided outbox is only allowed for SummaryRecorded")
+
+    def _validate_transition_commands(
+        self,
+        current: State,
+        transition: Transition,
+    ) -> None:
+        before = current.meta.command_ids
+        after = transition.state.meta.command_ids
+        if not transition.commands:
+            if after != before:
+                raise DataCorruption("state command IDs changed without a reducer command")
+            return
+        command = transition.commands[0]
+        if type(command) is not ReservationCommand:
+            raise DataCorruption("reducer command has an unknown type")
+        if command.workflow_id != current.meta.workflow_id:
+            raise DataCorruption("reducer command belongs to another workflow")
+        if before or after != (command.command_id,):
+            raise DataCorruption("reducer command disagrees with next state identity")
+        state_command = getattr(transition.state, "command", None)
+        if state_command != command:
+            raise DataCorruption("next state does not embed the authorized command")
+
+    def _assert_current_command_projection(self, current: State) -> None:
+        if not current.meta.command_ids:
+            return
+        if len(current.meta.command_ids) != 1:
+            raise DataCorruption("workflow contains more than one command identity")
+        command = self.load_command(current.meta.command_ids[0])
+        if getattr(current, "command", None) != command:
+            raise DataCorruption("workflow state command disagrees with durable command")
+        self.load_ledger(command.command_id)
+
+    def _insert_immutable_command(self, command: ReservationCommand) -> None:
+        raw = dumps_command(command)
+        existing = self._connection.execute(
+            "SELECT command_id FROM reservation_commands "
+            "WHERE command_id=? OR idempotency_key=? OR workflow_id=?",
+            (command.command_id, command.idempotency_key, command.workflow_id),
+        ).fetchone()
+        if existing is not None:
+            raise IdentityConflict("authorized command identity already exists")
+        self._connection.execute(
+            "INSERT INTO reservation_commands "
+            "(command_id, idempotency_key, workflow_id, draft_id, draft_version, "
+            "subject_signature, operation, command_json, command_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                command.command_id,
+                command.idempotency_key,
+                command.workflow_id,
+                command.draft_id,
+                command.draft_version,
+                command.subject_signature,
+                command.operation.value,
+                raw,
+                _sha256_text(raw),
+                command.created_at.isoformat(),
+            ),
+        )
+
+    def _insert_initial_ledger(self, command: ReservationCommand) -> None:
+        if self._ledger_row(command.command_id) is not None:
+            raise IdentityConflict("authorized command already has an execution ledger")
+        now = command.created_at.isoformat()
+        self._connection.execute(
+            "INSERT INTO execution_ledger "
+            "(command_id, status, claim_owner, fencing_token, lease_acquired_at, "
+            "lease_expires_at, claim_count, preparation_failures, "
+            "dispatch_slots_consumed, dispatch_request_hash, dispatch_fenced_at, "
+            "outcome_json, outcome_hash, updated_at) "
+            "VALUES (?, ?, NULL, 0, NULL, NULL, 0, 0, 0, NULL, NULL, NULL, NULL, ?)",
+            (command.command_id, LedgerStatus.QUEUED.value, now),
+        )
+
+    def _insert_outbox(self, message: OutboxMessage) -> None:
+        existing = self._connection.execute(
+            "SELECT message_id FROM outbox_messages "
+            "WHERE message_id=? OR idempotency_key=?",
+            (message.message_id, message.idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            raise IdentityConflict("outbox identity already exists")
+        instant = message.created_at.isoformat()
+        self._connection.execute(
+            "INSERT INTO outbox_messages "
+            "(message_id, idempotency_key, workflow_id, command_id, kind, "
+            "template_id, payload_json, payload_hash, status, claim_owner, "
+            "fencing_token, lease_acquired_at, lease_expires_at, "
+            "delivery_attempts, delivered_at, receipt_hash, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, 0, NULL, "
+            "NULL, ?, ?)",
+            (
+                message.message_id,
+                message.idempotency_key,
+                message.workflow_id,
+                message.command_id,
+                message.kind.value,
+                message.template_id,
+                message.canonical_payload,
+                message.payload_hash,
+                OutboxStatus.PENDING.value,
+                instant,
+                instant,
+            ),
+        )
 
     def _event_row(self, event_id: str):
         event_id = _require_id(event_id, "event_id")
@@ -552,6 +936,7 @@ __all__ = [
     "DataCorruption",
     "ConcurrencyConflict",
     "IdentityConflict",
-    "UnsupportedEffect",
     "WorkflowNotFound",
+    "CommandNotFound",
+    "OutboxNotFound",
 ]
