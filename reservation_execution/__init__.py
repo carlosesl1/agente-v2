@@ -3,10 +3,12 @@
 from .adapter import ExecutionAdapter, PreparationFailure
 from .projection import (
     LedgerSnapshot,
+    project_outcome_outbox,
     project_preparation_failure_outbox,
     summary_outbox_message,
     summary_payload,
 )
+from .worker import CommandWorker, WorkerDisposition, WorkerResult
 from .types import (
     CommandClaim,
     DeliveryReceipt,
@@ -37,4 +39,8 @@ __all__ = [
     "summary_payload",
     "summary_outbox_message",
     "project_preparation_failure_outbox",
+    "project_outcome_outbox",
+    "CommandWorker",
+    "WorkerDisposition",
+    "WorkerResult",
 ]

@@ -20,6 +20,8 @@ from reservation_domain import (
     DraftRequested,
     EconomicTerms,
     Event,
+    ExecutionCertainty,
+    ExecutionOutcome,
     LookupRecorded,
     OfferChosen,
     Party,
@@ -28,10 +30,11 @@ from reservation_domain import (
     ServiceKind,
     StartSearch,
     State,
+    dumps_command,
     new_workflow,
     reduce,
 )
-from reservation_execution import OutboxMessage
+from reservation_execution import DispatchRequest, OutboxMessage, PreparationFailure
 from reservation_execution.projection import summary_outbox_message
 from reservation_execution.sqlite_store import PersistedTransition, SQLiteUnitOfWork
 from reservation_lookup import (
@@ -270,3 +273,78 @@ def claim_fixture(test_case):
         )
 
     return store, claim_at
+
+
+class ScriptedExecutionAdapter:
+    """Finite execution adapter fake with no network or provider fallback."""
+
+    adapter_id = "scripted-execution"
+    adapter_version = 1
+
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.prepare_calls = 0
+        self.dispatch_calls = 0
+        self._command = None
+
+    def prepare(self, command):
+        self.prepare_calls += 1
+        self._command = command
+        if self.outcomes and type(self.outcomes[0]) is PreparationFailure:
+            raise self.outcomes.pop(0)
+        payload = dumps_command(command)
+        return DispatchRequest.from_command(command, payload)
+
+    def dispatch(self, request, *, idempotency_key):
+        self.dispatch_calls += 1
+        if not self.outcomes:
+            raise AssertionError("unexpected synthetic dispatch")
+        action = self.outcomes.pop(0)
+        if isinstance(action, BaseException):
+            raise action
+        if type(action) is ExecutionOutcome:
+            return action
+        if type(action) is not ExecutionCertainty or self._command is None:
+            raise AssertionError("scripted action must be an outcome or certainty")
+        provider_reference = (
+            "provider:synthetic"
+            if action is not ExecutionCertainty.NOT_CALLED
+            else None
+        )
+        status = {
+            ExecutionCertainty.EFFECT_CONFIRMED: "synthetic_effect_confirmed",
+            ExecutionCertainty.CALLED_NO_EFFECT: "synthetic_no_effect",
+            ExecutionCertainty.CALLED_UNKNOWN: "synthetic_unknown",
+            ExecutionCertainty.NOT_CALLED: "synthetic_not_called",
+        }[action]
+        return self._command.outcome(
+            certainty=action,
+            normalized_status=status,
+            provider_reference=provider_reference,
+            evidence=(request.payload_hash,),
+        )
+
+
+def worker_fixture(test_case, action):
+    """Persist one queued command and build a local one-shot worker fixture."""
+
+    from reservation_execution.worker import CommandWorker
+
+    temporary = tempfile.TemporaryDirectory(prefix="phase5-worker-")
+    test_case.addCleanup(temporary.cleanup)
+    path = Path(temporary.name) / "phase5.db"
+    store = SQLiteUnitOfWork.open(path)
+    test_case.addCleanup(store.close)
+    workflow_id = _opaque_id("workflow", "worker", test_case.id())
+    initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+    store.create_workflow(initial)
+    persist_script(store, workflow_id, script)
+    command_id = store.load_workflow(workflow_id).command.command_id
+    adapter = ScriptedExecutionAdapter([action])
+    worker = CommandWorker(
+        store=store,
+        adapter=adapter,
+        worker_id="worker:scripted",
+        lease_ttl=timedelta(seconds=30),
+    )
+    return store, worker, adapter, workflow_id, command_id

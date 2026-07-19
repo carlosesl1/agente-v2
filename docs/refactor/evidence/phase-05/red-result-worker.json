@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "worker_and_outcome_projection",
+  "source_sha": "1b74a411c8d57324a5442c1cb6cb2e478e891ef0",
+  "command": "python3 -m unittest tests.test_phase5_worker -v",
+  "expected_failure": "reservation_execution.worker is absent before Task 7 implementation",
+  "exit_code": 1,
+  "tests_run": 7,
+  "failures": 0,
+  "errors": 7,
+  "output_sha256": "a61684d264cab8c3b7d089a3c066f3db83d2cae4ebec3cf0a8bf56220d522efe",
+  "raw_output_versioned": false,
+  "external_capabilities": [],
+  "provider_calls": 0,
+  "network_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "preparation_failure_routing",
+      "base_sha": "1b74a411c8d57324a5442c1cb6cb2e478e891ef0",
+      "command": "python3 -m unittest tests.test_phase5_worker.Phase5WorkerTests.test_retryable_preparation_failure_requeues_without_dispatch_or_fence -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "8d0bce60d581b4270fe8c1a463f3b6a30952ef98baf0ef3fdb6eb8e4f831bebe",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "execution_outbox_projection_verification",
+      "base_sha": "1b74a411c8d57324a5442c1cb6cb2e478e891ef0",
+      "command": "python3 -m unittest tests.test_phase5_worker.Phase5WorkerTests.test_execution_outbox_loader_rejects_coherent_payload_and_hash_tampering -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "e84efbcb0c35d58e907371f9ea67002ec3d3ebc32461aaa9aec26748c8404e9c",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "outcome_state_event_history_binding",
+      "base_sha": "1b74a411c8d57324a5442c1cb6cb2e478e891ef0",
+      "command": "python3 -m unittest tests.test_phase5_worker.Phase5WorkerTests.test_execution_outbox_loader_rejects_coherent_internal_outcome_rewrite -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "a5efa34a8b8b7ae5d62e0bdac1637fc8a2313b11a288b5162ec77c46b35b5afe",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "not_called_projection_identity",
+      "base_sha": "1b74a411c8d57324a5442c1cb6cb2e478e891ef0",
+      "command": "python3 -m unittest tests.test_phase5_worker.Phase5WorkerTests.test_not_called_general_projection_is_identical_to_preparation_projection -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "598efcf7a006152eb11f65ba2c72dffe34e20d28ca49d4f027796babb9e9b6b5",
+      "raw_output_versioned": false
+    }
+  ]
+}

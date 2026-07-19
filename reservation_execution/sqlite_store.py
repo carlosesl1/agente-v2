@@ -19,15 +19,20 @@ from reservation_domain import (
     ExecutingState,
     ExecutionCertainty,
     ExecutionFinished,
+    ExecutionOutcome,
     ExecutionQueuedState,
     ExecutionStarted,
     FailedBeforeProviderState,
+    FailedNoEffectState,
+    ManualReviewState,
     ManualReviewRequested,
     ReservationCommand,
     State,
     SummaryRecorded,
+    SucceededState,
     Transition,
     TransitionStatus,
+    UncertainState,
     dumps_command,
     dumps_event,
     dumps_outcome,
@@ -43,6 +48,7 @@ from reservation_domain import (
 from .adapter import PreparationFailure
 from .projection import (
     LedgerSnapshot,
+    project_outcome_outbox,
     project_preparation_failure_outbox,
     validate_summary_outbox,
 )
@@ -657,6 +663,8 @@ class SQLiteUnitOfWork:
             message = self._outbox_from_row(row)
             if message.kind is OutboxKind.SUMMARY_PRESENTED:
                 self._verify_summary_outbox_projection(message)
+            else:
+                self._verify_execution_outbox_projection(message)
             return message
         except sqlite3.Error as exc:
             raise _sqlite_store_error(exc, "load_outbox") from exc
@@ -733,6 +741,115 @@ class SQLiteUnitOfWork:
             raise DataCorruption(
                 "summary outbox diverges from its historical Phase 4 artifact"
             ) from exc
+
+    def _verify_execution_outcome_history(
+        self,
+        command: ReservationCommand,
+        outcome: ExecutionOutcome,
+        ledger: LedgerSnapshot,
+    ) -> None:
+        state = self.load_workflow(command.workflow_id)
+        if (
+            not self._terminal_state_matches_outcome(state, command, outcome)
+            or state.meta.last_event_at != ledger.updated_at
+        ):
+            raise DataCorruption("execution outcome disagrees with terminal workflow state")
+        rows = tuple(
+            self._connection.execute(
+                "SELECT event_id, workflow_id, revision, occurred_at, event_type, "
+                "event_json, event_hash FROM domain_events WHERE workflow_id=? "
+                "AND event_type IN ('execution_finished', 'manual_review_requested') "
+                "ORDER BY revision",
+                (command.workflow_id,),
+            )
+        )
+        verified = tuple((self._verified_event(row), row[2]) for row in rows)
+        expected_count = (
+            2 if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN else 1
+        )
+        if len(verified) != expected_count:
+            raise DataCorruption("execution outcome has the wrong terminal event count")
+        finished, finished_revision = verified[0]
+        expected_finished_id = (
+            _derived_id("event", "preparation_not_called", command.command_id)
+            if outcome.certainty is ExecutionCertainty.NOT_CALLED
+            else _derived_id(
+                "event",
+                "execution_outcome",
+                command.command_id,
+                ledger.outcome_hash,
+            )
+        )
+        expected_finished_revision = state.meta.revision - (expected_count - 1)
+        if (
+            type(finished) is not ExecutionFinished
+            or finished.event_id != expected_finished_id
+            or finished.command_id != command.command_id
+            or finished.outcome != outcome
+            or finished.occurred_at != ledger.updated_at
+            or finished_revision != expected_finished_revision
+        ):
+            raise DataCorruption("execution outcome has no exact owning finished event")
+        if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN:
+            review, review_revision = verified[1]
+            expected_review_id = _derived_id(
+                "event",
+                "manual_review",
+                command.command_id,
+                ledger.outcome_hash,
+            )
+            if (
+                type(review) is not ManualReviewRequested
+                or review.event_id != expected_review_id
+                or review.reason != "provider_effect_uncertain"
+                or review.occurred_at != ledger.updated_at
+                or review_revision != state.meta.revision
+                or state.reason != review.reason
+            ):
+                raise DataCorruption("uncertain outcome has no exact manual-review event")
+
+    def _verify_execution_outbox_projection(self, message: OutboxMessage) -> None:
+        if message.command_id is None:
+            raise DataCorruption("execution outbox requires an authorized command")
+        command = self.load_command(message.command_id)
+        ledger = self.load_ledger(command.command_id)
+        if (
+            message.workflow_id != command.workflow_id
+            or ledger.outcome_json is None
+            or ledger.outcome_hash is None
+            or ledger.updated_at != message.created_at
+        ):
+            raise DataCorruption("execution outbox has no matching durable outcome")
+        try:
+            outcome = loads_outcome(ledger.outcome_json)
+            self._verify_execution_outcome_history(command, outcome, ledger)
+            if ledger.dispatch_slots_consumed == 0:
+                if (
+                    ledger.status is not LedgerStatus.OUTCOME_RECORDED
+                    or outcome.certainty is not ExecutionCertainty.NOT_CALLED
+                ):
+                    raise ValueError("preparation outcome matrix is invalid")
+                expected = project_preparation_failure_outbox(
+                    command,
+                    outcome,
+                    created_at=message.created_at,
+                )
+            else:
+                if (
+                    outcome.certainty is ExecutionCertainty.NOT_CALLED
+                    or ledger.status
+                    not in (LedgerStatus.OUTCOME_RECORDED, LedgerStatus.MANUAL_REVIEW)
+                ):
+                    raise ValueError("post-fence outcome matrix is invalid")
+                expected = project_outcome_outbox(
+                    command,
+                    outcome,
+                    created_at=message.created_at,
+                )
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("execution outbox projection is invalid") from exc
+        if message != expected:
+            raise DataCorruption("execution outbox diverges from its durable outcome")
 
     def apply_event(
         self,
@@ -1261,6 +1378,244 @@ class SQLiteUnitOfWork:
                 raise StaleLease("terminal preparation failure lost its lease compare-and-swap")
             self._insert_outbox(message)
             return PreparationDisposition.TERMINAL_NOT_CALLED
+
+    @staticmethod
+    def _terminal_state_matches_outcome(
+        state: State,
+        command: ReservationCommand,
+        outcome: ExecutionOutcome,
+    ) -> bool:
+        expected_type = {
+            ExecutionCertainty.EFFECT_CONFIRMED: SucceededState,
+            ExecutionCertainty.CALLED_NO_EFFECT: FailedNoEffectState,
+            ExecutionCertainty.CALLED_UNKNOWN: ManualReviewState,
+            ExecutionCertainty.NOT_CALLED: FailedBeforeProviderState,
+        }.get(outcome.certainty)
+        return (
+            expected_type is not None
+            and type(state) is expected_type
+            and state.command == command
+            and state.outcome == outcome
+            and state.meta.command_ids == (command.command_id,)
+        )
+
+    def _assert_live_dispatch_permit(
+        self,
+        permit: DispatchPermit,
+        *,
+        now: datetime,
+    ) -> tuple[ReservationCommand, LedgerSnapshot, ExecutingState]:
+        command = self.load_command(permit.command_id)
+        ledger = self.load_ledger(command.command_id)
+        state = self.load_workflow(command.workflow_id)
+        expected_request = DispatchRequest.from_command(command, dumps_command(command))
+        if (
+            ledger.status is not LedgerStatus.DISPATCH_FENCED
+            or ledger.outcome_json is not None
+            or ledger.claim_owner != permit.lease.owner
+            or ledger.fencing_token != permit.lease.fencing_token
+            or ledger.lease_acquired_at != permit.lease.acquired_at
+            or ledger.lease_expires_at != permit.lease.expires_at
+            or ledger.dispatch_slots_consumed != permit.dispatch_slot
+            or ledger.dispatch_request_hash != permit.request_hash
+            or ledger.dispatch_fenced_at != permit.fenced_at
+            or permit.request_hash != expected_request.payload_hash
+            or ledger.updated_at > now
+            or permit.fenced_at > now
+            or ledger.lease_expires_at is None
+            or now >= ledger.lease_expires_at
+        ):
+            raise StaleLease("dispatch permit is no longer current")
+        if (
+            type(state) is not ExecutingState
+            or state.command != command
+            or state.meta.command_ids != (command.command_id,)
+        ):
+            raise DataCorruption(
+                "live dispatch permit requires exact executing workflow command"
+            )
+        return command, ledger, state
+
+    def _resolve_duplicate_outcome(
+        self,
+        permit: DispatchPermit,
+        outcome: ExecutionOutcome,
+        ledger: LedgerSnapshot,
+        *,
+        now: datetime,
+    ) -> PersistedTransition:
+        if (
+            permit.lease.fencing_token != ledger.fencing_token
+            or permit.request_hash != ledger.dispatch_request_hash
+            or permit.fenced_at != ledger.dispatch_fenced_at
+            or ledger.dispatch_slots_consumed != 1
+            or now < ledger.updated_at
+        ):
+            raise StaleLease("completed outcome belongs to another dispatch permit")
+        raw_outcome = dumps_outcome(outcome)
+        if (
+            ledger.outcome_json != raw_outcome
+            or ledger.outcome_hash != _sha256_text(raw_outcome)
+        ):
+            raise IdentityConflict("completed command already has a divergent outcome")
+        command = self.load_command(permit.command_id)
+        state = self.load_workflow(command.workflow_id)
+        expected_status = (
+            LedgerStatus.MANUAL_REVIEW
+            if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN
+            else LedgerStatus.OUTCOME_RECORDED
+        )
+        if (
+            ledger.status is not expected_status
+            or not self._terminal_state_matches_outcome(state, command, outcome)
+        ):
+            raise DataCorruption("completed outcome projection is inconsistent")
+        message = project_outcome_outbox(
+            command,
+            outcome,
+            created_at=ledger.updated_at,
+        )
+        if self.load_outbox(message.message_id) != message:
+            raise DataCorruption("completed outcome outbox is inconsistent")
+        return PersistedTransition(
+            state=state,
+            status=TransitionStatus.APPLIED,
+            reason="execution_outcome_duplicate",
+            commands=(),
+            duplicate=True,
+        )
+
+    def record_outcome(
+        self,
+        permit: DispatchPermit,
+        outcome: ExecutionOutcome,
+        *,
+        now: datetime,
+    ) -> PersistedTransition:
+        if type(permit) is not DispatchPermit:
+            raise TypeError("permit must be the exact DispatchPermit type")
+        if type(outcome) is not ExecutionOutcome:
+            raise TypeError("outcome must be the exact ExecutionOutcome type")
+        if outcome.command_id != permit.command_id:
+            raise ValueError("outcome command does not match dispatch permit")
+        if outcome.certainty is ExecutionCertainty.NOT_CALLED:
+            raise ValueError("post-fence not_called outcome is forbidden")
+        now = _require_utc_input(now, "now")
+        with self._transaction("record_outcome"):
+            existing = self.load_ledger(permit.command_id)
+            if existing.outcome_json is not None:
+                return self._resolve_duplicate_outcome(
+                    permit,
+                    outcome,
+                    existing,
+                    now=now,
+                )
+            command, ledger, state = self._assert_live_dispatch_permit(
+                permit,
+                now=now,
+            )
+            raw_outcome = dumps_outcome(outcome)
+            outcome_hash = _sha256_text(raw_outcome)
+            finished = ExecutionFinished(
+                event_id=_derived_id(
+                    "event",
+                    "execution_outcome",
+                    command.command_id,
+                    outcome_hash,
+                ),
+                occurred_at=now,
+                command_id=command.command_id,
+                outcome=outcome,
+            )
+            finished_transition = reduce(state, finished)
+            expected_first_type = {
+                ExecutionCertainty.EFFECT_CONFIRMED: SucceededState,
+                ExecutionCertainty.CALLED_NO_EFFECT: FailedNoEffectState,
+                ExecutionCertainty.CALLED_UNKNOWN: UncertainState,
+            }[outcome.certainty]
+            if (
+                finished_transition.status is not TransitionStatus.APPLIED
+                or type(finished_transition.state) is not expected_first_type
+                or finished_transition.commands
+            ):
+                raise DataCorruption("execution outcome did not produce its terminal state")
+            final_transition = finished_transition
+            events: list[tuple[Event, int]] = [
+                (finished, finished_transition.state.meta.revision)
+            ]
+            if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN:
+                review = ManualReviewRequested(
+                    event_id=_derived_id(
+                        "event",
+                        "manual_review",
+                        command.command_id,
+                        outcome_hash,
+                    ),
+                    occurred_at=now,
+                    reason="provider_effect_uncertain",
+                )
+                final_transition = reduce(finished_transition.state, review)
+                if (
+                    final_transition.status is not TransitionStatus.APPLIED
+                    or type(final_transition.state) is not ManualReviewState
+                    or final_transition.commands
+                ):
+                    raise DataCorruption(
+                        "uncertain outcome did not produce mandatory manual review"
+                    )
+                events.append((review, final_transition.state.meta.revision))
+            message = project_outcome_outbox(
+                command,
+                outcome,
+                created_at=now,
+            )
+            for event, revision in events:
+                self._insert_event(command.workflow_id, event, revision)
+            self._update_state_compare_and_swap(state, final_transition.state)
+            final_status = (
+                LedgerStatus.MANUAL_REVIEW
+                if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN
+                else LedgerStatus.OUTCOME_RECORDED
+            )
+            cursor = self._connection.execute(
+                "UPDATE execution_ledger SET status=?, claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, "
+                "outcome_json=?, outcome_hash=?, updated_at=? "
+                "WHERE command_id=? AND status='dispatch_fenced' "
+                "AND claim_owner=? AND fencing_token=? "
+                "AND lease_acquired_at=? AND lease_expires_at=? "
+                "AND lease_expires_at>? AND dispatch_slots_consumed=1 "
+                "AND dispatch_request_hash=? AND dispatch_fenced_at=? "
+                "AND outcome_json IS NULL AND outcome_hash IS NULL",
+                (
+                    final_status.value,
+                    raw_outcome,
+                    outcome_hash,
+                    now.isoformat(),
+                    command.command_id,
+                    permit.lease.owner,
+                    permit.lease.fencing_token,
+                    permit.lease.acquired_at.isoformat(),
+                    permit.lease.expires_at.isoformat(),
+                    now.isoformat(),
+                    permit.request_hash,
+                    permit.fenced_at.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("record outcome lost its dispatch permit compare-and-swap")
+            self._insert_outbox(message)
+            persisted = self.load_ledger(command.command_id)
+            if (
+                persisted.status is not final_status
+                or persisted.outcome_json != raw_outcome
+                or persisted.outcome_hash != outcome_hash
+                or persisted.claim_owner is not None
+                or persisted.lease_acquired_at is not None
+                or persisted.lease_expires_at is not None
+            ):
+                raise DataCorruption("persisted outcome ledger is inconsistent")
+            return PersistedTransition.from_domain(final_transition)
 
     def _insert_immutable_command(self, command: ReservationCommand) -> None:
         raw = dumps_command(command)

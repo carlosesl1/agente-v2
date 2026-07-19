@@ -40,6 +40,28 @@ _SUMMARY_PAYLOAD_KEYS = {
     "renderer_version",
     "subject_signature",
 }
+_OUTCOME_TEMPLATE_BY_CERTAINTY = {
+    ExecutionCertainty.EFFECT_CONFIRMED: (
+        OutboxKind.EXECUTION_SUCCEEDED,
+        "reservation.execution.succeeded.v1",
+        "execution_succeeded",
+    ),
+    ExecutionCertainty.NOT_CALLED: (
+        OutboxKind.EXECUTION_NOT_CALLED,
+        "reservation.execution.not_called.v1",
+        "execution_not_called",
+    ),
+    ExecutionCertainty.CALLED_NO_EFFECT: (
+        OutboxKind.EXECUTION_FAILED_NO_EFFECT,
+        "reservation.execution.no_effect.v1",
+        "execution_failed_no_effect",
+    ),
+    ExecutionCertainty.CALLED_UNKNOWN: (
+        OutboxKind.EXECUTION_MANUAL_REVIEW,
+        "reservation.execution.manual_review.v1",
+        "manual_review_required",
+    ),
+}
 
 
 def _require_utc(value: datetime, field_name: str) -> datetime:
@@ -263,6 +285,56 @@ def project_preparation_failure_outbox(
     )
 
 
+def project_outcome_outbox(
+    command: ReservationCommand,
+    outcome: ExecutionOutcome,
+    *,
+    created_at: datetime,
+) -> OutboxMessage:
+    """Project a typed execution outcome without provider-private material."""
+
+    if type(command) is not ReservationCommand:
+        raise TypeError("command must be the exact ReservationCommand type")
+    if type(outcome) is not ExecutionOutcome:
+        raise TypeError("outcome must be the exact ExecutionOutcome type")
+    created_at = _require_utc(created_at, "created_at")
+    if outcome.command_id != command.command_id:
+        raise ValueError("outcome projection requires its authorized command")
+    if outcome.certainty is ExecutionCertainty.NOT_CALLED:
+        return project_preparation_failure_outbox(
+            command,
+            outcome,
+            created_at=created_at,
+        )
+    kind, template_id, public_status = _OUTCOME_TEMPLATE_BY_CERTAINTY[
+        outcome.certainty
+    ]
+    payload = json.dumps(
+        {
+            "certainty": outcome.certainty.value,
+            "status": public_status,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    identity = "|".join(
+        (command.command_id, outcome.certainty.value, template_id)
+    ).encode("utf-8")
+    message_id = f"outbox:{hashlib.sha256(identity).hexdigest()}"
+    return OutboxMessage(
+        message_id=message_id,
+        idempotency_key=message_id,
+        workflow_id=command.workflow_id,
+        command_id=command.command_id,
+        kind=kind,
+        template_id=template_id,
+        canonical_payload=payload,
+        payload_hash=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        created_at=created_at,
+    )
+
+
 def validate_summary_outbox(
     state: ReadyToSummarizeState,
     event: SummaryRecorded,
@@ -347,6 +419,7 @@ __all__ = [
     "summary_payload",
     "summary_outbox_message",
     "project_preparation_failure_outbox",
+    "project_outcome_outbox",
     "validate_summary_outbox",
     "validate_summary_outbox_for_draft",
 ]
