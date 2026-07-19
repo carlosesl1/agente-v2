@@ -1,7 +1,7 @@
 # Fase 4 — Resumo e confirmação únicos — Design
 
 **Data:** 2026-07-19
-**Status:** proposto para revisão
+**Status:** aprovado para implementação
 **Fase:** `phase-04-single-summary-and-confirmation`
 
 ## Objetivo

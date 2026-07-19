@@ -2,7 +2,7 @@
 
 ## Status
 
-`design em revisão`
+`plano aprovado; implementação não iniciada`
 
 Aberta em `2026-07-19T02:21:03Z`, a partir do commit-base
 `18588cf2d9d771decd4e7c56540fabd79ed4ebcc`.
@@ -16,6 +16,7 @@ provider, rede ou side effect.
 ## Design proposto
 
 - [spec da Fase 4](../../superpowers/specs/2026-07-19-phase-4-summary-confirmation-design.md)
+- [plano da Fase 4](../../superpowers/plans/2026-07-19-phase-4-summary-confirmation.md)
 
 Boundary:
 
@@ -83,8 +84,8 @@ ReadyToSummarizeState
 - [x] usuário autorizou seguir para a próxima fase;
 - [x] boundary do classifier escolhido: model-agnostic + referência determinística;
 - [x] confirmações contextuais exigem contexto tipado vigente;
-- [ ] spec revisada;
-- [ ] plano executável aprovado.
+- [x] spec revisada e aprovada;
+- [x] plano executável escrito e autorrevisado.
 
 ## Gate de saída
 
