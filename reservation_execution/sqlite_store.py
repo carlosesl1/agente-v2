@@ -55,12 +55,15 @@ from .projection import (
 from .schema import SCHEMA_VERSION, render_sqlite, schema_contract, schema_hash
 from .types import (
     CommandClaim,
+    DeliveryReceipt,
     DispatchPermit,
     DispatchRequest,
     Lease,
     LedgerStatus,
+    OutboxClaim,
     OutboxKind,
     OutboxMessage,
+    OutboxSnapshot,
     OutboxStatus,
     PreparationDisposition,
 )
@@ -641,7 +644,7 @@ class SQLiteUnitOfWork:
             (message_id,),
         ).fetchone()
 
-    def _outbox_from_row(self, row) -> OutboxMessage:
+    def _outbox_snapshot_from_row(self, row) -> OutboxSnapshot:
         try:
             message = OutboxMessage(
                 message_id=row[0],
@@ -655,6 +658,38 @@ class SQLiteUnitOfWork:
                 created_at=_canonical_utc(row[16], "outbox.created_at"),
             )
             status = OutboxStatus(row[8])
+            if row[9] is None:
+                lease = None
+            else:
+                owner = _require_id(row[9], "outbox.claim_owner")
+                if owner != row[9]:
+                    raise ValueError("outbox claim owner is noncanonical")
+                lease = Lease(
+                    owner=owner,
+                    fencing_token=row[10],
+                    acquired_at=_canonical_utc(
+                        row[11],
+                        "outbox.lease_acquired_at",
+                    ),
+                    expires_at=_canonical_utc(
+                        row[12],
+                        "outbox.lease_expires_at",
+                    ),
+                )
+            snapshot = OutboxSnapshot(
+                message=message,
+                status=status,
+                lease=lease,
+                fencing_token=row[10],
+                delivery_attempts=row[13],
+                delivered_at=(
+                    None
+                    if row[14] is None
+                    else _canonical_utc(row[14], "outbox.delivered_at")
+                ),
+                receipt_hash=row[15],
+                updated_at=_canonical_utc(row[17], "outbox.updated_at"),
+            )
         except (TypeError, ValueError) as exc:
             raise DataCorruption("outbox message row is invalid") from exc
         immutable = (
@@ -673,48 +708,263 @@ class SQLiteUnitOfWork:
             raise DataCorruption("outbox immutable SQL bytes were normalized or changed")
         if type(row[10]) is not int or type(row[13]) is not int:
             raise DataCorruption("outbox counters have wrong SQLite types")
-        optional_times = tuple(
-            None if row[index] is None else _canonical_utc(row[index], field_name)
-            for index, field_name in (
-                (11, "outbox.lease_acquired_at"),
-                (12, "outbox.lease_expires_at"),
-                (14, "outbox.delivered_at"),
-            )
-        )
-        updated_at = _canonical_utc(row[17], "outbox.updated_at")
-        if updated_at < message.created_at:
-            raise DataCorruption("outbox updated_at predates created_at")
-        if status is OutboxStatus.PENDING and (
-            row[9] is not None
-            or optional_times[0] is not None
-            or optional_times[1] is not None
-            or optional_times[2] is not None
-            or row[15] is not None
+        if snapshot.status is OutboxStatus.LEASED and (
+            snapshot.lease is None
+            or snapshot.lease.acquired_at != snapshot.updated_at
+            or snapshot.updated_at >= snapshot.lease.expires_at
         ):
-            raise DataCorruption("pending outbox message has lease or receipt state")
-        if row[10] < 0 or row[13] < 0:
-            raise DataCorruption("outbox counters are negative")
+            raise DataCorruption("leased outbox timeline is invalid")
         if message.command_id is not None:
             command = self.load_command(message.command_id)
             if command.workflow_id != message.workflow_id:
                 raise DataCorruption("outbox command belongs to another workflow")
-        return message
+        return snapshot
 
-    def load_outbox(self, message_id: str) -> OutboxMessage:
+    def _outbox_from_row(self, row) -> OutboxMessage:
+        return self._outbox_snapshot_from_row(row).message
+
+    def load_outbox_snapshot(self, message_id: str) -> OutboxSnapshot:
         self._ensure_open()
         message_id = _require_id(message_id, "message_id")
         try:
             row = self._outbox_row(message_id)
             if row is None:
                 raise OutboxNotFound(f"outbox message not found: {message_id}")
-            message = self._outbox_from_row(row)
-            if message.kind is OutboxKind.SUMMARY_PRESENTED:
-                self._verify_summary_outbox_projection(message)
+            snapshot = self._outbox_snapshot_from_row(row)
+            if snapshot.message.kind is OutboxKind.SUMMARY_PRESENTED:
+                self._verify_summary_outbox_projection(snapshot.message)
             else:
-                self._verify_execution_outbox_projection(message)
-            return message
+                self._verify_execution_outbox_projection(snapshot.message)
+            return snapshot
         except sqlite3.Error as exc:
-            raise _sqlite_store_error(exc, "load_outbox") from exc
+            raise _sqlite_store_error(exc, "load_outbox_snapshot") from exc
+
+    def load_outbox(self, message_id: str) -> OutboxMessage:
+        return self.load_outbox_snapshot(message_id).message
+
+    @staticmethod
+    def _assert_live_outbox_claim(
+        claim: OutboxClaim,
+        snapshot: OutboxSnapshot,
+        *,
+        now: datetime,
+    ) -> None:
+        if (
+            snapshot.status is not OutboxStatus.LEASED
+            or snapshot.message != claim.message
+            or snapshot.lease != claim.lease
+            or snapshot.fencing_token != claim.lease.fencing_token
+            or snapshot.delivery_attempts != claim.delivery_attempts
+            or snapshot.updated_at != claim.lease.acquired_at
+            or now < snapshot.updated_at
+            or now >= claim.lease.expires_at
+        ):
+            raise StaleLease("outbox claim is stale, expired, or divergent")
+
+    def claim_outbox(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> OutboxClaim | None:
+        worker_id = _require_id(worker_id, "worker_id")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        try:
+            expires_at = now + lease_ttl
+        except OverflowError as exc:
+            raise ValueError("lease_ttl overflows datetime range") from exc
+        with self._transaction("claim_outbox"):
+            candidate = self._connection.execute(
+                "SELECT message_id FROM outbox_messages "
+                "WHERE status IN ('pending', 'leased') "
+                "AND (status='pending' OR lease_expires_at<=?) "
+                "ORDER BY created_at, message_id LIMIT 1",
+                (now.isoformat(),),
+            ).fetchone()
+            if candidate is None:
+                return None
+            snapshot = self.load_outbox_snapshot(candidate[0])
+            if now < snapshot.message.created_at or now < snapshot.updated_at:
+                raise ValueError("outbox claim time cannot predate durable message state")
+            if snapshot.status is OutboxStatus.PENDING:
+                predicate = (
+                    "status='pending' AND claim_owner IS NULL "
+                    "AND lease_acquired_at IS NULL AND lease_expires_at IS NULL"
+                )
+                predicate_values: tuple[object, ...] = ()
+            elif (
+                snapshot.status is OutboxStatus.LEASED
+                and snapshot.lease is not None
+                and snapshot.lease.expires_at <= now
+            ):
+                predicate = (
+                    "status='leased' AND claim_owner=? "
+                    "AND lease_acquired_at=? AND lease_expires_at=?"
+                )
+                predicate_values = (
+                    snapshot.lease.owner,
+                    snapshot.lease.acquired_at.isoformat(),
+                    snapshot.lease.expires_at.isoformat(),
+                )
+            else:
+                raise DataCorruption("eligible outbox row has an impossible lease state")
+            token = snapshot.fencing_token + 1
+            attempts = snapshot.delivery_attempts + 1
+            if token != attempts:
+                raise DataCorruption("outbox token and delivery attempts diverged")
+            cursor = self._connection.execute(
+                "UPDATE outbox_messages SET status='leased', claim_owner=?, "
+                "fencing_token=?, lease_acquired_at=?, lease_expires_at=?, "
+                "delivery_attempts=?, updated_at=? WHERE message_id=? AND "
+                + predicate
+                + " AND fencing_token=? AND delivery_attempts=? AND updated_at=? "
+                "AND delivered_at IS NULL AND receipt_hash IS NULL",
+                (
+                    worker_id,
+                    token,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    attempts,
+                    now.isoformat(),
+                    snapshot.message.message_id,
+                    *predicate_values,
+                    snapshot.fencing_token,
+                    snapshot.delivery_attempts,
+                    snapshot.updated_at.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrencyConflict("outbox claim lost its compare-and-swap")
+            persisted = self.load_outbox_snapshot(snapshot.message.message_id)
+            lease = Lease(
+                owner=worker_id,
+                fencing_token=token,
+                acquired_at=now,
+                expires_at=expires_at,
+            )
+            if (
+                persisted.status is not OutboxStatus.LEASED
+                or persisted.lease != lease
+                or persisted.delivery_attempts != attempts
+                or persisted.message != snapshot.message
+            ):
+                raise DataCorruption("persisted outbox claim projection is invalid")
+            return OutboxClaim(
+                message=persisted.message,
+                lease=lease,
+                delivery_attempts=attempts,
+            )
+
+    def complete_outbox(
+        self,
+        claim: OutboxClaim,
+        receipt: DeliveryReceipt,
+        *,
+        now: datetime,
+    ) -> OutboxSnapshot:
+        if type(claim) is not OutboxClaim:
+            raise TypeError("claim must be the exact OutboxClaim type")
+        if type(receipt) is not DeliveryReceipt:
+            raise TypeError("receipt must be the exact DeliveryReceipt type")
+        if receipt.message_id != claim.message.message_id:
+            raise IdentityConflict("delivery receipt belongs to another outbox message")
+        now = _require_utc_input(now, "now")
+        if receipt.delivered_at > now:
+            raise ValueError("receipt.delivered_at cannot exceed completion time")
+        with self._transaction("complete_outbox"):
+            snapshot = self.load_outbox_snapshot(claim.message.message_id)
+            if snapshot.message != claim.message:
+                raise IdentityConflict("outbox claim contains divergent message bytes")
+            if snapshot.status is OutboxStatus.DELIVERED:
+                if (
+                    snapshot.receipt_hash == receipt.receipt_hash
+                    and snapshot.delivered_at == receipt.delivered_at
+                ):
+                    return snapshot
+                raise IdentityConflict("delivered outbox has a divergent receipt")
+            self._assert_live_outbox_claim(claim, snapshot, now=now)
+            if receipt.delivered_at < claim.lease.acquired_at:
+                raise ValueError("receipt.delivered_at predates the delivery claim")
+            cursor = self._connection.execute(
+                "UPDATE outbox_messages SET status='delivered', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, delivered_at=?, "
+                "receipt_hash=?, updated_at=? WHERE message_id=? "
+                "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                "AND lease_acquired_at=? AND lease_expires_at=? "
+                "AND delivery_attempts=? AND updated_at=? "
+                "AND lease_expires_at>? AND delivered_at IS NULL "
+                "AND receipt_hash IS NULL",
+                (
+                    receipt.delivered_at.isoformat(),
+                    receipt.receipt_hash,
+                    now.isoformat(),
+                    claim.message.message_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.lease.acquired_at.isoformat(),
+                    claim.lease.expires_at.isoformat(),
+                    claim.delivery_attempts,
+                    claim.lease.acquired_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("outbox completion lost its compare-and-swap")
+            persisted = self.load_outbox_snapshot(claim.message.message_id)
+            if (
+                persisted.status is not OutboxStatus.DELIVERED
+                or persisted.receipt_hash != receipt.receipt_hash
+                or persisted.delivered_at != receipt.delivered_at
+                or persisted.lease is not None
+            ):
+                raise DataCorruption("persisted outbox receipt projection is invalid")
+            return persisted
+
+    def release_outbox(
+        self,
+        claim: OutboxClaim,
+        *,
+        now: datetime,
+    ) -> OutboxSnapshot:
+        if type(claim) is not OutboxClaim:
+            raise TypeError("claim must be the exact OutboxClaim type")
+        now = _require_utc_input(now, "now")
+        with self._transaction("release_outbox"):
+            snapshot = self.load_outbox_snapshot(claim.message.message_id)
+            self._assert_live_outbox_claim(claim, snapshot, now=now)
+            cursor = self._connection.execute(
+                "UPDATE outbox_messages SET status='pending', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                "WHERE message_id=? AND status='leased' AND claim_owner=? "
+                "AND fencing_token=? AND lease_acquired_at=? "
+                "AND lease_expires_at=? AND delivery_attempts=? AND updated_at=? "
+                "AND lease_expires_at>? AND delivered_at IS NULL "
+                "AND receipt_hash IS NULL",
+                (
+                    now.isoformat(),
+                    claim.message.message_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.lease.acquired_at.isoformat(),
+                    claim.lease.expires_at.isoformat(),
+                    claim.delivery_attempts,
+                    claim.lease.acquired_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("outbox release lost its compare-and-swap")
+            persisted = self.load_outbox_snapshot(claim.message.message_id)
+            if (
+                persisted.status is not OutboxStatus.PENDING
+                or persisted.lease is not None
+                or persisted.fencing_token != claim.lease.fencing_token
+                or persisted.delivery_attempts != claim.delivery_attempts
+            ):
+                raise DataCorruption("released outbox projection is invalid")
+            return persisted
 
     def _replay_workflow_history(
         self,

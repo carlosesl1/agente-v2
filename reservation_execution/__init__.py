@@ -8,6 +8,12 @@ from .projection import (
     summary_outbox_message,
     summary_payload,
 )
+from .outbox import (
+    DeliveryPort,
+    OutboxWorker,
+    OutboxWorkerDisposition,
+    OutboxWorkerResult,
+)
 from .reconciliation import Reconciler, ReconciliationResult
 from .worker import CommandWorker, WorkerDisposition, WorkerResult
 from .types import (
@@ -18,7 +24,9 @@ from .types import (
     Lease,
     LedgerStatus,
     OutboxKind,
+    OutboxClaim,
     OutboxMessage,
+    OutboxSnapshot,
     OutboxStatus,
     PreparationDisposition,
 )
@@ -27,11 +35,13 @@ __all__ = [
     "LedgerStatus",
     "OutboxStatus",
     "OutboxKind",
+    "OutboxClaim",
     "Lease",
     "CommandClaim",
     "DispatchRequest",
     "DispatchPermit",
     "OutboxMessage",
+    "OutboxSnapshot",
     "DeliveryReceipt",
     "PreparationDisposition",
     "PreparationFailure",
@@ -41,6 +51,10 @@ __all__ = [
     "summary_outbox_message",
     "project_preparation_failure_outbox",
     "project_outcome_outbox",
+    "DeliveryPort",
+    "OutboxWorker",
+    "OutboxWorkerDisposition",
+    "OutboxWorkerResult",
     "Reconciler",
     "ReconciliationResult",
     "CommandWorker",

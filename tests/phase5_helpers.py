@@ -34,7 +34,12 @@ from reservation_domain import (
     new_workflow,
     reduce,
 )
-from reservation_execution import DispatchRequest, OutboxMessage, PreparationFailure
+from reservation_execution import (
+    DeliveryReceipt,
+    DispatchRequest,
+    OutboxMessage,
+    PreparationFailure,
+)
 from reservation_execution.projection import summary_outbox_message
 from reservation_execution.sqlite_store import PersistedTransition, SQLiteUnitOfWork
 from reservation_lookup import (
@@ -378,3 +383,80 @@ def worker_fixture(test_case, action):
         lease_ttl=timedelta(seconds=30),
     )
     return store, worker, adapter, workflow_id, command_id
+
+
+class ScriptedDeliveryPort:
+    """Finite local delivery fake with no transport fallback."""
+
+    delivery_id = "scripted-delivery"
+    delivery_version = 1
+
+    def __init__(self, actions):
+        self.actions = list(actions)
+        self.calls = 0
+        self.messages = []
+
+    def deliver(self, message):
+        self.calls += 1
+        self.messages.append(message)
+        if not self.actions:
+            raise AssertionError("unexpected synthetic delivery")
+        action = self.actions.pop(0)
+        if isinstance(action, BaseException):
+            raise action
+        if callable(action):
+            return action(message)
+        return action
+
+
+def receipt_for(
+    message: OutboxMessage,
+    *,
+    delivered_at: datetime,
+    delivery_reference: str = "delivery:synthetic",
+) -> DeliveryReceipt:
+    material = json.dumps(
+        {
+            "message_id": message.message_id,
+            "delivery_reference": delivery_reference,
+            "delivered_at": delivered_at.isoformat(),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return DeliveryReceipt(
+        message_id=message.message_id,
+        delivery_reference=delivery_reference,
+        receipt_hash=hashlib.sha256(material.encode("utf-8")).hexdigest(),
+        delivered_at=delivered_at,
+    )
+
+
+def successful_receipt(*, delivered_at: datetime):
+    return lambda message: receipt_for(message, delivered_at=delivered_at)
+
+
+def outbox_fixture(test_case, actions):
+    """Persist a terminal command and build a local one-shot outbox worker."""
+
+    from reservation_execution.outbox import OutboxWorker
+
+    now = T0 + timedelta(minutes=2)
+    store, command_worker, _, _, command_id = worker_fixture(
+        test_case,
+        ExecutionCertainty.EFFECT_CONFIRMED,
+    )
+    command_worker.run_once(now=now)
+    message_id = store._connection.execute(
+        "SELECT message_id FROM outbox_messages "
+        "WHERE status='pending' ORDER BY created_at, message_id LIMIT 1"
+    ).fetchone()[0]
+    delivery = ScriptedDeliveryPort(actions)
+    worker = OutboxWorker(
+        store=store,
+        delivery=delivery,
+        worker_id="delivery:scripted",
+        lease_ttl=timedelta(seconds=30),
+    )
+    return store, worker, delivery, command_id, message_id

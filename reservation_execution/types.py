@@ -328,6 +328,98 @@ class OutboxMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class OutboxClaim:
+    message: OutboxMessage
+    lease: Lease
+    delivery_attempts: int
+
+    def __post_init__(self) -> None:
+        if type(self.message) is not OutboxMessage:
+            raise ValueError("outbox_claim.message must be the exact OutboxMessage type")
+        if type(self.lease) is not Lease:
+            raise ValueError("outbox_claim.lease must be the exact Lease type")
+        attempts = _require_int_at_least(
+            self.delivery_attempts,
+            "outbox_claim.delivery_attempts",
+            1,
+        )
+        if attempts != self.lease.fencing_token:
+            raise ValueError("outbox claim attempts must equal its fencing token")
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxSnapshot:
+    message: OutboxMessage
+    status: OutboxStatus
+    lease: Lease | None
+    fencing_token: int
+    delivery_attempts: int
+    delivered_at: datetime | None
+    receipt_hash: str | None
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        if type(self.message) is not OutboxMessage:
+            raise ValueError("outbox_snapshot.message must be the exact OutboxMessage type")
+        _require_enum(self.status, OutboxStatus, "outbox_snapshot.status")
+        if self.lease is not None and type(self.lease) is not Lease:
+            raise ValueError("outbox_snapshot.lease must be an exact Lease or None")
+        token = _require_int_at_least(
+            self.fencing_token,
+            "outbox_snapshot.fencing_token",
+            0,
+        )
+        attempts = _require_int_at_least(
+            self.delivery_attempts,
+            "outbox_snapshot.delivery_attempts",
+            0,
+        )
+        if token != attempts:
+            raise ValueError("outbox fencing token must equal delivery attempts")
+        updated_at = _require_utc(self.updated_at, "outbox_snapshot.updated_at")
+        if updated_at < self.message.created_at:
+            raise ValueError("outbox snapshot update predates message creation")
+        delivered_at = (
+            None
+            if self.delivered_at is None
+            else _require_utc(self.delivered_at, "outbox_snapshot.delivered_at")
+        )
+        receipt_hash = (
+            None
+            if self.receipt_hash is None
+            else _require_hash(self.receipt_hash, "outbox_snapshot.receipt_hash")
+        )
+        if self.status is OutboxStatus.PENDING:
+            valid = self.lease is None and delivered_at is None and receipt_hash is None
+        elif self.status is OutboxStatus.LEASED:
+            valid = (
+                self.lease is not None
+                and attempts >= 1
+                and self.lease.fencing_token == token
+                and self.lease.acquired_at == updated_at
+                and delivered_at is None
+                and receipt_hash is None
+            )
+        else:
+            valid = (
+                self.lease is None
+                and attempts >= 1
+                and delivered_at is not None
+                and delivered_at <= updated_at
+                and receipt_hash is not None
+            )
+        if not valid:
+            raise ValueError("outbox snapshot status matrix is inconsistent")
+        object.__setattr__(self, "delivered_at", delivered_at)
+        object.__setattr__(self, "receipt_hash", receipt_hash)
+        object.__setattr__(self, "updated_at", updated_at)
+
+    @property
+    def claim_owner(self) -> str | None:
+        return None if self.lease is None else self.lease.owner
+
+
+@dataclass(frozen=True, slots=True)
 class DeliveryReceipt:
     message_id: str
     delivery_reference: str
@@ -378,5 +470,7 @@ __all__ = [
     "DispatchRequest",
     "DispatchPermit",
     "OutboxMessage",
+    "OutboxClaim",
+    "OutboxSnapshot",
     "DeliveryReceipt",
 ]
