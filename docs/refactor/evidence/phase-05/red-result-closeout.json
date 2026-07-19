@@ -38,6 +38,17 @@
       "errors": 0,
       "output_sha256": "8fee23bac5dab22f5a6d67cec37dbaebe324a146e4f0827fda57768a32975946",
       "raw_output_versioned": false
+    },
+    {
+      "name": "ci_parallel_heavy_gates",
+      "base_sha": "5b1e14a211163ae6434649411e25dd328e294786",
+      "command": "python3 -m unittest tests.test_phase5_closeout.Phase5CloseoutContractTests.test_phase5_workflow_splits_heavy_gates_into_independent_jobs -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "d7ced45c7cc7f049451d22abd67d0479f692abe032b08b98279478f2e0a6af03",
+      "raw_output_versioned": false
     }
   ]
 }

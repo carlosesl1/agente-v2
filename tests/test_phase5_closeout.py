@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -144,6 +145,41 @@ def mutation_payload() -> dict[str, object]:
 
 
 class Phase5CloseoutContractTests(unittest.TestCase):
+    def test_phase5_workflow_splits_heavy_gates_into_independent_jobs(self) -> None:
+        workflow = (ROOT / ".github/workflows/phase5.yml").read_text(encoding="utf-8")
+        job_starts = tuple(re.finditer(r"(?m)^  ([a-z0-9-]+):\n", workflow))
+        jobs = {
+            match.group(1): workflow[
+                match.start() : (
+                    job_starts[index + 1].start()
+                    if index + 1 < len(job_starts)
+                    else len(workflow)
+                )
+            ]
+            for index, match in enumerate(job_starts)
+        }
+        workloads = {
+            "full-suite": "python3 -m unittest discover -s tests -v",
+            "properties": "python3 scripts/run_phase5_properties.py --cases 20000",
+            "fault-restart-contention": "python3 scripts/run_phase5_faults.py",
+            "mutations": "python3 scripts/run_phase5_mutations.py",
+        }
+        required = {"static-validation", *workloads, "phase5-gate"}
+        self.assertTrue(required.issubset(jobs), sorted(jobs))
+        for job_name in required:
+            self.assertIn("timeout-minutes: 15", jobs[job_name])
+        for owner, command in workloads.items():
+            self.assertIn(command, jobs[owner])
+            self.assertEqual(workflow.count(command), 1)
+            for other_name, other_job in jobs.items():
+                if other_name != owner:
+                    self.assertNotIn(command, other_job)
+        self.assertIn(
+            "needs: [static-validation, full-suite, properties, fault-restart-contention, mutations]",
+            jobs["phase5-gate"],
+        )
+        self.assertNotIn("if: always()", jobs["phase5-gate"])
+
     def test_schema_and_package_manifests_are_exact_and_deterministic(self) -> None:
         schema = build_schema_manifest()
         self.assertEqual(schema["phase"], PHASE)

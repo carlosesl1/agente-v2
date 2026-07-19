@@ -56,3 +56,10 @@ Sim. O DDL PostgreSQL é contrato estático regenerável. `schema-manifest.json`
 ### 12. Há qualquer rede/runtime/default adapter?
 
 Não. Não existe transport default nem adapter externo no package. AST/capability scan proíbe HTTP/SDK/env/auth/subprocess em `reservation_execution`; nenhum Hermes, LLM, provider, delivery, Supabase, Docker ou banco live foi executado.
+
+### 13. O orçamento de CI de 15 minutos é executável sem reduzir os gates?
+
+Sim por job. Properties, faults/restart/contention, suíte, mutations e validação
+estática rodam em jobs independentes, todos com `timeout-minutes: 15`; o check
+terminal `phase5-gate` depende do sucesso de todos. O paralelismo não altera
+20.000 casos, 2.000 schedules, 50 rounds, 17 fault points ou 20 mutantes.

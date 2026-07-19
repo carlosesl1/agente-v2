@@ -77,7 +77,7 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - [x] catálogo completo de 20 mutantes mortos com baseline verde;
 - [x] schema/package manifests e `SHA256SUMS` regeneráveis;
 - [x] validators 0–5 locais verdes;
-- [ ] workflow CI da Fase 5 e cinco workflows regressivos verdes;
+- [ ] workflow CI paralelo da Fase 5 e cinco workflows regressivos verdes;
 - [ ] commit de implementação publicado e conferido no remoto;
 - [ ] commit documental terminal publicado e conferido no remoto.
 
