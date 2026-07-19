@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "claim_lease_and_dispatch_fencing",
+  "source_sha": "5675776b58045f85a9a80a6623f86082a03cf0ed",
+  "command": "python3 -m unittest tests.test_phase5_claims -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "test_count": 1,
+  "failure_count": 0,
+  "error_count": 1,
+  "failure_class": "claim_lease_and_fencing_store_contract_absent",
+  "output_sha256": "c2723819036d5ae430c052cedc77f5317d64a515b3e079a158a096eb73403640",
+  "raw_output_versioned": false,
+  "provider_calls": 0,
+  "network_calls": 0,
+  "postgresql_executed": false,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "backdated_operation_after_renewal",
+      "base_head": "5675776b58045f85a9a80a6623f86082a03cf0ed",
+      "command": "python3 -m unittest tests.test_phase5_claims.Phase5ClaimTests.test_backdated_operation_after_renewal_is_stale_and_cannot_move_updated_at_backwards -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 1,
+      "error_count": 0,
+      "failure_class": "renewed_claim_accepted_backdated_fence_and_moved_ledger_time_backwards",
+      "output_sha256": "4b2f38f4b246e115d12fcf58149e834ba912642c6fbc040f7a44b327007902a2",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "preparation_outbox_projection_ownership",
+      "base_head": "5675776b58045f85a9a80a6623f86082a03cf0ed",
+      "command": "python3 -m unittest tests.test_phase5_claims.Phase5ClaimTests.test_preparation_terminal_outbox_comes_from_public_pure_projection -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "failure_count": 0,
+      "error_count": 1,
+      "failure_class": "preparation_terminal_outbox_projection_was_owned_by_store_instead_of_pure_projection_module",
+      "output_sha256": "c2e7a0bbb5e8e249a5e90fe7aa4eeb55c9f334c3d799aa368f0b59aa2fe4b543",
+      "raw_output_versioned": false
+    }
+  ]
+}

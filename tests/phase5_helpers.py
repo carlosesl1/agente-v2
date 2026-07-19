@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import tempfile
 
 from reservation_confirmation import (
     ReferenceConfirmationClassifier,
@@ -246,3 +247,26 @@ def database_counts(path: Path) -> tuple[int, int, int, int, int]:
         )
     finally:
         connection.close()
+
+
+def claim_fixture(test_case):
+    """Persist one synthetic authorized command and expose a fixed-TTL claimer."""
+
+    temporary = tempfile.TemporaryDirectory(prefix="phase5-claim-")
+    test_case.addCleanup(temporary.cleanup)
+    path = Path(temporary.name) / "phase5.db"
+    store = SQLiteUnitOfWork.open(path)
+    test_case.addCleanup(store.close)
+    workflow_id = _opaque_id("workflow", "claim", test_case.id())
+    initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+    store.create_workflow(initial)
+    persist_script(store, workflow_id, script)
+
+    def claim_at(now: datetime, worker: str = "worker:one"):
+        return store.claim_command(
+            worker_id=worker,
+            now=now,
+            lease_ttl=timedelta(seconds=30),
+        )
+
+    return store, claim_at

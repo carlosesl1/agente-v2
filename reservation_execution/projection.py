@@ -15,7 +15,14 @@ from reservation_confirmation import (
     prepare_summary,
     render_summary,
 )
-from reservation_domain import CommercialDraft, ReadyToSummarizeState, SummaryRecorded
+from reservation_domain import (
+    CommercialDraft,
+    ExecutionCertainty,
+    ExecutionOutcome,
+    ReadyToSummarizeState,
+    ReservationCommand,
+    SummaryRecorded,
+)
 
 from .types import LedgerStatus, OutboxKind, OutboxMessage
 
@@ -208,6 +215,52 @@ def summary_outbox_message(
     )
 
 
+def project_preparation_failure_outbox(
+    command: ReservationCommand,
+    outcome: ExecutionOutcome,
+    *,
+    created_at: datetime,
+) -> OutboxMessage:
+    """Project a proven pre-dispatch failure without provider/private material."""
+
+    if type(command) is not ReservationCommand:
+        raise TypeError("command must be the exact ReservationCommand type")
+    if type(outcome) is not ExecutionOutcome:
+        raise TypeError("outcome must be the exact ExecutionOutcome type")
+    created_at = _require_utc(created_at, "created_at")
+    if (
+        outcome.command_id != command.command_id
+        or outcome.certainty is not ExecutionCertainty.NOT_CALLED
+        or outcome.provider_reference is not None
+    ):
+        raise ValueError("preparation projection requires matching not_called outcome")
+    template_id = "reservation.execution.not_called.v1"
+    payload = json.dumps(
+        {
+            "certainty": outcome.certainty.value,
+            "status": outcome.normalized_status,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    identity = "|".join(
+        (command.command_id, outcome.certainty.value, template_id)
+    ).encode("utf-8")
+    message_id = f"outbox:{hashlib.sha256(identity).hexdigest()}"
+    return OutboxMessage(
+        message_id=message_id,
+        idempotency_key=message_id,
+        workflow_id=command.workflow_id,
+        command_id=command.command_id,
+        kind=OutboxKind.EXECUTION_NOT_CALLED,
+        template_id=template_id,
+        canonical_payload=payload,
+        payload_hash=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        created_at=created_at,
+    )
+
+
 def validate_summary_outbox(
     state: ReadyToSummarizeState,
     event: SummaryRecorded,
@@ -291,6 +344,7 @@ __all__ = [
     "LedgerSnapshot",
     "summary_payload",
     "summary_outbox_message",
+    "project_preparation_failure_outbox",
     "validate_summary_outbox",
     "validate_summary_outbox_for_draft",
 ]

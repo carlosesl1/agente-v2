@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 import re
@@ -16,8 +16,12 @@ from reservation_domain import (
     EVENT_TYPES,
     STATE_TYPES,
     Event,
+    ExecutingState,
+    ExecutionCertainty,
     ExecutionFinished,
+    ExecutionQueuedState,
     ExecutionStarted,
+    FailedBeforeProviderState,
     ManualReviewRequested,
     ReservationCommand,
     State,
@@ -26,21 +30,39 @@ from reservation_domain import (
     TransitionStatus,
     dumps_command,
     dumps_event,
+    dumps_outcome,
     dumps_state,
     loads_command,
     loads_event,
+    loads_outcome,
     loads_state,
     new_workflow,
     reduce,
 )
 
-from .projection import LedgerSnapshot, validate_summary_outbox
+from .adapter import PreparationFailure
+from .projection import (
+    LedgerSnapshot,
+    project_preparation_failure_outbox,
+    validate_summary_outbox,
+)
 from .schema import SCHEMA_VERSION, render_sqlite, schema_contract, schema_hash
-from .types import LedgerStatus, OutboxKind, OutboxMessage, OutboxStatus
+from .types import (
+    CommandClaim,
+    DispatchPermit,
+    DispatchRequest,
+    Lease,
+    LedgerStatus,
+    OutboxKind,
+    OutboxMessage,
+    OutboxStatus,
+    PreparationDisposition,
+)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
 _FACTORY_TOKEN = object()
+_MAX_PREPARATION_FAILURES = 3
 
 
 class StoreError(RuntimeError):
@@ -65,6 +87,14 @@ class IdentityConflict(StoreError):
 
 class UnsupportedEffect(StoreError):
     """An operational event must use its specialized atomic store method."""
+
+
+class StaleLease(StoreError):
+    """A lease owner/token is absent, expired, or no longer current."""
+
+
+class DispatchAlreadyFenced(StoreError):
+    """The command has already consumed its only durable dispatch slot."""
 
 
 class WorkflowNotFound(StoreError):
@@ -113,6 +143,28 @@ def _require_id(value: str, field_name: str) -> str:
     if type(value) is not str or not _ID_RE.fullmatch(value):
         raise ValueError(f"{field_name} must be an exact opaque identifier")
     return value
+
+
+def _require_utc_input(value: datetime, field_name: str) -> datetime:
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset() != timedelta(0)
+    ):
+        raise ValueError(f"{field_name} must be an exact UTC datetime")
+    return value.astimezone(timezone.utc)
+
+
+def _require_lease_ttl(value: timedelta) -> timedelta:
+    if type(value) is not timedelta or value <= timedelta(0):
+        raise ValueError("lease_ttl must be a positive timedelta")
+    return value
+
+
+def _derived_id(prefix: str, *parts: str) -> str:
+    material = "|".join(parts).encode("utf-8")
+    return f"{prefix}:{hashlib.sha256(material).hexdigest()}"
 
 
 def _canonical_utc(value: str, field_name: str) -> datetime:
@@ -242,7 +294,7 @@ class SQLiteUnitOfWork:
             raise StoreError("SQLiteUnitOfWork is closed")
 
     @contextmanager
-    def _transaction(self) -> Iterator[None]:
+    def _transaction(self, operation: str = "transaction") -> Iterator[None]:
         self._ensure_open()
         if self._connection.in_transaction:
             raise StoreError("nested SQLiteUnitOfWork transactions are forbidden")
@@ -259,10 +311,10 @@ class SQLiteUnitOfWork:
                 rollback_error = rollback_exc
             if rollback_error is not None:
                 raise StoreUnavailable(
-                    "SQLite transaction failed and rollback was not possible"
+                    f"{operation} failed and rollback was not possible"
                 ) from rollback_error
             if isinstance(exc, sqlite3.Error):
-                raise _sqlite_store_error(exc, "transaction") from exc
+                raise _sqlite_store_error(exc, operation) from exc
             raise
 
     def _table_names(self) -> tuple[str, ...]:
@@ -511,6 +563,18 @@ class SQLiteUnitOfWork:
             and snapshot.updated_at != command.created_at
         ):
             raise DataCorruption("initial queued ledger timestamp disagrees with command")
+        if snapshot.outcome_json is not None:
+            if _sha256_text(snapshot.outcome_json) != snapshot.outcome_hash:
+                raise DataCorruption("execution outcome hash mismatch")
+            try:
+                outcome = loads_outcome(snapshot.outcome_json)
+                canonical_outcome = dumps_outcome(outcome)
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption("execution outcome serialization is invalid") from exc
+            if canonical_outcome != snapshot.outcome_json:
+                raise DataCorruption("execution outcome serialization is noncanonical")
+            if outcome.command_id != command.command_id:
+                raise DataCorruption("execution outcome belongs to another command")
         return snapshot
 
     def _outbox_row(self, message_id: str):
@@ -844,6 +908,352 @@ class SQLiteUnitOfWork:
             raise DataCorruption("workflow state command disagrees with durable command")
         self.load_ledger(command.command_id)
 
+    def _claim_from_projection(
+        self,
+        *,
+        command: ReservationCommand,
+        state: State,
+        ledger: LedgerSnapshot,
+    ) -> CommandClaim:
+        if (
+            ledger.status is not LedgerStatus.PREPARING
+            or ledger.claim_owner is None
+            or ledger.lease_acquired_at is None
+            or ledger.lease_expires_at is None
+        ):
+            raise DataCorruption("claim projection requires a complete preparing lease")
+        return CommandClaim(
+            command=command,
+            workflow_revision=state.meta.revision,
+            lease=Lease(
+                owner=ledger.claim_owner,
+                fencing_token=ledger.fencing_token,
+                acquired_at=ledger.lease_acquired_at,
+                expires_at=ledger.lease_expires_at,
+            ),
+            claim_count=ledger.claim_count,
+            preparation_failures=ledger.preparation_failures,
+        )
+
+    def _assert_live_preparation_claim(
+        self,
+        claim: CommandClaim,
+        *,
+        now: datetime,
+    ) -> tuple[ReservationCommand, LedgerSnapshot, State]:
+        command = self.load_command(claim.command.command_id)
+        ledger = self.load_ledger(command.command_id)
+        state = self.load_workflow(command.workflow_id)
+        lease = claim.lease
+        if command != claim.command or state.meta.revision != claim.workflow_revision:
+            raise StaleLease("claim command or workflow revision is no longer current")
+        if (
+            ledger.status is not LedgerStatus.PREPARING
+            or ledger.dispatch_slots_consumed != 0
+            or ledger.claim_owner != lease.owner
+            or ledger.fencing_token != lease.fencing_token
+            or ledger.lease_acquired_at != lease.acquired_at
+            or ledger.lease_expires_at != lease.expires_at
+            or ledger.claim_count != claim.claim_count
+            or ledger.preparation_failures != claim.preparation_failures
+            or now < ledger.updated_at
+            or now < lease.acquired_at
+            or now >= lease.expires_at
+        ):
+            raise StaleLease("preparation lease is stale or expired")
+        return command, ledger, state
+
+    def claim_command(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> CommandClaim | None:
+        worker_id = _require_id(worker_id, "worker_id")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        try:
+            expires_at = now + lease_ttl
+        except OverflowError as exc:
+            raise ValueError("lease_ttl overflows datetime range") from exc
+        with self._transaction("claim_command"):
+            candidate = self._connection.execute(
+                "SELECT ledger.command_id FROM execution_ledger AS ledger "
+                "JOIN reservation_commands AS command "
+                "ON command.command_id=ledger.command_id "
+                "WHERE ledger.status IN ('queued', 'preparing') "
+                "AND ledger.dispatch_slots_consumed=0 "
+                "AND (ledger.claim_owner IS NULL OR ledger.lease_expires_at<=?) "
+                "ORDER BY command.created_at, ledger.command_id LIMIT 1",
+                (now.isoformat(),),
+            ).fetchone()
+            if candidate is None:
+                return None
+            command = self.load_command(candidate[0])
+            ledger = self.load_ledger(command.command_id)
+            state = self.load_workflow(command.workflow_id)
+            if now < command.created_at or now < ledger.updated_at:
+                raise ValueError("claim time cannot predate command or ledger state")
+            if getattr(state, "command", None) != command:
+                raise DataCorruption("claim workflow does not embed its durable command")
+            if type(state) not in (ExecutionQueuedState, ExecutingState):
+                raise DataCorruption("eligible ledger has a non-claimable workflow state")
+            cursor = self._connection.execute(
+                "UPDATE execution_ledger SET status='preparing', claim_owner=?, "
+                "fencing_token=fencing_token+1, lease_acquired_at=?, "
+                "lease_expires_at=?, claim_count=claim_count+1, updated_at=? "
+                "WHERE command_id=? AND fencing_token=? AND claim_count=? "
+                "AND dispatch_slots_consumed=0 AND "
+                "((status='queued' AND claim_owner IS NULL) OR "
+                "(status='preparing' AND lease_expires_at<=?))",
+                (
+                    worker_id,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                    command.command_id,
+                    ledger.fencing_token,
+                    ledger.claim_count,
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrencyConflict("eligible command claim lost its compare-and-swap")
+            if type(state) is ExecutionQueuedState:
+                event = ExecutionStarted(
+                    event_id=_derived_id("event", "execution_started", command.command_id),
+                    occurred_at=now,
+                    command_id=command.command_id,
+                )
+                if self._event_row(event.event_id) is not None:
+                    raise DataCorruption("queued workflow already has an execution-start event")
+                transition = reduce(state, event)
+                if (
+                    transition.status is not TransitionStatus.APPLIED
+                    or type(transition.state) is not ExecutingState
+                    or transition.commands
+                ):
+                    raise DataCorruption("claim did not produce the exact executing transition")
+                self._insert_event(
+                    command.workflow_id,
+                    event,
+                    transition.state.meta.revision,
+                )
+                self._update_state_compare_and_swap(state, transition.state)
+                state = transition.state
+            updated = self.load_ledger(command.command_id)
+            return self._claim_from_projection(
+                command=command,
+                state=state,
+                ledger=updated,
+            )
+
+    def renew_command_lease(
+        self,
+        claim: CommandClaim,
+        *,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> CommandClaim:
+        if type(claim) is not CommandClaim:
+            raise TypeError("claim must be the exact CommandClaim type")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        try:
+            expires_at = now + lease_ttl
+        except OverflowError as exc:
+            raise ValueError("lease_ttl overflows datetime range") from exc
+        with self._transaction("renew_command_lease"):
+            command, ledger, state = self._assert_live_preparation_claim(claim, now=now)
+            if expires_at <= claim.lease.expires_at:
+                raise ValueError("renewed lease must extend the current expiry")
+            cursor = self._connection.execute(
+                "UPDATE execution_ledger SET lease_expires_at=?, updated_at=? "
+                "WHERE command_id=? AND status='preparing' AND claim_owner=? "
+                "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
+                "AND dispatch_slots_consumed=0",
+                (
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                    command.command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.lease.acquired_at.isoformat(),
+                    claim.lease.expires_at.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("preparation lease changed during renewal")
+            updated = self.load_ledger(command.command_id)
+            if updated.claim_count != ledger.claim_count:
+                raise DataCorruption("renewal changed claim count")
+            return self._claim_from_projection(
+                command=command,
+                state=state,
+                ledger=updated,
+            )
+
+    def fence_dispatch(
+        self,
+        claim: CommandClaim,
+        request: DispatchRequest,
+        *,
+        now: datetime,
+    ) -> DispatchPermit:
+        if type(claim) is not CommandClaim:
+            raise TypeError("claim must be the exact CommandClaim type")
+        if type(request) is not DispatchRequest:
+            raise TypeError("request must be the exact DispatchRequest type")
+        now = _require_utc_input(now, "now")
+        with self._transaction("fence_dispatch"):
+            command = self.load_command(claim.command.command_id)
+            ledger = self.load_ledger(command.command_id)
+            if ledger.dispatch_slots_consumed == 1:
+                if (
+                    ledger.claim_owner == claim.lease.owner
+                    and ledger.fencing_token == claim.lease.fencing_token
+                ):
+                    raise DispatchAlreadyFenced(
+                        "command already consumed its durable dispatch slot"
+                    )
+                raise StaleLease("dispatch slot belongs to another lease")
+            command, _, _ = self._assert_live_preparation_claim(claim, now=now)
+            expected = DispatchRequest.from_command(command, dumps_command(command))
+            if request != expected:
+                raise ValueError("dispatch request diverges from the authorized command")
+            cursor = self._connection.execute(
+                "UPDATE execution_ledger SET status='dispatch_fenced', "
+                "dispatch_slots_consumed=1, dispatch_request_hash=?, "
+                "dispatch_fenced_at=?, updated_at=? "
+                "WHERE command_id=? AND status='preparing' AND claim_owner=? "
+                "AND fencing_token=? AND lease_expires_at>? "
+                "AND dispatch_slots_consumed=0",
+                (
+                    request.payload_hash,
+                    now.isoformat(),
+                    now.isoformat(),
+                    command.command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("dispatch fence lost its lease compare-and-swap")
+            persisted = self.load_ledger(command.command_id)
+            if (
+                persisted.status is not LedgerStatus.DISPATCH_FENCED
+                or persisted.dispatch_slots_consumed != 1
+                or persisted.dispatch_request_hash != request.payload_hash
+                or persisted.dispatch_fenced_at != now
+            ):
+                raise DataCorruption("dispatch fence projection is inconsistent")
+            return DispatchPermit(
+                command_id=command.command_id,
+                lease=claim.lease,
+                dispatch_slot=1,
+                request_hash=request.payload_hash,
+                fenced_at=now,
+            )
+
+    def release_preparation_failure(
+        self,
+        claim: CommandClaim,
+        failure: PreparationFailure,
+        *,
+        now: datetime,
+    ) -> PreparationDisposition:
+        if type(claim) is not CommandClaim:
+            raise TypeError("claim must be the exact CommandClaim type")
+        if type(failure) is not PreparationFailure:
+            raise TypeError("failure must be the exact PreparationFailure type")
+        now = _require_utc_input(now, "now")
+        with self._transaction("release_preparation_failure"):
+            command, ledger, state = self._assert_live_preparation_claim(claim, now=now)
+            failures = ledger.preparation_failures + 1
+            if failures > _MAX_PREPARATION_FAILURES:
+                raise DataCorruption("preparation failure budget was already exhausted")
+            if failure.retryable and failures < _MAX_PREPARATION_FAILURES:
+                cursor = self._connection.execute(
+                    "UPDATE execution_ledger SET status='queued', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, "
+                    "preparation_failures=?, updated_at=? "
+                    "WHERE command_id=? AND status='preparing' AND claim_owner=? "
+                    "AND fencing_token=? AND lease_expires_at>? "
+                    "AND dispatch_slots_consumed=0",
+                    (
+                        failures,
+                        now.isoformat(),
+                        command.command_id,
+                        claim.lease.owner,
+                        claim.lease.fencing_token,
+                        now.isoformat(),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise StaleLease("preparation release lost its lease compare-and-swap")
+                return PreparationDisposition.REQUEUED
+
+            outcome = command.outcome(
+                certainty=ExecutionCertainty.NOT_CALLED,
+                normalized_status=failure.reason,
+                evidence=failure.evidence,
+            )
+            event = ExecutionFinished(
+                event_id=_derived_id(
+                    "event",
+                    "preparation_not_called",
+                    command.command_id,
+                ),
+                occurred_at=now,
+                command_id=command.command_id,
+                outcome=outcome,
+            )
+            transition = reduce(state, event)
+            if (
+                transition.status is not TransitionStatus.APPLIED
+                or type(transition.state) is not FailedBeforeProviderState
+                or transition.commands
+            ):
+                raise DataCorruption(
+                    "terminal preparation failure did not produce failed-before-provider"
+                )
+            raw_outcome = dumps_outcome(outcome)
+            message = project_preparation_failure_outbox(
+                command,
+                outcome,
+                created_at=now,
+            )
+            self._insert_event(
+                command.workflow_id,
+                event,
+                transition.state.meta.revision,
+            )
+            self._update_state_compare_and_swap(state, transition.state)
+            cursor = self._connection.execute(
+                "UPDATE execution_ledger SET status='outcome_recorded', "
+                "claim_owner=NULL, lease_acquired_at=NULL, lease_expires_at=NULL, "
+                "preparation_failures=?, outcome_json=?, outcome_hash=?, updated_at=? "
+                "WHERE command_id=? AND status='preparing' AND claim_owner=? "
+                "AND fencing_token=? AND lease_expires_at>? "
+                "AND dispatch_slots_consumed=0 AND outcome_json IS NULL",
+                (
+                    failures,
+                    raw_outcome,
+                    _sha256_text(raw_outcome),
+                    now.isoformat(),
+                    command.command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("terminal preparation failure lost its lease compare-and-swap")
+            self._insert_outbox(message)
+            return PreparationDisposition.TERMINAL_NOT_CALLED
+
     def _insert_immutable_command(self, command: ReservationCommand) -> None:
         raw = dumps_command(command)
         existing = self._connection.execute(
@@ -1036,6 +1446,8 @@ __all__ = [
     "ConcurrencyConflict",
     "IdentityConflict",
     "UnsupportedEffect",
+    "StaleLease",
+    "DispatchAlreadyFenced",
     "WorkflowNotFound",
     "CommandNotFound",
     "OutboxNotFound",
