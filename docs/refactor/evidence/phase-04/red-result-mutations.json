@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T03:04:55Z",
+  "command": "python3 -m unittest tests.test_phase4_mutation_runner -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_mutation_runner",
+  "missing_module": "scripts.run_phase4_mutations",
+  "output_sha256": "6b9c235845f37b46704c131d4935d58d14caa2f4a23a5efbde316c1c322072a6",
+  "raw_output_versioned": false
+}

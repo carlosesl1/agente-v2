@@ -249,7 +249,24 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(prepared.event.outbox_message_id, prepared.outbox_message_id)
         self.assertEqual(prepared.event.draft_version, state.draft.version)
         self.assertEqual(prepared.event.subject_signature, state.draft.subject_signature)
-        self.assertEqual(prepared.event.occurred_at, T0 + timedelta(seconds=1))
+        self.assertEqual(prepared.event.occurred_at, prepared.presented_at)
+
+    def test_summary_artifact_identity_binds_locale_and_rendered_content(self) -> None:
+        state = ready_state()
+        pt = prepare_summary(
+            state,
+            locale=SummaryLocale.PT_BR,
+            presented_at=T0 + timedelta(seconds=1),
+        )
+        en = prepare_summary(
+            state,
+            locale=SummaryLocale.EN,
+            presented_at=T0 + timedelta(seconds=1),
+        )
+        self.assertNotEqual(pt.rendered.content_hash, en.rendered.content_hash)
+        self.assertNotEqual(pt.summary_event_id, en.summary_event_id)
+        self.assertNotEqual(pt.outbox_message_id, en.outbox_message_id)
+        self.assertNotEqual(pt.event.event_id, en.event.event_id)
 
     def test_prepare_summary_rejects_wrong_state_and_time_before_draft(self) -> None:
         state = ready_state()
