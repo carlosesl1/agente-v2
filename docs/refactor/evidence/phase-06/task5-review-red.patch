@@ -1,0 +1,670 @@
+diff --git a/tests/test_phase6_schema.py b/tests/test_phase6_schema.py
+index 191c1723da9a976cb7d41eedfcba81e673c9dd16..902e35a2461fa90d319fc1076ce27caf50454099 100644
+--- a/tests/test_phase6_schema.py
++++ b/tests/test_phase6_schema.py
+@@ -243 +243,5 @@ EXPECTED_FOREIGN_KEYS = {
+-    "handoff_receipts": {("message_id", "handoff_outbox", "message_id")},
++    "handoff_receipts": {
++        ("message_id", "handoff_outbox", "message_id"),
++        ("receipt_hash", "handoff_outbox", "receipt_hash"),
++        ("delivered_at", "handoff_outbox", "delivered_at"),
++    },
+@@ -269 +273,5 @@ EXPECTED_FOREIGN_KEYS = {
+-    "payment_receipts": {("message_id", "payment_outbox", "message_id")},
++    "payment_receipts": {
++        ("message_id", "payment_outbox", "message_id"),
++        ("receipt_hash", "payment_outbox", "receipt_hash"),
++        ("delivered_at", "payment_outbox", "delivered_at"),
++    },
+@@ -281 +289,5 @@ EXPECTED_FOREIGN_KEY_GROUPS = {
+-        (("message_id",), "handoff_outbox", ("message_id",))
++        (
++            ("message_id", "receipt_hash", "delivered_at"),
++            "handoff_outbox",
++            ("message_id", "receipt_hash", "delivered_at"),
++        )
+@@ -339 +351,5 @@ EXPECTED_FOREIGN_KEY_GROUPS = {
+-        (("message_id",), "payment_outbox", ("message_id",))
++        (
++            ("message_id", "receipt_hash", "delivered_at"),
++            "payment_outbox",
++            ("message_id", "receipt_hash", "delivered_at"),
++        )
+@@ -346 +362,5 @@ EXPECTED_UNIQUES = {
+-    "handoff_outbox": {("idempotency_key",), ("effect_id",)},
++    "handoff_outbox": {
++        ("idempotency_key",),
++        ("effect_id",),
++        ("message_id", "receipt_hash", "delivered_at"),
++    },
+@@ -364 +384,5 @@ EXPECTED_UNIQUES = {
+-    "payment_outbox": {("idempotency_key",), ("effect_id",)},
++    "payment_outbox": {
++        ("idempotency_key",),
++        ("effect_id",),
++        ("message_id", "receipt_hash", "delivered_at"),
++    },
+@@ -367,0 +392,75 @@ EXPECTED_UNIQUES = {
++INTEGER_COLUMNS = {
++    "handoff_workflows": {"revision"},
++    "handoff_events": {"revision"},
++    "handoff_outbox": {"fencing_token", "delivery_attempts"},
++    "handoff_receipts": set(),
++    "payment_workflows": {"revision", "payment_version"},
++    "payment_events": {"revision", "payment_version"},
++    "payment_evidence_claims": {"payment_version"},
++    "payment_commands": {"payment_version"},
++    "payment_ledger": {
++        "payment_version",
++        "fencing_token",
++        "claim_count",
++        "dispatch_slots_consumed",
++    },
++    "payment_outbox": {
++        "payment_version",
++        "fencing_token",
++        "delivery_attempts",
++    },
++    "payment_receipts": set(),
++}
++
++NONEMPTY_COLUMNS = {
++    "handoff_workflows": {"handoff_id", "incident_key", "state_json"},
++    "handoff_events": {"event_id", "handoff_id", "event_type", "event_json"},
++    "handoff_outbox": {
++        "message_id",
++        "idempotency_key",
++        "effect_id",
++        "handoff_id",
++        "template_id",
++        "payload_json",
++        "claim_owner",
++    },
++    "handoff_receipts": {
++        "receipt_id",
++        "idempotency_key",
++        "message_id",
++        "receipt_json",
++    },
++    "payment_workflows": {"payment_id", "state_json"},
++    "payment_events": {"event_id", "payment_id", "event_type", "event_json"},
++    "payment_evidence_claims": {"claim_key", "payment_id", "evidence_json"},
++    "payment_commands": {
++        "settlement_command_id",
++        "idempotency_key",
++        "payment_id",
++        "evidence_claim_key",
++        "command_json",
++    },
++    "payment_ledger": {
++        "settlement_command_id",
++        "payment_id",
++        "claim_owner",
++        "outcome_json",
++    },
++    "payment_outbox": {
++        "message_id",
++        "idempotency_key",
++        "effect_id",
++        "payment_id",
++        "settlement_command_id",
++        "template_id",
++        "payload_json",
++        "claim_owner",
++    },
++    "payment_receipts": {
++        "receipt_id",
++        "idempotency_key",
++        "message_id",
++        "receipt_json",
++    },
++}
++
+@@ -427 +525,0 @@ class Phase6SchemaTests(unittest.TestCase):
+-        connection.execute("PRAGMA foreign_keys = ON")
+@@ -430,0 +529,43 @@ class Phase6SchemaTests(unittest.TestCase):
++    def sqlite_column_definition(self, table_name: str, column_name: str) -> str:
++        sql = render_sqlite()
++        start = sql.index(f"CREATE TABLE {table_name} (")
++        end = sql.index(") STRICT;", start)
++        prefix = f"    {column_name} "
++        matches = [
++            line.strip().removesuffix(",")
++            for line in sql[start:end].splitlines()
++            if line.startswith(prefix)
++        ]
++        self.assertEqual(len(matches), 1, (table_name, column_name, matches))
++        return matches[0]
++
++    def assert_isolated_sqlite_column_rejects(
++        self,
++        table_name: str,
++        column_name: str,
++        value: object,
++    ) -> None:
++        self.assert_isolated_sqlite_column_rejects_all(
++            table_name,
++            column_name,
++            (value,),
++        )
++
++    def assert_isolated_sqlite_column_rejects_all(
++        self,
++        table_name: str,
++        column_name: str,
++        values: tuple[object, ...] | list[object],
++    ) -> None:
++        connection = sqlite3.connect(":memory:")
++        self.addCleanup(connection.close)
++        definition = self.sqlite_column_definition(table_name, column_name)
++        connection.execute(f"CREATE TABLE probe ({definition}) STRICT")
++        for value in values:
++            with self.subTest(table=table_name, column=column_name, isolated=value):
++                with self.assertRaises(sqlite3.IntegrityError):
++                    connection.execute(
++                        f"INSERT INTO probe ({column_name}) VALUES (?)",
++                        (value,),
++                    )
++
+@@ -795,0 +937,19 @@ class Phase6SchemaTests(unittest.TestCase):
++        for table in contract:
++            for column in table.columns:
++                expected_sqlite = (
++                    "INTEGER"
++                    if column.name in INTEGER_COLUMNS[table.name]
++                    else "TEXT"
++                )
++                expected_postgresql = (
++                    "bigint"
++                    if column.name in INTEGER_COLUMNS[table.name]
++                    else (
++                        "timestamptz"
++                        if column.name in TIMESTAMP_COLUMNS[table.name]
++                        else "text"
++                    )
++                )
++                with self.subTest(table=table.name, column=column.name):
++                    self.assertEqual(column.sqlite_type, expected_sqlite)
++                    self.assertEqual(column.postgresql_type, expected_postgresql)
+@@ -810,0 +971,2 @@ class Phase6SchemaTests(unittest.TestCase):
++        self.assertTrue(sqlite_sql.startswith("PRAGMA foreign_keys = ON;\n\n"))
++        self.assertNotIn("PRAGMA", postgresql_sql.upper())
+@@ -815 +977 @@ class Phase6SchemaTests(unittest.TestCase):
+-                self.assertEqual(sql.count(";"), 11)
++                self.assertEqual(sql.count(";"), 12 if dialect == "sqlite" else 11)
+@@ -830,0 +993,16 @@ class Phase6SchemaTests(unittest.TestCase):
++    def test_postgresql_contains_exact_contract_constraints_columns_and_nullability(self) -> None:
++        sql = render_postgresql()
++        for table in schema_contract():
++            start = sql.index(f"CREATE TABLE {table.name} (")
++            end = sql.index(");", start)
++            block = sql[start:end]
++            for column in table.columns:
++                nullable = "" if column.nullable else " NOT NULL"
++                check = "" if column.check is None else f" CHECK ({column.check})"
++                expected = f"    {column.name} {column.postgresql_type}{nullable}{check}"
++                with self.subTest(table=table.name, column=column.name):
++                    self.assertIn(expected, block)
++            for constraint in table.table_constraints:
++                with self.subTest(table=table.name, constraint=constraint):
++                    self.assertIn(f"    {constraint}", block)
++
+@@ -846 +1024,11 @@ class Phase6SchemaTests(unittest.TestCase):
+-                self.assertTrue(all(row[2] in {"TEXT", "INTEGER"} for row in info))
++                self.assertEqual(
++                    {row[1]: row[2] for row in info},
++                    {
++                        column_name: (
++                            "INTEGER"
++                            if column_name in INTEGER_COLUMNS[table_name]
++                            else "TEXT"
++                        )
++                        for column_name in expected_columns
++                    },
++                )
+@@ -965,0 +1154,5 @@ class Phase6SchemaTests(unittest.TestCase):
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=NOW,
++            receipt_hash=HASH_A,
+@@ -982,11 +1175,30 @@ class Phase6SchemaTests(unittest.TestCase):
+-        for receipt_id, idem in (
+-            ("handoff:receipt:2", "handoff:receipt:idem:other"),
+-            ("handoff:receipt:3", "handoff:receipt:idem:shared"),
+-        ):
+-            with self.subTest(receipt_id=receipt_id), self.assertRaises(sqlite3.IntegrityError):
+-                connection.execute(
+-                    "INSERT INTO handoff_receipts "
+-                    "(receipt_id, idempotency_key, message_id, receipt_json, "
+-                    "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
+-                    (receipt_id, idem, message_one, HASH_B, NOW),
+-                )
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO handoff_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, "
++                "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                ("handoff:receipt:2", "handoff:receipt:idem:other", message_one, HASH_A, NOW),
++            )
++        message_two = self.insert_handoff_outbox(
++            connection,
++            first,
++            "unique-receipt-2",
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=LATER,
++            receipt_hash=HASH_B,
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO handoff_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, "
++                "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                (
++                    "handoff:receipt:3",
++                    "handoff:receipt:idem:shared",
++                    message_two,
++                    HASH_B,
++                    LATER,
++                ),
++            )
+@@ -1018,29 +1230,40 @@ class Phase6SchemaTests(unittest.TestCase):
+-        for suffix, overrides in (
+-            (
+-                "unique-command-2",
+-                {
+-                    "settlement_command_id": "payment:command:other",
+-                    "idempotency_key": "payment:command:idem:other",
+-                },
+-            ),
+-            (
+-                "unique-command-3",
+-                {
+-                    "settlement_command_id": "payment:command:other-2",
+-                    "idempotency_key": "payment:command:idem:shared",
+-                    "payment_version": 2,
+-                },
+-            ),
+-            (
+-                "unique-command-4",
+-                {
+-                    "settlement_command_id": command,
+-                    "idempotency_key": "payment:command:idem:other-2",
+-                    "payment_version": 2,
+-                },
+-            ),
+-        ):
+-            with self.subTest(overrides=overrides), self.assertRaises(sqlite3.IntegrityError):
+-                self.insert_command(
+-                    connection, payment_one, claim, suffix, **overrides
+-                )
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_command(
++                connection,
++                payment_one,
++                claim,
++                "unique-command-subject",
++                settlement_command_id="payment:command:subject-other",
++                idempotency_key="payment:command:idem:subject-other",
++            )
++
++        claim_two = self.insert_claim(
++            connection,
++            payment_two,
++            "unique-payment-2-valid-claim",
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_command(
++                connection,
++                payment_two,
++                claim_two,
++                "unique-command-idempotency",
++                settlement_command_id="payment:command:idem-other",
++                idempotency_key="payment:command:idem:shared",
++            )
++
++        payment_three = self.insert_payment_workflow(connection, "unique-payment-3")
++        claim_three = self.insert_claim(
++            connection,
++            payment_three,
++            "unique-payment-3-valid-claim",
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_command(
++                connection,
++                payment_three,
++                claim_three,
++                "unique-command-id",
++                settlement_command_id=command,
++                idempotency_key="payment:command:idem:id-other",
++            )
+@@ -1054,0 +1278,5 @@ class Phase6SchemaTests(unittest.TestCase):
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=NOW,
++            receipt_hash=HASH_A,
+@@ -1073,3 +1301,62 @@ class Phase6SchemaTests(unittest.TestCase):
+-        for receipt_id, idem in (
+-            ("payment:receipt:2", "payment:receipt:idem:other"),
+-            ("payment:receipt:3", "payment:receipt:idem:shared"),
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO payment_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, "
++                "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                ("payment:receipt:2", "payment:receipt:idem:other", message, HASH_A, NOW),
++            )
++        message_two = self.insert_payment_outbox(
++            connection,
++            payment_one,
++            command,
++            "unique-receipt-2",
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=LATER,
++            receipt_hash=HASH_B,
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO payment_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, "
++                "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                (
++                    "payment:receipt:3",
++                    "payment:receipt:idem:shared",
++                    message_two,
++                    HASH_B,
++                    LATER,
++                ),
++            )
++
++    def test_receipts_require_an_exact_delivered_outbox_snapshot(self) -> None:
++        connection = self.open_database()
++
++        handoff_id = self.insert_handoff_workflow(connection, "receipt-binding")
++        pending_handoff = self.insert_handoff_outbox(
++            connection,
++            handoff_id,
++            "receipt-binding-pending",
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO handoff_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
++                "delivered_at) VALUES ('handoff:receipt:pending', "
++                "'handoff:receipt:pending:idem', ?, '{}', ?, ?)",
++                (pending_handoff, HASH_A, NOW),
++            )
++        delivered_handoff = self.insert_handoff_outbox(
++            connection,
++            handoff_id,
++            "receipt-binding-delivered",
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=LATER,
++            receipt_hash=HASH_B,
++        )
++        for suffix, receipt_hash, delivered_at in (
++            ("wrong-hash", HASH_A, LATER),
++            ("wrong-time", HASH_B, NOW),
+@@ -1077,7 +1364,76 @@ class Phase6SchemaTests(unittest.TestCase):
+-            with self.subTest(receipt_id=receipt_id), self.assertRaises(sqlite3.IntegrityError):
+-                connection.execute(
+-                    "INSERT INTO payment_receipts "
+-                    "(receipt_id, idempotency_key, message_id, receipt_json, "
+-                    "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
+-                    (receipt_id, idem, message, HASH_B, NOW),
+-                )
++            with self.subTest(domain="handoff", suffix=suffix):
++                with self.assertRaises(sqlite3.IntegrityError):
++                    connection.execute(
++                        "INSERT INTO handoff_receipts "
++                        "(receipt_id, idempotency_key, message_id, receipt_json, "
++                        "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                        (
++                            f"handoff:receipt:{suffix}",
++                            f"handoff:receipt:{suffix}:idem",
++                            delivered_handoff,
++                            receipt_hash,
++                            delivered_at,
++                        ),
++                    )
++        connection.execute(
++            "INSERT INTO handoff_receipts "
++            "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
++            "delivered_at) VALUES ('handoff:receipt:matching', "
++            "'handoff:receipt:matching:idem', ?, '{}', ?, ?)",
++            (delivered_handoff, HASH_B, LATER),
++        )
++
++        payment_id, _, command_id = self.create_payment_command_graph(
++            connection,
++            "receipt-binding",
++        )
++        pending_payment = self.insert_payment_outbox(
++            connection,
++            payment_id,
++            command_id,
++            "receipt-binding-pending",
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            connection.execute(
++                "INSERT INTO payment_receipts "
++                "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
++                "delivered_at) VALUES ('payment:receipt:pending', "
++                "'payment:receipt:pending:idem', ?, '{}', ?, ?)",
++                (pending_payment, HASH_A, NOW),
++            )
++        delivered_payment = self.insert_payment_outbox(
++            connection,
++            payment_id,
++            command_id,
++            "receipt-binding-delivered",
++            status="delivered",
++            fencing_token=1,
++            delivery_attempts=1,
++            delivered_at=LATER,
++            receipt_hash=HASH_B,
++        )
++        for suffix, receipt_hash, delivered_at in (
++            ("wrong-hash", HASH_A, LATER),
++            ("wrong-time", HASH_B, NOW),
++        ):
++            with self.subTest(domain="payment", suffix=suffix):
++                with self.assertRaises(sqlite3.IntegrityError):
++                    connection.execute(
++                        "INSERT INTO payment_receipts "
++                        "(receipt_id, idempotency_key, message_id, receipt_json, "
++                        "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                        (
++                            f"payment:receipt:{suffix}",
++                            f"payment:receipt:{suffix}:idem",
++                            delivered_payment,
++                            receipt_hash,
++                            delivered_at,
++                        ),
++                    )
++        connection.execute(
++            "INSERT INTO payment_receipts "
++            "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
++            "delivered_at) VALUES ('payment:receipt:matching', "
++            "'payment:receipt:matching:idem', ?, '{}', ?, ?)",
++            (delivered_payment, HASH_B, LATER),
++        )
+@@ -1153,0 +1510,14 @@ class Phase6SchemaTests(unittest.TestCase):
++        method_payment = self.insert_payment_workflow(connection, "payment-methods")
++        method_claim_keys = {
++            PaymentMethod.PIX: "pix:E1234567820270201ABCDEFGHIJK",
++            PaymentMethod.WISE: "wise:1234567890abcdef1234567890abcdef",
++            PaymentMethod.STRIPE: "stripe:account-profile:evt_1234567890abcdef",
++        }
++        for index, method in enumerate(PaymentMethod):
++            self.insert_claim(
++                connection,
++                method_payment,
++                f"payment-method-{index}",
++                method=method.value,
++                claim_key=method_claim_keys[method],
++            )
+@@ -1307,0 +1678 @@ class Phase6SchemaTests(unittest.TestCase):
++            "claim_count": 1,
+@@ -1328,0 +1700,8 @@ class Phase6SchemaTests(unittest.TestCase):
++            (
++                "manual_review",
++                {**dispatch, "outcome_certainty": "dispatched_no_effect", **outcome},
++            ),
++            (
++                "manual_review",
++                {**dispatch, "outcome_certainty": "partial_settlement", **outcome},
++            ),
+@@ -1352,0 +1732 @@ class Phase6SchemaTests(unittest.TestCase):
++            "claim_count": 1,
+@@ -1442,0 +1823,66 @@ class Phase6SchemaTests(unittest.TestCase):
++    def test_fencing_tokens_preserve_claim_and_delivery_history(self) -> None:
++        connection = self.open_database()
++        for index, overrides in enumerate(
++            (
++                {"claim_count": 2, "fencing_token": 0},
++                {"claim_count": 0, "fencing_token": 2},
++            )
++        ):
++            payment_id, _, command_id = self.create_payment_command_graph(
++                connection,
++                f"fence-history-invalid-{index}",
++            )
++            with self.subTest(ledger=overrides):
++                with self.assertRaises(sqlite3.IntegrityError):
++                    self.insert_ledger(
++                        connection,
++                        payment_id,
++                        command_id,
++                        **overrides,
++                    )
++        payment_id, _, command_id = self.create_payment_command_graph(
++            connection,
++            "fence-history-valid",
++        )
++        self.insert_ledger(
++            connection,
++            payment_id,
++            command_id,
++            claim_count=2,
++            fencing_token=2,
++        )
++
++        handoff_id = self.insert_handoff_workflow(connection, "delivery-history")
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_handoff_outbox(
++                connection,
++                handoff_id,
++                "delivery-history-invalid",
++                delivery_attempts=2,
++                fencing_token=0,
++            )
++        self.insert_handoff_outbox(
++            connection,
++            handoff_id,
++            "delivery-history-valid",
++            delivery_attempts=2,
++            fencing_token=2,
++        )
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_payment_outbox(
++                connection,
++                payment_id,
++                command_id,
++                "delivery-history-invalid",
++                delivery_attempts=2,
++                fencing_token=0,
++            )
++        self.insert_payment_outbox(
++            connection,
++            payment_id,
++            command_id,
++            "delivery-history-valid",
++            delivery_attempts=2,
++            fencing_token=2,
++        )
++
+@@ -1446,7 +1892,4 @@ class Phase6SchemaTests(unittest.TestCase):
+-        for table in schema_contract():
+-            integer_columns = [
+-                column.name for column in table.columns if column.sqlite_type == "INTEGER"
+-            ]
+-            primary = EXPECTED_PRIMARY_KEYS[table.name][0]
+-            for column_name in integer_columns:
+-                with self.subTest(table=table.name, column=column_name):
++        for table_name, integer_columns in INTEGER_COLUMNS.items():
++            primary = EXPECTED_PRIMARY_KEYS[table_name][0]
++            for column_name in sorted(integer_columns):
++                with self.subTest(table=table_name, column=column_name):
+@@ -1455 +1898 @@ class Phase6SchemaTests(unittest.TestCase):
+-                            f"UPDATE {table.name} SET {column_name} = 0.5 "
++                            f"UPDATE {table_name} SET {column_name} = 0.5 "
+@@ -1457 +1900 @@ class Phase6SchemaTests(unittest.TestCase):
+-                            (identities[table.name],),
++                            (identities[table_name],),
+@@ -1492,0 +1936,5 @@ class Phase6SchemaTests(unittest.TestCase):
++                self.assert_isolated_sqlite_column_rejects_all(
++                    table.name,
++                    column_name,
++                    invalid,
++                )
+@@ -1526,21 +1974,18 @@ class Phase6SchemaTests(unittest.TestCase):
+-        for table_name, column_name in (
+-            ("handoff_workflows", "state_json"),
+-            ("handoff_events", "event_json"),
+-            ("handoff_outbox", "payload_json"),
+-            ("handoff_receipts", "receipt_json"),
+-            ("payment_workflows", "state_json"),
+-            ("payment_events", "event_json"),
+-            ("payment_evidence_claims", "evidence_json"),
+-            ("payment_commands", "command_json"),
+-            ("payment_ledger", "outcome_json"),
+-            ("payment_outbox", "payload_json"),
+-            ("payment_receipts", "receipt_json"),
+-        ):
+-            primary = EXPECTED_PRIMARY_KEYS[table_name][0]
+-            with self.subTest(table=table_name, column=column_name):
+-                with self.assertRaises(sqlite3.IntegrityError):
+-                    connection.execute(
+-                        f"UPDATE {table_name} SET {column_name} = '' "
+-                        f"WHERE {primary} = ?",
+-                        (identities[table_name],),
+-                    )
++        self.assertEqual(
++            {
++                table.name: {
++                    column.name
++                    for column in table.columns
++                    if column.check == f"length({column.name}) >= 1"
++                }
++                for table in contract
++            },
++            NONEMPTY_COLUMNS,
++        )
++        for table_name, column_names in NONEMPTY_COLUMNS.items():
++            for column_name in sorted(column_names):
++                self.assert_isolated_sqlite_column_rejects(
++                    table_name,
++                    column_name,
++                    "",
++                )
+@@ -1579,0 +2025,5 @@ class Phase6SchemaTests(unittest.TestCase):
++                self.assert_isolated_sqlite_column_rejects_all(
++                    table.name,
++                    column_name,
++                    list(malformed),
++                )
+@@ -1640 +2090 @@ class Phase6SchemaTests(unittest.TestCase):
+-                r"(?i)\b(?:postgres(?:ql)?://|redis://|https?://|ATTACH|PRAGMA)\b",
++                r"(?i)\b(?:postgres(?:ql)?://|redis://|https?://|ATTACH)\b",
+@@ -1641,0 +2092,3 @@ class Phase6SchemaTests(unittest.TestCase):
++        self.assertEqual(sqlite_sql.upper().count("PRAGMA"), 1)
++        self.assertTrue(sqlite_sql.startswith("PRAGMA foreign_keys = ON;\n\n"))
++        self.assertNotIn("PRAGMA", postgresql_sql.upper())

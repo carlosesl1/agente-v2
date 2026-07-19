@@ -1,3 +1,5 @@
+PRAGMA foreign_keys = ON;
+
 CREATE TABLE handoff_workflows (
     handoff_id TEXT NOT NULL CHECK (length(handoff_id) >= 1) CHECK (instr(handoff_id, char(0)) = 0),
     incident_key TEXT NOT NULL CHECK (length(incident_key) >= 1) CHECK (instr(incident_key, char(0)) = 0),
@@ -48,9 +50,11 @@ CREATE TABLE handoff_outbox (
     CONSTRAINT fk_handoff_outbox_workflow FOREIGN KEY (handoff_id) REFERENCES handoff_workflows (handoff_id),
     CONSTRAINT uq_handoff_outbox_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_handoff_outbox_effect_id UNIQUE (effect_id),
+    CONSTRAINT uq_handoff_outbox_receipt_binding UNIQUE (message_id, receipt_hash, delivered_at),
     CONSTRAINT ck_handoff_outbox_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_handoff_outbox_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_handoff_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
+    CONSTRAINT ck_handoff_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
     CONSTRAINT ck_handoff_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 ) STRICT;
 
@@ -62,7 +66,7 @@ CREATE TABLE handoff_receipts (
     receipt_hash TEXT NOT NULL CHECK (length(receipt_hash) = 64 AND receipt_hash = lower(receipt_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(receipt_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0) CHECK (instr(receipt_hash, char(0)) = 0),
     delivered_at TEXT NOT NULL CHECK ((((length(delivered_at) = 25 AND delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]+00:00') OR (length(delivered_at) = 32 AND delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]+00:00' AND substr(delivered_at, 21, 6) != '000000')) AND CAST(substr(delivered_at, 1, 4) AS INTEGER) BETWEEN 1 AND 9999 AND CAST(substr(delivered_at, 6, 2) AS INTEGER) BETWEEN 1 AND 12 AND CAST(substr(delivered_at, 9, 2) AS INTEGER) BETWEEN 1 AND (CASE CAST(substr(delivered_at, 6, 2) AS INTEGER) WHEN 2 THEN CASE WHEN ((CAST(substr(delivered_at, 1, 4) AS INTEGER) % 4 = 0 AND CAST(substr(delivered_at, 1, 4) AS INTEGER) % 100 != 0) OR CAST(substr(delivered_at, 1, 4) AS INTEGER) % 400 = 0) THEN 29 ELSE 28 END WHEN 4 THEN 30 WHEN 6 THEN 30 WHEN 9 THEN 30 WHEN 11 THEN 30 ELSE 31 END) AND CAST(substr(delivered_at, 12, 2) AS INTEGER) BETWEEN 0 AND 23 AND CAST(substr(delivered_at, 15, 2) AS INTEGER) BETWEEN 0 AND 59 AND CAST(substr(delivered_at, 18, 2) AS INTEGER) BETWEEN 0 AND 59)) CHECK (instr(delivered_at, char(0)) = 0),
     CONSTRAINT pk_handoff_receipts PRIMARY KEY (receipt_id),
-    CONSTRAINT fk_handoff_receipts_message FOREIGN KEY (message_id) REFERENCES handoff_outbox (message_id),
+    CONSTRAINT fk_handoff_receipts_message FOREIGN KEY (message_id, receipt_hash, delivered_at) REFERENCES handoff_outbox (message_id, receipt_hash, delivered_at),
     CONSTRAINT uq_handoff_receipts_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_handoff_receipts_message_id UNIQUE (message_id)
 ) STRICT;
@@ -153,6 +157,7 @@ CREATE TABLE payment_ledger (
     CONSTRAINT pk_payment_ledger PRIMARY KEY (settlement_command_id),
     CONSTRAINT fk_payment_ledger_command FOREIGN KEY (settlement_command_id, payment_id, payment_version, economic_signature) REFERENCES payment_commands (settlement_command_id, payment_id, payment_version, economic_signature),
     CONSTRAINT uq_payment_ledger_subject UNIQUE (payment_id, payment_version, economic_signature),
+    CONSTRAINT ck_payment_ledger_fencing_history CHECK (fencing_token = claim_count),
     CONSTRAINT ck_payment_ledger_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_payment_ledger_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_payment_ledger_dispatch_tuple CHECK ((dispatch_slots_consumed = 0 AND dispatch_request_hash IS NULL AND dispatch_fenced_at IS NULL) OR (dispatch_slots_consumed = 1 AND dispatch_request_hash IS NOT NULL AND dispatch_fenced_at IS NOT NULL AND fencing_token >= 1)),
@@ -187,9 +192,11 @@ CREATE TABLE payment_outbox (
     CONSTRAINT fk_payment_outbox_command FOREIGN KEY (settlement_command_id, payment_id, payment_version, economic_signature) REFERENCES payment_commands (settlement_command_id, payment_id, payment_version, economic_signature),
     CONSTRAINT uq_payment_outbox_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_payment_outbox_effect_id UNIQUE (effect_id),
+    CONSTRAINT uq_payment_outbox_receipt_binding UNIQUE (message_id, receipt_hash, delivered_at),
     CONSTRAINT ck_payment_outbox_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_payment_outbox_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_payment_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
+    CONSTRAINT ck_payment_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
     CONSTRAINT ck_payment_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 ) STRICT;
 
@@ -201,7 +208,7 @@ CREATE TABLE payment_receipts (
     receipt_hash TEXT NOT NULL CHECK (length(receipt_hash) = 64 AND receipt_hash = lower(receipt_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(receipt_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0) CHECK (instr(receipt_hash, char(0)) = 0),
     delivered_at TEXT NOT NULL CHECK ((((length(delivered_at) = 25 AND delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]+00:00') OR (length(delivered_at) = 32 AND delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]+00:00' AND substr(delivered_at, 21, 6) != '000000')) AND CAST(substr(delivered_at, 1, 4) AS INTEGER) BETWEEN 1 AND 9999 AND CAST(substr(delivered_at, 6, 2) AS INTEGER) BETWEEN 1 AND 12 AND CAST(substr(delivered_at, 9, 2) AS INTEGER) BETWEEN 1 AND (CASE CAST(substr(delivered_at, 6, 2) AS INTEGER) WHEN 2 THEN CASE WHEN ((CAST(substr(delivered_at, 1, 4) AS INTEGER) % 4 = 0 AND CAST(substr(delivered_at, 1, 4) AS INTEGER) % 100 != 0) OR CAST(substr(delivered_at, 1, 4) AS INTEGER) % 400 = 0) THEN 29 ELSE 28 END WHEN 4 THEN 30 WHEN 6 THEN 30 WHEN 9 THEN 30 WHEN 11 THEN 30 ELSE 31 END) AND CAST(substr(delivered_at, 12, 2) AS INTEGER) BETWEEN 0 AND 23 AND CAST(substr(delivered_at, 15, 2) AS INTEGER) BETWEEN 0 AND 59 AND CAST(substr(delivered_at, 18, 2) AS INTEGER) BETWEEN 0 AND 59)) CHECK (instr(delivered_at, char(0)) = 0),
     CONSTRAINT pk_payment_receipts PRIMARY KEY (receipt_id),
-    CONSTRAINT fk_payment_receipts_message FOREIGN KEY (message_id) REFERENCES payment_outbox (message_id),
+    CONSTRAINT fk_payment_receipts_message FOREIGN KEY (message_id, receipt_hash, delivered_at) REFERENCES payment_outbox (message_id, receipt_hash, delivered_at),
     CONSTRAINT uq_payment_receipts_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_payment_receipts_message_id UNIQUE (message_id)
 ) STRICT;

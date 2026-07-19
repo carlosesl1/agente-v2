@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 5,
   "title": "Schema Phase 6 and deterministic DDL",
-  "recorded_at_utc": "2026-07-19T22:31:04Z",
+  "recorded_at_utc": "2026-07-19T23:06:11Z",
   "base_sha": "27fec8d2734f4b07718300573c21e0fa1e34bf80",
   "schema_version": 1,
   "rollout": "NO-GO",
@@ -81,23 +81,24 @@
     ],
     "sqlite": {
       "path": "schemas/phase6/sqlite.sql",
-      "sha256": "4c7650fea86281ae57e715c5513c331f7d0e20b0835aefd3ffe729f7f47e6811",
+      "sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
       "executed_in_memory": true,
       "strict_tables": 11,
       "foreign_keys_enabled": true,
       "foreign_key_check": [],
       "quick_check": "ok",
-      "triggers": []
+      "triggers": [],
+      "foreign_keys_enabled_by_artifact": true
     },
     "postgresql": {
       "path": "schemas/phase6/postgresql.sql",
-      "sha256": "05de6b5dd4b7f391cbf4473bb4a366bbe7f5b2aab8ea007339d6d9e25d4e9e3d",
+      "sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
       "executed": false,
       "contract_only": true
     },
     "drift": {
-      "generator_command": "python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-task5-sqlite.sql --postgresql /tmp/phase6-task5-postgresql.sql",
-      "generator_output_sha256": "d1446ab039938f0a0e00a2a14e7b555736008c15a8ab5124e43d025ee05053d0",
+      "generator_command": "python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-task5-review-sqlite.sql --postgresql /tmp/phase6-task5-review-postgresql.sql",
+      "generator_output_sha256": "9bb11fe3b77d0ac7a8738001910748de246354c744ac37caf936f344645d67a6",
       "sqlite_diff_bytes": 0,
       "postgresql_diff_bytes": 0,
       "drift_zero": true
@@ -105,28 +106,28 @@
   },
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-focused-final.out 2>&1",
-      "tests": 22,
+      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-review-focused-final.out 2>&1",
+      "tests": 25,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 0.935,
-      "output_sha256": "814b2cb2b54726516c060f42e5bf12f40838b2769a395db3e544b72f354013c2"
+      "duration_seconds": 1.038,
+      "output_sha256": "a6825881df35c5a94dcc3022cbea7c8d02b9305f20d57ea2378ea7a003642595"
     },
     "regressions": {
-      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase5_schema -v >/tmp/phase6-task5-regressions-final.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase5_schema -v >/tmp/phase6-task5-review-regressions-final.out 2>&1",
       "tests": 124,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 0.708,
-      "output_sha256": "b3fd54cf48e01dc9a0f75c030ae587f9970159df894147cb3033e7611b3329c9"
+      "duration_seconds": 0.685,
+      "output_sha256": "4231ae8afab16e68f4675aaefa3d42873e2e52ecff763986c2a04bca540c63a2"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task5-full-suite-final.out 2>&1",
-      "tests": 474,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task5-review-full-suite-final.out 2>&1",
+      "tests": 477,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 64.523,
-      "output_sha256": "1ddfa3135e29ac65a54bc51f8cd1698b07691cd265047f9ffe0bd298aad58183"
+      "duration_seconds": 64.946,
+      "output_sha256": "adae2b25e3f6256028d188189a97ce167b49e5b7044e52a95019a013d5b038ec"
     }
   },
   "scans": {
@@ -135,8 +136,47 @@
     "forbidden_imports": [],
     "forbidden_cross_ledger_terms": [],
     "sensitive_hits": [],
-    "forbidden_db_wal_shm_log_artifacts": []
+    "forbidden_db_wal_shm_log_artifacts": [],
+    "review_findings_closed": [
+      "SQLite DDL enables foreign keys before tables",
+      "receipts reference exact delivered outbox message/hash/timestamp tuples",
+      "payment ledger fencing token equals claim count",
+      "outbox fencing token never trails delivery attempts",
+      "test oracles close type, nullable guard, positive method/outcome, PostgreSQL, non-empty and unique-key false-greens"
+    ]
   },
   "live_capabilities_executed": [],
-  "database_scope": "SQLite :memory: and temporary generated text files only"
+  "database_scope": "SQLite :memory: and temporary generated text files only",
+  "review_reds": [
+    {
+      "name": "independent_schema_review_findings",
+      "unfixed_base_sha": "440f638ae30134d21dc83b02aa6590d87599676a",
+      "test_tree_sha": "0d029f3200d0ca84cb53de05e834ea07e3b5a1d5",
+      "reproduction_patch_path": "docs/refactor/evidence/phase-06/task5-review-red.patch",
+      "reproduction_patch_sha256": "bcb280f91d0e2bf3a04bfbbbc6a7e4e7fd32a77db7235ccf8c4cff593566a49d",
+      "reproduction_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task5-review-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_schema -v >/tmp/phase6-task5-review-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 25,
+      "failures": 15,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task5-review-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "72cbb6006909731e0e0a9aa55dc5c5bbada5cca511812c257c79519961aae161",
+      "counterexamples": [
+        "SQLite artifact left PRAGMA foreign_keys disabled, so orphan and composite-binding writes were accepted",
+        "receipt rows could bind to pending outbox rows or diverge from outbox receipt hash/timestamp",
+        "payment ledger accepted fencing_token different from claim_count",
+        "outbox accepted delivery_attempts greater than fencing_token"
+      ],
+      "preventive_oracles_added": [
+        "literal integer type universe and fractional probes independent of schema_contract discovery",
+        "isolated nullable hash/timestamp column probes",
+        "positive Pix/Wise/Stripe and every manual-review certainty row",
+        "exact PostgreSQL columns/nullability/checks/table constraints",
+        "literal non-empty operational column universe with isolated empty-string probes",
+        "independent unique-key probes"
+      ]
+    }
+  ]
 }

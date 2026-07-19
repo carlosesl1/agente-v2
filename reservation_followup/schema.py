@@ -213,6 +213,8 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
         (
             f"CONSTRAINT uq_{table}_idempotency_key UNIQUE (idempotency_key)",
             f"CONSTRAINT uq_{table}_effect_id UNIQUE (effect_id)",
+            f"CONSTRAINT uq_{table}_receipt_binding UNIQUE "
+            "(message_id, receipt_hash, delivered_at)",
             f"CONSTRAINT ck_{table}_lease_tuple CHECK "
             "((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) "
             "OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL "
@@ -223,6 +225,8 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             f"CONSTRAINT ck_{table}_receipt_tuple CHECK "
             "((delivered_at IS NULL AND receipt_hash IS NULL) OR "
             "(delivered_at IS NOT NULL AND receipt_hash IS NOT NULL))",
+            f"CONSTRAINT ck_{table}_fencing_history CHECK "
+            "(fencing_token >= delivery_attempts)",
             f"CONSTRAINT ck_{table}_status_matrix CHECK "
             "((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR "
             "(status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR "
@@ -257,8 +261,9 @@ def _receipts_contract(prefix: str) -> TableContract:
         ),
         (
             f"CONSTRAINT pk_{table} PRIMARY KEY (receipt_id)",
-            f"CONSTRAINT fk_{table}_message FOREIGN KEY (message_id) "
-            f"REFERENCES {outbox} (message_id)",
+            f"CONSTRAINT fk_{table}_message FOREIGN KEY "
+            "(message_id, receipt_hash, delivered_at) "
+            f"REFERENCES {outbox} (message_id, receipt_hash, delivered_at)",
             f"CONSTRAINT uq_{table}_idempotency_key UNIQUE (idempotency_key)",
             f"CONSTRAINT uq_{table}_message_id UNIQUE (message_id)",
         ),
@@ -436,6 +441,8 @@ def payment_ledger_contract() -> TableContract:
             "(settlement_command_id, payment_id, payment_version, economic_signature)",
             "CONSTRAINT uq_payment_ledger_subject UNIQUE "
             "(payment_id, payment_version, economic_signature)",
+            "CONSTRAINT ck_payment_ledger_fencing_history CHECK "
+            "(fencing_token = claim_count)",
             "CONSTRAINT ck_payment_ledger_lease_tuple CHECK "
             "((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) "
             "OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL "
@@ -533,7 +540,7 @@ def _render(dialect: Dialect, contract: tuple[TableContract, ...]) -> str:
 
 
 def render_sqlite() -> str:
-    return _render("sqlite", schema_contract())
+    return "PRAGMA foreign_keys = ON;\n\n" + _render("sqlite", schema_contract())
 
 
 def render_postgresql() -> str:

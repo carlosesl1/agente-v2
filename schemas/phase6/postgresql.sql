@@ -48,9 +48,11 @@ CREATE TABLE handoff_outbox (
     CONSTRAINT fk_handoff_outbox_workflow FOREIGN KEY (handoff_id) REFERENCES handoff_workflows (handoff_id),
     CONSTRAINT uq_handoff_outbox_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_handoff_outbox_effect_id UNIQUE (effect_id),
+    CONSTRAINT uq_handoff_outbox_receipt_binding UNIQUE (message_id, receipt_hash, delivered_at),
     CONSTRAINT ck_handoff_outbox_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_handoff_outbox_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_handoff_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
+    CONSTRAINT ck_handoff_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
     CONSTRAINT ck_handoff_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 );
 
@@ -62,7 +64,7 @@ CREATE TABLE handoff_receipts (
     receipt_hash text NOT NULL CHECK (length(receipt_hash) = 64 AND receipt_hash = lower(receipt_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(receipt_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0),
     delivered_at timestamptz NOT NULL,
     CONSTRAINT pk_handoff_receipts PRIMARY KEY (receipt_id),
-    CONSTRAINT fk_handoff_receipts_message FOREIGN KEY (message_id) REFERENCES handoff_outbox (message_id),
+    CONSTRAINT fk_handoff_receipts_message FOREIGN KEY (message_id, receipt_hash, delivered_at) REFERENCES handoff_outbox (message_id, receipt_hash, delivered_at),
     CONSTRAINT uq_handoff_receipts_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_handoff_receipts_message_id UNIQUE (message_id)
 );
@@ -153,6 +155,7 @@ CREATE TABLE payment_ledger (
     CONSTRAINT pk_payment_ledger PRIMARY KEY (settlement_command_id),
     CONSTRAINT fk_payment_ledger_command FOREIGN KEY (settlement_command_id, payment_id, payment_version, economic_signature) REFERENCES payment_commands (settlement_command_id, payment_id, payment_version, economic_signature),
     CONSTRAINT uq_payment_ledger_subject UNIQUE (payment_id, payment_version, economic_signature),
+    CONSTRAINT ck_payment_ledger_fencing_history CHECK (fencing_token = claim_count),
     CONSTRAINT ck_payment_ledger_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_payment_ledger_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_payment_ledger_dispatch_tuple CHECK ((dispatch_slots_consumed = 0 AND dispatch_request_hash IS NULL AND dispatch_fenced_at IS NULL) OR (dispatch_slots_consumed = 1 AND dispatch_request_hash IS NOT NULL AND dispatch_fenced_at IS NOT NULL AND fencing_token >= 1)),
@@ -187,9 +190,11 @@ CREATE TABLE payment_outbox (
     CONSTRAINT fk_payment_outbox_command FOREIGN KEY (settlement_command_id, payment_id, payment_version, economic_signature) REFERENCES payment_commands (settlement_command_id, payment_id, payment_version, economic_signature),
     CONSTRAINT uq_payment_outbox_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_payment_outbox_effect_id UNIQUE (effect_id),
+    CONSTRAINT uq_payment_outbox_receipt_binding UNIQUE (message_id, receipt_hash, delivered_at),
     CONSTRAINT ck_payment_outbox_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_payment_outbox_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_payment_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
+    CONSTRAINT ck_payment_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
     CONSTRAINT ck_payment_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 );
 
@@ -201,7 +206,7 @@ CREATE TABLE payment_receipts (
     receipt_hash text NOT NULL CHECK (length(receipt_hash) = 64 AND receipt_hash = lower(receipt_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(receipt_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0),
     delivered_at timestamptz NOT NULL,
     CONSTRAINT pk_payment_receipts PRIMARY KEY (receipt_id),
-    CONSTRAINT fk_payment_receipts_message FOREIGN KEY (message_id) REFERENCES payment_outbox (message_id),
+    CONSTRAINT fk_payment_receipts_message FOREIGN KEY (message_id, receipt_hash, delivered_at) REFERENCES payment_outbox (message_id, receipt_hash, delivered_at),
     CONSTRAINT uq_payment_receipts_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT uq_payment_receipts_message_id UNIQUE (message_id)
 );
