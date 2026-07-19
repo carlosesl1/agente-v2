@@ -530,6 +530,7 @@ class Phase5SchemaTests(unittest.TestCase):
             "2027-01-01T23:60:00+00:00",
             "2027-01-01T23:59:60+00:00",
             "2027-01-01T00:00:00.000000+00:00",
+            NOW + "\x00junk",
         )
         for index, malformed_time in enumerate(malformed_times):
             with self.subTest(timestamp=malformed_time):
@@ -758,9 +759,10 @@ class Phase5SchemaTests(unittest.TestCase):
 
     def test_all_hash_columns_reject_malformed_non_null_and_required_hashes_reject_null(self) -> None:
         connection = self.open_database()
-        malformed = "x" * 64
+        malformed_hashes = ("x" * 64, HASH_A + "\x00g")
+        required_bad_values = (*malformed_hashes, None)
 
-        for index, schema_hash_value in enumerate((malformed, None)):
+        for index, schema_hash_value in enumerate(required_bad_values):
             with self.subTest(column="schema_migrations.schema_hash", value=schema_hash_value):
                 with self.assertRaises(sqlite3.IntegrityError):
                     connection.execute(
@@ -769,7 +771,7 @@ class Phase5SchemaTests(unittest.TestCase):
                         (index + 5, schema_hash_value, NOW),
                     )
 
-        for index, state_hash in enumerate((malformed, None)):
+        for index, state_hash in enumerate(required_bad_values):
             with self.subTest(column="workflows.state_hash", value=state_hash):
                 with self.assertRaises(sqlite3.IntegrityError):
                     self.insert_workflow(
@@ -779,7 +781,7 @@ class Phase5SchemaTests(unittest.TestCase):
                     )
 
         event_workflow = self.insert_workflow(connection, "hash-event")
-        for index, event_hash in enumerate((malformed, None)):
+        for index, event_hash in enumerate(required_bad_values):
             with self.subTest(column="domain_events.event_hash", value=event_hash):
                 with self.assertRaises(sqlite3.IntegrityError):
                     connection.execute(
@@ -790,7 +792,7 @@ class Phase5SchemaTests(unittest.TestCase):
                     )
 
         for column in ("subject_signature", "command_hash"):
-            for index, value in enumerate((malformed, None)):
+            for index, value in enumerate(required_bad_values):
                 workflow_id = self.insert_workflow(
                     connection, f"hash-command-{column}-{index}"
                 )
@@ -805,7 +807,7 @@ class Phase5SchemaTests(unittest.TestCase):
                         )
 
         payload_workflow = self.insert_workflow(connection, "hash-payload")
-        for index, payload_hash in enumerate((malformed, None)):
+        for index, payload_hash in enumerate(required_bad_values):
             with self.subTest(column="outbox_messages.payload_hash", value=payload_hash):
                 with self.assertRaises(sqlite3.IntegrityError):
                     self.insert_outbox(
@@ -815,47 +817,56 @@ class Phase5SchemaTests(unittest.TestCase):
                         payload_hash=payload_hash,
                     )
 
-        optional_cases = (
-            (
-                "dispatch_request_hash",
-                {
-                    "status": "dispatch_fenced",
-                    "claim_owner": "worker:hash:a",
-                    "fencing_token": 1,
-                    "lease_acquired_at": NOW,
-                    "lease_expires_at": LATER,
-                    "claim_count": 1,
-                    "dispatch_slots_consumed": 1,
-                    "dispatch_request_hash": malformed,
-                    "dispatch_fenced_at": NOW,
-                },
-            ),
-            (
-                "outcome_hash",
-                {
-                    "status": "outcome_recorded",
-                    "outcome_json": "{}",
-                    "outcome_hash": malformed,
-                },
-            ),
-        )
-        for index, (column, overrides) in enumerate(optional_cases):
-            command_id = self.create_command_graph(connection, f"hash-optional-{index}")
-            with self.subTest(column=f"execution_ledger.{column}"):
-                with self.assertRaises(sqlite3.IntegrityError):
-                    self.insert_ledger(connection, command_id, **overrides)
-
-        receipt_workflow = self.insert_workflow(connection, "hash-receipt")
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.insert_outbox(
-                connection,
-                receipt_workflow,
-                "hash-receipt",
-                status="delivered",
-                delivery_attempts=1,
-                delivered_at=NOW,
-                receipt_hash=malformed,
+        for bad_index, malformed in enumerate(malformed_hashes):
+            optional_cases = (
+                (
+                    "dispatch_request_hash",
+                    {
+                        "status": "dispatch_fenced",
+                        "claim_owner": "worker:hash:a",
+                        "fencing_token": 1,
+                        "lease_acquired_at": NOW,
+                        "lease_expires_at": LATER,
+                        "claim_count": 1,
+                        "dispatch_slots_consumed": 1,
+                        "dispatch_request_hash": malformed,
+                        "dispatch_fenced_at": NOW,
+                    },
+                ),
+                (
+                    "outcome_hash",
+                    {
+                        "status": "outcome_recorded",
+                        "outcome_json": "{}",
+                        "outcome_hash": malformed,
+                    },
+                ),
             )
+            for case_index, (column, overrides) in enumerate(optional_cases):
+                command_id = self.create_command_graph(
+                    connection, f"hash-optional-{bad_index}-{case_index}"
+                )
+                with self.subTest(
+                    column=f"execution_ledger.{column}",
+                    value=malformed,
+                ):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        self.insert_ledger(connection, command_id, **overrides)
+
+            receipt_workflow = self.insert_workflow(
+                connection, f"hash-receipt-{bad_index}"
+            )
+            with self.subTest(column="outbox_messages.receipt_hash", value=malformed):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_outbox(
+                        connection,
+                        receipt_workflow,
+                        f"hash-receipt-{bad_index}",
+                        status="delivered",
+                        delivery_attempts=1,
+                        delivered_at=NOW,
+                        receipt_hash=malformed,
+                    )
 
     def test_execution_ledger_rejects_every_invalid_cross_constraint_family(self) -> None:
         lease = {
@@ -1089,7 +1100,7 @@ class Phase5SchemaTests(unittest.TestCase):
         self.assertIn(" timestamptz", postgresql_sql)
         self.assertNotRegex(
             postgresql_sql,
-            r"(?i)\b(?:PRAGMA|AUTOINCREMENT|GLOB)\b",
+            r"(?i)\b(?:PRAGMA|AUTOINCREMENT|GLOB|STRICT|INSTR)\b|CHAR\s*\(\s*0\s*\)",
         )
         self.assertNotIn("CREATE TYPE", postgresql_sql.upper())
         self.assertNotIn("JSONB", postgresql_sql.upper())

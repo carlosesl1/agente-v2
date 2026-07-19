@@ -95,6 +95,18 @@ def _hash(name: str, *, nullable: bool = False) -> ColumnContract:
     return _text(name, nullable=nullable, check=_hash_check(name, nullable=nullable))
 
 
+def _is_hash_column(column: ColumnContract) -> bool:
+    return (
+        column.check is not None
+        and f"length({column.name}) = 64" in column.check
+        and f"{column.name} = lower({column.name})" in column.check
+    )
+
+
+def _sqlite_no_nul_check(name: str) -> str:
+    return f"instr({name}, char(0)) = 0"
+
+
 def schema_migrations_contract() -> TableContract:
     return TableContract(
         name="schema_migrations",
@@ -330,6 +342,9 @@ def _render_column(dialect: Dialect, column: ColumnContract) -> str:
         checks.append(column.check)
     if dialect == "sqlite" and column.postgresql_type == "timestamptz":
         checks.append(_sqlite_timestamp_check(column.name))
+        checks.append(_sqlite_no_nul_check(column.name))
+    if dialect == "sqlite" and _is_hash_column(column):
+        checks.append(_sqlite_no_nul_check(column.name))
     parts.extend(f"CHECK ({check})" for check in checks)
     return " ".join(parts)
 

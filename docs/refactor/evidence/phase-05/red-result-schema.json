@@ -49,5 +49,18 @@
     ],
     "output_sha256": "386704a4c9748e03323a07df049c7cc6bc3759de3905736664025c68e3610111",
     "raw_output_versioned": false
+  },
+  "review_regression_3": {
+    "source_sha": "ab1c8d8d26357a2bc909cd5e6c814958225bc5f3",
+    "command": "python3 -m unittest tests.test_phase5_schema.Phase5SchemaTests.test_malformed_hashes_and_non_utc_sqlite_timestamps_are_rejected tests.test_phase5_schema.Phase5SchemaTests.test_all_hash_columns_reject_malformed_non_null_and_required_hashes_reject_null -v",
+    "exit_code": 1,
+    "expected_failure": true,
+    "failure_count": 10,
+    "failure_classes": [
+      "sqlite_timestamp_u0000_suffix_bypass",
+      "sqlite_hash_u0000_suffix_bypass"
+    ],
+    "output_sha256": "ab7de773e81fe92fe94f7645081187934c55bf9010328907d2e7534200810ee8",
+    "raw_output_versioned": false
   }
 }
