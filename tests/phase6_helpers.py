@@ -15,8 +15,16 @@ from reservation_domain import (
 from reservation_followup import (
     BusinessUnit,
     ConfirmedReservationAnchor,
+    EffectRequirement,
+    HandoffEffectPolicy,
+    HandoffReasonCode,
+    HandoffRequested,
+    PaymentEffectPolicy,
     PaymentMethod,
+    PaymentEvidenceTrust,
     PaymentSubject,
+    PixProofStatus,
+    PixVisualEvidence,
 )
 
 UTC = timezone.utc
@@ -141,3 +149,84 @@ def payment_subject(**changes: object) -> PaymentSubject:
         else:
             values["economic_signature"] = "0" * 64
     return PaymentSubject(**values)
+
+
+def handoff_requested(**changes: object) -> HandoffRequested:
+    values: dict[str, object] = {
+        "handoff_id": "handoff:synthetic:store:1",
+        "lead_key_hash": "b" * 64,
+        "incident_key": "incident:synthetic:store:1",
+        "reason_code": HandoffReasonCode.CUSTOMER_REQUESTED,
+        "source_event_id": "source:event:synthetic:store:1",
+        "reservation_anchor": None,
+        "requested_at": T0,
+    }
+    values.update(changes)
+    return HandoffRequested(**values)
+
+
+def optional_email_policy() -> HandoffEffectPolicy:
+    return HandoffEffectPolicy(
+        queue_state=EffectRequirement.REQUIRED,
+        customer_acknowledgement=EffectRequirement.REQUIRED,
+        internal_email=EffectRequirement.OPTIONAL,
+    )
+
+
+def payment_effect_policy() -> PaymentEffectPolicy:
+    return PaymentEffectPolicy(
+        paid_state_transition=EffectRequirement.REQUIRED,
+        customer_payment_confirmation=EffectRequirement.REQUIRED,
+        internal_payment_email=EffectRequirement.DISABLED,
+        booking_form=EffectRequirement.DISABLED,
+    )
+
+
+def _digest(payload: dict[str, object]) -> str:
+    material = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def pix_visual_evidence(**changes: object) -> PixVisualEvidence:
+    values: dict[str, object] = {
+        "proof_amount_minor": 12500,
+        "proof_currency": "BRL",
+        "proof_receiver_profile_id": "receiver:profile:synthetic:1",
+        "proof_status": PixProofStatus.PAID,
+        "normalized_e2e": "E1234567820270201ABCDEF12345",
+        "observed_at": T0,
+        "extractor_id": "extractor:synthetic:pix:store:1",
+        "extractor_version": "extractor-version:synthetic:store:1",
+    }
+    values.update(changes)
+    if "evidence_hash" not in values:
+        payload = {
+            "type": "pix_visual_evidence",
+            **{
+                key: (
+                    value.value
+                    if hasattr(value, "value")
+                    else value.isoformat()
+                    if hasattr(value, "isoformat")
+                    else value
+                )
+                for key, value in values.items()
+            },
+        }
+        values["evidence_hash"] = _digest(payload)
+    return PixVisualEvidence(**values)
+
+
+def payment_evidence_trust() -> PaymentEvidenceTrust:
+    return PaymentEvidenceTrust(
+        pix_receiver_profile_id="receiver:profile:synthetic:1",
+        wise_signer_profile_id="wise-signer:profile:synthetic:1",
+        wise_account_profile_id="wise-account:profile:synthetic:1",
+        stripe_account_profile_id="stripe-account:profile:synthetic:1",
+    )

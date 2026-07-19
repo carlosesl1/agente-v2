@@ -1,0 +1,151 @@
+{
+  "phase": 6,
+  "task": 6,
+  "title": "Atomic SQLite follow-up UnitOfWork",
+  "recorded_at_utc": "2026-07-19T23:53:13Z",
+  "base_sha": "7aff9b25f6b6cde7942ef031cef7b4be07ea9345",
+  "rollout": "NO-GO",
+  "postgresql_executed": false,
+  "live_capabilities_executed": [],
+  "timeout_recovery": {
+    "implementation_delegation": "deleg_ab5d9ad0",
+    "status": "timeout",
+    "head_unchanged": true,
+    "index_unchanged": true,
+    "surviving_assets": [
+      "tests/test_phase6_sqlite_store.py",
+      "tests/phase6_helpers.py",
+      "/tmp/phase6-task6-red.out"
+    ],
+    "production_present_at_recovery": false,
+    "active_processes": []
+  },
+  "red": {
+    "original": {
+      "provenance": "timed-out implementer; untracked tests and fixture changes survived while production module was absent",
+      "immutable_snapshot_available_at_original_run": false,
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "expected_error": "ModuleNotFoundError: No module named 'reservation_followup.sqlite_store'",
+      "raw_output_path": "/tmp/phase6-task6-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "39f15aac98ec31baff1ed3d2d85abbacd6e7465e7d2e1ca226e1c82eb1919d02"
+    },
+    "reproduction": {
+      "base_sha": "7aff9b25f6b6cde7942ef031cef7b4be07ea9345",
+      "test_tree_sha": "c890ade6eb98853da6993adf3750a30062819e08",
+      "patch_path": "docs/refactor/evidence/phase-06/task6-red.patch",
+      "patch_sha256": "7f7307edee9dd3889cf43c3e6ff02126bf7b3f812e27360d9f8be3eac2c368de",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task6-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "expected_error": "ModuleNotFoundError: No module named 'reservation_followup.sqlite_store'",
+      "raw_output_path": "/tmp/phase6-task6-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "0f7a8b05dadf02ba3b39c878c77bf8411ff72cba30d451e10c06ecc4d88c88bc"
+    }
+  },
+  "development_corrections": [
+    {
+      "attempt_output_sha256": "93754815bd0f402cbb29ba9df5d68f259cba22d2729c516f820e44dca37c0406",
+      "result": "17 tests; 33 subtest errors",
+      "root_cause": "the production factory required type(path) is Path and therefore rejected concrete PosixPath instances",
+      "fix": "accept pathlib.Path instances while continuing to reject bool/int/float/raw objects"
+    },
+    {
+      "attempt_output_sha256": "a1b90648fac296861b63874a987d05d986ec729de785c6e959153f43e0ab71dc",
+      "result": "17 tests; 16 passed and 1 error",
+      "root_cause": "SettlementStarted reached the pure reducer before the Task 8/9 operational boundary",
+      "fix": "reject all operational payment event types with UnsupportedEffect before opening a write transaction"
+    }
+  ],
+  "contract": {
+    "class": "SQLiteFollowupUnitOfWork",
+    "methods": [
+      "open",
+      "open_handoff",
+      "load_handoff",
+      "apply_handoff",
+      "open_payment",
+      "load_payment",
+      "apply_payment"
+    ],
+    "table_count": 11,
+    "extra_tables": [],
+    "triggers": [],
+    "transaction_mode": "BEGIN IMMEDIATE",
+    "rollback_catches_baseexception": true,
+    "handoff_open_fault_targets": [
+      "handoff_workflows INSERT",
+      "handoff_events INSERT",
+      "handoff_outbox customer_acknowledgement INSERT",
+      "handoff_outbox internal_email INSERT"
+    ],
+    "payment_open_fault_targets": [
+      "payment_workflows INSERT"
+    ],
+    "reopen_after_fault": true,
+    "canonical_load_replay": true,
+    "optimistic_revision": true,
+    "identical_replay": "no-op",
+    "divergent_replay": "identity conflict",
+    "later_task_methods_present": []
+  },
+  "schema": {
+    "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
+    "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
+    "generator_output_sha256": "79143b22671103c12852a9ec586f4167c00513e2e70dccd688c8cac9ae6a65af",
+    "sqlite_diff_bytes": 0,
+    "postgresql_diff_bytes": 0,
+    "drift_zero": true,
+    "quick_check": "ok",
+    "foreign_key_check": []
+  },
+  "green": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-focused-final.out 2>&1",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 4.079,
+      "output_sha256": "07bd379485ae01d60031e57d7c7213a47e4bc127c10634ec18306b65fff49f8e"
+    },
+    "regressions": {
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-regressions-final.out 2>&1",
+      "tests": 170,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 3.798,
+      "output_sha256": "6b4dbb9931f7525453619d828666060eedff22891bd256663bb2ef2f3de30f27"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-full-suite-final.out 2>&1",
+      "tests": 495,
+      "failures": 0,
+      "errors": 0,
+      "duration_seconds": 68.111,
+      "output_sha256": "5cce70061024aaa8580b77a2bb16cfaf4497aae0beb15ae473e6e1321f00dbf1"
+    }
+  },
+  "artifact_sha256": {
+    "reservation_followup/sqlite_store.py": "8dfcdde8aa1ccc1d0a6b11a6f83ed2f71e53f7406927fcbb304b4297bd7f3453",
+    "tests/test_phase6_sqlite_store.py": "b97df99e77eb13e13dbfde575518fec5a92e11c7217746c1930104ea9cea406d",
+    "tests/phase6_helpers.py": "f1545c3d471b54ab461c2cd6b7c338180b4891956a5549077197e6f2bbb943c9"
+  },
+  "scans": {
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "external_production_imports": [],
+    "forbidden_capability_terms": [],
+    "anticipated_task_7_8_methods": [],
+    "sensitive_hits": [],
+    "forbidden_db_wal_shm_log_artifacts": []
+  },
+  "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only"
+}
