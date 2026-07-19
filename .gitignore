@@ -42,3 +42,6 @@ venv/
 build/
 dist/
 *.egg-info/
+
+# Local Git worktrees
+.worktrees/
