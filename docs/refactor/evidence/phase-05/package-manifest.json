@@ -1,0 +1,59 @@
+{
+  "files": [
+    {
+      "bytes": 1581,
+      "path": "reservation_execution/__init__.py",
+      "sha256": "ec1ebe1e3911a0e2dab304e0b230e10c355991a0a1fab2362da0ec06d9fb065f"
+    },
+    {
+      "bytes": 2062,
+      "path": "reservation_execution/adapter.py",
+      "sha256": "ee2a35d64a4f5c7eee26b468c218d644508f73ebd90528ec315d4d32519fa524"
+    },
+    {
+      "bytes": 3800,
+      "path": "reservation_execution/outbox.py",
+      "sha256": "6da6a6dc89402d2e52c7315599c975940b8fa3fe0afbc21aa49505503f303ed0"
+    },
+    {
+      "bytes": 15595,
+      "path": "reservation_execution/projection.py",
+      "sha256": "45376a0a43a8988b97c43b017730936f4d09b37bd4ca944773f3feff4a4fd946"
+    },
+    {
+      "bytes": 32252,
+      "path": "reservation_execution/properties.py",
+      "sha256": "e35b537ae283f8062ffa86cf326b7d7e5e26721e3e31b675b809cec06f218ed7"
+    },
+    {
+      "bytes": 1484,
+      "path": "reservation_execution/reconciliation.py",
+      "sha256": "387b4ba2c8a4e56683f60a87de2a9f3dfb8d72adedfb716bceb84359baf344af"
+    },
+    {
+      "bytes": 14514,
+      "path": "reservation_execution/schema.py",
+      "sha256": "30b9f57d354e249559c0a6cb30144fc571a2851573381eca08e91b15f113ccb7"
+    },
+    {
+      "bytes": 111379,
+      "path": "reservation_execution/sqlite_store.py",
+      "sha256": "9b98fb57de1c2f4eac5ba5e4fe800210f74d23bfcfbf7b16b4e1f6183aa7efa0"
+    },
+    {
+      "bytes": 15964,
+      "path": "reservation_execution/types.py",
+      "sha256": "f9fe7543dd2bbc4ba33689a8777ffa7b0b31d6fb481167ad7d5298dfdb000276"
+    },
+    {
+      "bytes": 4286,
+      "path": "reservation_execution/worker.py",
+      "sha256": "786e46fa7b361155ec0432411ce4cc520baa435046d811d64fa2ee3aece5d4ae"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "package": "reservation_execution",
+  "phase": "phase-05-durable-command-execution",
+  "python_file_count": 10,
+  "schema_version": 1
+}

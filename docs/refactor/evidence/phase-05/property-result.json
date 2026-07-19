@@ -1,0 +1,51 @@
+{
+  "configuration": {
+    "cases": 20000,
+    "minimum_gate_cases": 20000,
+    "seed": 2026071905
+  },
+  "mode": "gate",
+  "phase": "phase-05-durable-command-execution",
+  "report": {
+    "authorized_commands": 20000,
+    "bokun_cases": 10000,
+    "cases": 20000,
+    "cloudbeds_cases": 10000,
+    "conflict_probes": 2500,
+    "consistency_probes": 80,
+    "delivery_retries": 2500,
+    "delivery_target_matches": 2500,
+    "duplicate_probes": 2500,
+    "expired_lease_recoveries": 2500,
+    "final_outboxes": 20000,
+    "manual_reviews": 5000,
+    "missing_terminals": 0,
+    "outbox_provider_retries": 0,
+    "outcome_counts": {
+      "called_no_effect": 2500,
+      "called_unknown": 5000,
+      "effect_confirmed": 10000,
+      "not_called": 2500
+    },
+    "partial_transactions": 0,
+    "passed": true,
+    "post_fence_unknowns": 5000,
+    "recovered_command_matches": 2500,
+    "second_commands": 0,
+    "second_dispatch_slots": 0,
+    "second_provider_calls": 0,
+    "seed": 2026071905,
+    "stale_token_rejections": 2500,
+    "stale_token_writes": 0,
+    "summary_outboxes": 20000,
+    "terminal_commands": 20000,
+    "unauthorized_commands": 0,
+    "unexpected_exceptions": 0,
+    "unknown_redispatches": 0,
+    "violations": [],
+    "wrong_command_claims": 0,
+    "wrong_delivery_targets": 0
+  },
+  "result": "passed",
+  "schema_version": 1
+}

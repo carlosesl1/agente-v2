@@ -1,0 +1,55 @@
+name: phase-5-durable-execution
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durable-command-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate previous phases
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: |
+          python3 scripts/validate_phase0.py
+          python3 scripts/validate_phase1.py
+          python3 scripts/validate_phase2.py
+          python3 scripts/validate_phase3.py
+          python3 scripts/validate_phase4.py
+      - name: Regenerate schemas and manifests
+        run: |
+          python3 scripts/generate_phase5_schema.py --sqlite /tmp/sqlite.sql --postgresql /tmp/postgresql.sql
+          diff -u schemas/phase5/sqlite.sql /tmp/sqlite.sql
+          diff -u schemas/phase5/postgresql.sql /tmp/postgresql.sql
+          python3 scripts/generate_phase5_manifest.py --check
+      - name: Run all tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Run operational properties
+        run: |
+          python3 scripts/run_phase5_properties.py --cases 20000 --seed 2026071905 --write docs/refactor/evidence/phase-05/property-result.json
+          git diff --exit-code -- docs/refactor/evidence/phase-05/property-result.json
+      - name: Run restart race and fault gates
+        run: |
+          python3 scripts/run_phase5_faults.py --seed 2026071905 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix docs/refactor/evidence/phase-05/fault-matrix.json --write-restart docs/refactor/evidence/phase-05/restart-result.json --write-concurrency docs/refactor/evidence/phase-05/concurrency-result.json
+          git diff --exit-code -- docs/refactor/evidence/phase-05/fault-matrix.json docs/refactor/evidence/phase-05/restart-result.json docs/refactor/evidence/phase-05/concurrency-result.json
+      - name: Kill mutation catalog
+        run: |
+          python3 scripts/run_phase5_mutations.py --write docs/refactor/evidence/phase-05/mutation-result.json
+          git diff --exit-code -- docs/refactor/evidence/phase-05/mutation-result.json
+      - name: Validate Phase 5
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: python3 scripts/validate_phase5.py
+      - name: Compile and whitespace
+        run: |
+          python3 -m compileall -q reservation_domain reservation_lookup reservation_confirmation reservation_execution characterization scripts tests
+          git diff --check

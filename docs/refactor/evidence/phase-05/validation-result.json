@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "result": "passed",
+  "command": "python3 -m unittest discover -s tests -v",
+  "exit_code": 0,
+  "tests_run": 334,
+  "unittest_elapsed_seconds": 61.166,
+  "elapsed_seconds": 61.955,
+  "max_rss_kb": 46336,
+  "output_sha256": "41a5a9199a562c122c0b144c2fb810f7e6143afb264ab0bde15105466989c1ea",
+  "raw_output_versioned": false,
+  "network_calls": 0,
+  "live_provider_calls": 0,
+  "live_delivery_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO"
+}

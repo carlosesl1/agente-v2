@@ -1,0 +1,21 @@
+{
+  "files": [
+    {
+      "bytes": 10044,
+      "dialect": "postgresql",
+      "path": "schemas/phase5/postgresql.sql",
+      "sha256": "e60476986892105d8d3f95ce8c871341dd6a99be147c555d907f46031d2092e0"
+    },
+    {
+      "bytes": 26326,
+      "dialect": "sqlite",
+      "path": "schemas/phase5/sqlite.sql",
+      "sha256": "d372e3a2a3fc5579c05ba1e949dacbcb43e45c01bbc26afc70cb7b4bba229e83"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "phase": "phase-05-durable-command-execution",
+  "postgresql_executed": false,
+  "schema_version": 1,
+  "sqlite_executed": true
+}

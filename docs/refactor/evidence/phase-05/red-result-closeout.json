@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "closeout-manifest-validator-ci",
+  "source_sha": "14b110b0c17e67024bc2a06e8cb6983f092e4a27",
+  "command": "python3 -m unittest tests.test_phase5_closeout -v",
+  "exit_code": 1,
+  "tests_run": 1,
+  "failures": 0,
+  "errors": 1,
+  "expected_failure": "scripts.generate_phase5_manifest and scripts.validate_phase5 are absent",
+  "output_sha256": "d7d44ce11f8d919c0eb6e1a4e255cf57ea822c2937eeabe250f22dd97449ec94",
+  "raw_output_versioned": false,
+  "network_calls": 0,
+  "live_provider_calls": 0,
+  "live_delivery_calls": 0,
+  "live_database_calls": 0,
+  "rollout": "NO-GO",
+  "controller_regressions": [
+    {
+      "name": "validator_indirect_ledger_write_and_live_claim_scan",
+      "base_sha": "14b110b0c17e67024bc2a06e8cb6983f092e4a27",
+      "command": "python3 -m unittest tests.test_phase5_closeout -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 0,
+      "errors": 1,
+      "output_sha256": "2a2adde3bcf792718e327d3e5a661412af664d152971856762c8e2e5717a27a0",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "validator_fault_evidence_schema_version",
+      "base_sha": "14b110b0c17e67024bc2a06e8cb6983f092e4a27",
+      "command": "python3 -m unittest tests.test_phase5_closeout.Phase5CloseoutContractTests.test_fault_validator_closes_manifest_restart_and_contention_oracles -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "output_sha256": "8fee23bac5dab22f5a6d67cec37dbaebe324a146e4f0827fda57768a32975946",
+      "raw_output_versioned": false
+    }
+  ]
+}

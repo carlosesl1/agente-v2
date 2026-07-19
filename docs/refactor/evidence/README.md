@@ -98,7 +98,19 @@ python3 scripts/validate_phase4.py
 
 ## Fase 5
 
-`phase-05/entry-baseline.json` fixa o SHA terminal e os cinco workflows verdes
-da Fase 4, os validadores regressivos, o fingerprint somente leitura do legado e
-a autorização de SQLite local sem Docker/PostgreSQL/Supabase. Nenhuma
-implementação funcional ou capacidade live foi iniciada na abertura.
+`phase-05/entry-baseline.json` fixa a entrada. `property-result.json`,
+`fault-matrix.json`, `restart-result.json`, `concurrency-result.json` e
+`mutation-result.json` são os gates determinísticos de execução durável.
+`schema-manifest.json`, `package-manifest.json` e `SHA256SUMS` protegem DDL,
+package e evidências; PostgreSQL permanece não executado. A fase não adiciona
+capacidade live e mantém rollout `NO-GO` e Fase 6 bloqueada.
+
+Para verificar, após gerar os artefatos integrais:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/run_phase5_properties.py --cases 20000 --seed 2026071905
+python3 scripts/run_phase5_faults.py --seed 2026071905 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix /tmp/fault.json --write-restart /tmp/restart.json --write-concurrency /tmp/concurrency.json
+python3 scripts/run_phase5_mutations.py
+python3 scripts/validate_phase5.py
+```

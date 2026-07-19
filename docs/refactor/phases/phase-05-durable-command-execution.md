@@ -2,10 +2,15 @@
 
 ## Status
 
-`design e plano TDD aprovados; implementação não iniciada`
+`implementação aprovada; gates integrais e closeout em execução`
 
 Aberta em `2026-07-19T04:50:49Z`, a partir do commit-base
 `e51259ea0d19a2d07d3d14ee086b0766776cbeab`.
+
+A implementação funcional das Tasks 1–11 foi concluída e aprovada por gates
+read-only independentes. A Task 12 reúne workloads integrais, manifests,
+validator, CI e prova terminal; a fase só muda para `concluída` após publicação
+e CI verde.
 
 ## Objetivo
 
@@ -17,40 +22,64 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - [spec da Fase 5](../../superpowers/specs/2026-07-19-phase-5-durable-command-execution-design.md)
 - [plano TDD da Fase 5](../../superpowers/plans/2026-07-19-phase-5-durable-command-execution.md)
 
-## Decisões aprovadas
+## Componentes entregues
 
-- SQLite por arquivo como prova executável;
-- DDL SQLite/PostgreSQL gerado de contrato comum;
-- nenhum Docker, PostgreSQL ou Supabase executado;
-- unidade transacional única para state/event/command/outbox;
-- ledger e outbox permanecem separados;
-- nenhum adapter/transporte default;
-- qualquer incerteza pós-dispatch vai para revisão manual;
-- Fase 6 não será iniciada automaticamente.
+- package `reservation_execution` sem transport/adapters externos default;
+- DTOs operacionais fechados e imutáveis;
+- DDL SQLite e PostgreSQL gerado de contrato comum;
+- `SQLiteUnitOfWork` com optimistic revision e transações atômicas;
+- command/ledger autorizados somente pelo reducer;
+- claim, lease, fencing e slot único de dispatch;
+- worker one-shot com fronteira conservadora de provider;
+- outcome atômico com state, eventos e outbox final;
+- reconciler one-shot sem adapter;
+- outbox worker com claim/fencing/receipt próprios;
+- fault injection, restart, contention multiprocesso, properties e mutations.
 
-## Gate de entrada
+## Invariantes provadas localmente
+
+1. state, eventos, command, ledger e outbox não ficam parcialmente persistidos;
+2. mesmo identity material é idempotente; bytes divergentes falham fechados;
+3. lease/token stale não fenceiam, gravam outcome nem receipt;
+4. um command autorizado consome no máximo um slot de dispatch;
+5. somente falha comprovadamente pré-provider pode voltar a retry;
+6. pós-fence incerto vira `called_unknown` e revisão manual sem redispatch;
+7. falha de delivery não altera ledger nem repete provider;
+8. adulteração de state/event/command/outcome/receipt falha antes de uso;
+9. properties começam em `new_workflow` e atravessam Cloudbeds/Bókun sintéticos;
+10. mutantes rodam em cópias temporárias com baseline verde obrigatório.
+
+## Persistência e limites
+
+- SQLite por arquivo é a prova executável;
+- WAL/SHM/DB e logs nunca são evidência versionada;
+- PostgreSQL é apenas DDL estático/regenerável e não foi executado;
+- nenhuma prova desta fase autoriza migração, produção ou equivalência PostgreSQL;
+- fixtures, IDs, receipts e provider effects são sintéticos e sanitizados.
+
+## Evidência de entrada
 
 - [x] Fase 4 concluída e publicada;
 - [x] `HEAD == origin/main == remote` no commit-base;
-- [x] árvore limpa na abertura;
 - [x] cinco workflows terminais da Fase 4 em `success`;
 - [x] validadores 0–4 em `ok`;
 - [x] legado permaneceu somente leitura;
 - [x] persistência SQLite autorizada;
-- [x] arquitetura/ownership aprovados;
-- [x] política de dispatch conservadora aceita por melhor julgamento;
-- [x] design completo aprovado;
-- [x] especificação consolidada e autorrevisada;
-- [x] plano TDD escrito, autorrevisado e aprovado para execução por melhor julgamento.
+- [x] arquitetura, ownership, spec e plano aprovados.
 
-## Escopo autorizado após aprovação do plano
+## Gates de saída da Task 12
 
-- package puro/operacional `reservation_execution`;
-- SQLite local e temporário;
-- contratos/fakes in-memory sem rede;
-- DDL PostgreSQL estático e não executado;
-- fault injection, restart, multiprocess, properties e mutations;
-- evidências sanitizadas e CI.
+- [x] implementação Tasks 1–11 aprovada sem finding material aberto;
+- [x] suíte fresca capturada sem output bruto versionado;
+- [x] 20.000 properties, seed `2026071905`, zero safety failures;
+- [x] 17 fault points e 2.000 restart schedules, zero violations;
+- [x] 50 contention rounds de command e outbox, zero violations;
+- [x] catálogo completo de 20 mutantes mortos com baseline verde;
+- [x] schema/package manifests e `SHA256SUMS` regeneráveis;
+- [x] validators 0–5 locais verdes;
+- [ ] workflow CI da Fase 5 e cinco workflows regressivos verdes;
+- [ ] commit de implementação publicado e conferido no remoto;
+- [ ] commit documental terminal publicado e conferido no remoto.
 
 ## Fora do escopo
 
@@ -62,19 +91,18 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - shadow/canary/rollout;
 - iniciar a Fase 6.
 
-## Gate de saída resumido
+## Riscos
 
-1. persistência atômica de state/event/command/ledger/outbox;
-2. optimistic revision e idempotência fail-closed;
-3. lease/fencing/restart/race provados;
-4. dispatch slot e provider calls no máximo um;
-5. unknown sem retry e com manual review;
-6. outbox incapaz de repetir provider;
-7. fault matrix, properties e mutations verdes;
-8. DDL/manifests/checksums regeneráveis;
-9. validadores 0–5 e CI verdes;
-10. rollout `NO-GO`.
+R04, R08 e R47–R50/R52/R53 possuem mitigação local executável. R51 continua
+aberto: SQLite verde não prova PostgreSQL ou locking de produção. Migração e
+canary continuam bloqueados.
 
 ## Rollback
 
-Reverter somente os commits da Fase 5 no repositório novo. Não há ação live.
+Reverter somente os commits da Fase 5 no repositório novo. Não há ação live,
+banco externo, provider effect, delivery ou deploy para desfazer.
+
+## Decisão de avanço
+
+A Fase 6 não foi iniciada e não é autorizada automaticamente pelo closeout da
+Fase 5. Rollout comercial permanece **NO-GO**.

@@ -1,0 +1,1419 @@
+{
+  "command_claim_winners": 50,
+  "command_rounds": 50,
+  "configuration": {
+    "rounds": 50,
+    "seed": 2026071905
+  },
+  "kind": "multiprocess-contention",
+  "max_provider_calls_per_round": 1,
+  "outbox_claim_winners": 50,
+  "outbox_rounds": 50,
+  "partial_transactions": 0,
+  "phase": "phase-05-durable-command-execution",
+  "result": "passed",
+  "round_results": [
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 0,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 0,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 1,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 1,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 2,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 2,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 3,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 3,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 4,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 4,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 5,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 5,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 6,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 6,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 7,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 7,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 8,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 8,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 9,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 9,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 10,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 10,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 11,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 11,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 12,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 12,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 13,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 13,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 14,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 14,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 15,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 15,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 16,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 16,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 17,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 17,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 18,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 18,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 19,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 19,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 20,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 20,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 21,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 21,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 22,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 22,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 23,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 23,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 24,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 24,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 25,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 25,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 26,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 26,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 27,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 27,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 28,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 28,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 29,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 29,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 30,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 30,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 31,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 31,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 32,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 32,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 33,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 33,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 34,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 34,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 35,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 35,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 36,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 36,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 37,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 37,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 38,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 38,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 39,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 39,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 40,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 40,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 41,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 41,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 42,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 42,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 43,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 43,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 44,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 44,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 45,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 45,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 46,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 46,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 47,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 47,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 48,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 48,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "command",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 1,
+      "round": 49,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    },
+    {
+      "child_errors": 0,
+      "kind": "outbox",
+      "nonzero_child_exits": 0,
+      "partial_transactions": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
+      "round": 49,
+      "violations": [],
+      "winners": 1,
+      "winning_tokens": [
+        1
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "violations": 0
+}

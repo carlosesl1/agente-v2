@@ -1,0 +1,210 @@
+{
+  "all_killed": true,
+  "catalog_count": 20,
+  "mutant_count": 20,
+  "mutants": [
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "remove_optimistic_revision",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_apply_event_requires_exact_expected_revision_and_rolls_back"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "accept_divergent_event_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_event_hash_guard_rejects_digest_only_tamper"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "commit_command_outside_transaction",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_every_statement_fault_rolls_back_after_reopen"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "remove_unique_idempotency",
+      "path": "schemas/phase5/sqlite.sql",
+      "target_count": 1,
+      "test": "tests.test_phase5_schema.Phase5SchemaTests.test_generated_sql_matches_tracked_artifacts_and_is_deterministic"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "allow_second_dispatch_slot",
+      "path": "reservation_execution/types.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_types.Phase5ExecutionTypeTests.test_dispatch_permit_requires_exact_lease_slot_hash_and_utc"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "ignore_fencing_token",
+      "path": "reservation_execution/types.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_types.Phase5ExecutionTypeTests.test_lease_requires_opaque_owner_exact_positive_token_and_positive_ttl"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "recover_post_fence_as_retry",
+      "path": "reservation_execution/reconciliation.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_expired_post_fence_becomes_unknown_atomically_without_adapter"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "post_fence_exception_as_not_called",
+      "path": "reservation_execution/worker.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_exception_after_fence_becomes_unknown_and_second_run_never_dispatches"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "allow_not_called_from_dispatch",
+      "path": "reservation_execution/worker.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_dispatch_returning_not_called_is_contract_violation_promoted_to_unknown"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "redispatch_called_unknown",
+      "path": "reservation_execution/worker.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_called_unknown_goes_to_manual_review_without_redispatch"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "outbox_failure_requeues_command",
+      "path": "reservation_execution/outbox.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_outbox.Phase5OutboxTests.test_delivery_failure_releases_only_message"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "mark_delivered_without_receipt",
+      "path": "reservation_execution/outbox.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_outbox.Phase5OutboxTests.test_delivery_marks_receipt_without_touching_ledger"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "accept_divergent_outcome",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_identical_outcome_replay_is_idempotent_and_divergence_conflicts"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "accept_tampered_command_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_command_hash_guard_rejects_digest_only_tamper"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "accept_tampered_state_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_tampered_state_hash_or_serialization_fails_before_reduce"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "skip_manual_review",
+      "path": "reservation_execution/sqlite_store.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_called_unknown_goes_to_manual_review_without_redispatch"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "allow_effect_without_evidence",
+      "path": "reservation_domain/types.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_domain_outcomes.Phase5DomainOutcomeTests.test_effect_confirmed_requires_reference_and_evidence"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "allow_not_called_provider_reference",
+      "path": "reservation_domain/types.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_domain_outcomes.Phase5DomainOutcomeTests.test_not_called_rejects_provider_reference"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "reduce_property_gate",
+      "path": "scripts/run_phase5_properties.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_property_gate_minimum_is_closed"
+    },
+    {
+      "baseline_exit_code": 0,
+      "exit_code": 1,
+      "killed": true,
+      "loader_error": false,
+      "name": "remove_required_fault_point",
+      "path": "scripts/run_phase5_faults.py",
+      "target_count": 1,
+      "test": "tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_fault_point_manifest_is_closed_and_exact"
+    }
+  ],
+  "phase": "phase-05-durable-command-execution",
+  "schema_version": 1,
+  "scope": "temporary repository copies only; working tree unchanged"
+}

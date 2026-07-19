@@ -13,7 +13,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 | 2. Domínio tipado e reducer | **concluída** | Criar a máquina de estados pura, sem integrar produção |
 | 3. Consultas e `OfferSnapshot` | **concluída e remediada** | Vincular seleção a `offer_id` e evidência fresca |
 | 4. Resumo e confirmação únicos | **concluída** | Uma versão, um resumo, uma confirmação posterior |
-| 5. Comando e execução duráveis | **design e plano TDD aprovados; implementação não iniciada** | Retirar writes do turno síncrono da LLM |
+| 5. Comando e execução duráveis | **implementada; gates integrais e closeout em execução** | Retirar writes do turno síncrono da LLM |
 | 6. Handoff e pagamentos | bloqueada | Separar workflows e side effects obrigatórios/opcionais |
 | 7. Migração das fronteiras | bloqueada | Fazer runner/plugin/executor usarem o mesmo kernel |
 | 8. Shadow, canary e rollout | bloqueada | Validar e promover o mesmo digest gradualmente |

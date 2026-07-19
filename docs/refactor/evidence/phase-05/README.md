@@ -2,7 +2,7 @@
 
 Fase: `phase-05-durable-command-execution`.
 
-Status: **aberta documentalmente; nenhuma implementação funcional iniciada**.
+Status: **implementação aprovada; gates integrais e closeout em execução**.
 
 Design e plano TDD versionados:
 
@@ -28,3 +28,22 @@ Design e plano TDD versionados:
 - nenhum payload bruto, PII real, segredo ou log de worker;
 - nenhum provider, delivery, runtime ou rede live;
 - claims só são feitos após execução real dos gates correspondentes.
+
+## Implementação local
+
+- `reservation_execution` contém contratos, SQLite UnitOfWork, worker,
+  reconciler, outbox e properties sem capability externa default;
+- DDL SQLite/PostgreSQL é regenerável do mesmo contrato, mas somente SQLite foi
+  executado;
+- state/event/command/ledger/outbox são persistidos atomicamente;
+- pós-fence incerto nunca retorna a retry automático;
+- delivery possui lease/fencing próprios e não altera o ledger comercial.
+
+## Gate de saída em execução
+
+- suíte fresca com output bruto somente em `/tmp`;
+- 20.000 properties adapter-backed;
+- 17 fault points, 2.000 restart schedules e 50 contention rounds;
+- 20 mutantes materiais em cópias temporárias;
+- manifests, validator fechado, workflow CI e revisão adversarial;
+- rollout `NO-GO`; Fase 6 não iniciada.
