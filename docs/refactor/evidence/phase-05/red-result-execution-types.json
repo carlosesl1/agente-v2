@@ -23,5 +23,16 @@
   "output_sha256": "c537b683210cdf201a518639bb8b322150049afff18b5d2934d42140fdc6934d",
   "raw_output_versioned": false,
   "synthetic_fixtures_only": true,
-  "rollout": "NO-GO"
+  "rollout": "NO-GO",
+  "review_regression": {
+    "command": "python3 -m unittest tests.test_phase5_types.Phase5ExecutionTypeTests.test_hash_fields_reject_surrounding_whitespace_without_normalization tests.test_phase5_types.Phase5ExecutionTypeTests.test_dispatch_request_rejects_escaped_and_materialized_lone_surrogates_uniformly -v",
+    "exit_code": 1,
+    "expected_failure": true,
+    "failure_classes": [
+      "surrounding_hash_whitespace_was_normalized",
+      "materialized_lone_surrogate_bypassed_uniform_payload_error"
+    ],
+    "output_sha256": "836f69b674cb094694b0d86ab182389de8637aca1985b4bc05c3bea36f09faf7",
+    "raw_output_versioned": false
+  }
 }

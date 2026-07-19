@@ -29,10 +29,9 @@ def _require_id(value: str, field_name: str) -> str:
 def _require_hash(value: str, field_name: str) -> str:
     if type(value) is not str:
         raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
-    normalized = value.strip()
-    if not _HASH_RE.fullmatch(normalized):
+    if not _HASH_RE.fullmatch(value):
         raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
-    return normalized
+    return value
 
 
 def _require_utc(value: datetime, field_name: str) -> datetime:
@@ -221,8 +220,10 @@ class DispatchRequest:
     ) -> DispatchRequest:
         if type(command) is not ReservationCommand:
             raise ValueError("command must be the exact ReservationCommand type")
-        if type(canonical_payload) is not str:
-            raise ValueError("canonical_payload must be a canonical JSON object string")
+        canonical_payload = _canonical_json_object(
+            canonical_payload,
+            "dispatch_request.canonical_payload",
+        )
         return cls(
             command_id=command.command_id,
             idempotency_key=command.idempotency_key,

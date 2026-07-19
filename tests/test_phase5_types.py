@@ -324,6 +324,53 @@ class Phase5ExecutionTypeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     DispatchRequest(**invalid)
 
+    def test_hash_fields_reject_surrounding_whitespace_without_normalization(self) -> None:
+        command = reservation_command()
+        digest = sha256_text(CANONICAL_PAYLOAD)
+        for padded in (" " + digest, digest + " ", "\t" + digest + "\n"):
+            with self.subTest(dto="DispatchRequest", padded=repr(padded)):
+                with self.assertRaises(ValueError):
+                    DispatchRequest(
+                        command_id=command.command_id,
+                        idempotency_key=command.idempotency_key,
+                        operation=command.operation,
+                        canonical_payload=CANONICAL_PAYLOAD,
+                        payload_hash=padded,
+                    )
+            with self.subTest(dto="DispatchPermit", padded=repr(padded)):
+                with self.assertRaises(ValueError):
+                    DispatchPermit(
+                        command_id=command.command_id,
+                        lease=lease(),
+                        dispatch_slot=1,
+                        request_hash=padded,
+                        fenced_at=T0,
+                    )
+            with self.subTest(dto="OutboxMessage", padded=repr(padded)):
+                with self.assertRaises(ValueError):
+                    outbox_message(payload_hash=padded)
+
+        message_id = "message:synthetic:1"
+        reference = "delivery:synthetic:reference:1"
+        receipt_digest = receipt_hash(
+            message_id=message_id,
+            delivery_reference=reference,
+            delivered_at=T0,
+        )
+        with self.assertRaises(ValueError):
+            DeliveryReceipt(
+                message_id=message_id,
+                delivery_reference=reference,
+                receipt_hash=" " + receipt_digest,
+                delivered_at=T0,
+            )
+        with self.assertRaises(ValueError):
+            PreparationFailure(
+                reason="synthetic_timeout",
+                retryable=True,
+                evidence=(receipt_digest + " ",),
+            )
+
     def test_canonical_payload_rejects_noncanonical_duplicate_nonfinite_and_nonobject_json(self) -> None:
         command = reservation_command()
         invalid_payloads = (
@@ -343,6 +390,22 @@ class Phase5ExecutionTypeTests(unittest.TestCase):
         for payload in invalid_payloads:
             with self.subTest(payload=payload):
                 with self.assertRaises(ValueError):
+                    DispatchRequest.from_command(command, payload)
+
+    def test_dispatch_request_rejects_escaped_and_materialized_lone_surrogates_uniformly(self) -> None:
+        command = reservation_command()
+        invalid_payloads = (
+            r'{"x":"\ud800"}',
+            r'{"x":"\udc00"}',
+            '{"x":"' + chr(0xD800) + '"}',
+            '{"x":"' + chr(0xDC00) + '"}',
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=ascii(payload)):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "canonical_payload must be valid canonical JSON",
+                ):
                     DispatchRequest.from_command(command, payload)
 
     def test_dispatch_permit_requires_exact_lease_slot_hash_and_utc(self) -> None:
