@@ -80,6 +80,18 @@ python3 scripts/validate_phase3.py
 
 ## Fase 4
 
-`phase-04/entry-baseline.json` registra o commit-base, os gates regressivos e o
-boundary autorizado. A fase permanece sem LLM, rede, provider, mensagem ou
-write live.
+`phase-04/package-manifest.json`, `fixture-manifest.json` e `SHA256SUMS`
+protegem o boundary puro e o corpus sintético. `property-result.json` registra 50
+mil workflows desde `new_workflow`, divididos igualmente entre Cloudbeds/Bókun
+in-memory; `mutation-result.json` registra 19/19 mutantes mortos. `ci-result.json`
+fixa os cinco workflows verdes do commit de implementação. A fase não executou
+LLM, rede, provider write, mensagem live ou rollout.
+
+Para verificar:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/run_phase4_properties.py --cases 50000 --seed 20260719
+python3 scripts/run_phase4_mutations.py
+python3 scripts/validate_phase4.py
+```

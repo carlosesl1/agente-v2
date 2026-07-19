@@ -12,18 +12,20 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 4 — plano aprovado; implementação não iniciada**.
+- Fase ativa: **nenhuma; Fase 5 não iniciada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
 - Fase 3: **concluída e remediada** no commit
   `b7c4cb2d6376d9ad3513477fc056a0ba978f77e7`; nenhuma rede real.
-- Fase 4: **aberta**, limitada a renderer/classifier/binding puros; nenhuma LLM,
-  rede, entrega ou execução live.
+- Fase 4: **concluída e publicada** no commit
+  `2c922d1b88eaf44412c1a808c4786e4729e8ba64`; cinco workflows remotos verdes,
+  sem LLM, rede, entrega ou execução live.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
-- Implementação funcional concluída: domínio puro e boundary de consultas no
-  novo repositório.
-- Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
+- Implementação funcional concluída: domínio, lookups e boundary puro de
+  resumo/confirmação no novo repositório.
+- Rollout comercial: **NO-GO**; execução durável, migração, shadow e canary
+  pertencem às fases posteriores.
 
 ## Navegação
 
@@ -58,4 +60,5 @@ python3 scripts/validate_phase0.py
 python3 scripts/validate_phase1.py
 python3 scripts/validate_phase2.py
 python3 scripts/validate_phase3.py
+python3 scripts/validate_phase4.py
 ```

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "implementation_commit": "2c922d1b88eaf44412c1a808c4786e4729e8ba64",
+  "checked_at_utc": "2026-07-19T04:20:04Z",
+  "all_success": true,
+  "workflow_count": 5,
+  "workflows": [
+    {
+      "id": 29673082650,
+      "name": "phase-0-validation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29673082650"
+    },
+    {
+      "id": 29673082641,
+      "name": "phase-1-characterization",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29673082641"
+    },
+    {
+      "id": 29673082637,
+      "name": "phase-2-domain",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29673082637"
+    },
+    {
+      "id": 29673082651,
+      "name": "phase-3-lookups",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29673082651"
+    },
+    {
+      "id": 29673082648,
+      "name": "phase-4-confirmation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29673082648"
+    }
+  ],
+  "next_phase_started": false,
+  "rollout": "NO-GO"
+}

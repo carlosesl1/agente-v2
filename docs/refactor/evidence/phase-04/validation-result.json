@@ -40,6 +40,12 @@
     "all_killed": true,
     "temporary_copies_only": true
   },
+  "remote_ci": {
+    "implementation_commit": "2c922d1b88eaf44412c1a808c4786e4729e8ba64",
+    "workflow_count": 5,
+    "all_success": true,
+    "checked_at_utc": "2026-07-19T04:20:04Z"
+  },
   "domain_regression": {
     "states": 16,
     "events": 12,
@@ -64,8 +70,8 @@
     "red_valid": 11,
     "package_python_files": 7,
     "fixture_files": 1,
-    "evidence_hashes_checked": 51,
-    "text_files_scanned": 206,
+    "evidence_hashes_checked": 55,
+    "text_files_scanned": 207,
     "relative_links_checked": 16,
     "forbidden_imports": 0,
     "forbidden_calls": 0,

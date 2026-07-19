@@ -45,6 +45,9 @@ RED_NAMES = (
     "red-result-public-property-api-review.json",
 )
 REQUIRED = (
+    "README.md",
+    "docs/refactor/README.md",
+    "docs/refactor/evidence/README.md",
     "reservation_confirmation/README.md",
     "reservation_confirmation/__init__.py",
     "reservation_confirmation/types.py",
@@ -80,6 +83,7 @@ REQUIRED = (
     "docs/refactor/evidence/phase-04/fixture-manifest.json",
     "docs/refactor/evidence/phase-04/adversarial-review.md",
     "docs/refactor/evidence/phase-04/validation-result.json",
+    "docs/refactor/evidence/phase-04/ci-result.json",
     "docs/refactor/evidence/phase-04/SHA256SUMS",
 )
 FORBIDDEN_IMPORTS = {
@@ -480,6 +484,46 @@ def check_domain_matrix(failures: list[str]) -> dict[str, int]:
     return {"states": states, "pairs": pairs}
 
 
+def check_ci_result(failures: list[str]) -> dict[str, Any]:
+    try:
+        payload = _load_json(EVIDENCE / "ci-result.json")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        failures.append(f"cannot read CI result: {exc}")
+        return {}
+    expected = {
+        "phase-0-validation": 29673082650,
+        "phase-1-characterization": 29673082641,
+        "phase-2-domain": 29673082637,
+        "phase-3-lookups": 29673082651,
+        "phase-4-confirmation": 29673082648,
+    }
+    workflows = payload.get("workflows", [])
+    observed = {
+        item.get("name"): item.get("id")
+        for item in workflows
+        if type(item) is dict
+        and item.get("conclusion") == "success"
+        and item.get("url")
+        == f"https://github.com/carlosesl1/agente-v2/actions/runs/{item.get('id')}"
+    }
+    if (
+        payload.get("phase") != PHASE
+        or payload.get("implementation_commit")
+        != "2c922d1b88eaf44412c1a808c4786e4729e8ba64"
+        or payload.get("all_success") is not True
+        or payload.get("workflow_count") != 5
+        or observed != expected
+        or payload.get("next_phase_started") is not False
+        or payload.get("rollout") != "NO-GO"
+    ):
+        failures.append("CI closeout evidence mismatch")
+    return {
+        "implementation_commit": payload.get("implementation_commit"),
+        "workflow_count": len(workflows),
+        "all_success": payload.get("all_success"),
+    }
+
+
 def check_validation_record(failures: list[str]) -> str | None:
     try:
         payload = _load_json(EVIDENCE / "validation-result.json")
@@ -527,8 +571,9 @@ def main() -> int:
     mutations = check_mutations(failures)
     performance = check_performance(failures)
     red = check_red(failures)
-    source_map = check_source_map(failures)
+    source = check_source_map(failures)
     matrix = check_domain_matrix(failures)
+    ci = check_ci_result(failures)
     record = check_validation_record(failures)
     sums = check_sums(failures)
     scanned = check_secrets_and_pii(failures)
@@ -564,8 +609,9 @@ def main() -> int:
             for key in ("elapsed_seconds", "max_rss_kb", "exit_code", "result")
         },
         "red": red,
-        "source_map": source_map,
+        "source_map": source,
         "domain_matrix": matrix,
+        "ci": ci,
         "validation_record": record,
         "evidence_hashes_checked": sums,
         "text_files_scanned": scanned,

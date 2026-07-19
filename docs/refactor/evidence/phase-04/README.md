@@ -2,7 +2,7 @@
 
 Fase: `phase-04-single-summary-and-confirmation`.
 
-Status: **implementação concluída localmente; fechamento em validação**.
+Status: **concluída, publicada e com CI remoto verde**.
 
 Este diretório prova resumo único determinístico, persistência do artefato,
 classificação model-agnostic, binding confiável e no máximo um comando após
@@ -22,7 +22,8 @@ live, credenciais, rede, LLM, provider write, Hermes/ManyChat ou rollout.
 - `mutation-result.json` — catálogo crítico executado em cópias temporárias;
 - `performance-result.json` — duração, RSS e exit code do gate integral;
 - `adversarial-review.md` — revisão de boundary, falso verde e invariantes;
-- `validation-result.json` — resultado consolidado dos gates;
+- `validation-result.json` — resumo local dos gates finais;
+- `ci-result.json` — IDs/URLs dos cinco workflows verdes do commit de implementação;
 - `SHA256SUMS` — integridade dos artefatos principais.
 
 Documentação associada:

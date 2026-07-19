@@ -62,7 +62,10 @@ def build_fixture_manifest() -> dict[str, object]:
 
 def checksum_paths() -> tuple[Path, ...]:
     relative = (
+        "README.md",
         ".github/workflows/phase4.yml",
+        "docs/refactor/README.md",
+        "docs/refactor/evidence/README.md",
         "reservation_domain/types.py",
         "reservation_domain/reducer.py",
         "reservation_domain/properties.py",
@@ -111,6 +114,7 @@ def checksum_paths() -> tuple[Path, ...]:
         "docs/refactor/evidence/phase-04/fixture-manifest.json",
         "docs/refactor/evidence/phase-04/adversarial-review.md",
         "docs/refactor/evidence/phase-04/README.md",
+        "docs/refactor/evidence/phase-04/ci-result.json",
         "docs/superpowers/specs/2026-07-19-phase-4-summary-confirmation-design.md",
         "docs/superpowers/plans/2026-07-19-phase-4-summary-confirmation.md",
     )

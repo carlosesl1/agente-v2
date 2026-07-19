@@ -2,7 +2,7 @@
 
 ## Status
 
-`implementação concluída localmente; fechamento em validação`
+`concluída, publicada e com CI remoto verde`
 
 Aberta em `2026-07-19T02:21:03Z`, a partir do commit-base
 `18588cf2d9d771decd4e7c56540fabd79ed4ebcc`.
@@ -110,7 +110,7 @@ Estado local antes do CI remoto:
 - [x] property gate: 50.000 casos, 12.500 autorizações, zero violações;
 - [x] mutation gate: 19/19 mortos em cópias temporárias;
 - [x] regressões pesadas, validators 0–4, hashes e scans finais;
-- [ ] commits publicados e CI remoto verificado.
+- [x] commits publicados e CI remoto verificado.
 
 ## Implementação
 
@@ -140,6 +140,16 @@ Estado local antes do CI remoto:
 - comando do fingerprint: `git status --short -z | sha256sum`;
 - status SHA-256:
   `77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b`.
+
+## Closeout remoto
+
+- commit de implementação:
+  `2c922d1b88eaf44412c1a808c4786e4729e8ba64`;
+- `HEAD == origin/main == remote` verificado após o push;
+- cinco workflows do commit concluíram em `success`;
+- IDs e URLs estão em `evidence/phase-04/ci-result.json`;
+- Fase 5 não iniciada;
+- rollout comercial permanece `NO-GO`.
 
 ## Rollback
 
