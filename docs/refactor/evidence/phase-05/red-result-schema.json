@@ -35,5 +35,19 @@
     ],
     "output_sha256": "039aea78455d1e49a356ae218fb9fc35c49f517ed5707a8203c649663cd2cb5e",
     "raw_output_versioned": false
+  },
+  "review_regression_2": {
+    "source_sha": "16ada8448e4e6cf49081254ee514e1cbf638fd24",
+    "command": "python3 -m unittest tests.test_phase5_schema -v",
+    "exit_code": 1,
+    "expected_failure": true,
+    "failure_count": 12,
+    "failure_classes": [
+      "sqlite_timestamp_accepted_invalid_calendar_or_noncanonical_fraction",
+      "sqlite_integer_affinity_accepted_fractional_security_values",
+      "schema_generator_allowed_colliding_targets"
+    ],
+    "output_sha256": "386704a4c9748e03323a07df049c7cc6bc3759de3905736664025c68e3610111",
+    "raw_output_versioned": false
   }
 }

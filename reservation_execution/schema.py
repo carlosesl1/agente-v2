@@ -49,9 +49,32 @@ def _sqlite_timestamp_check(name: str) -> str:
     time = "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]"
     whole_seconds = f"{date}T{time}+00:00"
     microseconds = f"{date}T{time}.[0-9][0-9][0-9][0-9][0-9][0-9]+00:00"
-    return (
+    year = f"CAST(substr({name}, 1, 4) AS INTEGER)"
+    month = f"CAST(substr({name}, 6, 2) AS INTEGER)"
+    day = f"CAST(substr({name}, 9, 2) AS INTEGER)"
+    hour = f"CAST(substr({name}, 12, 2) AS INTEGER)"
+    minute = f"CAST(substr({name}, 15, 2) AS INTEGER)"
+    second = f"CAST(substr({name}, 18, 2) AS INTEGER)"
+    leap_year = (
+        f"(({year} % 4 = 0 AND {year} % 100 != 0) OR {year} % 400 = 0)"
+    )
+    days_in_month = (
+        f"CASE {month} "
+        "WHEN 2 THEN CASE WHEN "
+        f"{leap_year} THEN 29 ELSE 28 END "
+        f"WHEN 4 THEN 30 WHEN 6 THEN 30 WHEN 9 THEN 30 WHEN 11 THEN 30 "
+        "ELSE 31 END"
+    )
+    shape = (
         f"((length({name}) = 25 AND {name} GLOB '{whole_seconds}') OR "
-        f"(length({name}) = 32 AND {name} GLOB '{microseconds}'))"
+        f"(length({name}) = 32 AND {name} GLOB '{microseconds}' AND "
+        f"substr({name}, 21, 6) != '000000'))"
+    )
+    return (
+        f"({shape} AND {year} BETWEEN 1 AND 9999 AND {month} BETWEEN 1 AND 12 "
+        f"AND {day} BETWEEN 1 AND ({days_in_month}) "
+        f"AND {hour} BETWEEN 0 AND 23 AND {minute} BETWEEN 0 AND 59 "
+        f"AND {second} BETWEEN 0 AND 59)"
     )
 
 
@@ -321,7 +344,8 @@ def _render(dialect: Dialect, contract: tuple[TableContract, ...]) -> str:
             *table.table_constraints,
         ]
         body = ",\n".join(f"    {definition}" for definition in definitions)
-        tables.append(f"CREATE TABLE {table.name} (\n{body}\n);")
+        strict = " STRICT" if dialect == "sqlite" else ""
+        tables.append(f"CREATE TABLE {table.name} (\n{body}\n){strict};")
     return "\n\n".join(tables) + "\n"
 
 

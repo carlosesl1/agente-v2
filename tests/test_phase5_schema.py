@@ -5,8 +5,13 @@ import hashlib
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
+import sys
+import tempfile
 import unittest
 
+from reservation_domain import ReservationOperation
+from reservation_execution.types import LedgerStatus, OutboxKind, OutboxStatus
 from reservation_execution.schema import (
     SCHEMA_VERSION,
     ColumnContract,
@@ -92,6 +97,30 @@ EXPECTED_COLUMNS = {
         "created_at",
         "updated_at",
     ),
+}
+
+EXPECTED_NULLABLE = {
+    "schema_migrations": set(),
+    "workflows": set(),
+    "domain_events": set(),
+    "reservation_commands": set(),
+    "execution_ledger": {
+        "claim_owner",
+        "lease_acquired_at",
+        "lease_expires_at",
+        "dispatch_request_hash",
+        "dispatch_fenced_at",
+        "outcome_json",
+        "outcome_hash",
+    },
+    "outbox_messages": {
+        "command_id",
+        "claim_owner",
+        "lease_acquired_at",
+        "lease_expires_at",
+        "delivered_at",
+        "receipt_hash",
+    },
 }
 
 EXPECTED_PRIMARY_KEYS = {
@@ -347,6 +376,8 @@ class Phase5SchemaTests(unittest.TestCase):
                 table_info = list(connection.execute(f"PRAGMA table_info('{table_name}')"))
                 self.assertEqual(tuple(row[1] for row in table_info), expected_columns)
                 self.assertTrue(all(row[2] in {"TEXT", "INTEGER"} for row in table_info))
+                nullable = {row[1] for row in table_info if row[3] == 0}
+                self.assertEqual(nullable, EXPECTED_NULLABLE[table_name])
 
     def test_sqlite_primary_foreign_unique_keys_and_no_triggers_are_exact(self) -> None:
         connection = self.open_database()
@@ -489,6 +520,16 @@ class Phase5SchemaTests(unittest.TestCase):
             "2027-01-01T00:00+00:00",
             "2027-01-01T00:00:00+03:00",
             "2027-01-01T00:00:00.00001+00:00",
+            "0000-01-01T00:00:00+00:00",
+            "2027-13-01T00:00:00+00:00",
+            "2027-00-01T00:00:00+00:00",
+            "2027-04-31T00:00:00+00:00",
+            "2027-02-29T00:00:00+00:00",
+            "2028-02-30T00:00:00+00:00",
+            "2027-01-01T24:00:00+00:00",
+            "2027-01-01T23:60:00+00:00",
+            "2027-01-01T23:59:60+00:00",
+            "2027-01-01T00:00:00.000000+00:00",
         )
         for index, malformed_time in enumerate(malformed_times):
             with self.subTest(timestamp=malformed_time):
@@ -503,6 +544,11 @@ class Phase5SchemaTests(unittest.TestCase):
             connection,
             "microsecond-time",
             created_at="2027-01-01T00:00:00.000001+00:00",
+        )
+        self.insert_workflow(
+            connection,
+            "leap-day-time",
+            created_at="2028-02-29T23:59:59+00:00",
         )
 
         dispatch_command = self.create_command_graph(connection, "bad-dispatch-hash")
@@ -571,9 +617,7 @@ class Phase5SchemaTests(unittest.TestCase):
                         **overrides,
                     )
 
-        for index, operation in enumerate(
-            ("reserve_lodging", "book_activity", "reserve_package")
-        ):
+        for index, operation in enumerate(item.value for item in ReservationOperation):
             accepted_workflow = self.insert_workflow(
                 connection, f"operation-{index}"
             )
@@ -583,6 +627,20 @@ class Phase5SchemaTests(unittest.TestCase):
                 accepted_workflow,
                 operation=operation,
             )
+
+        checks = {
+            ("execution_ledger", "status"): {item.value for item in LedgerStatus},
+            ("outbox_messages", "status"): {item.value for item in OutboxStatus},
+            ("outbox_messages", "kind"): {item.value for item in OutboxKind},
+        }
+        for (table_name, column_name), expected in checks.items():
+            table = next(table for table in schema_contract() if table.name == table_name)
+            column = next(column for column in table.columns if column.name == column_name)
+            with self.subTest(table=table_name, column=column_name):
+                self.assertEqual(
+                    set(re.findall(r"'([^']+)'", column.check or "")),
+                    expected,
+                )
 
     def test_revision_and_all_counters_reject_out_of_range_values(self) -> None:
         connection = self.open_database()
@@ -636,6 +694,168 @@ class Phase5SchemaTests(unittest.TestCase):
                         f"outbox-counter-{index}",
                         **overrides,
                     )
+
+    def test_every_sqlite_integer_column_rejects_fractional_values(self) -> None:
+        connection = self.open_database()
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO schema_migrations (version, schema_hash, applied_at) "
+                "VALUES (1.5, ?, ?)",
+                (HASH_A, NOW),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.insert_workflow(
+                connection,
+                "fractional-workflow",
+                revision=0.5,  # type: ignore[arg-type]
+            )
+
+        workflow_id = self.insert_workflow(connection, "fractional-event")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO domain_events "
+                "(event_id, workflow_id, revision, occurred_at, event_type, "
+                "event_json, event_hash) VALUES (?, ?, 1.5, ?, 'Started', '{}', ?)",
+                ("event:fractional", workflow_id, NOW, HASH_A),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.insert_command(
+                connection,
+                "fractional-command",
+                workflow_id,
+                draft_version=1.5,  # type: ignore[arg-type]
+            )
+
+        for index, overrides in enumerate(
+            (
+                {"fencing_token": 0.5},
+                {"claim_count": 0.5},
+                {"preparation_failures": 0.5},
+                {"dispatch_slots_consumed": 0.5},
+            )
+        ):
+            command_id = self.create_command_graph(
+                connection, f"fractional-ledger-{index}"
+            )
+            with self.subTest(table="execution_ledger", overrides=overrides):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_ledger(connection, command_id, **overrides)
+
+        for index, overrides in enumerate(
+            ({"fencing_token": 0.5}, {"delivery_attempts": 0.5})
+        ):
+            workflow_id = self.insert_workflow(
+                connection, f"fractional-outbox-{index}"
+            )
+            with self.subTest(table="outbox_messages", overrides=overrides):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_outbox(
+                        connection,
+                        workflow_id,
+                        f"fractional-outbox-{index}",
+                        **overrides,
+                    )
+
+    def test_all_hash_columns_reject_malformed_non_null_and_required_hashes_reject_null(self) -> None:
+        connection = self.open_database()
+        malformed = "x" * 64
+
+        for index, schema_hash_value in enumerate((malformed, None)):
+            with self.subTest(column="schema_migrations.schema_hash", value=schema_hash_value):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "INSERT INTO schema_migrations "
+                        "(version, schema_hash, applied_at) VALUES (?, ?, ?)",
+                        (index + 5, schema_hash_value, NOW),
+                    )
+
+        for index, state_hash in enumerate((malformed, None)):
+            with self.subTest(column="workflows.state_hash", value=state_hash):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_workflow(
+                        connection,
+                        f"hash-workflow-{index}",
+                        state_hash=state_hash,  # type: ignore[arg-type]
+                    )
+
+        event_workflow = self.insert_workflow(connection, "hash-event")
+        for index, event_hash in enumerate((malformed, None)):
+            with self.subTest(column="domain_events.event_hash", value=event_hash):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "INSERT INTO domain_events "
+                        "(event_id, workflow_id, revision, occurred_at, event_type, "
+                        "event_json, event_hash) VALUES (?, ?, ?, ?, 'Started', '{}', ?)",
+                        (f"event:hash:{index}", event_workflow, index + 1, NOW, event_hash),
+                    )
+
+        for column in ("subject_signature", "command_hash"):
+            for index, value in enumerate((malformed, None)):
+                workflow_id = self.insert_workflow(
+                    connection, f"hash-command-{column}-{index}"
+                )
+                kwargs = {column: value}
+                with self.subTest(column=f"reservation_commands.{column}", value=value):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        self.insert_command(
+                            connection,
+                            f"hash-command-{column}-{index}",
+                            workflow_id,
+                            **kwargs,
+                        )
+
+        payload_workflow = self.insert_workflow(connection, "hash-payload")
+        for index, payload_hash in enumerate((malformed, None)):
+            with self.subTest(column="outbox_messages.payload_hash", value=payload_hash):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_outbox(
+                        connection,
+                        payload_workflow,
+                        f"hash-payload-{index}",
+                        payload_hash=payload_hash,
+                    )
+
+        optional_cases = (
+            (
+                "dispatch_request_hash",
+                {
+                    "status": "dispatch_fenced",
+                    "claim_owner": "worker:hash:a",
+                    "fencing_token": 1,
+                    "lease_acquired_at": NOW,
+                    "lease_expires_at": LATER,
+                    "claim_count": 1,
+                    "dispatch_slots_consumed": 1,
+                    "dispatch_request_hash": malformed,
+                    "dispatch_fenced_at": NOW,
+                },
+            ),
+            (
+                "outcome_hash",
+                {
+                    "status": "outcome_recorded",
+                    "outcome_json": "{}",
+                    "outcome_hash": malformed,
+                },
+            ),
+        )
+        for index, (column, overrides) in enumerate(optional_cases):
+            command_id = self.create_command_graph(connection, f"hash-optional-{index}")
+            with self.subTest(column=f"execution_ledger.{column}"):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.insert_ledger(connection, command_id, **overrides)
+
+        receipt_workflow = self.insert_workflow(connection, "hash-receipt")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.insert_outbox(
+                connection,
+                receipt_workflow,
+                "hash-receipt",
+                status="delivered",
+                delivery_attempts=1,
+                delivered_at=NOW,
+                receipt_hash=malformed,
+            )
 
     def test_execution_ledger_rejects_every_invalid_cross_constraint_family(self) -> None:
         lease = {
@@ -731,6 +951,49 @@ class Phase5SchemaTests(unittest.TestCase):
             [("manual_review", 1), ("outcome_recorded", 1), ("outcome_recorded", 0)],
         )
 
+    def test_execution_ledger_accepts_every_closed_status(self) -> None:
+        connection = self.open_database()
+        lease = {
+            "claim_owner": "worker:positive:a",
+            "fencing_token": 1,
+            "lease_acquired_at": NOW,
+            "lease_expires_at": LATER,
+            "claim_count": 1,
+        }
+        dispatch = {
+            "dispatch_slots_consumed": 1,
+            "dispatch_request_hash": HASH_A,
+            "dispatch_fenced_at": NOW,
+        }
+        cases = {
+            LedgerStatus.QUEUED: {},
+            LedgerStatus.PREPARING: lease,
+            LedgerStatus.DISPATCH_FENCED: {**lease, **dispatch},
+            LedgerStatus.OUTCOME_RECORDED: {
+                "outcome_json": '{"kind":"not_called"}',
+                "outcome_hash": HASH_B,
+            },
+            LedgerStatus.MANUAL_REVIEW: {
+                **dispatch,
+                "outcome_json": '{"kind":"called_unknown"}',
+                "outcome_hash": HASH_C,
+            },
+        }
+        for index, (status, overrides) in enumerate(cases.items()):
+            command_id = self.create_command_graph(connection, f"positive-ledger-{index}")
+            with self.subTest(status=status.value):
+                self.insert_ledger(
+                    connection,
+                    command_id,
+                    status=status.value,
+                    **overrides,
+                )
+        stored = {
+            row[0]
+            for row in connection.execute("SELECT status FROM execution_ledger")
+        }
+        self.assertEqual(stored, {item.value for item in LedgerStatus})
+
     def test_outbox_accepts_exact_pending_leased_delivered_matrix(self) -> None:
         connection = self.open_database()
         pending_workflow = self.insert_workflow(connection, "outbox-pending")
@@ -764,6 +1027,20 @@ class Phase5SchemaTests(unittest.TestCase):
             )
         )
         self.assertEqual(rows, [("delivered",), ("leased",), ("pending",)])
+
+        for index, kind in enumerate(OutboxKind):
+            kind_workflow = self.insert_workflow(connection, f"outbox-kind-{index}")
+            self.insert_outbox(
+                connection,
+                kind_workflow,
+                f"outbox-kind-{index}",
+                kind=kind.value,
+            )
+        stored_kinds = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT kind FROM outbox_messages")
+        }
+        self.assertEqual(stored_kinds, {item.value for item in OutboxKind})
 
     def test_outbox_rejects_every_invalid_cross_constraint_family(self) -> None:
         lease = {
@@ -846,6 +1123,27 @@ class Phase5SchemaTests(unittest.TestCase):
                     postgresql_sql,
                     rf"(?m)^    {re.escape(column_name)} (?:text|bigint|timestamptz)\b",
                 )
+
+    def test_generator_rejects_colliding_targets_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase5-schema-") as directory:
+            target = Path(directory) / "same.sql"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/generate_phase5_schema.py"),
+                    "--sqlite",
+                    str(target),
+                    "--postgresql",
+                    str(target),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertFalse(target.exists())
+            self.assertIn("distinct", completed.stderr.lower())
 
 
 if __name__ == "__main__":

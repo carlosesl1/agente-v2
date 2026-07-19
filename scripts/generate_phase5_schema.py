@@ -39,8 +39,13 @@ def main() -> int:
     parser.add_argument("--postgresql", required=True, type=Path)
     args = parser.parse_args()
 
-    sqlite_target = _write(args.sqlite, render_sqlite())
-    postgresql_target = _write(args.postgresql, render_postgresql())
+    sqlite_target = _target(args.sqlite).resolve()
+    postgresql_target = _target(args.postgresql).resolve()
+    if sqlite_target == postgresql_target:
+        parser.error("--sqlite and --postgresql must be distinct targets")
+
+    sqlite_target = _write(sqlite_target, render_sqlite())
+    postgresql_target = _write(postgresql_target, render_postgresql())
     print(
         json.dumps(
             {
