@@ -38,6 +38,17 @@
       "errors": 0,
       "output_sha256": "a5805aa735dd77dddc68cd1866fcd75f14c4289fc8d41d6989a7aa13fbdef6dc",
       "raw_output_versioned": false
+    },
+    {
+      "name": "final_review_catalog_schema_and_loader_oracle",
+      "base_sha": "b863a2ebaa671bbac7fe881c5bb30286fd35aa38",
+      "command": "python3 -m unittest tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_mutant_contract_rejects_empty_fields tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_runner_refuses_mutant_loader_error_as_a_kill tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_catalog_is_closed_unique_material_and_targets_once -v",
+      "exit_code": 1,
+      "tests_run": 3,
+      "failures": 7,
+      "errors": 0,
+      "output_sha256": "986796b2776e5070a6793a2ba845b8e0fca049df3561b307ba025a13c84c17fb",
+      "raw_output_versioned": false
     }
   ]
 }

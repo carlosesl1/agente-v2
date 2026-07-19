@@ -57,6 +57,22 @@ def runtime_digest() -> str:
 
 
 class Phase5MutationRunnerTests(unittest.TestCase):
+    def test_mutant_contract_rejects_empty_fields(self) -> None:
+        fields = {
+            "name": "synthetic",
+            "path": "scripts/run_phase5_properties.py",
+            "old": "_MIN_GATE_CASES = 20_000\n",
+            "new": "_MIN_GATE_CASES = 1\n",
+            "test": "tests.test_phase5_mutation_runner."
+            "Phase5MutationRunnerTests.test_property_gate_minimum_is_closed",
+        }
+        for field in fields:
+            with self.subTest(field=field):
+                invalid = dict(fields)
+                invalid[field] = ""
+                with self.assertRaises(ValueError):
+                    Mutant(**invalid)
+
     def test_runner_refuses_baseline_failing_test_as_a_kill(self) -> None:
         mutant = Mutant(
             name="synthetic_baseline_failure",
@@ -69,6 +85,22 @@ class Phase5MutationRunnerTests(unittest.TestCase):
         self.assertFalse(result["killed"])
         self.assertNotEqual(result["baseline_exit_code"], 0)
         self.assertEqual(result["exit_code"], -1)
+
+    def test_runner_refuses_mutant_loader_error_as_a_kill(self) -> None:
+        mutant = Mutant(
+            name="synthetic_loader_error",
+            path="scripts/run_phase5_properties.py",
+            old="_MIN_GATE_CASES = 20_000\n",
+            new="_MIN_GATE_CASES =\n",
+            test="tests.test_phase5_mutation_runner."
+            "Phase5MutationRunnerTests.test_property_gate_minimum_is_closed",
+        )
+        result = _run_one(root=ROOT, mutant=mutant)
+        self.assertEqual(result["baseline_exit_code"], 0)
+        self.assertFalse(result["killed"])
+        self.assertEqual(result["exit_code"], 1)
+        self.assertTrue(result["loader_error"])
+        self.assertEqual(result["error"], "mutant test failed to load")
 
     def test_catalog_tests_pass_on_the_unmodified_tree(self) -> None:
         targets = tuple(dict.fromkeys(mutant.test for mutant in MUTANTS))
@@ -166,6 +198,7 @@ class Phase5MutationRunnerTests(unittest.TestCase):
                 self.assertTrue(mutant.name)
                 self.assertTrue(mutant.path)
                 self.assertTrue(mutant.old)
+                self.assertTrue(mutant.new)
                 self.assertNotEqual(mutant.old, mutant.new)
                 self.assertTrue(mutant.test)
                 source = (ROOT / mutant.path).read_text(encoding="utf-8")

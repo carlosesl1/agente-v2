@@ -25,6 +25,54 @@ class Mutant:
     new: str
     test: str
 
+    def __post_init__(self) -> None:
+        for field_name in ("name", "path", "old", "new", "test"):
+            value = getattr(self, field_name)
+            if type(value) is not str:
+                raise TypeError(f"mutant.{field_name} must be a string")
+            if not value:
+                raise ValueError(f"mutant.{field_name} must not be empty")
+        if self.old == self.new:
+            raise ValueError("mutant.old and mutant.new must differ")
+
+
+@dataclass(frozen=True, slots=True)
+class _TestRunResult:
+    exit_code: int
+    loader_error: bool
+    error: str | None = None
+
+
+_TEST_RESULT_PREFIX = "__PHASE5_TEST_RESULT__"
+_STRUCTURED_UNITTEST_RUNNER = r"""
+import json
+import sys
+import unittest
+
+test_name = sys.argv[1]
+loader = unittest.TestLoader()
+try:
+    suite = loader.loadTestsFromName(test_name)
+except Exception:
+    print(
+        "__PHASE5_TEST_RESULT__"
+        + json.dumps({"loader_error": True, "successful": False})
+    )
+    raise SystemExit(1)
+if loader.errors:
+    print(
+        "__PHASE5_TEST_RESULT__"
+        + json.dumps({"loader_error": True, "successful": False})
+    )
+    raise SystemExit(1)
+result = unittest.TextTestRunner(stream=sys.stderr, verbosity=2).run(suite)
+print(
+    "__PHASE5_TEST_RESULT__"
+    + json.dumps({"loader_error": False, "successful": result.wasSuccessful()})
+)
+raise SystemExit(0 if result.wasSuccessful() else 1)
+"""
+
 
 MUTANTS = (
     Mutant(
@@ -52,7 +100,7 @@ MUTANTS = (
         name="remove_unique_idempotency",
         path="schemas/phase5/sqlite.sql",
         old="    CONSTRAINT uq_reservation_commands_idempotency_key UNIQUE (idempotency_key),\n",
-        new="",
+        new="    -- MUTANT: remove unique idempotency-key constraint\n",
         test="tests.test_phase5_schema.Phase5SchemaTests.test_generated_sql_matches_tracked_artifacts_and_is_deterministic",
     ),
     Mutant(
@@ -183,36 +231,77 @@ def _ignore_copy(path: str, names: list[str]) -> set[str]:
     return ignored
 
 
-def _run_test(*, root: Path, test: str) -> tuple[int, str | None]:
+def _run_test(*, root: Path, test: str) -> _TestRunResult:
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "unittest", test, "-v"],
+            [sys.executable, "-c", _STRUCTURED_UNITTEST_RUNNER, test],
             cwd=root,
             capture_output=True,
             text=True,
             check=False,
             timeout=240,
         )
-        return completed.returncode, None
+        protocol_lines = tuple(
+            line.removeprefix(_TEST_RESULT_PREFIX)
+            for line in completed.stdout.splitlines()
+            if line.startswith(_TEST_RESULT_PREFIX)
+        )
+        if len(protocol_lines) != 1:
+            return _TestRunResult(
+                exit_code=completed.returncode,
+                loader_error=False,
+                error="test result protocol missing",
+            )
+        try:
+            payload = json.loads(protocol_lines[0])
+        except json.JSONDecodeError:
+            return _TestRunResult(
+                exit_code=completed.returncode,
+                loader_error=False,
+                error="test result protocol invalid",
+            )
+        loader_error = payload.get("loader_error") is True
+        if loader_error:
+            return _TestRunResult(
+                exit_code=completed.returncode,
+                loader_error=True,
+                error="test failed to load",
+            )
+        if type(payload.get("successful")) is not bool:
+            return _TestRunResult(
+                exit_code=completed.returncode,
+                loader_error=False,
+                error="test result protocol invalid",
+            )
+        return _TestRunResult(
+            exit_code=completed.returncode,
+            loader_error=False,
+        )
     except subprocess.TimeoutExpired:
-        return -2, "test timed out"
+        return _TestRunResult(
+            exit_code=-2,
+            loader_error=False,
+            error="test timed out",
+        )
 
 
 def _run_one(*, root: Path, mutant: Mutant) -> dict[str, Any]:
-    baseline_exit_code, baseline_error = _run_test(root=root, test=mutant.test)
-    if baseline_exit_code != 0:
+    baseline = _run_test(root=root, test=mutant.test)
+    if baseline.exit_code != 0 or baseline.error is not None:
         result: dict[str, Any] = {
             "name": mutant.name,
             "path": mutant.path,
             "test": mutant.test,
             "target_count": 0,
-            "baseline_exit_code": baseline_exit_code,
+            "baseline_exit_code": baseline.exit_code,
             "exit_code": -1,
             "killed": False,
             "error": "mutant test does not pass on the unmodified tree",
         }
-        if baseline_error is not None:
-            result["baseline_error"] = baseline_error
+        if baseline.error is not None:
+            result["baseline_error"] = baseline.error
+        if baseline.loader_error:
+            result["baseline_loader_error"] = True
         return result
     with tempfile.TemporaryDirectory(prefix=f"phase5-mutant-{mutant.name}-") as temp:
         copy_root = Path(temp) / "repo"
@@ -226,24 +315,33 @@ def _run_one(*, root: Path, mutant: Mutant) -> dict[str, Any]:
                 "path": mutant.path,
                 "test": mutant.test,
                 "target_count": target_count,
-                "baseline_exit_code": baseline_exit_code,
+                "baseline_exit_code": baseline.exit_code,
                 "exit_code": -1,
                 "killed": False,
                 "error": f"mutation target count was {target_count}, expected 1",
             }
         target.write_text(source.replace(mutant.old, mutant.new, 1), encoding="utf-8")
-        exit_code, error = _run_test(root=copy_root, test=mutant.test)
+        test_result = _run_test(root=copy_root, test=mutant.test)
         result: dict[str, Any] = {
             "name": mutant.name,
             "path": mutant.path,
             "test": mutant.test,
             "target_count": target_count,
-            "baseline_exit_code": baseline_exit_code,
-            "exit_code": exit_code,
-            "killed": exit_code > 0,
+            "baseline_exit_code": baseline.exit_code,
+            "exit_code": test_result.exit_code,
+            "loader_error": test_result.loader_error,
+            "killed": (
+                test_result.exit_code > 0
+                and not test_result.loader_error
+                and test_result.error is None
+            ),
         }
-        if error is not None:
-            result["error"] = error
+        if test_result.error is not None:
+            result["error"] = (
+                "mutant test failed to load"
+                if test_result.loader_error
+                else test_result.error
+            )
         return result
 
 
