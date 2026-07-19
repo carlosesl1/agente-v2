@@ -1,5 +1,7 @@
 """Pure summary and confirmation boundary for Agente v2 Phase 4."""
 
+from .presentation import prepare_summary
+from .renderer import RENDERER_ID, RENDERER_VERSION, render_summary
 from .types import (
     BoundConfirmation,
     ClassificationContext,
@@ -20,4 +22,8 @@ __all__ = [
     "DecisionCandidate",
     "BoundConfirmation",
     "rendered_summary_hash",
+    "RENDERER_ID",
+    "RENDERER_VERSION",
+    "render_summary",
+    "prepare_summary",
 ]

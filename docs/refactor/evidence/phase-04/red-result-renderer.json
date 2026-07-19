@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "recorded_at_utc": "2026-07-19T02:40:00Z",
+  "command": "python3 -m unittest tests.test_phase4_renderer -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_renderer_api",
+  "missing_symbol": "prepare_summary",
+  "output_sha256": "7cf6e97385997540f721120bed5714ef8d1db5f4f6201f8e31c5089b635b395c",
+  "raw_output_versioned": false
+}

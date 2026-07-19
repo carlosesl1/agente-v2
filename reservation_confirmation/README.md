@@ -11,5 +11,10 @@ Boundary puro da Fase 4 para apresentação e classificação de confirmação.
 - IDs e hashes são identidades determinísticas, não autenticação;
 - somente o reducer do domínio pode construir `ReservationCommand`.
 
-Renderer, preparation, classifier e binding serão adicionados em ciclos TDD
-separados. A API pública permanece fechada e tipada.
+`render_summary` projeta deterministicamente PT-BR/EN, calcula totais em
+`Decimal` e rejeita qualquer ID privado presente no texto. `prepare_summary`
+deriva IDs de resumo/outbox/evento e entrega o texto exato junto ao
+`SummaryRecorded`; não envia nem persiste nada.
+
+Classifier e binding serão adicionados em ciclos TDD separados. A API pública
+permanece fechada e tipada.
