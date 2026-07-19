@@ -95,3 +95,10 @@ python3 scripts/run_phase4_properties.py --cases 50000 --seed 20260719
 python3 scripts/run_phase4_mutations.py
 python3 scripts/validate_phase4.py
 ```
+
+## Fase 5
+
+`phase-05/entry-baseline.json` fixa o SHA terminal e os cinco workflows verdes
+da Fase 4, os validadores regressivos, o fingerprint somente leitura do legado e
+a autorização de SQLite local sem Docker/PostgreSQL/Supabase. Nenhuma
+implementação funcional ou capacidade live foi iniciada na abertura.

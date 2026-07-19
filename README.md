@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma; Fase 5 não iniciada**.
+- Fase ativa: **Fase 5 — design aprovado; especificação em revisão**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -21,6 +21,8 @@ Contrato central:
 - Fase 4: **concluída e publicada** no commit
   `2c922d1b88eaf44412c1a808c4786e4729e8ba64`; cinco workflows remotos verdes,
   sem LLM, rede, entrega ou execução live.
+- Fase 5: **aberta documentalmente**, com SQLite local autorizado e sem Docker,
+  PostgreSQL, Supabase, provider ou delivery live; implementação não iniciada.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída: domínio, lookups e boundary puro de
   resumo/confirmação no novo repositório.
@@ -42,6 +44,7 @@ Contrato central:
 - [Execução da Fase 2](docs/refactor/phases/phase-02-typed-domain-and-reducer.md)
 - [Execução da Fase 3](docs/refactor/phases/phase-03-lookups-and-offer-snapshots.md)
 - [Execução da Fase 4](docs/refactor/phases/phase-04-single-summary-and-confirmation.md)
+- [Execução da Fase 5](docs/refactor/phases/phase-05-durable-command-execution.md)
 
 ## Regras de execução
 

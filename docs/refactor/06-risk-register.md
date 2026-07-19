@@ -50,6 +50,13 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R44 | Consulta de atividade com janela/sem horário é rejeitada ao retornar ocorrência concreta | 3 | 4 | adapter positivo falha no `OfferedState` | ocorrência dentro da janela inclusiva; `start_time=None` como wildcard; replay/property Bókun desde workflow vazio | domain/adapters | mitigado |
 | R45 | Marcador positivo desconhecido ou pergunta é aceito como confirmação | 2 | 5 | “sim, talvez”/“confirmo?” gera `ACCEPT` | conjunto fechado; `?` ambíguo; corpus PT/EN, RED tardio e mutantes independentes | domain/AI/QA | mitigado |
 | R46 | Mutante depende da ordem de hash/set e produz evidence intermitente | 2 | 4 | mesmo catálogo alterna killed/survived entre processos | mutante força decisão determinística; testes com múltiplos `PYTHONHASHSEED`; CI regenera JSON | QA | mitigado |
+| R47 | Estado queued é persistido sem command/ledger atômicos | 2 | 5 | workflow sem comando ou comando órfão após crash | uma UnitOfWork, transaction rollback, fault injection em cada statement | persistence/domain | aberto |
+| R48 | Lease expirado permite dois workers concluírem o mesmo comando | 2 | 5 | token antigo grava outcome ou segundo dispatch | fencing token monotônico, compare-and-swap e corrida multiprocesso | worker/persistence | aberto |
+| R49 | Crash após socket causa retry comercial | 2 | 5 | dispatch fence sem outcome volta a queued | slot durável antes do dispatch; pós-fence sempre unknown/manual review, sem adapter no reconciler | worker/domain | aberto |
+| R50 | Falha de outbox reabre ledger ou repete provider | 2 | 5 | delivery failure aumenta dispatch/provider calls | tabelas/workers separados; properties e fault injection bilateral | messaging/worker | aberto |
+| R51 | SQLite verde mascara incompatibilidade PostgreSQL | 3 | 4 | DDL futuro falha ou locking diverge | contrato comum/DDL regenerável, claims limitados e prova PostgreSQL obrigatória antes da migração | persistence/QA | aberto |
+| R52 | Outcome `effect_confirmed` sem evidência sustenta promessa pública falsa | 2 | 5 | success sem provider reference/evidence | contrato endurecido, projection fechada, serializer hostil e mutante | domain/worker | aberto |
+| R53 | Banco/ledger de teste vaza PII em evidência | 2 | 5 | SQLite/WAL/log entra no Git ou relatório | temp dirs, `.gitignore`, fixtures sintéticas, scan e manifest sem bancos/logs | security/QA | aberto |
 
 ## Processo
 

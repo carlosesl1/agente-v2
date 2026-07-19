@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "opened_at_utc": "2026-07-19T04:50:49Z",
+  "base_commit": "e51259ea0d19a2d07d3d14ee086b0766776cbeab",
+  "git_sync": {
+    "head": "e51259ea0d19a2d07d3d14ee086b0766776cbeab",
+    "origin_main": "e51259ea0d19a2d07d3d14ee086b0766776cbeab",
+    "remote_main": "e51259ea0d19a2d07d3d14ee086b0766776cbeab",
+    "working_tree_clean": true,
+    "status_entries": 0,
+    "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "previous_phase_validators": {
+    "phase_0": "ok",
+    "phase_1": "ok",
+    "phase_2": "ok",
+    "phase_3": "ok",
+    "phase_4": "ok"
+  },
+  "phase_4_terminal_ci": {
+    "commit": "e51259ea0d19a2d07d3d14ee086b0766776cbeab",
+    "phase_0_validation": {
+      "run_id": 29673457318,
+      "conclusion": "success"
+    },
+    "phase_1_characterization": {
+      "run_id": 29673457308,
+      "conclusion": "success"
+    },
+    "phase_2_domain": {
+      "run_id": 29673457297,
+      "conclusion": "success"
+    },
+    "phase_3_lookups": {
+      "run_id": 29673457303,
+      "conclusion": "success"
+    },
+    "phase_4_confirmation": {
+      "run_id": 29673457320,
+      "conclusion": "success"
+    }
+  },
+  "legacy_readonly": {
+    "head": "57408d8b2040399bc25ee7957505208079458884",
+    "status_command": "git status --short -z",
+    "status_entries": 80,
+    "status_sha256": "77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b",
+    "sources": [
+      {
+        "path": "domain/hermes_native_runner.py",
+        "sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de"
+      },
+      {
+        "path": "domain/tool_executor.py",
+        "sha256": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88"
+      }
+    ]
+  },
+  "approved_persistence": "sqlite_file_backed",
+  "postgresql_ddl_contract": true,
+  "postgresql_executed": false,
+  "docker_executed": false,
+  "supabase_executed": false,
+  "provider_reads_executed": false,
+  "provider_writes_executed": false,
+  "message_delivery_executed": false,
+  "llm_executed": false,
+  "rollout": "NO-GO"
+}
