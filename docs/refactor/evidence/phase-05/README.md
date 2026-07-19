@@ -2,7 +2,7 @@
 
 Fase: `phase-05-durable-command-execution`.
 
-Status: **implementação aprovada; gates integrais e closeout em execução**.
+Status: **Task 12 aprovada localmente; publicação e CI remoto pendentes**.
 
 Design e plano TDD versionados:
 
@@ -47,7 +47,7 @@ Design e plano TDD versionados:
 - counters live/network exigem inteiro zero exato, flags negativas exigem
   booleano `false`, e proveniência RED rejeita campos ausentes ou extras.
 
-## Gate de saída em execução
+## Gate local fechado
 
 - suíte fresca com output bruto somente em `/tmp`;
 - 20.000 properties adapter-backed;

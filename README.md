@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 5 — implementação aprovada; gates integrais e closeout em execução**.
+- Fase ativa: **Fase 5 — Task 12 aprovada localmente; publicação e CI remoto pendentes**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -21,9 +21,10 @@ Contrato central:
 - Fase 4: **concluída e publicada** no commit
   `2c922d1b88eaf44412c1a808c4786e4729e8ba64`; cinco workflows remotos verdes,
   sem LLM, rede, entrega ou execução live.
-- Fase 5: **implementada e aprovada até a Task 11**, com SQLite local, command,
-  ledger, fencing, recovery, outbox, properties, faults e mutations; Task 12
-  reúne evidência/CI sem Docker, PostgreSQL, Supabase, provider ou delivery live.
+- Fase 5: **Tasks 1–12 implementadas e aprovadas localmente**, com SQLite local,
+  command, ledger, fencing, recovery, outbox, properties, faults, mutations e
+  closeout fechado; publicação e CI remoto ainda pendentes, sem Docker,
+  PostgreSQL, Supabase, provider ou delivery live.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.

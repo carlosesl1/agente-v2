@@ -2,15 +2,15 @@
 
 ## Status
 
-`implementação aprovada; gates integrais e closeout em execução`
+`Task 12 aprovada localmente; publicação e CI remoto pendentes`
 
 Aberta em `2026-07-19T04:50:49Z`, a partir do commit-base
 `e51259ea0d19a2d07d3d14ee086b0766776cbeab`.
 
-A implementação funcional das Tasks 1–11 foi concluída e aprovada por gates
-read-only independentes. A Task 12 reúne workloads integrais, manifests,
-validator, CI e prova terminal; a fase só muda para `concluída` após publicação
-e CI verde.
+As Tasks 1–12 foram concluídas localmente e aprovadas por gates read-only
+independentes, sem finding Critical ou Important aberto. Workloads integrais,
+manifests, validator e prova terminal estão fechados; a fase só muda para
+`concluída` após publicação e CI remoto verde.
 
 ## Objetivo
 
