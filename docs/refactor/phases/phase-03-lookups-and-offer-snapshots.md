@@ -2,10 +2,13 @@
 
 ## Status
 
-`em execução`
+`concluída`
 
 Aberta em `2026-07-18T23:24:58Z`, a partir do commit-base
 `e318a2f1cad6fbeda3db11a0368f7b762ae84cdf`.
+
+Implementação publicada em `2026-07-19T00:40:28Z` no commit
+`33b1975dd660963b242f961721d8117404654893`.
 
 ## Objetivo
 
@@ -80,19 +83,20 @@ Não existe transporte de rede padrão nesta fase.
 
 ## Entregáveis
 
-- [ ] spec e plano detalhado;
-- [ ] tipos e transport protocol;
-- [ ] identidade opaca canônica;
-- [ ] adapter Cloudbeds;
-- [ ] adapter Bókun;
-- [ ] seleção e revalidação fail-closed;
-- [ ] fixtures sanitizadas e manifest;
-- [ ] tests RED/contract/metamórficos/property;
-- [ ] mutation testing;
-- [ ] source map, riscos, evidências e hashes;
-- [ ] validador local e CI;
-- [ ] revisão adversarial;
-- [ ] commits de entrada, implementação e closeout remotos verificados.
+- [x] spec e plano detalhado;
+- [x] tipos e transport protocol;
+- [x] identidade opaca canônica;
+- [x] adapter Cloudbeds;
+- [x] adapter Bókun;
+- [x] seleção e revalidação fail-closed;
+- [x] fixtures sanitizadas e manifest;
+- [x] tests RED/contract/metamórficos/property;
+- [x] mutation testing reproduzível;
+- [x] source map, riscos, evidências e hashes;
+- [x] validador local e CI;
+- [x] revisão adversarial;
+- [x] commits de entrada e implementação remotos verificados;
+- [x] closeout preparado para publicação e verificação remota.
 
 ## Gate
 
@@ -118,6 +122,35 @@ Não existe transporte de rede padrão nesta fase.
 
 Reverter somente os commits da Fase 3 no repositório novo. Não há ação live.
 
+## Evidência de fechamento
+
+- suíte integral: `99` testes, `OK`;
+- property gate: `50.000` casos, seed `20260718`;
+- obrigações positivas: `50.000` autorizações e `50.000` equivalências de
+  label;
+- rejeições exercidas: `50.000` mutações executáveis, `50.000` TTLs vencidos,
+  `50.000` zero-match e `50.000` multiple-match;
+- falsos positivos, invalidações perdidas e exceções inesperadas: `0`;
+- mutation gate: `13/13` mutantes mortos por runner reproduzível;
+- fixtures: `8`, quatro Cloudbeds e quatro Bókun, todas sintéticas;
+- package: `8` módulos Python, nenhum import de rede/env/filesystem/provider;
+- hashes: `37` artefatos verificados;
+- validadores das Fases 0–3: `ok`, zero failures;
+- legado somente leitura: HEAD/status/status-hash inalterados;
+- nenhuma rede, auth, provider, write, banco, fila, Docker ou deploy executado.
+
+GitHub Actions do commit de implementação:
+
+- `phase-0-validation`: run `29667240880`, `success`;
+- `phase-1-characterization`: run `29667240879`, `success`;
+- `phase-2-domain`: run `29667240862`, `success`;
+- `phase-3-lookups`: run `29667240868`, `success`.
+
+O batch externo read-only disparado durante a implementação não entregou
+summary utilizável na sessão de fechamento e não é contado como evidência
+positiva. A revisão direta reproduziu em RED e corrigiu os achados A06–A09.
+
 ## Decisão de avanço
 
-Pendente. A Fase 4 permanece bloqueada até closeout formal e direção explícita.
+A Fase 3 está encerrada. A Fase 4 fica elegível, mas permanece **não iniciada**
+até direção explícita.

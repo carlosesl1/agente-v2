@@ -12,14 +12,15 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 3 — consultas e seleção por `OfferSnapshot`**.
+- Fase ativa: **nenhuma**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
-- Fase 3: **em execução**, somente adapters read-only com transporte injetado e
-  fixtures sanitizadas; nenhuma rede real.
+- Fase 3: **concluída e publicada no GitHub**, com adapters read-only,
+  identidade opaca e seleção fail-closed; nenhuma rede real.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
-- Implementação funcional concluída: domínio puro no novo repositório.
+- Implementação funcional concluída: domínio puro e boundary de consultas no
+  novo repositório.
 - Rollout comercial: **NO-GO** até os gates documentados serem satisfeitos.
 
 ## Navegação
@@ -53,4 +54,5 @@ Contrato central:
 python3 scripts/validate_phase0.py
 python3 scripts/validate_phase1.py
 python3 scripts/validate_phase2.py
+python3 scripts/validate_phase3.py
 ```

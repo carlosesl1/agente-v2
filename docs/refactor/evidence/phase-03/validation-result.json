@@ -1,6 +1,26 @@
 {
+  "closeout_ready_at_utc": "2026-07-19T00:40:28Z",
   "evidence_hashes_checked": 37,
   "failures": [],
+  "implementation_ci": {
+    "phase-0-validation": {
+      "conclusion": "success",
+      "run_id": 29667240880
+    },
+    "phase-1-characterization": {
+      "conclusion": "success",
+      "run_id": 29667240879
+    },
+    "phase-2-domain": {
+      "conclusion": "success",
+      "run_id": 29667240862
+    },
+    "phase-3-lookups": {
+      "conclusion": "success",
+      "run_id": 29667240868
+    }
+  },
+  "implementation_commit": "33b1975dd660963b242f961721d8117404654893",
   "manifests": {
     "fixture_count": 8,
     "python_file_count": 8

@@ -2,6 +2,8 @@
 
 Fase: `phase-03-lookups-and-offer-snapshots`.
 
+Status: **concluída**, implementação `33b1975dd660963b242f961721d8117404654893`.
+
 Este diretório prova adapters read-only e seleção por identidade opaca. Não
 contém payload live, credencial, header, PII, mensagem real ou write de
 provider.

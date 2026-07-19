@@ -115,9 +115,11 @@ Estado: **corrigido e coberto**.
 
 ## Revisão independente
 
-Pendente durante a preparação deste artefato. Pareceres válidos serão
-incorporados antes do closeout; timeout/bloqueio sem summary será registrado
-como não-evidência.
+Três frentes read-only foram disparadas durante a implementação. Nenhum summary
+utilizável retornou à sessão até o closeout; portanto, elas não são citadas como
+evidência positiva nem como ausência de achados. A revisão direta completa,
+testes RED, property gate, catálogo de mutantes, validador e CI sustentam os
+claims deste documento.
 
 ## Riscos residuais
 
