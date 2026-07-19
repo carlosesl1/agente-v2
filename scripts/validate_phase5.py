@@ -182,6 +182,50 @@ def _exact_int(value: object, expected: int | None = None) -> bool:
     return type(value) is int and (expected is None or value == expected)
 
 
+def _matches_closed_schema(value: object, schema: object) -> bool:
+    if type(schema) is not dict or set(schema) - {"type", "fields", "items"}:
+        return False
+    kind = schema.get("type")
+    if kind == "object":
+        fields = schema.get("fields")
+        return (
+            set(schema) == {"type", "fields"}
+            and type(value) is dict
+            and type(fields) is dict
+            and set(value) == set(fields)
+            and all(
+                _matches_closed_schema(value[key], field_schema)
+                for key, field_schema in fields.items()
+            )
+        )
+    if kind == "list":
+        items = schema.get("items")
+        return (
+            set(schema) == {"type", "items"}
+            and type(value) is list
+            and type(items) is list
+            and len(value) == len(items)
+            and all(
+                _matches_closed_schema(item, item_schema)
+                for item, item_schema in zip(value, items)
+            )
+        )
+    expected_types = {
+        "bool": bool,
+        "int": int,
+        "float": float,
+        "str": str,
+    }
+    if kind == "null":
+        return set(schema) == {"type"} and value is None
+    expected_type = expected_types.get(kind)
+    return (
+        set(schema) == {"type"}
+        and expected_type is not None
+        and type(value) is expected_type
+    )
+
+
 OPERATIONAL_CONTRACT = _load_json(OPERATIONAL_CONTRACT_PATH)
 
 
@@ -246,6 +290,17 @@ def check_operational_contract(failures: list[str]) -> dict[str, Any]:
     ]
     if not _exact_json(mutation_catalog, runner_mutants) or len(mutation_catalog) != 20:
         failures.append("runner mutation catalog diverges from independent contract")
+    metric_schemas = contract.get("metric_schemas")
+    red_schemas = contract.get("red_evidence_schemas")
+    if type(metric_schemas) is not dict or set(metric_schemas) != {
+        "validation-result.json",
+        "performance-result.json",
+    }:
+        failures.append("metric schema catalog diverges from the closed contract")
+    if type(red_schemas) is not dict or set(red_schemas) != {
+        path.name for path in EVIDENCE.glob("red-result-*.json")
+    }:
+        failures.append("RED schema catalog diverges from the closed evidence set")
     return {
         "fault_points": len(fault_points),
         "restart_points": len(restart_points),
@@ -664,42 +719,92 @@ def check_schemas_and_manifests(failures: list[str]) -> dict[str, Any]:
 
 
 def check_red_evidence(failures: list[str]) -> dict[str, int]:
-    files = tuple(sorted(EVIDENCE.glob("red-result-*.json")))
+    files = {
+        path.name: path for path in sorted(EVIDENCE.glob("red-result-*.json"))
+    }
+    schemas = OPERATIONAL_CONTRACT.get("red_evidence_schemas", {})
+    if type(schemas) is not dict or set(files) != set(schemas):
+        failures.append("RED evidence files diverge from the closed schema catalog")
     entries = 0
-    for path in files:
+    zero_integer_fields = {
+        "network_calls",
+        "provider_calls",
+        "live_provider_calls",
+        "live_delivery_calls",
+        "live_database_calls",
+    }
+    false_boolean_fields = {
+        "postgresql_executed",
+        "mutated_working_tree",
+    }
+
+    def provenance_entries(value: object):
+        if type(value) is dict:
+            if "exit_code" in value:
+                yield value
+            for item in value.values():
+                yield from provenance_entries(item)
+        elif type(value) is list:
+            for item in value:
+                yield from provenance_entries(item)
+
+    for name, path in files.items():
         try:
             payload = _load_json(path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            failures.append(f"cannot read RED evidence {path.name}: {exc}")
+            failures.append(f"cannot read RED evidence {name}: {exc}")
             continue
-        candidates = [payload]
-        candidates.extend(payload.get("controller_regressions", []))
-        review = payload.get("review_regression")
-        if type(review) is dict:
-            candidates.append(review)
-        for item in candidates:
-            if type(item) is not dict:
-                failures.append(f"RED evidence entry must be an object: {path.name}")
-                entries += 1
-                continue
-            if not _exact_int(item.get("exit_code")) or item["exit_code"] == 0:
-                failures.append(f"RED evidence must record nonzero integer exit: {path.name}")
-            for field in ("tests_run", "failures", "errors", "failure_count", "error_count"):
-                if field in item and not _exact_int(item[field]):
-                    failures.append(f"RED evidence integer field invalid: {path.name}:{field}")
-            if not HASH_RE.fullmatch(str(item.get("output_sha256", ""))):
-                failures.append(f"RED evidence hash invalid: {path.name}")
-            if item.get("raw_output_versioned") is not False:
-                failures.append(f"raw RED output must not be versioned: {path.name}")
+        schema = schemas.get(name) if type(schemas) is dict else None
+        if not _matches_closed_schema(payload, schema):
+            failures.append(f"RED evidence schema mismatch: {name}")
+        if (
+            not _exact_int(payload.get("schema_version"), 1)
+            or payload.get("phase") != PHASE
+            or payload.get("rollout") not in {None, "NO-GO"}
+        ):
+            failures.append(f"RED evidence envelope invalid: {name}")
+        for item in provenance_entries(payload):
             entries += 1
-        if payload.get("phase") != PHASE or payload.get("rollout") not in {None, "NO-GO"}:
-            failures.append(f"RED evidence envelope invalid: {path.name}")
+            if not _exact_int(item.get("exit_code")) or item["exit_code"] == 0:
+                failures.append(f"RED evidence must record nonzero integer exit: {name}")
+            if not HASH_RE.fullmatch(str(item.get("output_sha256", ""))):
+                failures.append(f"RED evidence hash invalid: {name}")
+            if item.get("raw_output_versioned") is not False:
+                failures.append(f"raw RED output must not be versioned: {name}")
+            for field in (
+                "tests_run",
+                "test_count",
+                "failures",
+                "errors",
+                "failure_count",
+                "error_count",
+                "mutants_run",
+                "mutants_killed",
+                "survivors",
+            ):
+                if field in item and not _exact_int(item[field]):
+                    failures.append(f"RED evidence integer field invalid: {name}:{field}")
+            for field in zero_integer_fields:
+                if field in item and not _exact_int(item[field], 0):
+                    failures.append(f"RED evidence live counter must be integer zero: {name}:{field}")
+            for field in false_boolean_fields:
+                if field in item and item[field] is not False:
+                    failures.append(f"RED evidence negative flag must be false: {name}:{field}")
+            if "synthetic_fixtures_only" in item and item["synthetic_fixtures_only"] is not True:
+                failures.append(f"RED evidence synthetic flag must be true: {name}")
+            if "expected_failure" in item:
+                expected_failure = item["expected_failure"]
+                if type(expected_failure) is bool and expected_failure is not True:
+                    failures.append(f"RED evidence expected_failure must be true: {name}")
+                elif type(expected_failure) is str and not expected_failure.strip():
+                    failures.append(f"RED evidence expected_failure must be nonempty: {name}")
     return {"files": len(files), "entries": entries}
 
 
 def check_metrics(failures: list[str]) -> dict[str, Any]:
     validation = _read_evidence(failures, "validation-result.json")
     performance = _read_evidence(failures, "performance-result.json")
+    schemas = OPERATIONAL_CONTRACT.get("metric_schemas", {})
     expected_keys = {
         "validation-result.json": {
             "schema_version", "phase", "result", "command", "exit_code",
@@ -720,7 +825,9 @@ def check_metrics(failures: list[str]) -> dict[str, Any]:
         elapsed = payload.get("elapsed_seconds")
         rss = payload.get("max_rss_kb")
         if (
-            set(payload) != expected_keys[name]
+            type(schemas) is not dict
+            or not _matches_closed_schema(payload, schemas.get(name))
+            or set(payload) != expected_keys[name]
             or not _exact_int(payload.get("schema_version"), 1)
             or payload.get("phase") != PHASE
             or not _exact_int(payload.get("exit_code"), 0)
@@ -736,6 +843,26 @@ def check_metrics(failures: list[str]) -> dict[str, Any]:
             or payload.get("raw_output_versioned") is not False
         ):
             failures.append(f"metrics envelope mismatch: {name}")
+    for field in (
+        "network_calls",
+        "live_provider_calls",
+        "live_delivery_calls",
+        "live_database_calls",
+    ):
+        if not _exact_int(validation.get(field), 0):
+            failures.append(f"validation metric must be integer zero: {field}")
+    if validation.get("rollout") != "NO-GO":
+        failures.append("validation metrics must preserve NO-GO")
+    if performance.get("nondeterministic_metrics_local_only") is not True:
+        failures.append("performance metrics must remain local-only")
+    for field in ("postgresql_executed", "live_capabilities_executed"):
+        if performance.get(field) is not False:
+            failures.append(f"performance negative flag must be false: {field}")
+    if performance.get("rollout") != "NO-GO":
+        failures.append("performance metrics must preserve NO-GO")
+    for field in ("command", "tests_run", "elapsed_seconds", "max_rss_kb", "output_sha256"):
+        if not _exact_json(validation.get(field), performance.get(field)):
+            failures.append(f"metric envelopes disagree: {field}")
     if not _exact_int(performance.get("ci_timeout_seconds"), 900):
         failures.append("performance evidence must record the 15-minute CI timeout")
     return {

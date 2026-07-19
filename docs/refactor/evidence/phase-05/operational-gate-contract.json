@@ -1,137 +1,32 @@
 {
-  "schema_version": 1,
-  "phase": "phase-05-durable-command-execution",
-  "seed": 2026071905,
-  "property_gate": {
-    "configuration": {
-      "cases": 20000,
-      "minimum_gate_cases": 20000,
-      "seed": 2026071905
-    },
-    "report": {
-      "authorized_commands": 20000,
-      "bokun_cases": 10000,
-      "cases": 20000,
-      "cloudbeds_cases": 10000,
-      "conflict_probes": 2500,
-      "consistency_probes": 80,
-      "delivery_retries": 2500,
-      "delivery_target_matches": 2500,
-      "duplicate_probes": 2500,
-      "expired_lease_recoveries": 2500,
-      "final_outboxes": 20000,
-      "manual_reviews": 5000,
-      "missing_terminals": 0,
-      "outbox_provider_retries": 0,
-      "outcome_counts": {
-        "called_no_effect": 2500,
-        "called_unknown": 5000,
-        "effect_confirmed": 10000,
-        "not_called": 2500
-      },
-      "partial_transactions": 0,
-      "passed": true,
-      "post_fence_unknowns": 5000,
-      "recovered_command_matches": 2500,
-      "second_commands": 0,
-      "second_dispatch_slots": 0,
-      "second_provider_calls": 0,
-      "seed": 2026071905,
-      "stale_token_rejections": 2500,
-      "stale_token_writes": 0,
-      "summary_outboxes": 20000,
-      "terminal_commands": 20000,
-      "unauthorized_commands": 0,
-      "unexpected_exceptions": 0,
-      "unknown_redispatches": 0,
-      "violations": [],
-      "wrong_command_claims": 0,
-      "wrong_delivery_targets": 0
-    }
-  },
-  "fault_gate": {
-    "fault_points": [
-      "before_event",
-      "after_event_before_state",
-      "after_state_before_command",
-      "after_command_before_ledger",
-      "after_ledger_before_commit",
-      "after_commit_before_claim",
-      "after_claim_before_prepare",
-      "during_prepare",
-      "after_prepare_before_fence",
-      "after_fence_before_dispatch",
-      "during_dispatch",
-      "after_dispatch_before_outcome",
-      "after_outcome_before_state",
-      "after_state_before_outbox",
-      "after_outbox_before_commit",
-      "during_delivery",
-      "after_delivery_before_receipt"
-    ],
-    "restart_points": [
-      "after_commit_before_claim",
-      "after_claim_before_prepare",
-      "during_prepare",
-      "after_prepare_before_fence",
-      "after_fence_before_dispatch",
-      "during_dispatch",
-      "after_dispatch_before_outcome",
-      "during_delivery",
-      "after_delivery_before_receipt"
-    ],
-    "schedule_keys": [
-      "called_unknown",
-      "called_unknown_redispatches",
-      "child_exit_code",
-      "command_count",
-      "delivery_calls",
-      "dispatch_slots_consumed",
-      "fault_point",
-      "final_claim_count",
-      "final_fencing_token",
-      "final_ledger_status",
-      "followup_worker_disposition",
-      "mechanism",
+  "contention_gate": {
+    "command_row_keys": [
+      "child_errors",
+      "kind",
+      "nonzero_child_exits",
       "partial_transactions",
-      "pre_dispatch_released",
+      "provider_calls",
+      "round",
+      "violations",
+      "winners",
+      "winning_tokens"
+    ],
+    "outbox_row_keys": [
+      "child_errors",
+      "kind",
+      "nonzero_child_exits",
+      "partial_transactions",
       "provider_calls",
       "provider_calls_baseline",
-      "provider_calls_during_recovery",
-      "provider_calls_setup_baseline",
-      "receipt_persisted",
-      "recovered_outbox_attempts",
-      "recovered_outbox_fencing_token",
-      "recovered_outbox_status",
-      "schedule",
+      "provider_calls_final",
+      "round",
       "violations",
-      "worker_disposition"
+      "winners",
+      "winning_tokens"
     ],
-    "schedule_defaults": {
-      "called_unknown": 0,
-      "called_unknown_redispatches": 0,
-      "child_exit_code": null,
-      "command_count": 0,
-      "delivery_calls": 0,
-      "dispatch_slots_consumed": 0,
-      "final_claim_count": null,
-      "final_fencing_token": null,
-      "final_ledger_status": null,
-      "followup_worker_disposition": null,
-      "mechanism": "transaction_trigger",
-      "partial_transactions": 0,
-      "pre_dispatch_released": 0,
-      "provider_calls": 0,
-      "provider_calls_baseline": 0,
-      "provider_calls_during_recovery": 0,
-      "provider_calls_setup_baseline": 0,
-      "receipt_persisted": false,
-      "recovered_outbox_attempts": null,
-      "recovered_outbox_fencing_token": null,
-      "recovered_outbox_status": null,
-      "violations": [],
-      "worker_disposition": null
-    },
+    "rounds": 50
+  },
+  "fault_gate": {
     "expectation_groups": [
       {
         "points": [
@@ -144,7 +39,9 @@
         "values": {}
       },
       {
-        "points": ["after_commit_before_claim"],
+        "points": [
+          "after_commit_before_claim"
+        ],
         "values": {
           "child_exit_code": 91,
           "command_count": 1,
@@ -179,7 +76,9 @@
         }
       },
       {
-        "points": ["after_fence_before_dispatch"],
+        "points": [
+          "after_fence_before_dispatch"
+        ],
         "values": {
           "called_unknown": 1,
           "child_exit_code": 91,
@@ -193,7 +92,10 @@
         }
       },
       {
-        "points": ["during_dispatch", "after_dispatch_before_outcome"],
+        "points": [
+          "during_dispatch",
+          "after_dispatch_before_outcome"
+        ],
         "values": {
           "called_unknown": 1,
           "child_exit_code": 91,
@@ -228,7 +130,10 @@
         }
       },
       {
-        "points": ["during_delivery", "after_delivery_before_receipt"],
+        "points": [
+          "during_delivery",
+          "after_delivery_before_receipt"
+        ],
         "values": {
           "child_exit_code": 91,
           "command_count": 1,
@@ -248,34 +153,197 @@
           "worker_disposition": "delivered"
         }
       }
-    ]
-  },
-  "contention_gate": {
-    "rounds": 50,
-    "command_row_keys": [
-      "child_errors",
-      "kind",
-      "nonzero_child_exits",
-      "partial_transactions",
-      "provider_calls",
-      "round",
-      "violations",
-      "winners",
-      "winning_tokens"
     ],
-    "outbox_row_keys": [
-      "child_errors",
-      "kind",
-      "nonzero_child_exits",
+    "fault_points": [
+      "before_event",
+      "after_event_before_state",
+      "after_state_before_command",
+      "after_command_before_ledger",
+      "after_ledger_before_commit",
+      "after_commit_before_claim",
+      "after_claim_before_prepare",
+      "during_prepare",
+      "after_prepare_before_fence",
+      "after_fence_before_dispatch",
+      "during_dispatch",
+      "after_dispatch_before_outcome",
+      "after_outcome_before_state",
+      "after_state_before_outbox",
+      "after_outbox_before_commit",
+      "during_delivery",
+      "after_delivery_before_receipt"
+    ],
+    "restart_points": [
+      "after_commit_before_claim",
+      "after_claim_before_prepare",
+      "during_prepare",
+      "after_prepare_before_fence",
+      "after_fence_before_dispatch",
+      "during_dispatch",
+      "after_dispatch_before_outcome",
+      "during_delivery",
+      "after_delivery_before_receipt"
+    ],
+    "schedule_defaults": {
+      "called_unknown": 0,
+      "called_unknown_redispatches": 0,
+      "child_exit_code": null,
+      "command_count": 0,
+      "delivery_calls": 0,
+      "dispatch_slots_consumed": 0,
+      "final_claim_count": null,
+      "final_fencing_token": null,
+      "final_ledger_status": null,
+      "followup_worker_disposition": null,
+      "mechanism": "transaction_trigger",
+      "partial_transactions": 0,
+      "pre_dispatch_released": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_during_recovery": 0,
+      "provider_calls_setup_baseline": 0,
+      "receipt_persisted": false,
+      "recovered_outbox_attempts": null,
+      "recovered_outbox_fencing_token": null,
+      "recovered_outbox_status": null,
+      "violations": [],
+      "worker_disposition": null
+    },
+    "schedule_keys": [
+      "called_unknown",
+      "called_unknown_redispatches",
+      "child_exit_code",
+      "command_count",
+      "delivery_calls",
+      "dispatch_slots_consumed",
+      "fault_point",
+      "final_claim_count",
+      "final_fencing_token",
+      "final_ledger_status",
+      "followup_worker_disposition",
+      "mechanism",
       "partial_transactions",
+      "pre_dispatch_released",
       "provider_calls",
       "provider_calls_baseline",
-      "provider_calls_final",
-      "round",
+      "provider_calls_during_recovery",
+      "provider_calls_setup_baseline",
+      "receipt_persisted",
+      "recovered_outbox_attempts",
+      "recovered_outbox_fencing_token",
+      "recovered_outbox_status",
+      "schedule",
       "violations",
-      "winners",
-      "winning_tokens"
+      "worker_disposition"
     ]
+  },
+  "metric_schemas": {
+    "performance-result.json": {
+      "fields": {
+        "ci_timeout_seconds": {
+          "type": "int"
+        },
+        "command": {
+          "type": "str"
+        },
+        "elapsed_seconds": {
+          "type": "float"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "live_capabilities_executed": {
+          "type": "bool"
+        },
+        "max_rss_kb": {
+          "type": "int"
+        },
+        "measurement": {
+          "type": "str"
+        },
+        "nondeterministic_metrics_local_only": {
+          "type": "bool"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "postgresql_executed": {
+          "type": "bool"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "result": {
+          "type": "str"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "validation-result.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "elapsed_seconds": {
+          "type": "float"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "live_delivery_calls": {
+          "type": "int"
+        },
+        "live_provider_calls": {
+          "type": "int"
+        },
+        "max_rss_kb": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "result": {
+          "type": "str"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "tests_run": {
+          "type": "int"
+        },
+        "unittest_elapsed_seconds": {
+          "type": "float"
+        }
+      },
+      "type": "object"
+    }
   },
   "mutation_catalog": [
     {
@@ -379,6 +447,2379 @@
       "test": "tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_fault_point_manifest_is_closed_and_exact"
     }
   ],
+  "phase": "phase-05-durable-command-execution",
+  "property_gate": {
+    "configuration": {
+      "cases": 20000,
+      "minimum_gate_cases": 20000,
+      "seed": 2026071905
+    },
+    "report": {
+      "authorized_commands": 20000,
+      "bokun_cases": 10000,
+      "cases": 20000,
+      "cloudbeds_cases": 10000,
+      "conflict_probes": 2500,
+      "consistency_probes": 80,
+      "delivery_retries": 2500,
+      "delivery_target_matches": 2500,
+      "duplicate_probes": 2500,
+      "expired_lease_recoveries": 2500,
+      "final_outboxes": 20000,
+      "manual_reviews": 5000,
+      "missing_terminals": 0,
+      "outbox_provider_retries": 0,
+      "outcome_counts": {
+        "called_no_effect": 2500,
+        "called_unknown": 5000,
+        "effect_confirmed": 10000,
+        "not_called": 2500
+      },
+      "partial_transactions": 0,
+      "passed": true,
+      "post_fence_unknowns": 5000,
+      "recovered_command_matches": 2500,
+      "second_commands": 0,
+      "second_dispatch_slots": 0,
+      "second_provider_calls": 0,
+      "seed": 2026071905,
+      "stale_token_rejections": 2500,
+      "stale_token_writes": 0,
+      "summary_outboxes": 20000,
+      "terminal_commands": 20000,
+      "unauthorized_commands": 0,
+      "unexpected_exceptions": 0,
+      "unknown_redispatches": 0,
+      "violations": [],
+      "wrong_command_claims": 0,
+      "wrong_delivery_targets": 0
+    }
+  },
+  "red_evidence_schemas": {
+    "red-result-atomic-command.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_classes": {
+                  "items": [
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    }
+                  ],
+                  "type": "list"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_classes": {
+                  "items": [
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    }
+                  ],
+                  "type": "list"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "error_count": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_classes": {
+          "items": [
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            }
+          ],
+          "type": "list"
+        },
+        "failure_count": {
+          "type": "int"
+        },
+        "fixture_class": {
+          "type": "str"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "postgresql_executed": {
+          "type": "bool"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "sqlite_mode": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-claims.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "test_count": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "error_count": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_class": {
+          "type": "str"
+        },
+        "failure_count": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "postgresql_executed": {
+          "type": "bool"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "test_count": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-closeout.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "str"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "str"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "live_delivery_calls": {
+          "type": "int"
+        },
+        "live_provider_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-domain-outcomes.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_class": {
+          "type": "str"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "subsequent_red": {
+          "fields": {
+            "exit_code": {
+              "type": "int"
+            },
+            "expected_failure": {
+              "type": "bool"
+            },
+            "failure_class": {
+              "type": "str"
+            },
+            "output_sha256": {
+              "type": "str"
+            },
+            "raw_output_versioned": {
+              "type": "bool"
+            },
+            "stage": {
+              "type": "str"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-execution-types.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_class": {
+          "type": "str"
+        },
+        "observed_error": {
+          "type": "str"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "red_scope": {
+          "items": [
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            }
+          ],
+          "type": "list"
+        },
+        "review_regression": {
+          "fields": {
+            "command": {
+              "type": "str"
+            },
+            "exit_code": {
+              "type": "int"
+            },
+            "expected_failure": {
+              "type": "bool"
+            },
+            "failure_classes": {
+              "items": [
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                }
+              ],
+              "type": "list"
+            },
+            "output_sha256": {
+              "type": "str"
+            },
+            "raw_output_versioned": {
+              "type": "bool"
+            }
+          },
+          "type": "object"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "synthetic_fixtures_only": {
+          "type": "bool"
+        },
+        "task": {
+          "type": "str"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-faults.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_cause": {
+          "type": "str"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-mutations.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "mutants_killed": {
+                  "type": "int"
+                },
+                "mutants_run": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "survivors": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "str"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "live_provider_calls": {
+          "type": "int"
+        },
+        "mutated_working_tree": {
+          "type": "bool"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-outbox.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_cause": {
+          "type": "str"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-properties.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "str"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "live_provider_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-reconciliation.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "str"
+        },
+        "external_capabilities": {
+          "items": [],
+          "type": "list"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-schema.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_class": {
+          "type": "str"
+        },
+        "observed_error": {
+          "type": "str"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "postgresql_executed": {
+          "type": "bool"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "red_scope": {
+          "items": [
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            }
+          ],
+          "type": "list"
+        },
+        "review_regression": {
+          "fields": {
+            "command": {
+              "type": "str"
+            },
+            "exit_code": {
+              "type": "int"
+            },
+            "expected_failure": {
+              "type": "bool"
+            },
+            "failure_classes": {
+              "items": [
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                }
+              ],
+              "type": "list"
+            },
+            "output_sha256": {
+              "type": "str"
+            },
+            "raw_output_versioned": {
+              "type": "bool"
+            }
+          },
+          "type": "object"
+        },
+        "review_regression_2": {
+          "fields": {
+            "command": {
+              "type": "str"
+            },
+            "exit_code": {
+              "type": "int"
+            },
+            "expected_failure": {
+              "type": "bool"
+            },
+            "failure_classes": {
+              "items": [
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                }
+              ],
+              "type": "list"
+            },
+            "failure_count": {
+              "type": "int"
+            },
+            "output_sha256": {
+              "type": "str"
+            },
+            "raw_output_versioned": {
+              "type": "bool"
+            },
+            "source_sha": {
+              "type": "str"
+            }
+          },
+          "type": "object"
+        },
+        "review_regression_3": {
+          "fields": {
+            "command": {
+              "type": "str"
+            },
+            "exit_code": {
+              "type": "int"
+            },
+            "expected_failure": {
+              "type": "bool"
+            },
+            "failure_classes": {
+              "items": [
+                {
+                  "type": "str"
+                },
+                {
+                  "type": "str"
+                }
+              ],
+              "type": "list"
+            },
+            "failure_count": {
+              "type": "int"
+            },
+            "output_sha256": {
+              "type": "str"
+            },
+            "raw_output_versioned": {
+              "type": "bool"
+            },
+            "source_sha": {
+              "type": "str"
+            }
+          },
+          "type": "object"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "sqlite_target": {
+          "type": "str"
+        },
+        "synthetic_fixtures_only": {
+          "type": "bool"
+        },
+        "task": {
+          "type": "str"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-store-core.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_classes": {
+                  "items": [
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    },
+                    {
+                      "type": "str"
+                    }
+                  ],
+                  "type": "list"
+                },
+                "failure_count": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_head": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "error_count": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "expected_failure": {
+                  "type": "bool"
+                },
+                "failure_class": {
+                  "type": "str"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "bool"
+        },
+        "failure_class": {
+          "type": "str"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "observed_error": {
+          "type": "str"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "postgresql_executed": {
+          "type": "bool"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "red_scope": {
+          "items": [
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            },
+            {
+              "type": "str"
+            }
+          ],
+          "type": "list"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "sqlite_target": {
+          "type": "str"
+        },
+        "synthetic_fixtures_only": {
+          "type": "bool"
+        },
+        "task": {
+          "type": "str"
+        }
+      },
+      "type": "object"
+    },
+    "red-result-worker.json": {
+      "fields": {
+        "command": {
+          "type": "str"
+        },
+        "controller_regressions": {
+          "items": [
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "fields": {
+                "base_sha": {
+                  "type": "str"
+                },
+                "command": {
+                  "type": "str"
+                },
+                "errors": {
+                  "type": "int"
+                },
+                "exit_code": {
+                  "type": "int"
+                },
+                "failures": {
+                  "type": "int"
+                },
+                "name": {
+                  "type": "str"
+                },
+                "output_sha256": {
+                  "type": "str"
+                },
+                "raw_output_versioned": {
+                  "type": "bool"
+                },
+                "tests_run": {
+                  "type": "int"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "type": "list"
+        },
+        "errors": {
+          "type": "int"
+        },
+        "exit_code": {
+          "type": "int"
+        },
+        "expected_failure": {
+          "type": "str"
+        },
+        "external_capabilities": {
+          "items": [],
+          "type": "list"
+        },
+        "failures": {
+          "type": "int"
+        },
+        "live_database_calls": {
+          "type": "int"
+        },
+        "network_calls": {
+          "type": "int"
+        },
+        "output_sha256": {
+          "type": "str"
+        },
+        "phase": {
+          "type": "str"
+        },
+        "provider_calls": {
+          "type": "int"
+        },
+        "raw_output_versioned": {
+          "type": "bool"
+        },
+        "rollout": {
+          "type": "str"
+        },
+        "schema_version": {
+          "type": "int"
+        },
+        "source_sha": {
+          "type": "str"
+        },
+        "task": {
+          "type": "str"
+        },
+        "tests_run": {
+          "type": "int"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "schema_version": 1,
+  "seed": 2026071905,
   "workflow": {
     "path": ".github/workflows/phase5.yml",
     "sha256": "5fc36878e49b7d64d2dc8fb8aafeea65b926a7d132c6c329f4926494e86d89fc"

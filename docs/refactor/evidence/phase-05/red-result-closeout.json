@@ -72,6 +72,17 @@
       "errors": 2,
       "output_sha256": "6eb82a94775561483988232b9bb1379f86d40198007fedf40944b68361573f6f",
       "raw_output_versioned": false
+    },
+    {
+      "name": "review_metric_and_red_closed_schemas",
+      "base_sha": "65c1b5a073cc2d9426a17cd7781007f5be9ec1d9",
+      "command": "python3 -m unittest tests.test_phase5_closeout.Phase5CloseoutContractTests.test_metrics_reject_missing_extra_and_false_zero_live_fields tests.test_phase5_closeout.Phase5CloseoutContractTests.test_red_evidence_rejects_missing_extra_and_false_integer_fields -v",
+      "exit_code": 1,
+      "tests_run": 2,
+      "failures": 13,
+      "errors": 0,
+      "output_sha256": "8bc7b15cc118b020bee3682cd1fbec8107262620894a5d225bdbdbc1498f1233",
+      "raw_output_versioned": false
     }
   ]
 }

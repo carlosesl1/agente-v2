@@ -77,3 +77,10 @@ Não. Cada schedule registra `provider_calls_setup_baseline`, baseline depois do
 exit 91, final e `provider_calls_during_recovery`. Em `during_dispatch` e
 `after_dispatch_before_outcome`, os valores exatos são setup 0, baseline 1,
 final 1 e delta de recovery 0.
+
+### 16. Métricas ou REDs podem trocar inteiro por boolean/float/string ou omitir campos?
+
+Não. O contrato versiona schemas recursivos fechados para os dois envelopes de
+métricas e os 13 arquivos RED. O validator exige identidade exata de tipos e
+chaves em todos os níveis, inteiro zero para counters live/network, booleanos
+exatos para flags negativas e proveniência completa para cada `exit_code`.

@@ -40,9 +40,12 @@ Design e plano TDD versionados:
 - delivery possui lease/fencing próprios e não altera o ledger comercial.
 - `operational-gate-contract.json` é a autoridade independente e versionada
   para 20.000 properties, 17 fault points, nove restart points, 20 mutantes,
-  schemas de schedules/rounds e o workflow canônico;
+  schemas de schedules/rounds, schemas recursivos fechados das métricas e dos
+  13 arquivos RED, e o workflow canônico;
 - o validator reconstrói schedules, contagens, identidades e pós-condições a
-  partir das linhas, sem confiar em `result=passed` ou agregados declarados.
+  partir das linhas, sem confiar em `result=passed` ou agregados declarados;
+- counters live/network exigem inteiro zero exato, flags negativas exigem
+  booleano `false`, e proveniência RED rejeita campos ausentes ou extras.
 
 ## Gate de saída em execução
 

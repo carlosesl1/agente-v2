@@ -23,9 +23,11 @@ from scripts.validate_phase5 import (
     SAFETY_PROPERTY_COUNTERS,
     check_fault_payloads,
     check_live_execution_claims,
+    check_metrics,
     check_mutation_payload,
     check_package_purity,
     check_property_payload,
+    check_red_evidence,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -266,6 +268,82 @@ class Phase5CloseoutContractTests(unittest.TestCase):
             with patch.object(phase5_validator, "EVIDENCE", evidence):
                 phase5_validator.check_metrics(failures)
             self.assertTrue(failures, "metrics without schema version false-greened")
+
+    def test_metrics_reject_missing_extra_and_false_zero_live_fields(self) -> None:
+        names = ("validation-result.json", "performance-result.json")
+        originals = {name: self._evidence(name) for name in names}
+        mutations = []
+        for value in (False, 0.0, "0"):
+            payloads = copy.deepcopy(originals)
+            payloads["validation-result.json"]["network_calls"] = value
+            mutations.append((f"network_calls={value!r}", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["validation-result.json"].pop("live_provider_calls")
+        mutations.append(("missing live_provider_calls", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["performance-result.json"]["unexpected"] = 0
+        mutations.append(("extra performance key", payloads))
+        for value in (0, 0.0, "false"):
+            payloads = copy.deepcopy(originals)
+            payloads["performance-result.json"]["postgresql_executed"] = value
+            mutations.append((f"postgresql_executed={value!r}", payloads))
+
+        for label, payloads in mutations:
+            with self.subTest(label=label), tempfile.TemporaryDirectory(
+                prefix="phase5-metrics-schema-"
+            ) as directory:
+                evidence = Path(directory)
+                for name, payload in payloads.items():
+                    (evidence / name).write_text(json.dumps(payload), encoding="utf-8")
+                failures: list[str] = []
+                with patch.object(phase5_validator, "EVIDENCE", evidence):
+                    check_metrics(failures)
+                self.assertTrue(failures, f"{label} false-greened")
+
+    def test_red_evidence_rejects_missing_extra_and_false_integer_fields(self) -> None:
+        source = ROOT / "docs/refactor/evidence/phase-05"
+        originals = {
+            path.name: json.loads(path.read_text(encoding="utf-8"))
+            for path in source.glob("red-result-*.json")
+        }
+        mutations = []
+        for value in (False, 0.0, "0"):
+            payloads = copy.deepcopy(originals)
+            payloads["red-result-closeout.json"]["network_calls"] = value
+            mutations.append((f"top network_calls={value!r}", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["red-result-closeout.json"].pop("network_calls")
+        mutations.append(("missing top network_calls", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["red-result-closeout.json"]["unexpected"] = 0
+        mutations.append(("extra top key", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["red-result-closeout.json"]["controller_regressions"][4].pop(
+            "tests_run"
+        )
+        mutations.append(("missing nested tests_run", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["red-result-closeout.json"]["controller_regressions"][4][
+            "unexpected"
+        ] = 0
+        mutations.append(("extra nested key", payloads))
+        payloads = copy.deepcopy(originals)
+        payloads["red-result-closeout.json"]["controller_regressions"][4][
+            "errors"
+        ] = True
+        mutations.append(("nested errors=true", payloads))
+
+        for label, payloads in mutations:
+            with self.subTest(label=label), tempfile.TemporaryDirectory(
+                prefix="phase5-red-schema-"
+            ) as directory:
+                evidence = Path(directory)
+                for name, payload in payloads.items():
+                    (evidence / name).write_text(json.dumps(payload), encoding="utf-8")
+                failures: list[str] = []
+                with patch.object(phase5_validator, "EVIDENCE", evidence):
+                    check_red_evidence(failures)
+                self.assertTrue(failures, f"{label} false-greened")
 
     def test_phase5_workflow_splits_heavy_gates_into_independent_jobs(self) -> None:
         workflow = (ROOT / ".github/workflows/phase5.yml").read_text(encoding="utf-8")
