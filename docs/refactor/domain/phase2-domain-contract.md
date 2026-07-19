@@ -21,6 +21,7 @@ offered
 selected
 ready_to_summarize
 awaiting_confirmation
+awaiting_adjustment
 execution_queued
 executing
 succeeded
@@ -80,6 +81,12 @@ draft_version
 subject_signature
 operation
 ```
+
+Uma decisão `adjust` posterior ao resumo vigente move o workflow para
+`awaiting_adjustment`, desarmando imediatamente aquele resumo. Somente um
+`draft_adjusted` com assinatura semântica diferente cria `version + 1` e retorna
+a `ready_to_summarize`; ajuste sem mudança é rejeitado. Confirmações da versão
+antiga não têm handler nesse estado e emitem zero comandos.
 
 ## Assinatura canônica
 

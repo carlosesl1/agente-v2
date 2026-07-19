@@ -14,6 +14,7 @@ Gerada deterministicamente de `reservation_domain.reducer`.
 | `selected` | evaluate | ignore | ignore | evaluate | ignore | ignore | ignore | ignore | ignore | ignore | evaluate | evaluate |
 | `ready_to_summarize` | evaluate | ignore | ignore | ignore | evaluate | evaluate | ignore | ignore | ignore | ignore | evaluate | evaluate |
 | `awaiting_confirmation` | evaluate | ignore | ignore | ignore | evaluate | ignore | evaluate | ignore | ignore | ignore | evaluate | evaluate |
+| `awaiting_adjustment` | evaluate | ignore | ignore | ignore | evaluate | ignore | ignore | ignore | ignore | ignore | evaluate | evaluate |
 | `execution_queued` | ignore | ignore | ignore | ignore | ignore | ignore | ignore | evaluate | ignore | ignore | ignore | ignore |
 | `executing` | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | evaluate | ignore | ignore | ignore |
 | `succeeded` | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore |
@@ -24,6 +25,6 @@ Gerada deterministicamente de `reservation_domain.reducer`.
 | `cancelled` | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore |
 | `expired` | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore | ignore |
 
-Estados discriminados: **15**.
+Estados discriminados: **16**.
 Eventos discriminados: **12**.
-Pares com política explícita: **180**.
+Pares com política explícita: **192**.

@@ -100,6 +100,7 @@ class WorkflowPhase(str, Enum):
     SELECTED = "selected"
     READY_TO_SUMMARIZE = "ready_to_summarize"
     AWAITING_CONFIRMATION = "awaiting_confirmation"
+    AWAITING_ADJUSTMENT = "awaiting_adjustment"
     EXECUTION_QUEUED = "execution_queued"
     EXECUTING = "executing"
     SUCCEEDED = "succeeded"
@@ -785,6 +786,26 @@ class AwaitingConfirmationState(WorkflowState):
 
 
 @dataclass(frozen=True, slots=True)
+class AwaitingAdjustmentState(WorkflowState):
+    TYPE: ClassVar[str] = "awaiting_adjustment"
+    PHASE: ClassVar[WorkflowPhase] = WorkflowPhase.AWAITING_ADJUSTMENT
+    meta: StateMeta
+    draft: CommercialDraft
+    summary: SummaryPresented
+    decision: ConfirmationRecord
+
+    def __post_init__(self) -> None:
+        _validate_summary_binding(self.draft, self.summary)
+        if (
+            self.decision.decision is not ConfirmationDecisionKind.ADJUST
+            or self.decision.target_draft_version != self.draft.version
+            or self.decision.subject_signature != self.draft.subject_signature
+            or self.decision.decided_at <= self.summary.presented_at
+        ):
+            raise ValueError("adjustment decision does not bind to presented draft")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionQueuedState(WorkflowState):
     TYPE: ClassVar[str] = "execution_queued"
     PHASE: ClassVar[WorkflowPhase] = WorkflowPhase.EXECUTION_QUEUED
@@ -940,6 +961,7 @@ State: TypeAlias = (
     | SelectedState
     | ReadyToSummarizeState
     | AwaitingConfirmationState
+    | AwaitingAdjustmentState
     | ExecutionQueuedState
     | ExecutingState
     | SucceededState
@@ -972,8 +994,13 @@ def validate_state_consistency(state: State) -> None:
     elif state.meta.command_ids:
         raise ValueError("pre-command or non-command state cannot record command IDs")
     internal_times: list[datetime] = []
-    if isinstance(state, (ReadyToSummarizeState, AwaitingConfirmationState)):
+    if isinstance(
+        state,
+        (ReadyToSummarizeState, AwaitingConfirmationState, AwaitingAdjustmentState),
+    ):
         internal_times.append(state.draft.created_at)
+    if isinstance(state, AwaitingAdjustmentState):
+        internal_times.extend((state.summary.presented_at, state.decision.decided_at))
     if isinstance(state, (ExecutionQueuedState, ExecutingState)):
         internal_times.extend(
             (
@@ -1192,6 +1219,7 @@ STATE_TYPES = (
     SelectedState,
     ReadyToSummarizeState,
     AwaitingConfirmationState,
+    AwaitingAdjustmentState,
     ExecutionQueuedState,
     ExecutingState,
     SucceededState,
@@ -1249,6 +1277,7 @@ __all__ = [
     "SelectedState",
     "ReadyToSummarizeState",
     "AwaitingConfirmationState",
+    "AwaitingAdjustmentState",
     "ExecutionQueuedState",
     "ExecutingState",
     "SucceededState",

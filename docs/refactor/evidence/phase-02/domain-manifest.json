@@ -12,14 +12,14 @@
       "sha256": "cc9095fdfd9cd929b17a470b388075fc53cef9813b4063a1650a4c78455ff0d2"
     },
     {
-      "bytes": 21221,
+      "bytes": 21499,
       "path": "reservation_domain/properties.py",
-      "sha256": "932512906ef25a93b240ede316ff1642b567966ac15e746b344e99937417b7aa"
+      "sha256": "0e73659500edfb689bad36f1ac78b3f6e675468571f517bc9accb13487ac00d0"
     },
     {
-      "bytes": 21203,
+      "bytes": 21793,
       "path": "reservation_domain/reducer.py",
-      "sha256": "16a67b455ce103b9efefeb7ef35abb59a10caf73d8873e69a32a0c370e16c0dc"
+      "sha256": "884257d8b5e6e57f2d4139d63828b65d4d0bfc524ddd0da4df09f22e1a8034ec"
     },
     {
       "bytes": 8204,
@@ -32,14 +32,14 @@
       "sha256": "5884d6191f03669071efde7b2e9586bc7ae01e2e87e01b2c04fd425added8dff"
     },
     {
-      "bytes": 42160,
+      "bytes": 43298,
       "path": "reservation_domain/types.py",
-      "sha256": "1d17b235fbe78e0c9de21e1cae46bd3f1f8d16353736aee2c9aa5ebb74aa534d"
+      "sha256": "03bec7bf4f4da0193bf67636c9e8aba65f6d4d93f433817b620234baafcc58ca"
     }
   ],
   "hash_algorithm": "sha256",
   "phase": "phase-02-typed-domain-and-reducer",
   "schema_version": 1,
-  "state_count": 15,
-  "state_event_pairs": 180
+  "state_count": 16,
+  "state_event_pairs": 192
 }

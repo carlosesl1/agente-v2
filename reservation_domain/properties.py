@@ -10,6 +10,7 @@ import random
 from .reducer import reduce
 from .types import (
     AddOn,
+    AwaitingAdjustmentState,
     AwaitingConfirmationState,
     CollectingState,
     ConfirmationDecisionKind,
@@ -219,6 +220,13 @@ def _guided_event(sequence: int, step: int, state, now, rng: random.Random):
             decision=decision,
             target_draft_version=state.draft.version,
             subject_signature=state.draft.subject_signature,
+        )
+    if isinstance(state, AwaitingAdjustmentState):
+        return DraftAdjusted(
+            event_id=event_id,
+            occurred_at=now,
+            customer=_customer(sequence, step + 1),
+            terms=_terms(sequence, step + 1),
         )
     if isinstance(state, ExecutionQueuedState):
         return ExecutionStarted(

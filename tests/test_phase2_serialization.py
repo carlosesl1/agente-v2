@@ -8,6 +8,7 @@ import unittest
 
 from reservation_domain import (
     AddOn,
+    AwaitingAdjustmentState,
     ConfirmationDecisionKind,
     ConfirmationReceived,
     CustomerFacts,
@@ -241,6 +242,19 @@ def all_domain_samples():
     states.append(reduce(initial, cancelled).state)
     states.append(reduce(initial, expired).state)
 
+    awaiting = states[5]
+    adjustment_decision = ConfirmationReceived(
+        event_id="event-serializer-adjustment-decision",
+        occurred_at=T0 + timedelta(seconds=7),
+        confirmation_event_id="confirmation-serializer-adjustment",
+        decision=ConfirmationDecisionKind.ADJUST,
+        target_draft_version=awaiting.draft.version,
+        subject_signature=awaiting.draft.subject_signature,
+    )
+    adjustment_state = reduce(awaiting, adjustment_decision).state
+    assert isinstance(adjustment_state, AwaitingAdjustmentState)
+    states.append(adjustment_state)
+
     ready = states[4]
     adjusted = DraftAdjusted(
         event_id="event-serializer-adjusted",
@@ -253,6 +267,7 @@ def all_domain_samples():
         (
             *events,
             adjusted,
+            adjustment_decision,
             execution_started,
             execution_finished,
             manual_review,

@@ -16,6 +16,7 @@ from .serialization import dumps_event
 from .types import (
     EVENT_TYPES,
     STATE_TYPES,
+    AwaitingAdjustmentState,
     AwaitingConfirmationState,
     CancelledState,
     CollectingState,
@@ -261,6 +262,7 @@ _PRE_COMMAND_STATES = (
     SelectedState,
     ReadyToSummarizeState,
     AwaitingConfirmationState,
+    AwaitingAdjustmentState,
 )
 
 
@@ -374,9 +376,15 @@ def _request_draft(state: State, event: Event) -> _Decision:
     )
 
 
-@_register((ReadyToSummarizeState, AwaitingConfirmationState), DraftAdjusted)
+@_register(
+    (ReadyToSummarizeState, AwaitingConfirmationState, AwaitingAdjustmentState),
+    DraftAdjusted,
+)
 def _adjust_draft(state: State, event: Event) -> _Decision:
-    assert isinstance(state, (ReadyToSummarizeState, AwaitingConfirmationState))
+    assert isinstance(
+        state,
+        (ReadyToSummarizeState, AwaitingConfirmationState, AwaitingAdjustmentState),
+    )
     assert isinstance(event, DraftAdjusted)
     if not _terms_match_component_currencies(state.draft.components, event.terms):
         return _Decision(
@@ -392,6 +400,12 @@ def _adjust_draft(state: State, event: Event) -> _Decision:
         customer=event.customer,
         terms=event.terms,
     )
+    if draft.subject_signature == state.draft.subject_signature:
+        return _Decision(
+            state=state,
+            status=TransitionStatus.REJECTED,
+            reason="adjustment_did_not_change_subject",
+        )
     return _Decision(
         state=ReadyToSummarizeState(meta=state.meta, draft=draft),
         status=TransitionStatus.APPLIED,
@@ -471,18 +485,22 @@ def _receive_confirmation(state: State, event: Event) -> _Decision:
             status=TransitionStatus.APPLIED,
             reason="current_draft_rejected",
         )
-    if event.decision in {
-        ConfirmationDecisionKind.ADJUST,
-        ConfirmationDecisionKind.AMBIGUOUS,
-    }:
+    if event.decision is ConfirmationDecisionKind.ADJUST:
+        return _Decision(
+            state=AwaitingAdjustmentState(
+                meta=state.meta,
+                draft=state.draft,
+                summary=state.summary,
+                decision=record,
+            ),
+            status=TransitionStatus.APPLIED,
+            reason="lead_requested_adjustment",
+        )
+    if event.decision is ConfirmationDecisionKind.AMBIGUOUS:
         return _Decision(
             state=state,
             status=TransitionStatus.APPLIED,
-            reason=(
-                "lead_requested_adjustment"
-                if event.decision is ConfirmationDecisionKind.ADJUST
-                else "confirmation_ambiguous"
-            ),
+            reason="confirmation_ambiguous",
         )
     command = _command_for(
         workflow_id=state.meta.workflow_id,
@@ -627,6 +645,7 @@ _EXPLICIT_POLICY_CODES = {
     "selected": "EIIEIIIIIIEE",
     "ready_to_summarize": "EIIIEEIIIIEE",
     "awaiting_confirmation": "EIIIEIEIIIEE",
+    "awaiting_adjustment": "EIIIEIIIIIEE",
     "execution_queued": "IIIIIIIEIIII",
     "executing": "IIIIIIIIEIII",
     "succeeded": "IIIIIIIIIIII",
