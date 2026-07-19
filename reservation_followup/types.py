@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
@@ -318,6 +318,18 @@ class PaymentSubject:
         original_anchor = anchor
         if type(anchor.reservation_outcome) is not ExecutionOutcome:
             raise ValueError("anchor outcome must be the exact ExecutionOutcome type")
+        if (
+            type(anchor.confirmed_at) is not datetime
+            or anchor.confirmed_at.utcoffset() != timedelta(0)
+            or (
+                anchor.payment_deadline is not None
+                and (
+                    type(anchor.payment_deadline) is not datetime
+                    or anchor.payment_deadline.utcoffset() != timedelta(0)
+                )
+            )
+        ):
+            raise ValueError("anchor timestamps must be canonical UTC")
         clean_outcome = ExecutionOutcome(
             command_id=anchor.reservation_outcome.command_id,
             certainty=anchor.reservation_outcome.certainty,
@@ -381,10 +393,12 @@ class PaymentSubject:
             or selected_target != anchor.payment_target_id
         )
         expected_version = 2 if economics_changed else 1
+        selected_version = expected_version
         if payment_version is not None:
             _require_positive_int(payment_version, "payment_subject.payment_version")
-            if payment_version != expected_version:
-                raise ValueError("payment_version does not match the economic version")
+            if payment_version == 1 and economics_changed:
+                raise ValueError("payment_version 1 cannot contain revised economics")
+            selected_version = payment_version
         signature = _economic_signature(
             amount_minor=selected_amount,
             currency=selected_currency,
@@ -394,7 +408,7 @@ class PaymentSubject:
         )
         return cls(
             payment_id=payment_id,
-            payment_version=expected_version,
+            payment_version=selected_version,
             confirmed_reservation_anchor=anchor,
             amount_minor=selected_amount,
             currency=selected_currency,
@@ -453,9 +467,11 @@ class PaymentSubject:
             and self.business_unit is anchor.business_unit
             and payment_target_id == anchor.payment_target_id
         )
-        if economics_match_anchor and self.payment_version != 1:
-            raise ValueError("anchor economics require payment_version 1")
-        if not economics_match_anchor and self.payment_version < 2:
+        if economics_match_anchor and self.payment_version == 2:
+            raise ValueError(
+                "payment_version 2 requires economics revised from the anchor"
+            )
+        if not economics_match_anchor and self.payment_version == 1:
             raise ValueError("revised economics require payment_version >= 2")
         object.__setattr__(self, "payment_id", payment_id)
         object.__setattr__(self, "receiver_profile_id", receiver_profile_id)

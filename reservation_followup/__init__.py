@@ -3,6 +3,7 @@
 from .serialization import from_wire_json, semantic_hash, to_wire_json
 from .payment import (
     PaymentEvidence,
+    PaymentEvidenceTrust,
     PixProofStatus,
     PixVisualEvidence,
     StripeEventType,
@@ -12,6 +13,7 @@ from .payment import (
     evidence_claim_key,
     stripe_target_fingerprint,
     validate_evidence,
+    wise_target_fingerprint,
 )
 from .handoff import (
     HandoffAcknowledged,
@@ -65,8 +67,10 @@ __all__ = [
     "VerifiedWiseCredit",
     "VerifiedStripeEvent",
     "PaymentEvidence",
+    "PaymentEvidenceTrust",
     "VerifiedPaymentEvidence",
     "stripe_target_fingerprint",
+    "wise_target_fingerprint",
     "evidence_claim_key",
     "validate_evidence",
     "HandoffReasonCode",

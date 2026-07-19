@@ -7,7 +7,7 @@ contacts a provider, bank, transport, process, or persistence layer.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
@@ -22,8 +22,8 @@ from .types import (
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
-_E2E_RE = re.compile(r"^[A-Z0-9]{16,64}$")
-_PLACEHOLDER_PARTS = ("PLACEHOLDER", "EXAMPLE", "SAMPLE", "DUMMY", "TEST")
+_E2E_RE = re.compile(r"^E[0-9]{8}[0-9]{8}[A-Z0-9]{11}$")
+_STRIPE_EVENT_RE = re.compile(r"^evt_[A-Za-z0-9]{16,64}$")
 
 
 class PixProofStatus(str, Enum):
@@ -83,13 +83,32 @@ def _canonical_digest(payload: dict[str, object]) -> str:
     ).hexdigest()
 
 
-def _has_identity_entropy(value: str) -> bool:
-    upper = value.upper()
-    return (
-        len(set(upper)) >= 6
-        and not any(part in upper for part in _PLACEHOLDER_PARTS)
-        and upper != "0" * len(upper)
+def _is_high_entropy_digest(value: str) -> bool:
+    if type(value) is not str or not _HASH_RE.fullmatch(value):
+        return False
+    if len(set(value)) < 10:
+        return False
+    return not any(
+        value == (value[:period] * ((len(value) + period - 1) // period))[: len(value)]
+        for period in range(1, 9)
     )
+
+
+def _is_canonical_e2e(value: str) -> bool:
+    if type(value) is not str or not _E2E_RE.fullmatch(value):
+        return False
+    try:
+        datetime.strptime(value[9:17], "%Y%m%d")
+    except ValueError:
+        return False
+    variable = value[17:]
+    return len(set(variable)) >= 6
+
+
+def _is_canonical_stripe_event_id(value: str) -> bool:
+    if type(value) is not str or not _STRIPE_EVENT_RE.fullmatch(value):
+        return False
+    return len(set(value[4:])) >= 8
 
 
 def stripe_target_fingerprint(payment_target_id: str) -> str:
@@ -97,6 +116,30 @@ def stripe_target_fingerprint(payment_target_id: str) -> str:
 
     target = _require_id(payment_target_id, "payment_target_id")
     return hashlib.sha256(f"stripe-payment-target:{target}".encode("utf-8")).hexdigest()
+
+
+def wise_target_fingerprint(payment_target_id: str) -> str:
+    """Return the domain-separated Wise reference binding for one target."""
+
+    target = _require_id(payment_target_id, "payment_target_id")
+    return hashlib.sha256(f"wise-payment-target:{target}".encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentEvidenceTrust:
+    pix_receiver_profile_id: str
+    wise_signer_profile_id: str
+    wise_account_profile_id: str
+    stripe_account_profile_id: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "pix_receiver_profile_id",
+            "wise_signer_profile_id",
+            "wise_account_profile_id",
+            "stripe_account_profile_id",
+        ):
+            _require_id(getattr(self, field_name), f"payment_evidence_trust.{field_name}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +163,7 @@ class PixVisualEvidence:
         )
         if type(self.proof_status) is not PixProofStatus:
             raise ValueError("pix.proof_status must be an exact PixProofStatus")
-        if type(self.normalized_e2e) is not str or not _E2E_RE.fullmatch(
-            self.normalized_e2e
-        ):
+        if not _is_canonical_e2e(self.normalized_e2e):
             raise ValueError("pix.normalized_e2e must use the closed canonical format")
         object.__setattr__(
             self,
@@ -187,7 +228,8 @@ class VerifiedStripeEvent:
             self.stripe_account_profile_id,
             "stripe.stripe_account_profile_id",
         )
-        _require_id(self.event_id, "stripe.event_id")
+        if not _is_canonical_stripe_event_id(self.event_id):
+            raise ValueError("stripe.event_id must use the canonical provider format")
         _require_hash(
             self.payment_intent_fingerprint,
             "stripe.payment_intent_fingerprint",
@@ -262,19 +304,44 @@ def evidence_claim_key(evidence: PaymentEvidence) -> str:
     """Return a global claim identity independent of target/caller keys."""
 
     clean = _revalidate_evidence(evidence)
+    _require_intrinsic_integrity(clean)
     if type(clean) is PixVisualEvidence:
-        if not _has_identity_entropy(clean.normalized_e2e):
-            raise ValueError("Pix E2E has insufficient claim identity entropy")
         return f"pix:{clean.normalized_e2e}"
     if type(clean) is VerifiedWiseCredit:
-        if not _has_identity_entropy(clean.transaction_fingerprint):
-            raise ValueError("Wise transaction has insufficient claim identity entropy")
         return f"wise:{clean.transaction_fingerprint}"
     if type(clean) is VerifiedStripeEvent:
-        if not _has_identity_entropy(clean.event_id):
-            raise ValueError("Stripe event has insufficient claim identity entropy")
         return f"stripe:{clean.stripe_account_profile_id}:{clean.event_id}"
     raise TypeError("unsupported payment evidence type")  # pragma: no cover
+
+
+def _require_intrinsic_integrity(evidence: PaymentEvidence) -> None:
+    if type(evidence) is PixVisualEvidence:
+        if evidence.proof_status not in (PixProofStatus.PAID, PixProofStatus.COMPLETED):
+            raise ValueError("Pix claim requires completed/paid evidence")
+        if not _is_canonical_e2e(evidence.normalized_e2e):
+            raise ValueError("Pix claim requires canonical E2E identity")
+        if evidence.evidence_hash != _pix_evidence_hash(evidence):
+            raise ValueError("Pix claim evidence hash is not canonical")
+        return
+    if type(evidence) is VerifiedWiseCredit:
+        if evidence.signature_verified is not True:
+            raise ValueError("Wise claim requires a verified signature")
+        if not _is_high_entropy_digest(evidence.transaction_fingerprint):
+            raise ValueError("Wise claim requires a high-entropy transaction digest")
+        if evidence.verification_hash != _wise_verification_hash(evidence):
+            raise ValueError("Wise claim verification hash is not canonical")
+        return
+    if type(evidence) is VerifiedStripeEvent:
+        if evidence.signature_verified is not True:
+            raise ValueError("Stripe claim requires a verified signature")
+        if evidence.event_type is not StripeEventType.PAYMENT_INTENT_SUCCEEDED:
+            raise ValueError("Stripe claim requires a successful event")
+        if not _is_canonical_stripe_event_id(evidence.event_id):
+            raise ValueError("Stripe claim requires canonical event identity")
+        if evidence.verification_hash != _stripe_verification_hash(evidence):
+            raise ValueError("Stripe claim verification hash is not canonical")
+        return
+    raise TypeError("unsupported payment evidence type")
 
 
 def _revalidate_subject(subject: PaymentSubject) -> PaymentSubject:
@@ -283,6 +350,18 @@ def _revalidate_subject(subject: PaymentSubject) -> PaymentSubject:
     anchor = subject.confirmed_reservation_anchor
     if type(anchor) is not ConfirmedReservationAnchor:
         raise ValueError("subject anchor must be exact")
+    if (
+        type(anchor.confirmed_at) is not datetime
+        or anchor.confirmed_at.utcoffset() != timedelta(0)
+        or (
+            anchor.payment_deadline is not None
+            and (
+                type(anchor.payment_deadline) is not datetime
+                or anchor.payment_deadline.utcoffset() != timedelta(0)
+            )
+        )
+    ):
+        raise ValueError("subject anchor timestamps must be canonical UTC")
     clean_anchor = ConfirmedReservationAnchor(
         **{field.name: getattr(anchor, field.name) for field in fields(anchor)}
     )
@@ -307,11 +386,29 @@ def _revalidate_evidence(evidence: PaymentEvidence) -> PaymentEvidence:
     evidence_type = type(evidence)
     if evidence_type not in (PixVisualEvidence, VerifiedWiseCredit, VerifiedStripeEvent):
         raise TypeError("evidence must be an exact PaymentEvidence type")
+    timestamp = (
+        evidence.credited_at
+        if evidence_type is VerifiedWiseCredit
+        else evidence.observed_at
+    )
+    if type(timestamp) is not datetime or timestamp.utcoffset() != timedelta(0):
+        raise ValueError("payment evidence timestamp must be canonical UTC")
     clean = evidence_type(
         **{field.name: getattr(evidence, field.name) for field in fields(evidence)}
     )
     if clean != evidence:
         raise ValueError("payment evidence contains noncanonical values")
+    return clean
+
+
+def _revalidate_trust(trust: PaymentEvidenceTrust) -> PaymentEvidenceTrust:
+    if type(trust) is not PaymentEvidenceTrust:
+        raise TypeError("trust must be the exact PaymentEvidenceTrust type")
+    clean = PaymentEvidenceTrust(
+        **{field.name: getattr(trust, field.name) for field in fields(trust)}
+    )
+    if clean != trust:
+        raise ValueError("payment evidence trust contains noncanonical values")
     return clean
 
 
@@ -330,42 +427,60 @@ def _validate_window(
         raise ValueError("payment evidence is outside the configured window")
 
 
-def _validate_pix(subject: PaymentSubject, evidence: PixVisualEvidence) -> str:
+def _validate_pix(
+    subject: PaymentSubject,
+    evidence: PixVisualEvidence,
+    trust: PaymentEvidenceTrust,
+) -> str:
     if evidence.proof_amount_minor != subject.amount_minor:
         raise ValueError("Pix proof amount does not match payment subject")
     if evidence.proof_currency != subject.currency:
         raise ValueError("Pix proof currency does not match payment subject")
-    if evidence.proof_receiver_profile_id != subject.receiver_profile_id:
+    if subject.receiver_profile_id != trust.pix_receiver_profile_id:
+        raise ValueError("payment receiver does not match trusted Pix configuration")
+    if evidence.proof_receiver_profile_id != trust.pix_receiver_profile_id:
         raise ValueError("Pix receiver profile does not match trusted configuration")
     if evidence.proof_status not in (PixProofStatus.PAID, PixProofStatus.COMPLETED):
         raise ValueError("Pix proof status is not completed/paid")
-    if not _has_identity_entropy(evidence.normalized_e2e):
-        raise ValueError("Pix E2E has insufficient identity entropy")
+    if not _is_canonical_e2e(evidence.normalized_e2e):
+        raise ValueError("Pix E2E is not canonical")
     if evidence.evidence_hash != _pix_evidence_hash(evidence):
         raise ValueError("Pix evidence hash does not match canonical evidence")
     _validate_window(subject, evidence.observed_at, require_deadline=False)
     return evidence.evidence_hash
 
 
-def _validate_wise(subject: PaymentSubject, evidence: VerifiedWiseCredit) -> str:
-    if evidence.signer_profile_id != subject.receiver_profile_id:
+def _validate_wise(
+    subject: PaymentSubject,
+    evidence: VerifiedWiseCredit,
+    trust: PaymentEvidenceTrust,
+) -> str:
+    if evidence.signer_profile_id != trust.wise_signer_profile_id:
         raise ValueError("Wise signer profile does not match trusted configuration")
-    if evidence.account_profile_id != subject.receiver_profile_id:
+    if evidence.account_profile_id != trust.wise_account_profile_id:
         raise ValueError("Wise account profile does not match trusted configuration")
     if evidence.amount_minor != subject.amount_minor or evidence.currency != subject.currency:
         raise ValueError("Wise economics do not match payment subject")
     if evidence.signature_verified is not True:
         raise ValueError("Wise evidence requires verified signature")
-    if not _has_identity_entropy(evidence.transaction_fingerprint):
+    if not _is_high_entropy_digest(evidence.transaction_fingerprint):
         raise ValueError("Wise transaction fingerprint has insufficient entropy")
+    if evidence.reference_fingerprint != wise_target_fingerprint(
+        subject.payment_target_id
+    ):
+        raise ValueError("Wise credit is ambiguous for the payment target")
     if evidence.verification_hash != _wise_verification_hash(evidence):
         raise ValueError("Wise verification hash does not match canonical evidence")
     _validate_window(subject, evidence.credited_at, require_deadline=True)
     return evidence.verification_hash
 
 
-def _validate_stripe(subject: PaymentSubject, evidence: VerifiedStripeEvent) -> str:
-    if evidence.stripe_account_profile_id != subject.receiver_profile_id:
+def _validate_stripe(
+    subject: PaymentSubject,
+    evidence: VerifiedStripeEvent,
+    trust: PaymentEvidenceTrust,
+) -> str:
+    if evidence.stripe_account_profile_id != trust.stripe_account_profile_id:
         raise ValueError("Stripe account profile does not match trusted configuration")
     if evidence.payment_intent_fingerprint != stripe_target_fingerprint(
         subject.payment_target_id
@@ -434,11 +549,13 @@ class VerifiedPaymentEvidence:
 def validate_evidence(
     subject: PaymentSubject,
     evidence: PaymentEvidence,
+    trust: PaymentEvidenceTrust,
 ) -> VerifiedPaymentEvidence:
     """Validate exact method evidence against one immutable economic subject."""
 
     clean_subject = _revalidate_subject(subject)
     clean_evidence = _revalidate_evidence(evidence)
+    clean_trust = _revalidate_trust(trust)
     if clean_subject.method is None:
         raise ValueError("payment method must be selected before evidence validation")
     expected_evidence_type = {
@@ -449,11 +566,11 @@ def validate_evidence(
     if type(clean_evidence) is not expected_evidence_type:
         raise ValueError("payment evidence type does not match selected method")
     if type(clean_evidence) is PixVisualEvidence:
-        evidence_hash = _validate_pix(clean_subject, clean_evidence)
+        evidence_hash = _validate_pix(clean_subject, clean_evidence, clean_trust)
     elif type(clean_evidence) is VerifiedWiseCredit:
-        evidence_hash = _validate_wise(clean_subject, clean_evidence)
+        evidence_hash = _validate_wise(clean_subject, clean_evidence, clean_trust)
     elif type(clean_evidence) is VerifiedStripeEvent:
-        evidence_hash = _validate_stripe(clean_subject, clean_evidence)
+        evidence_hash = _validate_stripe(clean_subject, clean_evidence, clean_trust)
     else:  # pragma: no cover - exact map above is the closed universe
         raise TypeError("unsupported payment evidence type")
     return VerifiedPaymentEvidence(
@@ -468,6 +585,7 @@ def validate_evidence(
 
 
 __all__ = [
+    "PaymentEvidenceTrust",
     "PixProofStatus",
     "StripeEventType",
     "PixVisualEvidence",
@@ -476,6 +594,7 @@ __all__ = [
     "PaymentEvidence",
     "VerifiedPaymentEvidence",
     "stripe_target_fingerprint",
+    "wise_target_fingerprint",
     "evidence_claim_key",
     "validate_evidence",
 ]
