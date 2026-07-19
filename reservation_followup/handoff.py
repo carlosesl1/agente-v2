@@ -33,6 +33,8 @@ def _require_id(value: str, field_name: str) -> str:
     normalized = value.strip()
     if not _ID_RE.fullmatch(normalized):
         raise ValueError(f"{field_name} must be an opaque identifier")
+    if normalized != value:
+        raise ValueError(f"{field_name} must be canonical without outer whitespace")
     return normalized
 
 
@@ -468,21 +470,82 @@ class HandoffWorkflow:
                 or self.conflicting_request.handoff_id == self.request.handoff_id
             ):
                 raise ValueError("conflicting request is unrelated to the workflow")
+            if self.conflicting_request.requested_at < self.request.requested_at:
+                raise ValueError("conflicting request predates the original request")
+        required_ack_failures = tuple(
+            failure
+            for failure in self.effect_failures
+            if failure.kind is HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT
+        )
+        if self.cancellation is not None:
+            terminal_times = [
+                failure.failed_at for failure in self.effect_failures
+            ]
+            if self.acknowledgement is not None:
+                terminal_times.append(self.acknowledgement.acknowledged_at)
+            if self.conflicting_request is not None:
+                terminal_times.append(self.conflicting_request.requested_at)
+            if terminal_times and self.cancellation.cancelled_at < max(terminal_times):
+                raise ValueError("handoff cancellation predates recorded history")
         if self.status is HandoffStatus.REQUESTED:
-            if self.queue_active or self.acknowledgement is not None:
-                raise ValueError("requested handoff cannot have active queue or receipt")
-        elif self.status in (HandoffStatus.ACTIVE, HandoffStatus.ACKNOWLEDGEMENT_PENDING):
-            if not self.queue_active or self.acknowledgement is not None:
+            valid = (
+                not self.queue_active
+                and self.acknowledgement is None
+                and not self.effect_failures
+                and self.cancellation is None
+                and self.conflicting_request is None
+            )
+            if not valid:
+                raise ValueError("requested handoff cannot contain lifecycle history")
+        elif self.status is HandoffStatus.ACTIVE:
+            valid = (
+                self.queue_active
+                and self.acknowledgement is None
+                and self.cancellation is None
+                and self.conflicting_request is None
+                and not required_ack_failures
+            )
+            if not valid:
+                raise ValueError("active handoff status/history is inconsistent")
+        elif self.status is HandoffStatus.ACKNOWLEDGEMENT_PENDING:
+            valid = (
+                self.queue_active
+                and self.acknowledgement is None
+                and self.cancellation is None
+                and self.conflicting_request is None
+                and not required_ack_failures
+            )
+            if not valid:
                 raise ValueError("pending handoff status matrix is inconsistent")
         elif self.status is HandoffStatus.ACKNOWLEDGED:
-            if not self.queue_active or self.acknowledgement is None:
+            valid = (
+                self.queue_active
+                and self.acknowledgement is not None
+                and self.cancellation is None
+                and self.conflicting_request is None
+            )
+            if not valid:
                 raise ValueError("acknowledged handoff requires queue and receipt")
         elif self.status is HandoffStatus.MANUAL_REVIEW:
-            if not self.queue_active:
+            valid = (
+                self.queue_active
+                and self.cancellation is None
+                and (
+                    self.conflicting_request is not None
+                    or (required_ack_failures and self.acknowledgement is None)
+                )
+            )
+            if not valid:
                 raise ValueError("manual-review handoff must keep queue active")
         elif self.status is HandoffStatus.COMPLETED:
-            if self.queue_active:
-                raise ValueError("completed handoff cannot keep queue active")
+            valid = (
+                not self.queue_active
+                and self.acknowledgement is not None
+                and self.cancellation is None
+                and self.conflicting_request is None
+            )
+            if not valid:
+                raise ValueError("completed handoff status/history is inconsistent")
         elif self.status is HandoffStatus.CANCELLED:
             if self.queue_active or self.cancellation is None:
                 raise ValueError("cancelled handoff requires cancellation and closed queue")
@@ -575,6 +638,22 @@ class PublicHandoffProjection:
             raise ValueError(
                 "public_handoff_projection.reservation_outcome must be exact or None"
             )
+        expected_prefix = _reservation_sentence(self.reservation_outcome)
+        expected_handoff_texts = {
+            PublicNextAction.WAIT_FOR_HUMAN: (
+                "O atendimento humano foi acionado. Aguarde o contato da equipe.",
+            ),
+            PublicNextAction.NO_ACTION: (
+                "O atendimento humano foi cancelado.",
+                "O atendimento humano foi concluído.",
+            ),
+        }
+        allowed = {
+            f"{expected_prefix} {handoff_text}"
+            for handoff_text in expected_handoff_texts[self.next_action]
+        }
+        if canonical_text not in allowed:
+            raise ValueError("public_handoff_projection.public_text is not a safe projection")
 
 
 _EVENT_NAMES = MappingProxyType(
@@ -767,9 +846,14 @@ def _reduce_acknowledgement(
             HandoffTransitionStatus.REJECTED,
             HandoffTransitionReason.EVENT_NOT_APPLICABLE,
         )
+    next_status = (
+        HandoffStatus.MANUAL_REVIEW
+        if state.conflicting_request is not None
+        else HandoffStatus.ACKNOWLEDGED
+    )
     acknowledged = replace(
         state,
-        status=HandoffStatus.ACKNOWLEDGED,
+        status=next_status,
         queue_active=True,
         acknowledgement=event,
     )
@@ -913,7 +997,7 @@ def reduce_handoff(
 
 def _reservation_sentence(outcome: ExecutionOutcome | None) -> str:
     if outcome is None:
-        return "A reserva não foi criada."
+        return "Não há informação canônica sobre uma reserva neste atendimento."
     if outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED:
         return "A reserva foi criada."
     if outcome.certainty in (

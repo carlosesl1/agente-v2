@@ -39,6 +39,32 @@
       "raw_output_versioned": false
     }
   ],
+  "review_reds": [
+    {
+      "name": "closed_history_public_projection_and_absent_outcome",
+      "command": "python3 -m unittest tests.test_phase6_handoff.Phase6HandoffSerializationTests.test_workflow_wire_rejects_status_history_and_chronology_mismatches tests.test_phase6_handoff.Phase6HandoffSerializationTests.test_public_projection_constructor_and_wire_reject_arbitrary_text tests.test_phase6_handoff.Phase6HandoffProjectionTests.test_absent_outcome_and_anchor_do_not_invent_outcome_dto -v >/tmp/phase6-task2-review-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 3,
+      "failures": 12,
+      "errors": 0,
+      "failure_reason": "wire accepted impossible status/history snapshots, public projection accepted arbitrary text and missing outcome was asserted as reservation not created",
+      "output_sha256": "7a6542e746670d5f078c39f03fa095a4160e8facad1273f687f1827a5aa0d825",
+      "raw_output_path": "/tmp/phase6-task2-review-red.out",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "canonical_ids_and_conflict_ack_monotonicity",
+      "command": "python3 -m unittest tests.test_phase6_handoff.Phase6HandoffContractTests.test_request_validates_exact_ids_hash_reason_time_and_optional_anchor tests.test_phase6_handoff.Phase6HandoffReducerTests.test_acknowledgement_does_not_clear_an_unresolved_incident_conflict -v >/tmp/phase6-task2-review-minor-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 2,
+      "failures": 1,
+      "errors": 1,
+      "failure_reason": "outer-whitespace IDs were normalized and acknowledgement attempted to clear unresolved incident conflict",
+      "output_sha256": "f7488960494a8d3be5c4726f1d833fc3586871b172a628d3c6c8665eb1a619f0",
+      "raw_output_path": "/tmp/phase6-task2-review-minor-red.out",
+      "raw_output_versioned": false
+    }
+  ],
   "synthetic_fixtures_only": true,
   "rollout": "NO-GO"
 }

@@ -252,6 +252,7 @@ class Phase6HandoffContractTests(unittest.TestCase):
         invalid_changes = (
             {"handoff_id": "x"},
             {"handoff_id": 123},
+            {"handoff_id": " handoff:synthetic:1 "},
             {"lead_key_hash": "B" * 64},
             {"lead_key_hash": "b" * 63},
             {"incident_key": "x"},
@@ -530,6 +531,27 @@ class Phase6HandoffReducerTests(unittest.TestCase):
         self.assertEqual(transition.state.effect_failures, (failure,))
         self.assertTrue(transition.state.queue_active)
 
+    def test_acknowledgement_does_not_clear_an_unresolved_incident_conflict(self) -> None:
+        pending = active_handoff()
+        conflict = handoff_requested(
+            handoff_id="handoff:synthetic:conflict-ack",
+            source_event_id="source:event:synthetic:conflict-ack",
+            reason_code=HandoffReasonCode.OPERATIONAL_REVIEW,
+            requested_at=T0 + timedelta(seconds=1),
+        )
+        manual = reduce_handoff(pending, conflict).state
+        transition = reduce_handoff(
+            manual,
+            handoff_acknowledged(
+                manual,
+                acknowledged_at=T0 + timedelta(seconds=2),
+            ),
+        )
+        self.assertIs(transition.state.status, HandoffStatus.MANUAL_REVIEW)
+        self.assertEqual(transition.state.conflicting_request, conflict)
+        self.assertIsNotNone(transition.state.acknowledgement)
+        self.assertTrue(transition.state.queue_active)
+
     def test_failure_for_disabled_or_divergent_effect_fails_closed(self) -> None:
         enabled = active_handoff(policy=optional_email_policy())
         email_failure = handoff_effect_failed(enabled)
@@ -740,7 +762,12 @@ class Phase6HandoffProjectionTests(unittest.TestCase):
     def test_absent_outcome_and_anchor_do_not_invent_outcome_dto(self) -> None:
         projection = project_handoff_public_reply(active_handoff(), None)
         self.assertIsNone(projection.reservation_outcome)
-        self.assertTrue(projection.public_text.startswith("A reserva não foi criada."))
+        self.assertTrue(
+            projection.public_text.startswith(
+                "Não há informação canônica sobre uma reserva neste atendimento."
+            )
+        )
+        self.assertNotIn("reserva não foi criada", projection.public_text.casefold())
 
     def test_projection_rejects_outcome_subclass_and_anchor_divergence(self) -> None:
         valid = outcome()
@@ -850,6 +877,89 @@ class Phase6HandoffSerializationTests(unittest.TestCase):
         for mutation in (invalid_receipt, disabled_failure):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 from_wire_json(json.dumps(mutation), HandoffWorkflow)
+
+    def test_workflow_wire_rejects_status_history_and_chronology_mismatches(self) -> None:
+        pending = active_handoff(policy=optional_email_policy())
+        conflict_event = handoff_requested(
+            handoff_id="handoff:synthetic:conflict",
+            source_event_id="source:event:synthetic:conflict",
+            reason_code=HandoffReasonCode.OPERATIONAL_REVIEW,
+            requested_at=T0 + timedelta(seconds=1),
+        )
+        conflicted = reduce_handoff(pending, conflict_event).state
+        ack_failure = handoff_effect_failed(
+            pending,
+            kind=HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT,
+        )
+        failed = reduce_handoff(pending, ack_failure).state
+        cancelled = reduce_handoff(pending, handoff_cancelled(pending)).state
+
+        mutations = []
+        pending_with_conflict = json.loads(to_wire_json(conflicted))
+        pending_with_conflict["data"]["status"] = "acknowledgement_pending"
+        mutations.append(pending_with_conflict)
+
+        pending_with_required_failure = json.loads(to_wire_json(failed))
+        pending_with_required_failure["data"]["status"] = "acknowledgement_pending"
+        mutations.append(pending_with_required_failure)
+
+        requested_with_cancellation = json.loads(to_wire_json(cancelled))
+        requested_with_cancellation["data"]["status"] = "requested"
+        mutations.append(requested_with_cancellation)
+
+        active_with_cancellation = json.loads(to_wire_json(cancelled))
+        active_with_cancellation["data"]["status"] = "active"
+        active_with_cancellation["data"]["queue_active"] = True
+        mutations.append(active_with_cancellation)
+
+        acknowledged = reduce_handoff(
+            pending,
+            handoff_acknowledged(
+                pending,
+                acknowledged_at=T0 + timedelta(seconds=2),
+            ),
+        ).state
+        cancelled_after_ack = reduce_handoff(
+            acknowledged,
+            handoff_cancelled(
+                acknowledged,
+                cancelled_at=T0 + timedelta(seconds=3),
+            ),
+        ).state
+        cancellation_before_ack = json.loads(to_wire_json(cancelled_after_ack))
+        cancellation_before_ack["data"]["acknowledgement"]["acknowledged_at"] = (
+            (T0 + timedelta(seconds=4)).isoformat()
+        )
+        mutations.append(cancellation_before_ack)
+
+        completed_with_cancellation = json.loads(to_wire_json(cancelled))
+        completed_with_cancellation["data"]["status"] = "completed"
+        mutations.append(completed_with_cancellation)
+
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                from_wire_json(json.dumps(mutation), HandoffWorkflow)
+
+    def test_public_projection_constructor_and_wire_reject_arbitrary_text(self) -> None:
+        private_texts = (
+            "b" * 64,
+            "handoff:synthetic:private",
+            HandoffReasonCode.CUSTOMER_REQUESTED.value,
+            "texto arbitrário fornecido pelo caller",
+        )
+        for public_text in private_texts:
+            with self.subTest(public_text=public_text), self.assertRaises(ValueError):
+                PublicHandoffProjection(
+                    public_text=public_text,
+                    next_action=PublicNextAction.WAIT_FOR_HUMAN,
+                    reservation_outcome=None,
+                )
+
+        valid = project_handoff_public_reply(active_handoff(), None)
+        mutation = json.loads(to_wire_json(valid))
+        mutation["data"]["public_text"] = "texto arbitrário fornecido pelo wire"
+        with self.assertRaises(ValueError):
+            from_wire_json(json.dumps(mutation), PublicHandoffProjection)
 
     def test_ephemeral_transition_and_subclasses_are_outside_wire_registry(self) -> None:
         transition = new_handoff(
