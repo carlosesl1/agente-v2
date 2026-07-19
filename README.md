@@ -12,12 +12,14 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **nenhuma**.
+- Fase ativa: **Fase 4 — design em revisão**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
 - Fase 3: **concluída e remediada** no commit
   `b7c4cb2d6376d9ad3513477fc056a0ba978f77e7`; nenhuma rede real.
+- Fase 4: **aberta**, limitada a renderer/classifier/binding puros; nenhuma LLM,
+  rede, entrega ou execução live.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída: domínio puro e boundary de consultas no
   novo repositório.
@@ -37,6 +39,7 @@ Contrato central:
 - [Execução da Fase 1](docs/refactor/phases/phase-01-incident-characterization.md)
 - [Execução da Fase 2](docs/refactor/phases/phase-02-typed-domain-and-reducer.md)
 - [Execução da Fase 3](docs/refactor/phases/phase-03-lookups-and-offer-snapshots.md)
+- [Execução da Fase 4](docs/refactor/phases/phase-04-single-summary-and-confirmation.md)
 
 ## Regras de execução
 

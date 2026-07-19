@@ -77,3 +77,9 @@ python3 scripts/run_phase3_properties.py --cases 50000 --seed 20260718
 python3 scripts/run_phase3_mutations.py
 python3 scripts/validate_phase3.py
 ```
+
+## Fase 4
+
+`phase-04/entry-baseline.json` registra o commit-base, os gates regressivos e o
+boundary autorizado. A fase permanece sem LLM, rede, provider, mensagem ou
+write live.

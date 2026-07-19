@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "phase": "phase-04-single-summary-and-confirmation",
+  "opened_at_utc": "2026-07-19T02:21:03Z",
+  "base_commit": "18588cf2d9d771decd4e7c56540fabd79ed4ebcc",
+  "git_sync": {
+    "head": "18588cf2d9d771decd4e7c56540fabd79ed4ebcc",
+    "origin_main": "18588cf2d9d771decd4e7c56540fabd79ed4ebcc",
+    "remote_main": "18588cf2d9d771decd4e7c56540fabd79ed4ebcc",
+    "working_tree_clean": true
+  },
+  "previous_phase_validators": {
+    "phase_0": "ok",
+    "phase_1": "ok",
+    "phase_2": "ok",
+    "phase_3": "ok"
+  },
+  "phase_3_closeout_ci": {
+    "phase_0_validation": {
+      "run_id": 29668633084,
+      "conclusion": "success"
+    },
+    "phase_1_characterization": {
+      "run_id": 29668633064,
+      "conclusion": "success"
+    },
+    "phase_2_domain": {
+      "run_id": 29668633049,
+      "conclusion": "success"
+    },
+    "phase_3_lookups": {
+      "run_id": 29668633057,
+      "conclusion": "success"
+    }
+  },
+  "legacy_readonly": {
+    "head": "57408d8b2040399bc25ee7957505208079458884",
+    "status_command": "git status --short -z",
+    "status_entries": 80,
+    "status_sha256": "77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b",
+    "sources": [
+      {
+        "path": "domain/hermes_native_runner.py",
+        "sha256": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de"
+      },
+      {
+        "path": "domain/tool_executor.py",
+        "sha256": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88"
+      }
+    ]
+  },
+  "classifier_boundary": "model_agnostic_with_deterministic_reference",
+  "contextual_accept_requires_typed_context": true,
+  "reference_locales": [
+    "pt_BR",
+    "en"
+  ],
+  "network_executed": false,
+  "provider_reads_executed": false,
+  "provider_writes_executed": false,
+  "message_delivery_executed": false,
+  "llm_executed": false
+}
