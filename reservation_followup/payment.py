@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
+import math
 import re
 
 from .types import (
@@ -24,6 +25,16 @@ _HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _E2E_RE = re.compile(r"^E[0-9]{8}[0-9]{8}[A-Z0-9]{11}$")
 _STRIPE_EVENT_RE = re.compile(r"^evt_[A-Za-z0-9]{16,64}$")
+_PLACEHOLDER_PARTS = (
+    "PLACEHOLDER",
+    "EXAMPLE",
+    "SAMPLE",
+    "DUMMY",
+    "FAKE",
+    "DEMO",
+    "UNKNOWN",
+    "TEST",
+)
 
 
 class PixProofStatus(str, Enum):
@@ -88,9 +99,10 @@ def _is_high_entropy_digest(value: str) -> bool:
         return False
     if len(set(value)) < 10:
         return False
+    max_period = len(value) // 2
     return not any(
-        value == (value[:period] * ((len(value) + period - 1) // period))[: len(value)]
-        for period in range(1, 9)
+        value == (value[:period] * math.ceil(len(value) / period))[: len(value)]
+        for period in range(1, max_period + 1)
     )
 
 
@@ -101,14 +113,21 @@ def _is_canonical_e2e(value: str) -> bool:
         datetime.strptime(value[9:17], "%Y%m%d")
     except ValueError:
         return False
+    if value[1:9] == "00000000":
+        return False
     variable = value[17:]
-    return len(set(variable)) >= 6
+    return len(set(variable)) >= 6 and not any(
+        marker in variable for marker in _PLACEHOLDER_PARTS
+    )
 
 
 def _is_canonical_stripe_event_id(value: str) -> bool:
     if type(value) is not str or not _STRIPE_EVENT_RE.fullmatch(value):
         return False
-    return len(set(value[4:])) >= 8
+    suffix = value[4:]
+    return len(set(suffix)) >= 8 and not any(
+        marker in suffix.upper() for marker in _PLACEHOLDER_PARTS
+    )
 
 
 def stripe_target_fingerprint(payment_target_id: str) -> str:

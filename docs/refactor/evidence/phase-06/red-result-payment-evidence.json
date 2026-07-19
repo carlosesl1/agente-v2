@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": "phase-06-handoff-payments",
   "task": 3,
-  "recorded_at_utc": "2026-07-19T20:35:47Z",
+  "recorded_at_utc": "2026-07-19T20:50:42Z",
   "base_commit": "e881ff8577607d27420ec35e67f84fb05306fe7f",
   "original_red": {
     "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests -v >/tmp/phase6-task3-red.out 2>&1",
@@ -65,7 +65,8 @@
       "failure_reason": "economic reversion was rejected, claims accepted invalid hashes, low-entropy identities were verified and equivalent non-UTC timestamps were normalized",
       "output_sha256": "4c28ffd52fb9a980819252a63dce4fd70da6820b30ffa3c759aba35438d6f21d",
       "raw_output_path": "/tmp/phase6-task3-review-core-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
     },
     {
       "name": "trusted_profiles_and_wise_target_binding",
@@ -77,7 +78,8 @@
       "failure_reason": "closed PaymentEvidenceTrust and Wise target-reference binding did not exist",
       "output_sha256": "0e4a4bb0850cddfd686cb36c63bb4c8c4365a071d888b5e25055c8ab9ad24d16",
       "raw_output_path": "/tmp/phase6-task3-review-trust-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
     },
     {
       "name": "canonical_anchor_and_trust",
@@ -89,7 +91,8 @@
       "failure_reason": "an equivalent non-UTC confirmed anchor timestamp was normalized instead of rejected",
       "output_sha256": "45540e9684f13324f65c96de3caee918eecec1ee35e411ebe3a3f79b081eeed7",
       "raw_output_path": "/tmp/phase6-task3-review-canonical-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
     },
     {
       "name": "canonical_subject_anchor_during_validation",
@@ -101,7 +104,8 @@
       "failure_reason": "evidence validation accepted a subject whose nested anchor timestamp had an equivalent non-UTC offset",
       "output_sha256": "6068537a41ccb1bc66c1cf55d51dd82b7e56a2eb4864f17b10f0b14439df9069",
       "raw_output_path": "/tmp/phase6-task3-review-subject-time-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
     },
     {
       "name": "version_two_requires_real_economic_change",
@@ -113,7 +117,8 @@
       "failure_reason": "closing economic reversion allowed artificial payment_version 2 without any economic change",
       "output_sha256": "43a8ce66b62ee1385ecfc68b886410363b1ae787ca321a32b8d2ac320ead0f8f",
       "raw_output_path": "/tmp/phase6-task3-review-version2-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
     },
     {
       "name": "pix_e2e_contains_valid_calendar_date",
@@ -125,6 +130,20 @@
       "failure_reason": "Pix E2E format accepted an impossible calendar date",
       "output_sha256": "0a8e25bfc23c48d38a368286a359eca0d6cbf85cd0e6224fed4e4a79ff3015ac",
       "raw_output_path": "/tmp/phase6-task3-review-e2e-date-red.out",
+      "raw_output_versioned": false,
+      "unfixed_base_sha": "67b3d6d2af20433d7f328a789e94404d52b77cb2"
+    },
+    {
+      "name": "canonical_placeholder_and_periodic_identities",
+      "unfixed_base_sha": "9528a405673ee7a5251d9911acf6e91534838c86",
+      "command": "python3 -m unittest tests.test_phase6_payment.Phase6PaymentEvidenceTests.test_low_entropy_or_placeholder_method_identities_fail_closed -v >/tmp/phase6-task3-review-identity-red-2.out 2>&1",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "failure_reason": "a lowercase hexadecimal Wise transaction digest with period ten passed the identity filter; the same oracle also covers null-ISPB Pix placeholders and Stripe evt_ placeholders",
+      "output_sha256": "0e896d4b3030385cf575f717170a95e6e5524c762d075f560e2ad93c58b9300c",
+      "raw_output_path": "/tmp/phase6-task3-review-identity-red-2.out",
       "raw_output_versioned": false
     }
   ],
@@ -134,22 +153,22 @@
       "tests": 49,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "e955ec833876bc1848ddc96489b93c3479a50188c754d9f65cf128c11f1b27bc"
+      "output_sha256": "e6a971d94f79297dd60bc444599db5e212aa23caed92a8f2df39d920ac034f1b"
     },
     "regressions": {
       "command": "python3 -m unittest tests.test_phase2_serialization tests.test_phase4_replays tests.test_phase5_types tests.test_phase5_properties -v",
       "tests": 48,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "f116d989a72c0aa70cd7a388042a1d8afe7d5f3207c583002ac69d5f7d312742"
+      "output_sha256": "7d306108b70e266ba2b79aa952ddc85b4aa2665b41a9870db88cacc3fccc4c22"
     },
     "full_suite": {
       "command": "python3 -m unittest discover -s tests -v",
       "tests": 431,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 63.664,
-      "output_sha256": "df76e6a62e58457f773fe5e2b4cf1c4b81743465f9eb4b1f1918db695f2492b2"
+      "duration_seconds": 63.608,
+      "output_sha256": "9e06750d788d7c0d23055e6241d0a4fba4404b8563aad49444f8ff5c77f1b523"
     }
   },
   "known_answer_economic_signature": {

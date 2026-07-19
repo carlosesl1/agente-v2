@@ -507,13 +507,31 @@ class Phase6PaymentEvidenceTests(unittest.TestCase):
         )
         fake_stripe = stripe_event()
         object.__setattr__(fake_stripe, "event_id", "FAKEPAYMENT123456")
-        matrix = (
-            (self.subject(PaymentMethod.PIX), fake_pix),
-            (self.subject(PaymentMethod.WISE), periodic_wise),
-            (self.subject(PaymentMethod.STRIPE), fake_stripe),
+        canonical_placeholder_pix = pix_evidence()
+        object.__setattr__(
+            canonical_placeholder_pix,
+            "normalized_e2e",
+            "E0000000020270201PLACEHOLDER",
         )
-        for subject, evidence in matrix:
-            with self.subTest(evidence=type(evidence).__name__), self.assertRaises(ValueError):
+        period_ten_wise = wise_credit(
+            transaction_fingerprint=("0123456789" * 7)[:64],
+        )
+        canonical_placeholder_stripe = stripe_event()
+        object.__setattr__(
+            canonical_placeholder_stripe,
+            "event_id",
+            "evt_PLACEHOLDER123456",
+        )
+        matrix = (
+            ("pix_external_format", self.subject(PaymentMethod.PIX), fake_pix),
+            ("pix_canonical_placeholder", self.subject(PaymentMethod.PIX), canonical_placeholder_pix),
+            ("wise_period_six", self.subject(PaymentMethod.WISE), periodic_wise),
+            ("wise_period_ten", self.subject(PaymentMethod.WISE), period_ten_wise),
+            ("stripe_external_format", self.subject(PaymentMethod.STRIPE), fake_stripe),
+            ("stripe_canonical_placeholder", self.subject(PaymentMethod.STRIPE), canonical_placeholder_stripe),
+        )
+        for case, subject, evidence in matrix:
+            with self.subTest(case=case), self.assertRaises(ValueError):
                 self.validate(subject, evidence)
 
     def test_mutated_non_utc_evidence_timestamp_fails_closed(self) -> None:
