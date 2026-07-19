@@ -37,6 +37,17 @@
       "errors": 8,
       "output_sha256": "2c1fe6229c0c9ff480358b8432160c6032274d0cd09ab63d6ea254f503fbc5ee",
       "raw_output_versioned": false
+    },
+    {
+      "name": "final_review_transactional_outcome_recovery_oracle",
+      "base_sha": "d34443821ae9cd93b65883f33058fe59ce38fa02",
+      "command": "python3 -m unittest tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_all_fault_points_survive_rollback_or_crash_restart tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_restart_oracle_rejects_permissive_false_greens -v",
+      "exit_code": 1,
+      "tests_run": 2,
+      "failures": 4,
+      "errors": 0,
+      "output_sha256": "3833452fde4b908ab0d8fcf248af5db5b52affe3cda3336df3f1ce104a6cf381",
+      "raw_output_versioned": false
     }
   ]
 }

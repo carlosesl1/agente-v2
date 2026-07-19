@@ -379,6 +379,23 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "provider_calls_during_recovery": provider_calls,
             "followup_worker_disposition": "idle",
         }
+    elif point in {
+        "after_outcome_before_state",
+        "after_state_before_outbox",
+        "after_outbox_before_commit",
+    }:
+        expected = {
+            "pre_dispatch_released": 0,
+            "called_unknown": 1,
+            "final_ledger_status": "manual_review",
+            "final_fencing_token": 1,
+            "final_claim_count": 1,
+            "dispatch_slots_consumed": 1,
+            "provider_calls": 1,
+            "provider_calls_baseline": 1,
+            "provider_calls_during_recovery": 0,
+            "followup_worker_disposition": "idle",
+        }
     elif point in {"during_delivery", "after_delivery_before_receipt"}:
         expected = {
             "pre_dispatch_released": 0,
@@ -478,7 +495,19 @@ def _run_transaction_fault(point: str, directory: Path, index: int) -> dict[str,
         store.close()
     reopened = SQLiteUnitOfWork.open(db_path)
     try:
-        Reconciler(reopened).run_once(now=COMMAND_AT + timedelta(seconds=31))
+        provider_calls_baseline = _line_count(provider_log)
+        reconciliation = Reconciler(reopened).run_once(
+            now=COMMAND_AT + timedelta(seconds=31)
+        )
+        followup = CommandWorker(
+            store=reopened,
+            adapter=_AppendingExecutionAdapter(provider_log),
+            worker_id="worker:transaction-post-fence-probe",
+            lease_ttl=LEASE_TTL,
+        )
+        followup_result = followup.run_once(
+            now=COMMAND_AT + timedelta(seconds=32)
+        )
         schedule = _snapshot(
             reopened,
             fault_point=point,
@@ -486,6 +515,17 @@ def _run_transaction_fault(point: str, directory: Path, index: int) -> dict[str,
             provider_log=provider_log,
             delivery_log=delivery_log,
             child_exit_code=None,
+        )
+        schedule.update(
+            {
+                "provider_calls_baseline": provider_calls_baseline,
+                "provider_calls_during_recovery": (
+                    schedule["provider_calls"] - provider_calls_baseline
+                ),
+                "pre_dispatch_released": reconciliation.pre_dispatch_released,
+                "called_unknown": reconciliation.called_unknown,
+                "followup_worker_disposition": followup_result.disposition.value,
+            }
         )
     finally:
         reopened.close()

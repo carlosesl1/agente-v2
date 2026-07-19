@@ -85,15 +85,23 @@ class Phase5FaultInjectionTests(unittest.TestCase):
             ("after_fence_before_dispatch", 0),
             ("during_dispatch", 1),
             ("after_dispatch_before_outcome", 1),
+            ("after_outcome_before_state", 1),
+            ("after_state_before_outbox", 1),
+            ("after_outbox_before_commit", 1),
         ):
             with self.subTest(exact_post_fence_recovery=point):
                 schedule = by_point[point]
                 self.assertEqual(schedule["pre_dispatch_released"], 0)
                 self.assertEqual(schedule["called_unknown"], 1)
                 self.assertEqual(schedule["final_ledger_status"], "manual_review")
+                self.assertEqual(schedule["final_fencing_token"], 1)
+                self.assertEqual(schedule["final_claim_count"], 1)
                 self.assertEqual(schedule["dispatch_slots_consumed"], 1)
                 self.assertEqual(schedule["provider_calls"], expected_provider_calls)
                 self.assertEqual(schedule["followup_worker_disposition"], "idle")
+                if schedule["mechanism"] == "transaction_trigger":
+                    self.assertEqual(schedule["provider_calls_baseline"], 1)
+                    self.assertEqual(schedule["provider_calls_during_recovery"], 0)
         for point in ("during_delivery", "after_delivery_before_receipt"):
             with self.subTest(exact_delivery_recovery=point):
                 schedule = by_point[point]
@@ -138,6 +146,17 @@ class Phase5FaultInjectionTests(unittest.TestCase):
             schedule = {**base, "fault_point": point}
             with self.subTest(fault_point=point):
                 self.assertTrue(_schedule_violations(schedule))
+
+        rolled_back_outcome = {
+            **base,
+            "fault_point": "after_outcome_before_state",
+            "mechanism": "transaction_trigger",
+            "child_exit_code": None,
+            "provider_calls": 1,
+            "provider_calls_baseline": 1,
+            "provider_calls_during_recovery": 0,
+        }
+        self.assertTrue(_schedule_violations(rolled_back_outcome))
 
     def test_restart_schedules_are_deterministic_and_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase5-restarts-a-") as first_dir:
