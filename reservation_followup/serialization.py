@@ -14,8 +14,21 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from reservation_domain import ExecutionCertainty, ExecutionOutcome, ServiceKind
 
 from .payment import (
+    FinancialConfirmationReceived,
+    FinancialSummaryRecorded,
+    PaymentCancelled,
+    PaymentEvidenceRecorded,
+    PaymentEvidenceTrust,
+    PaymentExpired,
+    PaymentMethodSelected,
+    PaymentSettlementCommand,
+    PaymentWorkflow,
     PixProofStatus,
     PixVisualEvidence,
+    SettlementFinished,
+    SettlementOperation,
+    SettlementOutcome,
+    SettlementStarted,
     StripeEventType,
     VerifiedPaymentEvidence,
     VerifiedStripeEvent,
@@ -43,7 +56,9 @@ from .types import (
     HandoffStatus,
     PaymentEffectPolicy,
     PaymentMethod,
+    PaymentStatus,
     PaymentSubject,
+    SettlementCertainty,
 )
 
 SCHEMA_VERSION = 1
@@ -63,14 +78,28 @@ _TYPE_TAGS = {
     PixVisualEvidence: "pix_visual_evidence",
     VerifiedWiseCredit: "verified_wise_credit",
     VerifiedStripeEvent: "verified_stripe_event",
+    PaymentMethodSelected: "payment_method_selected",
+    FinancialSummaryRecorded: "financial_summary_recorded",
+    FinancialConfirmationReceived: "financial_confirmation_received",
+    PaymentEvidenceRecorded: "payment_evidence_recorded",
+    SettlementStarted: "settlement_started",
+    SettlementFinished: "settlement_finished",
+    PaymentExpired: "payment_expired",
+    PaymentCancelled: "payment_cancelled",
+    PaymentSettlementCommand: "payment_settlement_command",
+    SettlementOutcome: "settlement_outcome",
+    PaymentWorkflow: "payment_workflow",
 }
 _NESTED_DATACLASSES = frozenset(
-    (*_TYPE_TAGS, ExecutionOutcome, VerifiedPaymentEvidence)
+    (*_TYPE_TAGS, ExecutionOutcome, PaymentEvidenceTrust, VerifiedPaymentEvidence)
 )
 _ENUM_TYPES = frozenset(
     (
         BusinessUnit,
         PaymentMethod,
+        PaymentStatus,
+        SettlementCertainty,
+        SettlementOperation,
         EffectRequirement,
         HandoffStatus,
         ServiceKind,
