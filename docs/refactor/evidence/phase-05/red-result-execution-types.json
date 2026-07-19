@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "operational_execution_contracts",
+  "command": "python3 -m unittest tests.test_phase5_types -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_reservation_execution_package",
+  "observed_error": "ModuleNotFoundError: No module named 'reservation_execution'",
+  "red_scope": [
+    "closed_enum_values",
+    "exact_dto_field_universes",
+    "exact_runtime_types",
+    "opaque_identifiers",
+    "canonical_utc",
+    "canonical_json_object",
+    "tampered_payload_hashes",
+    "dispatch_request_from_command",
+    "delivery_receipt_hash_recomputation",
+    "immutable_slotted_dtos",
+    "runtime_execution_adapter_protocol"
+  ],
+  "output_sha256": "c537b683210cdf201a518639bb8b322150049afff18b5d2934d42140fdc6934d",
+  "raw_output_versioned": false,
+  "synthetic_fixtures_only": true,
+  "rollout": "NO-GO"
+}
