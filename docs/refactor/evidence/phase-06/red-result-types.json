@@ -10,6 +10,18 @@
   "output_sha256": "28920b459ac6f0f11f34afb56871e10f49765832d1b73a68832ed99cc45bd8c2",
   "raw_output_path": "/tmp/phase6-task1-red.out",
   "raw_output_versioned": false,
+  "review_red": {
+    "name": "encoder_rejects_mutated_invalid_schema",
+    "command": "python3 -m unittest tests.test_phase6_types.Phase6WireSerializationTests.test_encoder_and_semantic_hash_reject_mutated_invalid_schema -v >/tmp/phase6-task1-review-encoder-red.out 2>&1",
+    "exit_code": 1,
+    "tests": 1,
+    "failures": 6,
+    "errors": 0,
+    "failure_reason": "to_wire_json and semantic_hash accepted bool-as-int, raw enum string and divergent internal binding",
+    "output_sha256": "db6c349db6d89a14eeeefb9e879fc39e0b2b6d2628eb8cc61ff1aa22e883990e",
+    "raw_output_path": "/tmp/phase6-task1-review-encoder-red.out",
+    "raw_output_versioned": false
+  },
   "synthetic_fixtures_only": true,
   "rollout": "NO-GO"
 }

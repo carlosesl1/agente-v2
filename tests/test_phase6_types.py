@@ -559,6 +559,34 @@ class Phase6WireSerializationTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             from_wire_json(to_wire_json(subject), InventedSubject)
 
+    def test_encoder_and_semantic_hash_reject_mutated_invalid_schema(self) -> None:
+        mutations = []
+
+        bool_as_int = payment_subject()
+        object.__setattr__(bool_as_int, "payment_version", True)
+        mutations.append(bool_as_int)
+
+        raw_enum = HandoffEffectPolicy.default_email_disabled()
+        object.__setattr__(raw_enum, "internal_email", "optional")
+        mutations.append(raw_enum)
+
+        invalid_binding = confirmed_anchor()
+        object.__setattr__(
+            invalid_binding,
+            "reservation_command_id",
+            "command:reservation:synthetic:other",
+        )
+        mutations.append(invalid_binding)
+
+        for mutation in mutations:
+            for operation in (to_wire_json, semantic_hash):
+                with self.subTest(
+                    dto=type(mutation).__name__,
+                    operation=operation.__name__,
+                ):
+                    with self.assertRaises(ValueError):
+                        operation(mutation)
+
     def test_separate_decodes_do_not_share_nested_objects(self) -> None:
         raw = to_wire_json(payment_subject())
         first = from_wire_json(raw, PaymentSubject)

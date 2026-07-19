@@ -61,30 +61,75 @@ def _reject_nonfinite(value: str) -> None:
     raise ValueError(f"non-finite JSON number: {value}")
 
 
-def _encode_value(value: Any) -> Any:
-    value_type = type(value)
-    if value_type in _NESTED_DATACLASSES:
-        return {
-            field.name: _encode_value(getattr(value, field.name))
-            for field in fields(value)
-        }
-    if value_type in _ENUM_TYPES:
+def _encode_dataclass(cls: type, value: Any) -> dict[str, Any]:
+    if type(value) is not cls:
+        raise ValueError(f"value must be the exact {cls.__name__} type")
+    hints = _cached_type_hints(cls)
+    encoded = {
+        field.name: _encode_value(hints[field.name], getattr(value, field.name))
+        for field in fields(cls)
+    }
+    reconstructed = _decode_dataclass(cls, encoded)
+    if reconstructed != value:
+        raise ValueError(f"{cls.__name__} contains noncanonical field values")
+    return encoded
+
+
+def _encode_value(annotation: Any, value: Any) -> Any:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is tuple:
+        if type(value) is not tuple:
+            raise ValueError("tuple field must be an exact tuple")
+        if len(args) == 2 and args[1] is Ellipsis:
+            return [_encode_value(args[0], item) for item in value]
+        if len(args) != len(value):
+            raise ValueError("fixed tuple length mismatch")
+        return [
+            _encode_value(item_type, item)
+            for item_type, item in zip(args, value, strict=True)
+        ]
+    if origin in {Union, types.UnionType}:
+        if value is None and type(None) in args:
+            return None
+        failures: list[str] = []
+        for option in args:
+            if option is type(None):
+                continue
+            try:
+                return _encode_value(option, value)
+            except (TypeError, ValueError) as exc:
+                failures.append(str(exc))
+        raise ValueError(f"value does not match union: {failures}")
+    if annotation in _ENUM_TYPES:
+        if type(value) is not annotation:
+            raise ValueError(f"{annotation.__name__} field has wrong type")
         return value.value
-    if value_type is datetime:
+    if annotation is datetime:
         if (
-            value.tzinfo is None
+            type(value) is not datetime
+            or value.tzinfo is None
             or value.utcoffset() != timedelta(0)
-            or value.isoformat() != value.astimezone().astimezone(value.tzinfo).isoformat()
         ):
             raise ValueError("datetime value must be canonical UTC")
         return value.isoformat()
-    if value_type is tuple:
-        return [_encode_value(item) for item in value]
-    if value_type in (str, int, bool) or value is None:
+    if annotation in _NESTED_DATACLASSES:
+        return _encode_dataclass(annotation, value)
+    if annotation is str:
+        if type(value) is not str:
+            raise ValueError("string field has wrong type")
+        return value
+    if annotation is int:
+        if type(value) is not int:
+            raise ValueError("integer field has wrong type")
+        return value
+    if annotation is bool:
+        if type(value) is not bool:
+            raise ValueError("boolean field has wrong type")
         return value
     if is_dataclass(value):
-        raise TypeError(f"unsupported serialized dataclass: {value_type.__name__}")
-    raise TypeError(f"unsupported serialized value: {value_type.__name__}")
+        raise TypeError(f"unsupported serialized dataclass: {type(value).__name__}")
+    raise TypeError(f"unsupported field annotation: {annotation!r}")
 
 
 def _decode_dataclass(cls: type, value: Any) -> Any:
@@ -184,7 +229,7 @@ def to_wire_json(value: object) -> str:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "type": type_tag,
-        "data": _encode_value(value),
+        "data": _encode_dataclass(value_type, value),
     }
     return json.dumps(
         payload,
