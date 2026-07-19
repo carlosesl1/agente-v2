@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "task": "portable_execution_schema",
+  "source_sha": "db27e7d61fa7303fa6046a770ad9941dd48e80c7",
+  "command": "python3 -m unittest tests.test_phase5_schema -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_reservation_execution_schema_module",
+  "observed_error": "ModuleNotFoundError: No module named 'reservation_execution.schema'",
+  "red_scope": [
+    "exact_six_table_and_column_order",
+    "sqlite_primary_foreign_unique_keys_and_no_triggers",
+    "closed_hash_operation_status_kind_revision_and_counter_constraints",
+    "execution_ledger_cross_constraint_matrix",
+    "outcome_recorded_zero_or_one_dispatch_and_manual_review_one_dispatch",
+    "outbox_pending_leased_delivered_matrix",
+    "deterministic_renderers_hashes_and_static_artifacts",
+    "postgresql_text_only_portability_and_logical_identities"
+  ],
+  "output_sha256": "cb4b4a7600d3a8a6541add50c4f9134901566c36182eb7b2171850caabdfef4a",
+  "raw_output_versioned": false,
+  "synthetic_fixtures_only": true,
+  "sqlite_target": ":memory:",
+  "postgresql_executed": false,
+  "rollout": "NO-GO",
+  "review_regression": {
+    "command": "python3 -m unittest tests.test_phase5_schema.Phase5SchemaTests.test_malformed_hashes_and_non_utc_sqlite_timestamps_are_rejected tests.test_phase5_schema.Phase5SchemaTests.test_execution_ledger_rejects_every_invalid_cross_constraint_family tests.test_phase5_schema.Phase5SchemaTests.test_outbox_rejects_every_invalid_cross_constraint_family -v",
+    "exit_code": 1,
+    "expected_failure": true,
+    "failure_classes": [
+      "sqlite_timestamp_shape_was_suffix_only",
+      "active_command_lease_accepted_zero_token_or_nonpositive_ttl",
+      "active_outbox_lease_accepted_zero_token_or_nonpositive_ttl"
+    ],
+    "output_sha256": "039aea78455d1e49a356ae218fb9fc35c49f517ed5707a8203c649663cd2cb5e",
+    "raw_output_versioned": false
+  }
+}

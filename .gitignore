@@ -14,6 +14,10 @@ tokens.json
 # Runtime state and customer/provider data
 *.db
 *.sqlite*
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
 *.jsonl
 state/
 logs/
