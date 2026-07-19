@@ -530,6 +530,7 @@ class ReducerContractTests(unittest.TestCase):
             certainty=ExecutionCertainty.EFFECT_CONFIRMED,
             normalized_status="reservation_created",
             provider_reference="reservation-alpha",
+            evidence=("d" * 64,),
         )
         succeeded = reduce(
             executing,

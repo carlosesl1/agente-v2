@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "command": "python3 -m unittest tests.test_phase5_domain_outcomes -v",
+  "exit_code": 1,
+  "expected_failure": true,
+  "failure_class": "missing_outcome_serializer_export",
+  "output_sha256": "e3c9d1eeb0d23c3d07de6107e0705dba2a37c964d67f5d64116e8e49672ac508",
+  "raw_output_versioned": false,
+  "subsequent_red": {
+    "stage": "serializer_present_before_outcome_invariants",
+    "exit_code": 1,
+    "expected_failure": true,
+    "failure_class": "outcome_certainty_invariants_not_enforced",
+    "output_sha256": "89e60c92a01a82d2b30956de58cb791583c9514b27fa806b7acb1ae4e57ef4e4",
+    "raw_output_versioned": false
+  }
+}

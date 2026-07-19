@@ -16,6 +16,7 @@ from .types import (
     STATE_TYPES,
     DomainEvent,
     Event,
+    ExecutionOutcome,
     ReservationCommand,
     State,
     WorkflowState,
@@ -231,3 +232,16 @@ def loads_command(raw: str) -> ReservationCommand:
     if type_tag != ReservationCommand.TYPE:
         raise ValueError(f"unknown command type: {type_tag}")
     return _decode_dataclass(ReservationCommand, data)
+
+
+def dumps_outcome(outcome: ExecutionOutcome) -> str:
+    if type(outcome) is not ExecutionOutcome:
+        raise TypeError("outcome must be the exact ExecutionOutcome type")
+    return _dumps(outcome, "execution_outcome")
+
+
+def loads_outcome(raw: str) -> ExecutionOutcome:
+    type_tag, data = _loads_payload(raw)
+    if type_tag != "execution_outcome":
+        raise ValueError(f"unknown outcome type: {type_tag}")
+    return _decode_dataclass(ExecutionOutcome, data)

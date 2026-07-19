@@ -166,6 +166,7 @@ def all_domain_samples():
         certainty=ExecutionCertainty.EFFECT_CONFIRMED,
         normalized_status="reservation_created",
         provider_reference="reservation-serializer",
+        evidence=("e" * 64,),
     )
     execution_finished = ExecutionFinished(
         event_id="event-serializer-execution-finished",

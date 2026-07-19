@@ -5,9 +5,11 @@ from .reducer import Transition, new_workflow, reduce, transition_matrix
 from .serialization import (
     dumps_command,
     dumps_event,
+    dumps_outcome,
     dumps_state,
     loads_command,
     loads_event,
+    loads_outcome,
     loads_state,
 )
 from .signature import (

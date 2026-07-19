@@ -501,10 +501,20 @@ class ExecutionOutcome:
                 "provider_reference",
                 _require_id(self.provider_reference, "provider_reference"),
             )
-        normalized_evidence = tuple(sorted({_require_hash(item, "evidence") for item in self.evidence}))
+        normalized_evidence = tuple(
+            sorted({_require_hash(item, "evidence") for item in self.evidence})
+        )
         object.__setattr__(self, "evidence", normalized_evidence)
-        if self.certainty is ExecutionCertainty.EFFECT_CONFIRMED and not self.provider_reference:
-            raise ValueError("effect_confirmed requires provider_reference")
+        if self.certainty is ExecutionCertainty.EFFECT_CONFIRMED:
+            if not self.provider_reference:
+                raise ValueError("effect_confirmed requires provider_reference")
+            if not normalized_evidence:
+                raise ValueError("effect_confirmed requires evidence")
+        if (
+            self.certainty is ExecutionCertainty.NOT_CALLED
+            and self.provider_reference is not None
+        ):
+            raise ValueError("not_called forbids provider_reference")
 
 
 @dataclass(frozen=True, slots=True)

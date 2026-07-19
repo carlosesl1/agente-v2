@@ -241,10 +241,16 @@ def _guided_event(sequence: int, step: int, state, now, rng: random.Random):
             if certainty is ExecutionCertainty.EFFECT_CONFIRMED
             else None
         )
+        outcome_evidence = (
+            (f"{sequence + 1:064x}"[-64:],)
+            if certainty is ExecutionCertainty.EFFECT_CONFIRMED
+            else ()
+        )
         outcome = state.command.outcome(
             certainty=certainty,
             normalized_status=f"result:{certainty.value}",
             provider_reference=provider_reference,
+            evidence=outcome_evidence,
         )
         return ExecutionFinished(
             event_id=event_id,

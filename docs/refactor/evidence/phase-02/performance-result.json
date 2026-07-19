@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "phase": "phase-02-typed-domain-and-reducer",
-  "recorded_at_utc": "2026-07-19T03:56:45Z",
+  "recorded_at_utc": "2026-07-19T05:53:40Z",
   "command": "python3 scripts/run_phase2_properties.py --sequences 100000 --max-events 20 --seed 20260718 --write docs/refactor/evidence/phase-02/property-result.json",
   "result": "passed",
   "exit_code": 0,
-  "elapsed_seconds": 162.3,
+  "elapsed_seconds": 161.258,
   "ci_timeout_seconds": 600,
-  "max_rss_kb": 25908,
+  "max_rss_kb": 26044,
   "property_summary": {
     "sequences": 100000,
     "max_events": 20,
@@ -18,8 +18,8 @@
     "exception_count": 0
   },
   "hashes": {
-    "domain_manifest_sha256": "dadb6e3964f5e102da9b2f17dc556d6eede289b6b842cbd02f9908738e6c613a",
+    "domain_manifest_sha256": "4577ddd61072133df9019000e360ad67da35eb4a5312d4a3b8bc30a1e83ffef5",
     "runner_sha256": "25063a0fd5ac4100a1eff1a90d7323b39309059e0ddf479fe244929279ba3aeb",
-    "properties_sha256": "0e73659500edfb689bad36f1ac78b3f6e675468571f517bc9accb13487ac00d0"
+    "properties_sha256": "bcd967f34c9ee20dff3bc780d5c6b0d8fb4b03c22f5ad9c9cfbf4f83c7ec681d"
   }
 }

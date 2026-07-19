@@ -7,14 +7,14 @@
       "sha256": "d056b38e81dbe0eef64946ead3b6ff828c4e5646b85ad63f258dfd55ed3d99ef"
     },
     {
-      "bytes": 553,
+      "bytes": 591,
       "path": "reservation_domain/__init__.py",
-      "sha256": "cc9095fdfd9cd929b17a470b388075fc53cef9813b4063a1650a4c78455ff0d2"
+      "sha256": "d1c3decfce252c7cf22540bc403786704d537d119bf1adf2d73ef81d5beee6b6"
     },
     {
-      "bytes": 21499,
+      "bytes": 21705,
       "path": "reservation_domain/properties.py",
-      "sha256": "0e73659500edfb689bad36f1ac78b3f6e675468571f517bc9accb13487ac00d0"
+      "sha256": "bcd967f34c9ee20dff3bc780d5c6b0d8fb4b03c22f5ad9c9cfbf4f83c7ec681d"
     },
     {
       "bytes": 22183,
@@ -22,9 +22,9 @@
       "sha256": "76e6a31aab9093d1383f58ce29a7f0ea019044bb4f6bd53c3d91e82b5c895dfb"
     },
     {
-      "bytes": 8204,
+      "bytes": 8697,
       "path": "reservation_domain/serialization.py",
-      "sha256": "aee152be2708131bb5ae30013516101117f4734f89fd9d1eacefef4829982539"
+      "sha256": "7a683530477931bf75173ec365d38fe5e2464f73a7ee4c039e13df6e12f5419a"
     },
     {
       "bytes": 5032,
@@ -32,9 +32,9 @@
       "sha256": "5884d6191f03669071efde7b2e9586bc7ae01e2e87e01b2c04fd425added8dff"
     },
     {
-      "bytes": 43643,
+      "bytes": 43998,
       "path": "reservation_domain/types.py",
-      "sha256": "9c5aa0682bcdf5b3eda20908ab1ded3368b50c45e2c7e4c2b3a42c23c2dd4261"
+      "sha256": "5f835391338ba5cf21b51ad5d344aaecef883f2b478f455e70af88c7e86d80c9"
     }
   ],
   "hash_algorithm": "sha256",
