@@ -294,6 +294,7 @@ def _snapshot(
         "command_count": command_count,
         "dispatch_slots_consumed": slots,
         "provider_calls": provider_calls,
+        "provider_calls_setup_baseline": 0,
         "provider_calls_baseline": 0,
         "provider_calls_during_recovery": provider_calls,
         "delivery_calls": _line_count(delivery_log),
@@ -328,6 +329,13 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
         violations.append("partial_transaction")
     if schedule["called_unknown_redispatches"] != 0:
         violations.append("called_unknown_redispatch")
+    if schedule["provider_calls_setup_baseline"] > schedule["provider_calls_baseline"]:
+        violations.append("provider_setup_baseline_after_crash")
+    if (
+        schedule["provider_calls"] - schedule["provider_calls_baseline"]
+        != schedule["provider_calls_during_recovery"]
+    ):
+        violations.append("provider_recovery_delta")
     if schedule["mechanism"] == "process_crash" and schedule["child_exit_code"] != 91:
         violations.append("wrong_child_exit")
 
@@ -341,6 +349,7 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "final_fencing_token": 1,
             "final_claim_count": 1,
             "provider_calls": 1,
+            "provider_calls_setup_baseline": 0,
             "provider_calls_baseline": 0,
             "provider_calls_during_recovery": 1,
             "worker_disposition": "completed",
@@ -357,6 +366,7 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "final_fencing_token": 2,
             "final_claim_count": 2,
             "provider_calls": 1,
+            "provider_calls_setup_baseline": 0,
             "provider_calls_baseline": 0,
             "provider_calls_during_recovery": 1,
             "worker_disposition": "completed",
@@ -375,8 +385,9 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "final_claim_count": 1,
             "dispatch_slots_consumed": 1,
             "provider_calls": provider_calls,
-            "provider_calls_baseline": 0,
-            "provider_calls_during_recovery": provider_calls,
+            "provider_calls_setup_baseline": 0,
+            "provider_calls_baseline": provider_calls,
+            "provider_calls_during_recovery": 0,
             "followup_worker_disposition": "idle",
         }
     elif point in {
@@ -392,6 +403,7 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "final_claim_count": 1,
             "dispatch_slots_consumed": 1,
             "provider_calls": 1,
+            "provider_calls_setup_baseline": 1,
             "provider_calls_baseline": 1,
             "provider_calls_during_recovery": 0,
             "followup_worker_disposition": "idle",
@@ -403,6 +415,7 @@ def _schedule_violations(schedule: dict[str, object]) -> tuple[str, ...]:
             "final_ledger_status": "outcome_recorded",
             "final_fencing_token": 1,
             "final_claim_count": 1,
+            "provider_calls_setup_baseline": 1,
             "provider_calls_baseline": 1,
             "provider_calls": 1,
             "provider_calls_during_recovery": 0,
@@ -518,6 +531,7 @@ def _run_transaction_fault(point: str, directory: Path, index: int) -> dict[str,
         )
         schedule.update(
             {
+                "provider_calls_setup_baseline": provider_calls_baseline,
                 "provider_calls_baseline": provider_calls_baseline,
                 "provider_calls_during_recovery": (
                     schedule["provider_calls"] - provider_calls_baseline
@@ -621,8 +635,9 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
         _setup_outbox(db_path, label, provider_log)
     else:
         _setup_queued(db_path, label)
-    provider_calls_baseline = _line_count(provider_log)
+    provider_calls_setup_baseline = _line_count(provider_log)
     exit_code = _spawn_crash(point, db_path, provider_log, delivery_log)
+    provider_calls_baseline = _line_count(provider_log)
     store = SQLiteUnitOfWork.open(db_path)
     try:
         reconciliation = None
@@ -691,6 +706,7 @@ def _run_restart_fault(point: str, directory: Path, index: int) -> dict[str, obj
         )
         schedule.update(
             {
+                "provider_calls_setup_baseline": provider_calls_setup_baseline,
                 "provider_calls_baseline": provider_calls_baseline,
                 "provider_calls_during_recovery": (
                     schedule["provider_calls"] - provider_calls_baseline

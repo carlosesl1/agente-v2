@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import scripts.validate_phase5 as phase5_validator
 from scripts.generate_phase5_manifest import (
     build_package_manifest,
     build_schema_manifest,
@@ -31,120 +34,239 @@ SEED = 2_026_071_905
 
 
 def property_payload() -> dict[str, object]:
-    cases = 20_000
-    report: dict[str, object] = {
-        "cases": cases,
-        "seed": SEED,
-        "cloudbeds_cases": cases // 2,
-        "bokun_cases": cases // 2,
-        "outcome_counts": {
-            "called_no_effect": 2_500,
-            "called_unknown": 5_000,
-            "effect_confirmed": 10_000,
-            "not_called": 2_500,
-        },
-        "violations": [],
-        "passed": True,
-    }
-    report.update({name: 1 for name in POSITIVE_PROPERTY_COUNTERS})
-    report.update(
-        {
-            "authorized_commands": cases,
-            "terminal_commands": cases,
-            "summary_outboxes": cases,
-            "final_outboxes": cases,
-        }
+    return json.loads(
+        (ROOT / "docs/refactor/evidence/phase-05/property-result.json").read_text(
+            encoding="utf-8"
+        )
     )
-    report.update({name: 0 for name in SAFETY_PROPERTY_COUNTERS})
-    return {
-        "schema_version": 1,
-        "phase": PHASE,
-        "mode": "gate",
-        "configuration": {
-            "cases": cases,
-            "minimum_gate_cases": cases,
-            "seed": SEED,
-        },
-        "result": "passed",
-        "report": report,
-    }
 
 
 def fault_payloads() -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-    fault = {
-        "schema_version": 1,
-        "phase": PHASE,
-        "kind": "fault-matrix",
-        "configuration": {"seed": SEED, "fault_point_count": len(FAULT_POINTS)},
-        "fault_points": list(FAULT_POINTS),
-        "result": "passed",
-        "violations": 0,
-        "schedules": [{"violations": []} for _ in FAULT_POINTS],
-    }
-    restart = {
-        "schema_version": 1,
-        "phase": PHASE,
-        "kind": "restart-schedules",
-        "configuration": {"seed": SEED, "schedules": 2_000},
-        "result": "passed",
-        "violations": 0,
-        "schedules": [{"violations": []} for _ in range(2_000)],
-    }
-    concurrency = {
-        "schema_version": 1,
-        "phase": PHASE,
-        "kind": "multiprocess-contention",
-        "configuration": {"seed": SEED, "rounds": 50},
-        "result": "passed",
-        "violations": 0,
-        "command_rounds": 50,
-        "outbox_rounds": 50,
-        "command_claim_winners": 50,
-        "outbox_claim_winners": 50,
-        "partial_transactions": 0,
-        "round_results": [
-            {
-                "kind": kind,
-                "winners": 1,
-                "winning_tokens": [1],
-                "provider_calls": 1 if kind == "command" else 0,
-                "partial_transactions": 0,
-                "child_errors": 0,
-                "nonzero_child_exits": 0,
-                "violations": [],
-            }
-            for _ in range(50)
-            for kind in ("command", "outbox")
-        ],
-    }
-    return fault, restart, concurrency
+    base = ROOT / "docs/refactor/evidence/phase-05"
+    return tuple(
+        json.loads((base / name).read_text(encoding="utf-8"))
+        for name in (
+            "fault-matrix.json",
+            "restart-result.json",
+            "concurrency-result.json",
+        )
+    )
 
 
 def mutation_payload() -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "phase": PHASE,
-        "scope": "temporary repository copies only; working tree unchanged",
-        "mutant_count": len(MUTANTS),
-        "catalog_count": len(MUTANTS),
-        "all_killed": True,
-        "mutants": [
-            {
-                "name": mutant.name,
-                "path": mutant.path,
-                "test": mutant.test,
-                "target_count": 1,
-                "baseline_exit_code": 0,
-                "exit_code": 1,
-                "loader_error": False,
-                "killed": True,
-            }
-            for mutant in MUTANTS
-        ],
-    }
+    return json.loads(
+        (ROOT / "docs/refactor/evidence/phase-05/mutation-result.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
 
 class Phase5CloseoutContractTests(unittest.TestCase):
+    def _evidence(self, name: str) -> dict[str, object]:
+        return json.loads(
+            (ROOT / "docs/refactor/evidence/phase-05" / name).read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_property_validator_rejects_hollow_counters_and_non_integer_protocol(self) -> None:
+        payload = self._evidence("property-result.json")
+        for key in POSITIVE_PROPERTY_COUNTERS:
+            if key not in {
+                "authorized_commands",
+                "terminal_commands",
+                "summary_outboxes",
+                "final_outboxes",
+            }:
+                payload["report"][key] = 1
+        failures: list[str] = []
+        check_property_payload(failures, payload)
+        self.assertTrue(failures, "hollow property counters false-greened")
+
+        for bad_version in (True, 1.0, "1", None):
+            payload = self._evidence("property-result.json")
+            payload["schema_version"] = bad_version
+            failures = []
+            check_property_payload(failures, payload)
+            self.assertTrue(failures, f"invalid schema version accepted: {bad_version!r}")
+
+    def test_fault_validator_rejects_hollow_schedules_duplicate_ids_and_wrong_kinds(self) -> None:
+        actual = (
+            self._evidence("fault-matrix.json"),
+            self._evidence("restart-result.json"),
+            self._evidence("concurrency-result.json"),
+        )
+        mutations = []
+
+        fault, restart, concurrency = copy.deepcopy(actual)
+        fault["schedules"] = [{"violations": []} for _ in range(17)]
+        mutations.append(("hollow fault schedules", fault, restart, concurrency))
+
+        fault, restart, concurrency = copy.deepcopy(actual)
+        restart["schedules"] = [{"violations": []} for _ in range(2_000)]
+        mutations.append(("hollow restart schedules", fault, restart, concurrency))
+
+        fault, restart, concurrency = copy.deepcopy(actual)
+        restart["schedules"][1] = copy.deepcopy(restart["schedules"][0])
+        mutations.append(("duplicate restart identity", fault, restart, concurrency))
+
+        fault, restart, concurrency = copy.deepcopy(actual)
+        for row in concurrency["round_results"]:
+            row["kind"] = "command"
+            row["provider_calls"] = 1
+            row.pop("provider_calls_baseline", None)
+            row.pop("provider_calls_final", None)
+        mutations.append(("all command contention rows", fault, restart, concurrency))
+
+        for label, fault, restart, concurrency in mutations:
+            with self.subTest(label=label):
+                failures = []
+                check_fault_payloads(failures, fault, restart, concurrency)
+                self.assertTrue(failures, f"{label} false-greened")
+
+    def test_fault_and_mutation_catalogs_are_independent_of_runner_constants(self) -> None:
+        fault = self._evidence("fault-matrix.json")
+        restart = self._evidence("restart-result.json")
+        concurrency = self._evidence("concurrency-result.json")
+        fault["fault_points"] = fault["fault_points"][:-1]
+        fault["schedules"] = fault["schedules"][:-1]
+        fault["configuration"]["fault_point_count"] = 16
+        with patch.object(
+            phase5_validator,
+            "FAULT_POINTS",
+            tuple(fault["fault_points"]),
+            create=True,
+        ):
+            failures: list[str] = []
+            check_fault_payloads(failures, fault, restart, concurrency)
+        self.assertTrue(failures, "runner-reduced fault catalog false-greened")
+
+        payload = self._evidence("mutation-result.json")
+        payload["mutants"] = payload["mutants"][:-1]
+        payload["catalog_count"] = 19
+        payload["mutant_count"] = 19
+        with patch.object(
+            phase5_validator,
+            "MUTANTS",
+            MUTANTS[:-1],
+            create=True,
+        ):
+            failures = []
+            check_mutation_payload(failures, payload)
+        self.assertTrue(failures, "runner-reduced mutation catalog false-greened")
+
+    def test_manifests_and_purity_scan_recursive_code_and_all_mutation_targets(self) -> None:
+        relatives = {
+            str(path.relative_to(ROOT)) for path in checksum_paths()
+        }
+        self.assertTrue({mutant.path for mutant in MUTANTS}.issubset(relatives))
+
+        with tempfile.TemporaryDirectory(prefix="phase5-recursive-package-") as directory:
+            root = Path(directory)
+            package = root / "reservation_execution"
+            nested = package / "nested"
+            nested.mkdir(parents=True)
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (nested / "capability.py").write_text("import requests\n", encoding="utf-8")
+            manifest = build_package_manifest(root=root)
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                [
+                    "reservation_execution/__init__.py",
+                    "reservation_execution/nested/capability.py",
+                ],
+            )
+            failures: list[str] = []
+            check_package_purity(failures, root=root)
+            self.assertTrue(
+                any("external capability imports" in item for item in failures),
+                failures,
+            )
+
+    def test_purity_validator_follows_outbox_call_graph_to_neutral_helper(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase5-outbox-callgraph-") as directory:
+            root = Path(directory)
+            package = root / "reservation_execution"
+            package.mkdir()
+            for index in range(9):
+                (package / f"module_{index}.py").write_text("", encoding="utf-8")
+            (package / "sqlite_store.py").write_text(
+                "def complete_outbox():\n"
+                "    _write_record()\n\n"
+                "def _write_record():\n"
+                "    sql = 'UPDATE ' + 'execution_ledger SET status=queued'\n",
+                encoding="utf-8",
+            )
+            failures: list[str] = []
+            summary = check_package_purity(failures, root=root)
+            self.assertIn(
+                "reservation_execution/sqlite_store.py:complete_outbox->_write_record",
+                summary["outbox_ledger_references"],
+            )
+
+    def test_live_claim_scan_is_recursive_and_rejects_aliases_in_json_and_markdown(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase5-claim-alias-") as directory:
+            evidence = Path(directory)
+            nested = evidence / "nested"
+            nested.mkdir()
+            (nested / "claim.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "phase": PHASE,
+                        "postgresql_live": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (nested / "claim.md").write_text(
+                "Docker executed: yes\nSupabase run: true\n",
+                encoding="utf-8",
+            )
+            failures: list[str] = []
+            summary = check_live_execution_claims(failures, evidence=evidence)
+            self.assertGreaterEqual(len(summary["positive_claims"]), 3)
+            self.assertTrue(failures)
+
+    def test_workflow_validator_rejects_required_commands_hidden_in_comments(self) -> None:
+        markers = (
+            "name: phase-5-durable-execution",
+            "timeout-minutes: 15",
+            "permissions:",
+            "contents: read",
+            "--cases 20000",
+            "--restart-schedules 2000",
+            "--contention-rounds 50",
+            "generate_phase5_manifest.py --check",
+            "validate_phase5.py",
+            "git diff --check",
+        )
+        with tempfile.TemporaryDirectory(prefix="phase5-comment-workflow-") as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/phase5.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: inert\non: workflow_dispatch\njobs: {}\n"
+                + "".join(f"# {marker}\n" for marker in markers),
+                encoding="utf-8",
+            )
+            failures: list[str] = []
+            with patch.object(phase5_validator, "ROOT", root):
+                phase5_validator.check_workflow(failures)
+            self.assertTrue(failures, "comment-only workflow false-greened")
+
+    def test_metrics_require_exact_integer_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase5-metrics-version-") as directory:
+            evidence = Path(directory)
+            for name in ("validation-result.json", "performance-result.json"):
+                payload = self._evidence(name)
+                payload.pop("schema_version", None)
+                (evidence / name).write_text(json.dumps(payload), encoding="utf-8")
+            failures: list[str] = []
+            with patch.object(phase5_validator, "EVIDENCE", evidence):
+                phase5_validator.check_metrics(failures)
+            self.assertTrue(failures, "metrics without schema version false-greened")
+
     def test_phase5_workflow_splits_heavy_gates_into_independent_jobs(self) -> None:
         workflow = (ROOT / ".github/workflows/phase5.yml").read_text(encoding="utf-8")
         job_starts = tuple(re.finditer(r"(?m)^  ([a-z0-9-]+):\n", workflow))
@@ -196,7 +318,7 @@ class Phase5CloseoutContractTests(unittest.TestCase):
         package = build_package_manifest()
         expected = tuple(
             str(path.relative_to(ROOT))
-            for path in sorted((ROOT / "reservation_execution").glob("*.py"))
+            for path in sorted((ROOT / "reservation_execution").rglob("*.py"))
         )
         self.assertEqual(package["python_file_count"], len(expected))
         self.assertEqual(tuple(item["path"] for item in package["files"]), expected)
@@ -228,13 +350,19 @@ class Phase5CloseoutContractTests(unittest.TestCase):
         payload["report"]["wrong_command_claims"] = 1
         failures = []
         check_property_payload(failures, payload)
-        self.assertIn("property safety counter must be zero: wrong_command_claims", failures)
+        self.assertIn(
+            "property evidence diverges from the closed operational contract",
+            failures,
+        )
 
         payload = property_payload()
         payload["report"]["outcome_counts"]["effect_confirmed"] -= 1
         failures = []
         check_property_payload(failures, payload)
-        self.assertIn("property outcome totals must equal cases", failures)
+        self.assertIn(
+            "property evidence diverges from the closed operational contract",
+            failures,
+        )
 
     def test_fault_validator_closes_manifest_restart_and_contention_oracles(self) -> None:
         fault, restart, concurrency = fault_payloads()
@@ -246,8 +374,14 @@ class Phase5CloseoutContractTests(unittest.TestCase):
         concurrency["round_results"][0]["provider_calls"] = 2
         failures = []
         check_fault_payloads(failures, fault, restart, concurrency)
-        self.assertIn("restart workload must contain exactly 2000 schedules", failures)
-        self.assertIn("contention round oracle mismatch", failures)
+        self.assertIn(
+            "restart evidence diverges from exact identities and postconditions",
+            failures,
+        )
+        self.assertIn(
+            "contention evidence diverges from exact bilateral round oracles",
+            failures,
+        )
 
     def test_mutation_validator_requires_exact_catalog_and_valid_kills(self) -> None:
         payload = mutation_payload()
@@ -258,7 +392,10 @@ class Phase5CloseoutContractTests(unittest.TestCase):
         payload["mutants"][0]["loader_error"] = True
         failures = []
         check_mutation_payload(failures, payload)
-        self.assertIn("mutation evidence does not match the closed catalog", failures)
+        self.assertIn(
+            "mutation evidence diverges from the independent closed catalog",
+            failures,
+        )
 
     def test_execution_package_has_no_live_capability_or_cross_worker_ownership(self) -> None:
         failures: list[str] = []

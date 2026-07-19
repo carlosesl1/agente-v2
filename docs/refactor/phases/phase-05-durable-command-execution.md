@@ -35,6 +35,9 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 - reconciler one-shot sem adapter;
 - outbox worker com claim/fencing/receipt próprios;
 - fault injection, restart, contention multiprocesso, properties e mutations.
+- contrato operacional independente dos runners, com schemas e valores exatos;
+- validator recursivo para package, mutation targets, overclaims e call graph
+  outbox→ledger.
 
 ## Invariantes provadas localmente
 
@@ -48,6 +51,8 @@ lease, ledger, dispatch único, outcome, reconciliação e outbox desacoplada.
 8. adulteração de state/event/command/outcome/receipt falha antes de uso;
 9. properties começam em `new_workflow` e atravessam Cloudbeds/Bókun sintéticos;
 10. mutantes rodam em cópias temporárias com baseline verde obrigatório.
+11. recovery pós-crash mede setup, baseline pós-child, final e delta; crashes
+    pós-dispatch exigem `1/1/0` e não podem esconder redispatch.
 
 ## Persistência e limites
 

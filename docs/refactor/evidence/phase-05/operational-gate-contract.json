@@ -1,0 +1,386 @@
+{
+  "schema_version": 1,
+  "phase": "phase-05-durable-command-execution",
+  "seed": 2026071905,
+  "property_gate": {
+    "configuration": {
+      "cases": 20000,
+      "minimum_gate_cases": 20000,
+      "seed": 2026071905
+    },
+    "report": {
+      "authorized_commands": 20000,
+      "bokun_cases": 10000,
+      "cases": 20000,
+      "cloudbeds_cases": 10000,
+      "conflict_probes": 2500,
+      "consistency_probes": 80,
+      "delivery_retries": 2500,
+      "delivery_target_matches": 2500,
+      "duplicate_probes": 2500,
+      "expired_lease_recoveries": 2500,
+      "final_outboxes": 20000,
+      "manual_reviews": 5000,
+      "missing_terminals": 0,
+      "outbox_provider_retries": 0,
+      "outcome_counts": {
+        "called_no_effect": 2500,
+        "called_unknown": 5000,
+        "effect_confirmed": 10000,
+        "not_called": 2500
+      },
+      "partial_transactions": 0,
+      "passed": true,
+      "post_fence_unknowns": 5000,
+      "recovered_command_matches": 2500,
+      "second_commands": 0,
+      "second_dispatch_slots": 0,
+      "second_provider_calls": 0,
+      "seed": 2026071905,
+      "stale_token_rejections": 2500,
+      "stale_token_writes": 0,
+      "summary_outboxes": 20000,
+      "terminal_commands": 20000,
+      "unauthorized_commands": 0,
+      "unexpected_exceptions": 0,
+      "unknown_redispatches": 0,
+      "violations": [],
+      "wrong_command_claims": 0,
+      "wrong_delivery_targets": 0
+    }
+  },
+  "fault_gate": {
+    "fault_points": [
+      "before_event",
+      "after_event_before_state",
+      "after_state_before_command",
+      "after_command_before_ledger",
+      "after_ledger_before_commit",
+      "after_commit_before_claim",
+      "after_claim_before_prepare",
+      "during_prepare",
+      "after_prepare_before_fence",
+      "after_fence_before_dispatch",
+      "during_dispatch",
+      "after_dispatch_before_outcome",
+      "after_outcome_before_state",
+      "after_state_before_outbox",
+      "after_outbox_before_commit",
+      "during_delivery",
+      "after_delivery_before_receipt"
+    ],
+    "restart_points": [
+      "after_commit_before_claim",
+      "after_claim_before_prepare",
+      "during_prepare",
+      "after_prepare_before_fence",
+      "after_fence_before_dispatch",
+      "during_dispatch",
+      "after_dispatch_before_outcome",
+      "during_delivery",
+      "after_delivery_before_receipt"
+    ],
+    "schedule_keys": [
+      "called_unknown",
+      "called_unknown_redispatches",
+      "child_exit_code",
+      "command_count",
+      "delivery_calls",
+      "dispatch_slots_consumed",
+      "fault_point",
+      "final_claim_count",
+      "final_fencing_token",
+      "final_ledger_status",
+      "followup_worker_disposition",
+      "mechanism",
+      "partial_transactions",
+      "pre_dispatch_released",
+      "provider_calls",
+      "provider_calls_baseline",
+      "provider_calls_during_recovery",
+      "provider_calls_setup_baseline",
+      "receipt_persisted",
+      "recovered_outbox_attempts",
+      "recovered_outbox_fencing_token",
+      "recovered_outbox_status",
+      "schedule",
+      "violations",
+      "worker_disposition"
+    ],
+    "schedule_defaults": {
+      "called_unknown": 0,
+      "called_unknown_redispatches": 0,
+      "child_exit_code": null,
+      "command_count": 0,
+      "delivery_calls": 0,
+      "dispatch_slots_consumed": 0,
+      "final_claim_count": null,
+      "final_fencing_token": null,
+      "final_ledger_status": null,
+      "followup_worker_disposition": null,
+      "mechanism": "transaction_trigger",
+      "partial_transactions": 0,
+      "pre_dispatch_released": 0,
+      "provider_calls": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_during_recovery": 0,
+      "provider_calls_setup_baseline": 0,
+      "receipt_persisted": false,
+      "recovered_outbox_attempts": null,
+      "recovered_outbox_fencing_token": null,
+      "recovered_outbox_status": null,
+      "violations": [],
+      "worker_disposition": null
+    },
+    "expectation_groups": [
+      {
+        "points": [
+          "before_event",
+          "after_event_before_state",
+          "after_state_before_command",
+          "after_command_before_ledger",
+          "after_ledger_before_commit"
+        ],
+        "values": {}
+      },
+      {
+        "points": ["after_commit_before_claim"],
+        "values": {
+          "child_exit_code": 91,
+          "command_count": 1,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 1,
+          "final_fencing_token": 1,
+          "final_ledger_status": "outcome_recorded",
+          "mechanism": "process_crash",
+          "provider_calls": 1,
+          "provider_calls_during_recovery": 1,
+          "worker_disposition": "completed"
+        }
+      },
+      {
+        "points": [
+          "after_claim_before_prepare",
+          "during_prepare",
+          "after_prepare_before_fence"
+        ],
+        "values": {
+          "child_exit_code": 91,
+          "command_count": 1,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 2,
+          "final_fencing_token": 2,
+          "final_ledger_status": "outcome_recorded",
+          "mechanism": "process_crash",
+          "pre_dispatch_released": 1,
+          "provider_calls": 1,
+          "provider_calls_during_recovery": 1,
+          "worker_disposition": "completed"
+        }
+      },
+      {
+        "points": ["after_fence_before_dispatch"],
+        "values": {
+          "called_unknown": 1,
+          "child_exit_code": 91,
+          "command_count": 1,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 1,
+          "final_fencing_token": 1,
+          "final_ledger_status": "manual_review",
+          "followup_worker_disposition": "idle",
+          "mechanism": "process_crash"
+        }
+      },
+      {
+        "points": ["during_dispatch", "after_dispatch_before_outcome"],
+        "values": {
+          "called_unknown": 1,
+          "child_exit_code": 91,
+          "command_count": 1,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 1,
+          "final_fencing_token": 1,
+          "final_ledger_status": "manual_review",
+          "followup_worker_disposition": "idle",
+          "mechanism": "process_crash",
+          "provider_calls": 1,
+          "provider_calls_baseline": 1
+        }
+      },
+      {
+        "points": [
+          "after_outcome_before_state",
+          "after_state_before_outbox",
+          "after_outbox_before_commit"
+        ],
+        "values": {
+          "called_unknown": 1,
+          "command_count": 1,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 1,
+          "final_fencing_token": 1,
+          "final_ledger_status": "manual_review",
+          "followup_worker_disposition": "idle",
+          "provider_calls": 1,
+          "provider_calls_baseline": 1,
+          "provider_calls_setup_baseline": 1
+        }
+      },
+      {
+        "points": ["during_delivery", "after_delivery_before_receipt"],
+        "values": {
+          "child_exit_code": 91,
+          "command_count": 1,
+          "delivery_calls": 2,
+          "dispatch_slots_consumed": 1,
+          "final_claim_count": 1,
+          "final_fencing_token": 1,
+          "final_ledger_status": "outcome_recorded",
+          "mechanism": "process_crash",
+          "provider_calls": 1,
+          "provider_calls_baseline": 1,
+          "provider_calls_setup_baseline": 1,
+          "receipt_persisted": true,
+          "recovered_outbox_attempts": 2,
+          "recovered_outbox_fencing_token": 2,
+          "recovered_outbox_status": "delivered",
+          "worker_disposition": "delivered"
+        }
+      }
+    ]
+  },
+  "contention_gate": {
+    "rounds": 50,
+    "command_row_keys": [
+      "child_errors",
+      "kind",
+      "nonzero_child_exits",
+      "partial_transactions",
+      "provider_calls",
+      "round",
+      "violations",
+      "winners",
+      "winning_tokens"
+    ],
+    "outbox_row_keys": [
+      "child_errors",
+      "kind",
+      "nonzero_child_exits",
+      "partial_transactions",
+      "provider_calls",
+      "provider_calls_baseline",
+      "provider_calls_final",
+      "round",
+      "violations",
+      "winners",
+      "winning_tokens"
+    ]
+  },
+  "mutation_catalog": [
+    {
+      "name": "remove_optimistic_revision",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_apply_event_requires_exact_expected_revision_and_rolls_back"
+    },
+    {
+      "name": "accept_divergent_event_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_event_hash_guard_rejects_digest_only_tamper"
+    },
+    {
+      "name": "commit_command_outside_transaction",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_sqlite_store.Phase5AtomicCommandTests.test_every_statement_fault_rolls_back_after_reopen"
+    },
+    {
+      "name": "remove_unique_idempotency",
+      "path": "schemas/phase5/sqlite.sql",
+      "test": "tests.test_phase5_schema.Phase5SchemaTests.test_generated_sql_matches_tracked_artifacts_and_is_deterministic"
+    },
+    {
+      "name": "allow_second_dispatch_slot",
+      "path": "reservation_execution/types.py",
+      "test": "tests.test_phase5_types.Phase5ExecutionTypeTests.test_dispatch_permit_requires_exact_lease_slot_hash_and_utc"
+    },
+    {
+      "name": "ignore_fencing_token",
+      "path": "reservation_execution/types.py",
+      "test": "tests.test_phase5_types.Phase5ExecutionTypeTests.test_lease_requires_opaque_owner_exact_positive_token_and_positive_ttl"
+    },
+    {
+      "name": "recover_post_fence_as_retry",
+      "path": "reservation_execution/reconciliation.py",
+      "test": "tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_expired_post_fence_becomes_unknown_atomically_without_adapter"
+    },
+    {
+      "name": "post_fence_exception_as_not_called",
+      "path": "reservation_execution/worker.py",
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_exception_after_fence_becomes_unknown_and_second_run_never_dispatches"
+    },
+    {
+      "name": "allow_not_called_from_dispatch",
+      "path": "reservation_execution/worker.py",
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_dispatch_returning_not_called_is_contract_violation_promoted_to_unknown"
+    },
+    {
+      "name": "redispatch_called_unknown",
+      "path": "reservation_execution/worker.py",
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_called_unknown_goes_to_manual_review_without_redispatch"
+    },
+    {
+      "name": "outbox_failure_requeues_command",
+      "path": "reservation_execution/outbox.py",
+      "test": "tests.test_phase5_outbox.Phase5OutboxTests.test_delivery_failure_releases_only_message"
+    },
+    {
+      "name": "mark_delivered_without_receipt",
+      "path": "reservation_execution/outbox.py",
+      "test": "tests.test_phase5_outbox.Phase5OutboxTests.test_delivery_marks_receipt_without_touching_ledger"
+    },
+    {
+      "name": "accept_divergent_outcome",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_identical_outcome_replay_is_idempotent_and_divergence_conflicts"
+    },
+    {
+      "name": "accept_tampered_command_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_command_hash_guard_rejects_digest_only_tamper"
+    },
+    {
+      "name": "accept_tampered_state_hash",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_sqlite_store.Phase5SQLiteStoreTests.test_tampered_state_hash_or_serialization_fails_before_reduce"
+    },
+    {
+      "name": "skip_manual_review",
+      "path": "reservation_execution/sqlite_store.py",
+      "test": "tests.test_phase5_worker.Phase5WorkerTests.test_called_unknown_goes_to_manual_review_without_redispatch"
+    },
+    {
+      "name": "allow_effect_without_evidence",
+      "path": "reservation_domain/types.py",
+      "test": "tests.test_phase5_domain_outcomes.Phase5DomainOutcomeTests.test_effect_confirmed_requires_reference_and_evidence"
+    },
+    {
+      "name": "allow_not_called_provider_reference",
+      "path": "reservation_domain/types.py",
+      "test": "tests.test_phase5_domain_outcomes.Phase5DomainOutcomeTests.test_not_called_rejects_provider_reference"
+    },
+    {
+      "name": "reduce_property_gate",
+      "path": "scripts/run_phase5_properties.py",
+      "test": "tests.test_phase5_mutation_runner.Phase5MutationRunnerTests.test_property_gate_minimum_is_closed"
+    },
+    {
+      "name": "remove_required_fault_point",
+      "path": "scripts/run_phase5_faults.py",
+      "test": "tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_fault_point_manifest_is_closed_and_exact"
+    }
+  ],
+  "workflow": {
+    "path": ".github/workflows/phase5.yml",
+    "sha256": "5fc36878e49b7d64d2dc8fb8aafeea65b926a7d132c6c329f4926494e86d89fc"
+  }
+}

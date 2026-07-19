@@ -20,9 +20,9 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _entry(path: Path, **extra: object) -> dict[str, object]:
+def _entry(path: Path, *, root: Path = ROOT, **extra: object) -> dict[str, object]:
     return {
-        "path": str(path.relative_to(ROOT)),
+        "path": str(path.relative_to(root)),
         "bytes": path.stat().st_size,
         "sha256": sha256(path),
         **extra,
@@ -44,53 +44,66 @@ def build_schema_manifest() -> dict[str, object]:
     }
 
 
-def build_package_manifest() -> dict[str, object]:
-    paths = tuple(sorted((ROOT / "reservation_execution").glob("*.py")))
+def build_package_manifest(*, root: Path = ROOT) -> dict[str, object]:
+    paths = tuple(sorted((root / "reservation_execution").rglob("*.py")))
     return {
         "schema_version": 1,
         "phase": PHASE,
         "hash_algorithm": "sha256",
         "package": "reservation_execution",
         "python_file_count": len(paths),
-        "files": [_entry(path) for path in paths],
+        "files": [_entry(path, root=root) for path in paths],
     }
 
 
-def checksum_paths() -> tuple[Path, ...]:
+def _operational_contract(root: Path) -> dict[str, object]:
+    path = root / "docs/refactor/evidence/phase-05/operational-gate-contract.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if type(payload) is not dict:
+        raise ValueError("operational gate contract must be an object")
+    return payload
+
+
+def checksum_paths(*, root: Path = ROOT) -> tuple[Path, ...]:
+    evidence = root / "docs/refactor/evidence/phase-05"
     fixed = {
-        ROOT / "README.md",
-        ROOT / "docs" / "refactor" / "README.md",
-        ROOT / "docs" / "refactor" / "evidence" / "README.md",
-        ROOT / "docs" / "refactor" / "06-risk-register.md",
-        ROOT / "docs" / "refactor" / "phases" / "phase-05-durable-command-execution.md",
-        ROOT / "docs" / "superpowers" / "specs" / "2026-07-19-phase-5-durable-command-execution-design.md",
-        ROOT / "docs" / "superpowers" / "plans" / "2026-07-19-phase-5-durable-command-execution.md",
-        ROOT / ".github" / "workflows" / "phase5.yml",
-        ROOT / "schemas" / "phase5" / "sqlite.sql",
-        ROOT / "schemas" / "phase5" / "postgresql.sql",
-        ROOT / "scripts" / "generate_phase5_schema.py",
-        ROOT / "scripts" / "generate_phase5_manifest.py",
-        ROOT / "scripts" / "run_phase5_properties.py",
-        ROOT / "scripts" / "run_phase5_faults.py",
-        ROOT / "scripts" / "run_phase5_mutations.py",
-        ROOT / "scripts" / "validate_phase5.py",
-        ROOT / "tests" / "phase5_helpers.py",
-        ROOT / "tests" / "test_phase5_closeout.py",
+        root / "README.md",
+        root / "docs" / "refactor" / "README.md",
+        root / "docs" / "refactor" / "evidence" / "README.md",
+        root / "docs" / "refactor" / "06-risk-register.md",
+        root / "docs" / "refactor" / "phases" / "phase-05-durable-command-execution.md",
+        root / "docs" / "superpowers" / "specs" / "2026-07-19-phase-5-durable-command-execution-design.md",
+        root / "docs" / "superpowers" / "plans" / "2026-07-19-phase-5-durable-command-execution.md",
+        root / ".github" / "workflows" / "phase5.yml",
+        root / "schemas" / "phase5" / "sqlite.sql",
+        root / "schemas" / "phase5" / "postgresql.sql",
+        root / "scripts" / "generate_phase5_schema.py",
+        root / "scripts" / "generate_phase5_manifest.py",
+        root / "scripts" / "run_phase5_properties.py",
+        root / "scripts" / "run_phase5_faults.py",
+        root / "scripts" / "run_phase5_mutations.py",
+        root / "scripts" / "validate_phase5.py",
+        root / "tests" / "phase5_helpers.py",
+        root / "tests" / "test_phase5_closeout.py",
     }
-    fixed.update((ROOT / "reservation_execution").glob("*.py"))
-    fixed.update((ROOT / "tests").glob("test_phase5_*.py"))
-    if EVIDENCE.is_dir():
+    contract_path = evidence / "operational-gate-contract.json"
+    if contract_path.is_file():
+        contract = _operational_contract(root)
+        fixed.update(root / item["path"] for item in contract["mutation_catalog"])
+    fixed.update((root / "reservation_execution").rglob("*.py"))
+    fixed.update((root / "tests").glob("test_phase5_*.py"))
+    if evidence.is_dir():
         fixed.update(
             path
-            for path in EVIDENCE.iterdir()
+            for path in evidence.rglob("*")
             if path.is_file() and path.name != "SHA256SUMS"
         )
-    paths = tuple(sorted(fixed, key=lambda path: str(path.relative_to(ROOT))))
-    missing = tuple(str(path.relative_to(ROOT)) for path in paths if not path.is_file())
+    paths = tuple(sorted(fixed, key=lambda path: str(path.relative_to(root))))
+    missing = tuple(str(path.relative_to(root)) for path in paths if not path.is_file())
     if missing:
         raise FileNotFoundError(f"missing checksum targets: {missing}")
     forbidden = tuple(
-        str(path.relative_to(ROOT))
+        str(path.relative_to(root))
         for path in paths
         if path.suffix.lower() in {".db", ".sqlite", ".sqlite3", ".log"}
         or path.name.endswith(("-wal", "-shm"))
@@ -100,9 +113,10 @@ def checksum_paths() -> tuple[Path, ...]:
     return paths
 
 
-def render_sums() -> str:
+def render_sums(*, root: Path = ROOT) -> str:
     return "".join(
-        f"{sha256(path)}  {path.relative_to(ROOT)}\n" for path in checksum_paths()
+        f"{sha256(path)}  {path.relative_to(root)}\n"
+        for path in checksum_paths(root=root)
     )
 
 

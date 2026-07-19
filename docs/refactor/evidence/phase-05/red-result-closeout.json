@@ -18,13 +18,14 @@
   "rollout": "NO-GO",
   "controller_regressions": [
     {
-      "name": "validator_indirect_ledger_write_and_live_claim_scan",
+      "name": "loader_red_missing_live_claim_api",
       "base_sha": "14b110b0c17e67024bc2a06e8cb6983f092e4a27",
       "command": "python3 -m unittest tests.test_phase5_closeout -v",
       "exit_code": 1,
       "tests_run": 1,
       "failures": 0,
       "errors": 1,
+      "expected_failure": "check_live_execution_claims was not yet importable; guards were not reached",
       "output_sha256": "2a2adde3bcf792718e327d3e5a661412af664d152971856762c8e2e5717a27a0",
       "raw_output_versioned": false
     },
@@ -48,6 +49,28 @@
       "failures": 1,
       "errors": 0,
       "output_sha256": "d7ced45c7cc7f049451d22abd67d0479f692abe032b08b98279478f2e0a6af03",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "review_closed_validator_oracles",
+      "base_sha": "d52a152b5a1dffc99dedadf7fb7fdc1a0b621b14",
+      "command": "python3 -m unittest tests.test_phase5_closeout.Phase5CloseoutContractTests.test_property_validator_rejects_hollow_counters_and_non_integer_protocol tests.test_phase5_closeout.Phase5CloseoutContractTests.test_fault_validator_rejects_hollow_schedules_duplicate_ids_and_wrong_kinds tests.test_phase5_closeout.Phase5CloseoutContractTests.test_fault_and_mutation_catalogs_are_independent_of_runner_constants tests.test_phase5_closeout.Phase5CloseoutContractTests.test_manifests_and_purity_scan_recursive_code_and_all_mutation_targets tests.test_phase5_closeout.Phase5CloseoutContractTests.test_purity_validator_follows_outbox_call_graph_to_neutral_helper tests.test_phase5_closeout.Phase5CloseoutContractTests.test_live_claim_scan_is_recursive_and_rejects_aliases_in_json_and_markdown tests.test_phase5_closeout.Phase5CloseoutContractTests.test_workflow_validator_rejects_required_commands_hidden_in_comments tests.test_phase5_closeout.Phase5CloseoutContractTests.test_metrics_require_exact_integer_schema_version -v",
+      "exit_code": 1,
+      "tests_run": 8,
+      "failures": 11,
+      "errors": 0,
+      "output_sha256": "b40b9a9053e3a39e5173c69f2e2a0cdc18cdcf85d2aebf1b230c0a9ced9c8c1b",
+      "raw_output_versioned": false
+    },
+    {
+      "name": "review_post_crash_provider_recovery_delta",
+      "base_sha": "d52a152b5a1dffc99dedadf7fb7fdc1a0b621b14",
+      "command": "python3 -m unittest tests.test_phase5_fault_injection.Phase5FaultInjectionTests.test_all_fault_points_survive_rollback_or_crash_restart -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 0,
+      "errors": 2,
+      "output_sha256": "6eb82a94775561483988232b9bb1379f86d40198007fedf40944b68361573f6f",
       "raw_output_versioned": false
     }
   ]

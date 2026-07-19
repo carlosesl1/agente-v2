@@ -99,6 +99,10 @@ class Phase5FaultInjectionTests(unittest.TestCase):
                 self.assertEqual(schedule["dispatch_slots_consumed"], 1)
                 self.assertEqual(schedule["provider_calls"], expected_provider_calls)
                 self.assertEqual(schedule["followup_worker_disposition"], "idle")
+                if point in {"during_dispatch", "after_dispatch_before_outcome"}:
+                    self.assertEqual(schedule["provider_calls_setup_baseline"], 0)
+                    self.assertEqual(schedule["provider_calls_baseline"], 1)
+                    self.assertEqual(schedule["provider_calls_during_recovery"], 0)
                 if schedule["mechanism"] == "transaction_trigger":
                     self.assertEqual(schedule["provider_calls_baseline"], 1)
                     self.assertEqual(schedule["provider_calls_during_recovery"], 0)
@@ -131,6 +135,7 @@ class Phase5FaultInjectionTests(unittest.TestCase):
             "final_claim_count": 1,
             "worker_disposition": None,
             "followup_worker_disposition": None,
+            "provider_calls_setup_baseline": 0,
             "provider_calls_baseline": 0,
             "provider_calls_during_recovery": 0,
             "recovered_outbox_status": None,

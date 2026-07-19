@@ -63,3 +63,17 @@ Sim por job. Properties, faults/restart/contention, suíte, mutations e validaç
 estática rodam em jobs independentes, todos com `timeout-minutes: 15`; o check
 terminal `phase5-gate` depende do sucesso de todos. O paralelismo não altera
 20.000 casos, 2.000 schedules, 50 rounds, 17 fault points ou 20 mutantes.
+
+### 14. O validator pode aprovar envelopes vazios ou catálogos reduzidos?
+
+Não. `operational-gate-contract.json` fixa identidades e valores sem importar
+os runners. O validator exige schemas e tipos exatos, reconstrói as 17 linhas,
+a sequência determinística dos 2.000 restarts e os 50 pares command/outbox, e
+compara o catálogo material de 20 mutantes com o contrato independente.
+
+### 15. A chamada do child pós-dispatch pode ser confundida com redispatch?
+
+Não. Cada schedule registra `provider_calls_setup_baseline`, baseline depois do
+exit 91, final e `provider_calls_during_recovery`. Em `during_dispatch` e
+`after_dispatch_before_outcome`, os valores exatos são setup 0, baseline 1,
+final 1 e delta de recovery 0.

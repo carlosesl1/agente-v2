@@ -38,6 +38,11 @@ Design e plano TDD versionados:
 - state/event/command/ledger/outbox são persistidos atomicamente;
 - pós-fence incerto nunca retorna a retry automático;
 - delivery possui lease/fencing próprios e não altera o ledger comercial.
+- `operational-gate-contract.json` é a autoridade independente e versionada
+  para 20.000 properties, 17 fault points, nove restart points, 20 mutantes,
+  schemas de schedules/rounds e o workflow canônico;
+- o validator reconstrói schedules, contagens, identidades e pós-condições a
+  partir das linhas, sem confiar em `result=passed` ou agregados declarados.
 
 ## Gate de saída em execução
 
