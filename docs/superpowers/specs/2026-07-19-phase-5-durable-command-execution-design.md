@@ -460,6 +460,59 @@ updated_at UTC
 
 A outbox não possui FK ou trigger capaz de alterar `execution_ledger`.
 
+### 8.7 Invariantes portáveis e fechamento do DDL
+
+O contrato comum produz somente `CREATE TABLE` determinístico, sem `INSERT`,
+trigger, função, extension ou DML. A Task 4 será a única responsável por aplicar o
+DDL e inserir a linha `(version=5, schema_hash, applied_at)` em
+`schema_migrations`; isso evita hash circular dentro do próprio SQL.
+
+Regras comuns aos dois dialetos:
+
+- todo PK/ID obrigatório é `NOT NULL`; a validação completa do alfabeto opaco
+  permanece no DTO/store;
+- todo hash obrigatório ou opcional não nulo possui exatamente 64 caracteres e
+  somente `[0-9a-f]`; a expressão usa apenas `length`, `lower` e `replace`,
+  disponíveis em SQLite e PostgreSQL;
+- todo JSON é `TEXT`/`text` canônico validado e hasheado pela aplicação; o banco
+  não reinterpreta JSON nem recalcula hashes;
+- SQLite persiste UTC como `TEXT` no formato ISO emitido pelo domínio, com sufixo
+  `+00:00`; PostgreSQL usa `timestamptz`;
+- `operation` aceita somente `reserve_lodging`, `book_activity` ou
+  `reserve_package`;
+- `status` e `kind` aceitam somente os valores dos enums fechados da seção 6;
+- foreign keys e uniques são declarados nominalmente no DDL, sem cascade;
+- `schema_hash(dialect)` é SHA-256 lowercase do UTF-8 retornado pelo renderer do
+  dialeto.
+
+Constraints cruzadas obrigatórias de `execution_ledger`:
+
+```text
+claim_owner, lease_acquired_at e lease_expires_at são todos NULL ou todos NOT NULL
+dispatch_slots_consumed=0 ↔ dispatch_request_hash e dispatch_fenced_at são NULL
+dispatch_slots_consumed=1 ↔ dispatch_request_hash e dispatch_fenced_at são NOT NULL
+outcome_json e outcome_hash são ambos NULL ou ambos NOT NULL
+QUEUED: sem lease, sem dispatch, sem outcome
+PREPARING: lease presente, claim_count>=1, zero dispatch, sem outcome
+DISPATCH_FENCED: lease presente, claim_count>=1, um dispatch, sem outcome
+OUTCOME_RECORDED: sem lease, outcome presente; dispatch pode ser 0 ou 1
+MANUAL_REVIEW: sem lease, um dispatch e outcome presente
+```
+
+Constraints cruzadas obrigatórias de `outbox_messages`:
+
+```text
+claim_owner, lease_acquired_at e lease_expires_at são todos NULL ou todos NOT NULL
+delivered_at e receipt_hash são ambos NULL ou ambos NOT NULL
+PENDING: sem lease e sem receipt
+LEASED: lease presente e sem receipt
+DELIVERED: sem lease, receipt presente e delivery_attempts>=1
+```
+
+O DDL SQLite é o único executado nesta fase. O DDL PostgreSQL é artefato estático
+de compatibilidade e deve ser marcado como `postgresql_executed=false` nos
+manifests posteriores.
+
 ## 9. Unidade transacional
 
 API pública pretendida:

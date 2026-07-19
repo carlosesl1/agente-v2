@@ -496,7 +496,7 @@ class Phase5SchemaTests(unittest.TestCase):
         connection = sqlite3.connect(":memory:")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(render_sqlite())
-        now = "2027-01-01T00:00:00Z"
+        now = "2027-01-01T00:00:00+00:00"
 
         def insert_workflow(suffix: str) -> str:
             workflow_id = f"workflow:schema:{suffix}"
@@ -514,7 +514,7 @@ class Phase5SchemaTests(unittest.TestCase):
                 "INSERT INTO reservation_commands "
                 "(command_id, idempotency_key, workflow_id, draft_id, draft_version, "
                 "subject_signature, operation, command_json, command_hash, created_at) "
-                "VALUES (?, ?, ?, ?, 1, ?, 'create_reservation', '{}', ?, ?)",
+                "VALUES (?, ?, ?, ?, 1, ?, 'reserve_lodging', '{}', ?, ?)",
                 (
                     command_id,
                     idempotency_key,
@@ -604,6 +604,31 @@ Diferenças fechadas:
 - PostgreSQL: `text`, `bigint`, `timestamptz`;
 - ambos usam checks fechados para status/kind;
 - ambos terminam com newline e ordem estável.
+
+Aplicar literalmente a seção 8.7 da spec consolidada. Em particular:
+
+- renderers produzem somente seis `CREATE TABLE`, sem DML/trigger/extension;
+- `schema_hash(dialect)` hasheia o UTF-8 do SQL renderizado;
+- hashes usam constraint portátil de 64 caracteres `[0-9a-f]`;
+- timestamps SQLite usam `+00:00`; PostgreSQL usa `timestamptz`;
+- operation/status/kind têm universos fechados;
+- ledger e outbox têm as constraints cruzadas de lease, dispatch, outcome e
+  receipt;
+- FKs não usam cascade;
+- PostgreSQL não é executado.
+
+Expandir o RED para provar:
+
+1. ordem e universo exatos das seis tabelas e suas colunas;
+2. PKs, FKs, uniques e ausência de triggers no SQLite;
+3. rejeição de hash malformado, operation/status/kind desconhecido, revision ou
+   counters fora do intervalo e combinações cruzadas inválidas;
+4. aceitação de `OUTCOME_RECORDED` com dispatch `0` e outcome presente
+   (`not_called` pré-dispatch), além do caminho com dispatch `1`;
+5. matriz `PENDING/LEASED/DELIVERED` da outbox;
+6. renderer/hash determinísticos, seis statements e nenhuma DML;
+7. DDL PostgreSQL contendo `bigint`/`timestamptz`, as mesmas identidades lógicas e
+   nenhum marcador SQLite (`PRAGMA`, `AUTOINCREMENT`, `GLOB`).
 
 - [ ] **Step 4: Gerar os dois SQLs**
 
