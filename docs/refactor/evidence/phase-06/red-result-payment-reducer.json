@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": "phase-06-handoff-payments",
   "task": 4,
-  "recorded_at_utc": "2026-07-19T21:29:03Z",
+  "recorded_at_utc": "2026-07-19T21:53:36Z",
   "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
   "original_red": {
     "command": "python3 -m unittest tests.test_phase6_payment_reducer -v >/tmp/phase6-task4-red.out 2>&1",
@@ -18,7 +18,6 @@
   "self_review_reds": [
     {
       "name": "wire_impossible_state_and_cross_event_id_evidence_replay",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerContractTests.test_payment_events_command_outcome_and_workflow_have_bilateral_wire tests.test_phase6_payment_reducer.Phase6PaymentReducerContractTests.test_impossible_status_without_command_is_rejected_by_constructor tests.test_phase6_payment_reducer.Phase6PaymentReducerTests.test_same_evidence_with_new_event_id_is_noop_without_second_command -v >/tmp/phase6-task4-self-review-red.out 2>&1",
       "exit_code": 1,
       "tests": 3,
@@ -27,11 +26,15 @@
       "failure_reason": "Task 4 DTOs had no wire tags, impossible queued state was constructible and identical evidence under a new event id raised instead of becoming a no-op",
       "output_sha256": "b5d765430deb048924c4f45ffcb2526ca0431bd0cc5708f2006ee53578fdaccf",
       "raw_output_path": "/tmp/phase6-task4-self-review-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     },
     {
       "name": "wire_status_projection_and_history_chronology",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerContractTests.test_payment_events_command_outcome_and_workflow_have_bilateral_wire -v >/tmp/phase6-task4-wire-state-red.out 2>&1",
       "exit_code": 1,
       "tests": 1,
@@ -40,11 +43,15 @@
       "failure_reason": "wire reconstruction accepted manual_review for a settled outcome and did not yet close event chronology",
       "output_sha256": "b75811539fff516ef26b7fc1ee2eac7bf841d2e11e2f9ee38a508eca66666653",
       "raw_output_path": "/tmp/phase6-task4-wire-state-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     },
     {
       "name": "long_canonical_stripe_claim",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerTests.test_each_method_emits_one_command_and_long_stripe_claim_is_not_false_rejected -v >/tmp/phase6-task4-long-claim-red.out 2>&1",
       "exit_code": 1,
       "tests": 1,
@@ -53,11 +60,15 @@
       "failure_reason": "a valid global Stripe account:event claim exceeded the generic 128-character opaque-id limit",
       "output_sha256": "29e191cc232552bfad404728f87c59369ccb17c52684e52fea8e08e272b8b489",
       "raw_output_path": "/tmp/phase6-task4-long-claim-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     },
     {
       "name": "expiration_and_cancellation_transitions",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerTests.test_expiration_and_cancellation_apply_only_before_settlement -v >/tmp/phase6-task4-expire-cancel-red.out 2>&1",
       "exit_code": 1,
       "tests": 1,
@@ -66,11 +77,15 @@
       "failure_reason": "after removing unproven branches the reducer had no applied expiration/cancellation transition",
       "output_sha256": "7a534b5331e36daa33858e89d3c3c2f89b265745938ae323c3382859a7ac683a",
       "raw_output_path": "/tmp/phase6-task4-expire-cancel-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     },
     {
       "name": "command_payload_exact_integer_and_economic_binding",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerContractTests.test_command_payload_rejects_bool_integers_and_divergent_economics -v >/tmp/phase6-task4-command-payload-red.out 2>&1",
       "exit_code": 1,
       "tests": 1,
@@ -79,11 +94,15 @@
       "failure_reason": "canonical command payload accepted bool-as-int schema/version/amount and economics divergent from its signature",
       "output_sha256": "ea16b11d2220d479ce6e57ec10bf518a2f6f96219160033a8a8be710a02a2733",
       "raw_output_path": "/tmp/phase6-task4-command-payload-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     },
     {
       "name": "command_method_matches_global_claim_method",
-      "unfixed_base_sha": "28373d3ed824aef5f27907c16b78ce52a3555523",
       "command": "python3 -m unittest tests.test_phase6_payment_reducer.Phase6PaymentReducerContractTests.test_command_payload_rejects_bool_integers_and_divergent_economics -v >/tmp/phase6-task4-command-method-red.out 2>&1",
       "exit_code": 1,
       "tests": 1,
@@ -92,37 +111,49 @@
       "failure_reason": "standalone command payload accepted a method that diverged from the global evidence claim prefix",
       "output_sha256": "7205dc08c120225c2fde1ecc0f93e5ea57f0260d2cd17941b74127a4acf3c334",
       "raw_output_path": "/tmp/phase6-task4-command-method-red.out",
-      "raw_output_versioned": false
+      "raw_output_versioned": false,
+      "provenance": {
+        "kind": "intermediate_uncommitted_tree",
+        "immutable_snapshot_available": false,
+        "note": "Raw output is retained and hash-verified, but no immutable tree was captured for this exploratory self-review RED."
+      }
     }
   ],
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_payment_reducer tests.test_phase6_payment tests.test_phase6_types -v >/tmp/phase6-task4-focused-terminal.out 2>&1",
-      "tests": 67,
+      "command": "python3 -m unittest tests.test_phase6_payment_reducer tests.test_phase6_payment tests.test_phase6_types -v >/tmp/phase6-task4-review-focused-final.out 2>&1",
+      "tests": 70,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "e9676a4f48d07246a1059b1d6497c0b021c6f150499906c64484857a35887da5"
+      "output_sha256": "ab17cc636b46e2a11a21be73010eae50db0c337c7c6fa4b7d900fca2b080bd7d"
     },
     "reservation_regressions": {
-      "command": "python3 -m unittest tests.test_phase2_domain tests.test_phase4_properties tests.test_phase5_worker -v >/tmp/phase6-task4-reservation-regressions-terminal.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase2_domain tests.test_phase4_properties tests.test_phase5_worker -v >/tmp/phase6-task4-review-reservation-regressions.out 2>&1",
       "tests": 40,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "571ff307ef173a94b2a78c3d2f36d76c8a13d6d0b823b52e00c5e129e8fb77b3"
+      "output_sha256": "042a117380689f0b6662741c596f94aebb6b87d303142808bca46164e83b151a"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task4-full-suite-terminal.out 2>&1",
-      "tests": 449,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task4-review-full-suite.out 2>&1",
+      "tests": 452,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 63.897,
-      "output_sha256": "b2d1f35d2630943223c7ca1c681d2a7ac1f6e1930a38d30481ea1764dd5fcc0c"
+      "duration_seconds": 63.186,
+      "output_sha256": "54c726d3c8a1ebebf044f022f1e787bcd8e2e48e43c772c0845d2beae06c28c5"
     }
   },
   "transition_matrix": {
     "payment_statuses": 11,
     "event_types": 8,
-    "literal_pairs": 88
+    "literal_pairs": 88,
+    "actions": [
+      "handle",
+      "reject",
+      "replay_only",
+      "terminal_noop"
+    ],
+    "reducer_dispatches_from_matrix": true
   },
   "command_owner": "PaymentReducer",
   "reservation_command_mentions": 0,
@@ -131,5 +162,43 @@
   "forbidden_imports": [],
   "forbidden_artifacts": [],
   "sensitive_hits": [],
-  "rollout": "NO-GO"
+  "rollout": "NO-GO",
+  "review_reds": [
+    {
+      "name": "independent_review_outcome_fence_reachability_and_stale_summary",
+      "unfixed_base_sha": "1b3940469e3eb676d0c5689158c318295e973cd1",
+      "snapshot_tree_sha": "4cd25afeb66b8aac11047edefe9b7fd63fb2dccf",
+      "reproduction_patch_path": "docs/refactor/evidence/phase-06/task4-review-red.patch",
+      "reproduction_patch_sha256": "fdd0ab79af90cc0c968329e94aec7dcee8620de7483964aa709f559ecea47c66",
+      "command": "python3 -m unittest tests.test_phase6_task4_review_red -v >/tmp/phase6-task4-review-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 4,
+      "failures": 4,
+      "errors": 0,
+      "findings": [
+        "C1_mutated_settled_outcome",
+        "C2_paid_without_dispatch_fence",
+        "I1_unreachable_status_and_hidden_terminal_history",
+        "I3_stale_summary_before_replay"
+      ],
+      "output_sha256": "5a61305ad79163d3c67516142b294159560d848eab201ac2d218b75e0442596e",
+      "raw_output_path": "/tmp/phase6-task4-review-immutable-red.out",
+      "raw_output_versioned": false
+    }
+  ],
+  "reachable_wire_statuses": [
+    "awaiting_method",
+    "awaiting_financial_confirmation",
+    "awaiting_evidence",
+    "settlement_queued",
+    "settling",
+    "paid",
+    "retryable",
+    "manual_review",
+    "expired",
+    "cancelled"
+  ],
+  "deliberately_unreachable_wire_statuses": [
+    "evidence_verified"
+  ]
 }

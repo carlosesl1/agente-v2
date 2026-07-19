@@ -641,6 +641,13 @@ class PaymentTransitionStatus(str, Enum):
     CONFLICT = "conflict"
 
 
+class PaymentEventAction(str, Enum):
+    HANDLE = "handle"
+    REJECT = "reject"
+    REPLAY_ONLY = "replay_only"
+    TERMINAL_NOOP = "terminal_noop"
+
+
 class PaymentTransitionReason(str, Enum):
     PAYMENT_OPENED = "payment_opened"
     METHOD_SELECTED = "method_selected"
@@ -849,6 +856,14 @@ class SettlementOutcome:
         raise ValueError("unsupported settlement certainty")  # pragma: no cover
 
 
+def _revalidate_settlement_outcome(value: SettlementOutcome) -> SettlementOutcome:
+    if type(value) is not SettlementOutcome:
+        raise ValueError("settlement outcome must be exact")
+    return SettlementOutcome(
+        **{field.name: getattr(value, field.name) for field in fields(SettlementOutcome)}
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PaymentSettlementCommand:
     settlement_command_id: str
@@ -1020,6 +1035,7 @@ class SettlementFinished:
         _require_id(self.settlement_command_id, "settlement_finished.command_id")
         if type(self.outcome) is not SettlementOutcome:
             raise ValueError("settlement finish requires exact SettlementOutcome")
+        _revalidate_settlement_outcome(self.outcome)
         _require_canonical_utc(self.finished_at, "settlement_finished.finished_at")
 
 
@@ -1202,6 +1218,12 @@ class PaymentWorkflow:
             raise ValueError("settlement finish requires a command")
         if self.settlement_finish is not None:
             if (
+                self.settlement_finish.outcome.certainty
+                is not SettlementCertainty.NOT_DISPATCHED
+                and self.settlement_start is None
+            ):
+                raise ValueError("dispatched settlement finish requires a dispatch fence")
+            if (
                 self.settlement_finish.payment_id != clean_subject.payment_id
                 or self.settlement_finish.payment_version != clean_subject.payment_version
                 or self.settlement_finish.economic_signature != clean_subject.economic_signature
@@ -1227,6 +1249,8 @@ class PaymentWorkflow:
                 or self.settlement_finish.outcome.certainty is not SettlementCertainty.SETTLED
             ):
                 raise ValueError("paid workflow requires a settled outcome")
+        if self.status is PaymentStatus.EVIDENCE_VERIFIED:
+            raise ValueError("evidence_verified is not a reachable persisted status")
         if self.expiration is not None and self.cancellation is not None:
             raise ValueError("payment workflow cannot be expired and cancelled")
         if self.expiration is not None and (
@@ -1293,6 +1317,22 @@ class PaymentWorkflow:
             raise ValueError("expired workflow requires expiration event")
         if self.status is PaymentStatus.CANCELLED and self.cancellation is None:
             raise ValueError("cancelled workflow requires cancellation event")
+        expected_from_history = _replay_payment_history(clean_subject, self.history)
+        actual = (
+            clean_subject,
+            self.status,
+            self.summary,
+            self.confirmation,
+            self.evidence_record,
+            self.verified_evidence,
+            self.settlement_command,
+            self.settlement_start,
+            self.settlement_finish,
+            self.expiration,
+            self.cancellation,
+        )
+        if actual != expected_from_history:
+            raise ValueError("payment workflow is not reachable by canonical reducer replay")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1333,45 +1373,84 @@ def get_payment_event_types() -> tuple[type, ...]:
     )
 
 
-_ALLOWED_EVENTS: dict[PaymentStatus, frozenset[type]] = {
-    PaymentStatus.AWAITING_METHOD: frozenset(
-        (PaymentMethodSelected, PaymentExpired, PaymentCancelled)
+_PAYMENT_EVENT_ACTIONS: dict[PaymentStatus, tuple[PaymentEventAction, ...]] = {
+    PaymentStatus.AWAITING_METHOD: (
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
     ),
-    PaymentStatus.AWAITING_FINANCIAL_CONFIRMATION: frozenset(
-        (
-            PaymentMethodSelected,
-            FinancialSummaryRecorded,
-            FinancialConfirmationReceived,
-            PaymentExpired,
-            PaymentCancelled,
-        )
+    PaymentStatus.AWAITING_FINANCIAL_CONFIRMATION: (
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
     ),
-    PaymentStatus.AWAITING_EVIDENCE: frozenset(
-        (
-            PaymentMethodSelected,
-            FinancialSummaryRecorded,
-            PaymentEvidenceRecorded,
-            PaymentExpired,
-            PaymentCancelled,
-        )
+    PaymentStatus.AWAITING_EVIDENCE: (
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
     ),
-    PaymentStatus.EVIDENCE_VERIFIED: frozenset(),
-    PaymentStatus.SETTLEMENT_QUEUED: frozenset((SettlementStarted, SettlementFinished)),
-    PaymentStatus.SETTLING: frozenset((SettlementFinished,)),
-    PaymentStatus.PAID: frozenset(),
-    PaymentStatus.RETRYABLE: frozenset(),
-    PaymentStatus.MANUAL_REVIEW: frozenset(),
-    PaymentStatus.EXPIRED: frozenset(),
-    PaymentStatus.CANCELLED: frozenset(),
+    PaymentStatus.EVIDENCE_VERIFIED: (PaymentEventAction.REJECT,) * 8,
+    PaymentStatus.SETTLEMENT_QUEUED: (
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+    ),
+    PaymentStatus.SETTLING: (
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REPLAY_ONLY,
+        PaymentEventAction.HANDLE,
+        PaymentEventAction.REJECT,
+        PaymentEventAction.REJECT,
+    ),
+    PaymentStatus.PAID: (PaymentEventAction.TERMINAL_NOOP,) * 8,
+    PaymentStatus.RETRYABLE: (PaymentEventAction.REPLAY_ONLY,) * 8,
+    PaymentStatus.MANUAL_REVIEW: (PaymentEventAction.TERMINAL_NOOP,) * 8,
+    PaymentStatus.EXPIRED: (PaymentEventAction.TERMINAL_NOOP,) * 8,
+    PaymentStatus.CANCELLED: (PaymentEventAction.TERMINAL_NOOP,) * 8,
 }
 
 
-def payment_transition_matrix() -> tuple[tuple[PaymentStatus, type, bool], ...]:
+def payment_transition_matrix(
+) -> tuple[tuple[PaymentStatus, type, PaymentEventAction], ...]:
     return tuple(
-        (status, event_type, event_type in _ALLOWED_EVENTS[status])
+        (status, event_type, action)
         for status in PaymentStatus
-        for event_type in get_payment_event_types()
+        for event_type, action in zip(
+            get_payment_event_types(),
+            _PAYMENT_EVENT_ACTIONS[status],
+        )
     )
+
+
+def _event_action(status: PaymentStatus, event_type: type) -> PaymentEventAction:
+    try:
+        index = get_payment_event_types().index(event_type)
+    except ValueError as exc:  # pragma: no cover - exact input checked by reducer
+        raise TypeError("unknown payment event type") from exc
+    return _PAYMENT_EVENT_ACTIONS[status][index]
 
 
 def _settlement_payload(
@@ -1429,6 +1508,20 @@ def _settlement_command_for(
 
 def _binding(event: PaymentEvent, subject: PaymentSubject) -> None:
     if type(event) is FinancialSummaryRecorded:
+        candidate = _revalidate_subject(event.subject)
+        if candidate.payment_id != subject.payment_id:
+            raise ValueError("financial summary belongs to another payment")
+        if candidate.confirmed_reservation_anchor != subject.confirmed_reservation_anchor:
+            raise ValueError("financial summary changed the reservation anchor")
+        if candidate.method is not subject.method:
+            raise ValueError("financial summary method is stale")
+        if candidate.payment_version < subject.payment_version:
+            raise ValueError("financial summary uses a stale payment version")
+        if (
+            candidate.payment_version == subject.payment_version
+            and candidate.economic_signature != subject.economic_signature
+        ):
+            raise ValueError("financial summary diverges within the current version")
         return
     if event.payment_id != subject.payment_id:
         raise ValueError("payment event belongs to another payment")
@@ -1438,6 +1531,166 @@ def _binding(event: PaymentEvent, subject: PaymentSubject) -> None:
         raise ValueError("payment event uses a stale payment version")
     if event.economic_signature != subject.economic_signature:
         raise ValueError("payment event uses a stale economic signature")
+
+
+def _replay_payment_history(
+    final_subject: PaymentSubject,
+    history: tuple[PaymentEvent, ...],
+) -> tuple[object, ...]:
+    subject = PaymentSubject.from_anchor(
+        final_subject.confirmed_reservation_anchor,
+        payment_id=final_subject.payment_id,
+    )
+    status = PaymentStatus.AWAITING_METHOD
+    summary = None
+    confirmation = None
+    evidence_record = None
+    verified_evidence = None
+    settlement_command = None
+    settlement_start = None
+    settlement_finish = None
+    expiration = None
+    cancellation = None
+
+    for raw_event in history:
+        event_type = type(raw_event)
+        if event_type not in get_payment_event_types():
+            raise ValueError("payment history contains an unknown event")
+        event = event_type(
+            **{field.name: getattr(raw_event, field.name) for field in fields(event_type)}
+        )
+        _binding(event, subject)
+        if _event_action(status, event_type) is not PaymentEventAction.HANDLE:
+            raise ValueError("payment history contains an event the reducer would not apply")
+
+        if event_type is PaymentMethodSelected:
+            if event.selected_at < subject.confirmed_reservation_anchor.confirmed_at:
+                raise ValueError("method selection predates reservation confirmation")
+            if subject.method is event.method and summary is None:
+                raise ValueError("payment history contains a method no-op")
+            subject = replace(subject, method=event.method)
+            status = PaymentStatus.AWAITING_FINANCIAL_CONFIRMATION
+            summary = None
+            confirmation = None
+            evidence_record = None
+            verified_evidence = None
+            settlement_command = None
+            settlement_start = None
+            settlement_finish = None
+            continue
+
+        if event_type is FinancialSummaryRecorded:
+            candidate = _revalidate_subject(event.subject)
+            if candidate.economic_signature == subject.economic_signature:
+                if candidate.payment_version != subject.payment_version:
+                    raise ValueError("unchanged economics cannot change payment version")
+            elif candidate.payment_version != subject.payment_version + 1:
+                raise ValueError("economic changes require the next payment version")
+            if summary is not None and summary.subject == candidate:
+                raise ValueError("payment history contains a summary no-op")
+            subject = candidate
+            status = PaymentStatus.AWAITING_FINANCIAL_CONFIRMATION
+            summary = event
+            confirmation = None
+            evidence_record = None
+            verified_evidence = None
+            settlement_command = None
+            settlement_start = None
+            settlement_finish = None
+            continue
+
+        if event_type is FinancialConfirmationReceived:
+            if summary is None or event.summary_hash != summary.summary_hash:
+                raise ValueError("payment history contains a stale financial confirmation")
+            if event.confirmed_at < summary.recorded_at:
+                raise ValueError("financial confirmation predates its summary")
+            status = PaymentStatus.AWAITING_EVIDENCE
+            confirmation = event
+            continue
+
+        if event_type is PaymentEvidenceRecorded:
+            if confirmation is None or event.recorded_at < confirmation.confirmed_at:
+                raise ValueError("payment history contains evidence before confirmation")
+            verified_evidence = validate_evidence(subject, event.evidence, event.trust)
+            settlement_command = _settlement_command_for(subject, verified_evidence)
+            status = PaymentStatus.SETTLEMENT_QUEUED
+            evidence_record = event
+            continue
+
+        if event_type is SettlementStarted:
+            if settlement_command is None:
+                raise ValueError("payment history starts settlement without a command")
+            if (
+                event.settlement_command_id != settlement_command.settlement_command_id
+                or event.idempotency_key != settlement_command.idempotency_key
+                or (
+                    evidence_record is not None
+                    and event.started_at < evidence_record.recorded_at
+                )
+            ):
+                raise ValueError("payment history contains a divergent settlement start")
+            status = PaymentStatus.SETTLING
+            settlement_start = event
+            continue
+
+        if event_type is SettlementFinished:
+            if (
+                settlement_command is None
+                or event.settlement_command_id
+                != settlement_command.settlement_command_id
+            ):
+                raise ValueError("payment history finishes an unknown settlement command")
+            if (
+                event.outcome.certainty is not SettlementCertainty.NOT_DISPATCHED
+                and settlement_start is None
+            ):
+                raise ValueError("dispatched settlement history requires a dispatch fence")
+            boundary_time = (
+                settlement_start.started_at
+                if settlement_start is not None
+                else evidence_record.recorded_at if evidence_record is not None else None
+            )
+            if boundary_time is None or event.finished_at < boundary_time:
+                raise ValueError("settlement finish predates its boundary event")
+            from .projection import project_settlement_outcome
+
+            status = project_settlement_outcome(
+                event.outcome,
+                dispatch_fenced=settlement_start is not None,
+            )
+            settlement_finish = event
+            continue
+
+        if event_type is PaymentExpired:
+            deadline = subject.confirmed_reservation_anchor.payment_deadline
+            if deadline is None or event.expired_at < deadline:
+                raise ValueError("payment history expires before its configured deadline")
+            status = PaymentStatus.EXPIRED
+            expiration = event
+            continue
+
+        if event_type is PaymentCancelled:
+            if event.cancelled_at < subject.confirmed_reservation_anchor.confirmed_at:
+                raise ValueError("payment history cancellation predates confirmation")
+            status = PaymentStatus.CANCELLED
+            cancellation = event
+            continue
+
+        raise TypeError("unsupported payment history event")  # pragma: no cover
+
+    return (
+        subject,
+        status,
+        summary,
+        confirmation,
+        evidence_record,
+        verified_evidence,
+        settlement_command,
+        settlement_start,
+        settlement_finish,
+        expiration,
+        cancellation,
+    )
 
 
 def _noop(state: PaymentWorkflow) -> PaymentTransition:
@@ -1548,14 +1801,12 @@ def reduce_payment(state: PaymentWorkflow, event: PaymentEvent) -> PaymentTransi
             return _noop(state)
         raise ValueError("payment evidence replay has divergent payload")
 
-    if state.status in (
-        PaymentStatus.PAID,
-        PaymentStatus.EXPIRED,
-        PaymentStatus.CANCELLED,
-        PaymentStatus.MANUAL_REVIEW,
-    ):
+    action = _event_action(state.status, type(event))
+    if action is PaymentEventAction.TERMINAL_NOOP:
         return _not_applicable(state)
-    if type(event) not in _ALLOWED_EVENTS[state.status]:
+    if action is PaymentEventAction.REPLAY_ONLY:
+        raise ValueError("payment status accepts only an identical replay")
+    if action is PaymentEventAction.REJECT:
         raise ValueError("payment event is not applicable to current status")
 
     if type(event) is PaymentMethodSelected:
@@ -1734,6 +1985,7 @@ __all__ = [
     "evidence_claim_key",
     "validate_evidence",
     "SettlementOperation",
+    "PaymentEventAction",
     "PaymentTransitionStatus",
     "PaymentTransitionReason",
     "PaymentMethodSelected",

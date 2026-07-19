@@ -22,6 +22,7 @@ from reservation_followup.payment import (
     PaymentExpired,
     PaymentMethodSelected,
     PaymentSettlementCommand,
+    PaymentEventAction,
     PaymentTransition,
     PaymentTransitionReason,
     PaymentTransitionStatus,
@@ -280,8 +281,96 @@ class Phase6PaymentReducerContractTests(unittest.TestCase):
             with self.subTest(dto=dto_type.__name__):
                 self.assertEqual(tuple(field.name for field in fields(dto_type)), names)
         self.assertEqual(
-            len(payment_transition_matrix()),
-            len(PaymentStatus) * 8,
+            payment_transition_matrix(),
+            tuple(
+                (status, event_type, action)
+                for status, actions in (
+                    (
+                        PaymentStatus.AWAITING_METHOD,
+                        (
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                        ),
+                    ),
+                    (
+                        PaymentStatus.AWAITING_FINANCIAL_CONFIRMATION,
+                        (
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                        ),
+                    ),
+                    (
+                        PaymentStatus.AWAITING_EVIDENCE,
+                        (
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                        ),
+                    ),
+                    (PaymentStatus.EVIDENCE_VERIFIED, (PaymentEventAction.REJECT,) * 8),
+                    (
+                        PaymentStatus.SETTLEMENT_QUEUED,
+                        (
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                        ),
+                    ),
+                    (
+                        PaymentStatus.SETTLING,
+                        (
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REPLAY_ONLY,
+                            PaymentEventAction.HANDLE,
+                            PaymentEventAction.REJECT,
+                            PaymentEventAction.REJECT,
+                        ),
+                    ),
+                    (PaymentStatus.PAID, (PaymentEventAction.TERMINAL_NOOP,) * 8),
+                    (PaymentStatus.RETRYABLE, (PaymentEventAction.REPLAY_ONLY,) * 8),
+                    (PaymentStatus.MANUAL_REVIEW, (PaymentEventAction.TERMINAL_NOOP,) * 8),
+                    (PaymentStatus.EXPIRED, (PaymentEventAction.TERMINAL_NOOP,) * 8),
+                    (PaymentStatus.CANCELLED, (PaymentEventAction.TERMINAL_NOOP,) * 8),
+                )
+                for event_type, action in zip(
+                    (
+                        PaymentMethodSelected,
+                        FinancialSummaryRecorded,
+                        FinancialConfirmationReceived,
+                        PaymentEvidenceRecorded,
+                        SettlementStarted,
+                        SettlementFinished,
+                        PaymentExpired,
+                        PaymentCancelled,
+                    ),
+                    actions,
+                )
+            ),
         )
 
     def test_contracts_are_frozen_slotted_and_reject_forged_verified_wrapper_input(self) -> None:
@@ -356,6 +445,56 @@ class Phase6PaymentReducerContractTests(unittest.TestCase):
         state = selected_payment()
         with self.assertRaises(ValueError):
             replace(state, status=PaymentStatus.SETTLEMENT_QUEUED)
+
+    def test_mutated_settled_outcome_cannot_mark_payment_paid(self) -> None:
+        queued, command = queued_payment()
+        settling = reduce_payment(queued, settlement_started(queued, command)).state
+        forged = outcome(SettlementCertainty.SETTLED)
+        object.__setattr__(forged, "payment_registered", False)
+        with self.assertRaises(ValueError):
+            settlement_finished(settling, command, forged)
+        with self.assertRaises(ValueError):
+            project_settlement_outcome(forged, dispatch_fenced=True)
+
+    def test_wire_reconstruction_rejects_paid_without_dispatch_fence(self) -> None:
+        queued, command = queued_payment()
+        finish = settlement_finished(
+            queued,
+            command,
+            outcome(SettlementCertainty.SETTLED),
+        )
+        with self.assertRaises(ValueError):
+            replace(
+                queued,
+                status=PaymentStatus.PAID,
+                settlement_finish=finish,
+                history=(*queued.history, finish),
+            )
+
+    def test_workflow_constructor_rejects_unreachable_status_and_hidden_terminal_history(self) -> None:
+        selected = selected_payment()
+        with self.assertRaises(ValueError):
+            replace(selected, status=PaymentStatus.EVIDENCE_VERIFIED)
+
+        queued, command = queued_payment()
+        settling = reduce_payment(queued, settlement_started(queued, command)).state
+        cancellation = PaymentCancelled(
+            event_id="payment:event:cancelled:forged:after-fence",
+            payment_id=settling.subject.payment_id,
+            payment_version=settling.subject.payment_version,
+            economic_signature=settling.subject.economic_signature,
+            cancellation_id="payment:cancellation:forged:after-fence",
+            cancelled_at=T0 + timedelta(seconds=6),
+        )
+        with self.assertRaises(ValueError):
+            replace(
+                settling,
+                status=PaymentStatus.CANCELLED,
+                cancellation=cancellation,
+                history=(*settling.history, cancellation),
+            )
+        with self.assertRaises(ValueError):
+            replace(queued, history=(*queued.history, cancellation))
 
     def test_command_payload_rejects_bool_integers_and_divergent_economics(self) -> None:
         _, command = queued_payment()
@@ -436,6 +575,9 @@ class Phase6PaymentReducerTests(unittest.TestCase):
         assert old.confirmation is not None
         with self.assertRaises(ValueError):
             reduce_payment(revised, old.confirmation)
+        assert old.summary is not None
+        with self.assertRaises(ValueError):
+            reduce_payment(revised, old.summary)
         skipped = replace(revised_subject, payment_version=revised_subject.payment_version + 1)
         with self.assertRaises(ValueError):
             reduce_payment(

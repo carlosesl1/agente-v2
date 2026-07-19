@@ -12,17 +12,18 @@ def project_settlement_outcome(
 ) -> PaymentStatus:
     """Project a validated settlement outcome without performing any effect."""
 
-    from .payment import SettlementOutcome
+    from .payment import SettlementOutcome, _revalidate_settlement_outcome
 
     if type(outcome) is not SettlementOutcome:
         raise TypeError("outcome must be the exact SettlementOutcome type")
+    clean_outcome = _revalidate_settlement_outcome(outcome)
     if type(dispatch_fenced) is not bool:
         raise TypeError("dispatch_fenced must be an exact bool")
-    if outcome.certainty is SettlementCertainty.SETTLED:
+    if clean_outcome.certainty is SettlementCertainty.SETTLED:
         return PaymentStatus.PAID
-    if outcome.certainty is SettlementCertainty.NOT_DISPATCHED:
+    if clean_outcome.certainty is SettlementCertainty.NOT_DISPATCHED:
         return PaymentStatus.MANUAL_REVIEW if dispatch_fenced else PaymentStatus.RETRYABLE
-    if outcome.certainty in (
+    if clean_outcome.certainty in (
         SettlementCertainty.DISPATCHED_NO_EFFECT,
         SettlementCertainty.PARTIAL_SETTLEMENT,
         SettlementCertainty.DISPATCHED_UNKNOWN,

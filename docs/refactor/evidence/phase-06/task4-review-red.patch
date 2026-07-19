@@ -1,0 +1,108 @@
+diff --git a/tests/test_phase6_task4_review_red.py b/tests/test_phase6_task4_review_red.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6deffcc59a2f2d85d5447940dba40208fbd5d10a
+--- /dev/null
++++ b/tests/test_phase6_task4_review_red.py
+@@ -0,0 +1,102 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from datetime import timedelta
++import unittest
++
++from reservation_followup import PaymentStatus, SettlementCertainty
++from reservation_followup.payment import (
++    FinancialSummaryRecorded,
++    PaymentCancelled,
++    financial_summary_hash,
++    reduce_payment,
++)
++from reservation_followup.projection import project_settlement_outcome
++from reservation_followup.types import PaymentSubject
++from tests.phase6_helpers import T0
++from tests.test_phase6_payment_reducer import (
++    confirmed_payment,
++    outcome,
++    queued_payment,
++    selected_payment,
++    settlement_finished,
++    settlement_started,
++)
++
++
++class Task4RejectedHeadReviewReds(unittest.TestCase):
++    def test_mutated_settled_outcome_crosses_event_and_projection(self) -> None:
++        queued, command = queued_payment()
++        settling = reduce_payment(queued, settlement_started(queued, command)).state
++        forged = outcome(SettlementCertainty.SETTLED)
++        object.__setattr__(forged, "payment_registered", False)
++        with self.assertRaises(ValueError):
++            settlement_finished(settling, command, forged)
++        with self.assertRaises(ValueError):
++            project_settlement_outcome(forged, dispatch_fenced=True)
++
++    def test_paid_without_dispatch_fence_is_unreachable(self) -> None:
++        queued, command = queued_payment()
++        finish = settlement_finished(
++            queued,
++            command,
++            outcome(SettlementCertainty.SETTLED),
++        )
++        with self.assertRaises(ValueError):
++            replace(
++                queued,
++                status=PaymentStatus.PAID,
++                settlement_finish=finish,
++                history=(*queued.history, finish),
++            )
++
++    def test_unreachable_status_and_hidden_terminal_history_fail(self) -> None:
++        selected = selected_payment()
++        with self.assertRaises(ValueError):
++            replace(selected, status=PaymentStatus.EVIDENCE_VERIFIED)
++
++        queued, command = queued_payment()
++        settling = reduce_payment(queued, settlement_started(queued, command)).state
++        cancellation = PaymentCancelled(
++            event_id="payment:event:cancelled:forged:after-fence",
++            payment_id=settling.subject.payment_id,
++            payment_version=settling.subject.payment_version,
++            economic_signature=settling.subject.economic_signature,
++            cancellation_id="payment:cancellation:forged:after-fence",
++            cancelled_at=T0 + timedelta(seconds=6),
++        )
++        with self.assertRaises(ValueError):
++            replace(
++                settling,
++                status=PaymentStatus.CANCELLED,
++                cancellation=cancellation,
++                history=(*settling.history, cancellation),
++            )
++        with self.assertRaises(ValueError):
++            replace(queued, history=(*queued.history, cancellation))
++
++    def test_stale_summary_is_bound_before_identical_replay(self) -> None:
++        old = confirmed_payment()
++        revised_subject = PaymentSubject.from_anchor(
++            old.subject.confirmed_reservation_anchor,
++            payment_id=old.subject.payment_id,
++            method=old.subject.method,
++            amount_minor=old.subject.amount_minor + 1,
++            payment_version=old.subject.payment_version + 1,
++        )
++        revised = reduce_payment(
++            old,
++            FinancialSummaryRecorded(
++                event_id="payment:event:summary:review-red:v2",
++                subject=revised_subject,
++                summary_hash=financial_summary_hash(revised_subject),
++                recorded_at=T0 + timedelta(seconds=4),
++            ),
++        ).state
++        assert old.summary is not None
++        with self.assertRaises(ValueError):
++            reduce_payment(revised, old.summary)
++
++
++if __name__ == "__main__":
++    unittest.main()
