@@ -13,7 +13,10 @@ from reservation_domain import (
     ManualReviewState,
     SucceededState,
     dumps_command,
+    dumps_event,
     dumps_outcome,
+    dumps_state,
+    loads_event,
 )
 from reservation_execution import (
     DispatchRequest,
@@ -47,6 +50,113 @@ def _command_outbox_rows(store, command_id: str):
 
 
 class Phase5WorkerTests(unittest.TestCase):
+    def _execution_outbox_id(self, store, command_id: str) -> str:
+        row = store._connection.execute(
+            "SELECT message_id FROM outbox_messages WHERE command_id=?",
+            (command_id,),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        return row[0]
+
+    def _replace_workflow_state(self, store, state) -> None:
+        raw = dumps_state(state)
+        store._connection.execute(
+            "UPDATE workflows SET state_json=?, state_hash=? WHERE workflow_id=?",
+            (
+                raw,
+                hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                state.meta.workflow_id,
+            ),
+        )
+
+    def test_execution_outbox_loader_replays_full_history_and_rejects_state_meta_rewrite(self) -> None:
+        for field_name, forged_value in (
+            ("seen_event_ids", "event:forged-history"),
+            ("seen_event_hashes", "f" * 64),
+        ):
+            with self.subTest(field_name=field_name):
+                store, worker, _, workflow_id, command_id = worker_fixture(
+                    self,
+                    ExecutionCertainty.EFFECT_CONFIRMED,
+                )
+                worker.run_once(now=RUN_T0)
+                state = store.load_workflow(workflow_id)
+                values = list(getattr(state.meta, field_name))
+                values[-1] = forged_value
+                tampered = replace(
+                    state,
+                    meta=replace(state.meta, **{field_name: tuple(values)}),
+                )
+                self._replace_workflow_state(store, tampered)
+                message_id = self._execution_outbox_id(store, command_id)
+                self.assertEqual(store.load_workflow(workflow_id), tampered)
+
+                with self.assertRaises(DataCorruption):
+                    store.load_outbox(message_id)
+
+    def test_execution_outbox_loader_rejects_coordinated_outcome_state_event_rewrite(self) -> None:
+        store, worker, _, workflow_id, command_id = worker_fixture(
+            self,
+            ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+        worker.run_once(now=RUN_T0)
+        command = store.load_command(command_id)
+        ledger = store.load_ledger(command_id)
+        divergent = command.outcome(
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+            normalized_status="forged_effect_confirmed",
+            provider_reference="provider:forged",
+            evidence=(ledger.dispatch_request_hash,),
+        )
+        outcome_raw = dumps_outcome(divergent)
+        outcome_hash = hashlib.sha256(outcome_raw.encode("utf-8")).hexdigest()
+        event_id = "event:" + hashlib.sha256(
+            f"execution_outcome|{command_id}|{outcome_hash}".encode("utf-8")
+        ).hexdigest()
+        event_row = store._connection.execute(
+            "SELECT event_id, event_json FROM domain_events WHERE workflow_id=? "
+            "AND event_type='execution_finished'",
+            (workflow_id,),
+        ).fetchone()
+        event = replace(
+            loads_event(event_row[1]),
+            event_id=event_id,
+            outcome=divergent,
+        )
+        event_raw = dumps_event(event)
+        event_hash = hashlib.sha256(event_raw.encode("utf-8")).hexdigest()
+        state = store.load_workflow(workflow_id)
+        self._replace_workflow_state(store, replace(state, outcome=divergent))
+        store._connection.execute(
+            "UPDATE domain_events SET event_id=?, event_json=?, event_hash=? "
+            "WHERE event_id=?",
+            (event_id, event_raw, event_hash, event_row[0]),
+        )
+        store._connection.execute(
+            "UPDATE execution_ledger SET outcome_json=?, outcome_hash=? "
+            "WHERE command_id=?",
+            (outcome_raw, outcome_hash, command_id),
+        )
+
+        with self.assertRaises(DataCorruption):
+            store.load_outbox(self._execution_outbox_id(store, command_id))
+
+    def test_load_ledger_rejects_status_certainty_matrix_rewrites(self) -> None:
+        for certainty, forged_status in (
+            (ExecutionCertainty.CALLED_UNKNOWN, LedgerStatus.OUTCOME_RECORDED),
+            (ExecutionCertainty.EFFECT_CONFIRMED, LedgerStatus.MANUAL_REVIEW),
+        ):
+            with self.subTest(certainty=certainty.value):
+                store, worker, _, _, command_id = worker_fixture(self, certainty)
+                worker.run_once(now=RUN_T0)
+                store._connection.execute(
+                    "UPDATE execution_ledger SET status=? WHERE command_id=?",
+                    (forged_status.value, command_id),
+                )
+
+                with self.assertRaises(DataCorruption):
+                    store.load_ledger(command_id)
+
     def test_not_called_general_projection_is_identical_to_preparation_projection(self) -> None:
         store, claim_at = claim_fixture(self)
         command = claim_at(RUN_T0).command

@@ -60,6 +60,17 @@
       "errors": 0,
       "output_sha256": "598efcf7a006152eb11f65ba2c72dffe34e20d28ca49d4f027796babb9e9b6b5",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_full_history_and_ledger_matrix",
+      "base_sha": "e83e2b4a9bf56a88898052153b077e4aa7fe97a3",
+      "command": "python3 -m unittest tests.test_phase5_worker.Phase5WorkerTests.test_execution_outbox_loader_replays_full_history_and_rejects_state_meta_rewrite tests.test_phase5_worker.Phase5WorkerTests.test_execution_outbox_loader_rejects_coordinated_outcome_state_event_rewrite tests.test_phase5_worker.Phase5WorkerTests.test_load_ledger_rejects_status_certainty_matrix_rewrites -v",
+      "exit_code": 1,
+      "tests_run": 3,
+      "failures": 5,
+      "errors": 0,
+      "output_sha256": "1cb81dd7e9e94eae958a9d6430ac0a8b49d293170d9fe8dd65d7a66d9fde564e",
+      "raw_output_versioned": false
     }
   ]
 }

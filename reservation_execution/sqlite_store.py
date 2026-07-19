@@ -581,6 +581,27 @@ class SQLiteUnitOfWork:
                 raise DataCorruption("execution outcome serialization is noncanonical")
             if outcome.command_id != command.command_id:
                 raise DataCorruption("execution outcome belongs to another command")
+            if snapshot.dispatch_slots_consumed == 0:
+                if (
+                    snapshot.status is not LedgerStatus.OUTCOME_RECORDED
+                    or outcome.certainty is not ExecutionCertainty.NOT_CALLED
+                ):
+                    raise DataCorruption(
+                        "pre-dispatch outcome certainty/status matrix is invalid"
+                    )
+            else:
+                expected_status = (
+                    LedgerStatus.MANUAL_REVIEW
+                    if outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN
+                    else LedgerStatus.OUTCOME_RECORDED
+                )
+                if (
+                    outcome.certainty is ExecutionCertainty.NOT_CALLED
+                    or snapshot.status is not expected_status
+                ):
+                    raise DataCorruption(
+                        "post-dispatch outcome certainty/status matrix is invalid"
+                    )
         return snapshot
 
     def _outbox_row(self, message_id: str):
@@ -669,16 +690,20 @@ class SQLiteUnitOfWork:
         except sqlite3.Error as exc:
             raise _sqlite_store_error(exc, "load_outbox") from exc
 
-    def _historical_state_before_revision(
+    def _replay_workflow_history(
         self,
         workflow_id: str,
-        revision: int,
+        *,
+        before_revision: int | None = None,
     ) -> State:
         row = self._workflow_row(workflow_id)
         if row is None:
-            raise DataCorruption("historical event references a missing workflow")
+            raise DataCorruption("event history references a missing workflow")
         current = self._state_from_row(row)
-        if type(revision) is not int or not 1 <= revision <= current.meta.revision:
+        if before_revision is not None and (
+            type(before_revision) is not int
+            or not 1 <= before_revision <= current.meta.revision
+        ):
             raise DataCorruption("historical target revision is outside the workflow")
         state: State = new_workflow(
             workflow_id=workflow_id,
@@ -694,23 +719,46 @@ class SQLiteUnitOfWork:
         )
         if len(rows) != current.meta.revision:
             raise DataCorruption("workflow event row count disagrees with revision")
+        historical: State | None = None
         for expected_revision, event_row in enumerate(rows, start=1):
             if event_row[1] != workflow_id or event_row[2] != expected_revision:
-                raise DataCorruption("workflow event history has a revision gap or owner mismatch")
+                raise DataCorruption(
+                    "workflow event history has a revision gap or owner mismatch"
+                )
             event = self._verified_event(event_row)
             index = expected_revision - 1
             if (
                 current.meta.seen_event_ids[index] != event.event_id
                 or current.meta.seen_event_hashes[index] != event_row[6]
             ):
-                raise DataCorruption("workflow metadata disagrees with durable event history")
-            if expected_revision == revision:
-                return state
+                raise DataCorruption(
+                    "workflow metadata disagrees with durable event history"
+                )
+            if expected_revision == before_revision:
+                historical = state
             transition = reduce(state, event)
             if transition.state.meta.revision != expected_revision:
-                raise DataCorruption("historical reducer replay did not advance one revision")
+                raise DataCorruption(
+                    "historical reducer replay did not advance one revision"
+                )
             state = transition.state
-        raise DataCorruption("historical target revision was not found")
+        if state != current:
+            raise DataCorruption("workflow state diverges from full reducer replay")
+        if before_revision is not None:
+            if historical is None:
+                raise DataCorruption("historical target revision was not found")
+            return historical
+        return state
+
+    def _historical_state_before_revision(
+        self,
+        workflow_id: str,
+        revision: int,
+    ) -> State:
+        return self._replay_workflow_history(
+            workflow_id,
+            before_revision=revision,
+        )
 
     def _verify_summary_outbox_projection(self, message: OutboxMessage) -> None:
         rows = tuple(
@@ -748,7 +796,7 @@ class SQLiteUnitOfWork:
         outcome: ExecutionOutcome,
         ledger: LedgerSnapshot,
     ) -> None:
-        state = self.load_workflow(command.workflow_id)
+        state = self._replay_workflow_history(command.workflow_id)
         if (
             not self._terminal_state_matches_outcome(state, command, outcome)
             or state.meta.last_event_at != ledger.updated_at
