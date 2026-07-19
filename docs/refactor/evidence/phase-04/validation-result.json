@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "phase": "phase-04-single-summary-and-confirmation",
-  "recorded_at_utc": "2026-07-19T04:14:35Z",
+  "recorded_at_utc": "2026-07-19T04:30:26Z",
   "status": "ok",
   "previous_validators": {
     "phase0": "ok",
@@ -11,14 +11,14 @@
   },
   "tests": {
     "command": "python3 -m unittest discover -s tests -v",
-    "count": 153,
+    "count": 154,
     "failures": 0,
     "errors": 0,
-    "elapsed_seconds": 10.819,
-    "process_elapsed_seconds": 11.456,
+    "elapsed_seconds": 12.897,
+    "process_elapsed_seconds": 13.638,
     "max_rss_kb": 32100,
     "exit_code": 0,
-    "output_sha256": "8124c0c6377638982c698bc2bc9d0279c1ee6299f4a04fa7930df04aaa7227ae"
+    "output_sha256": "8cf4fbb6fe38471ca4b94fa39070bb92b0a6df4966dfa59af89a76335bfb90ed"
   },
   "properties": {
     "cases": 50000,
@@ -45,6 +45,13 @@
     "workflow_count": 5,
     "all_success": true,
     "checked_at_utc": "2026-07-19T04:20:04Z"
+  },
+  "closeout_ci_remediation": {
+    "failed_commit": "f1e4bfb3b136dac082e5df98a46eb789273b1d0f",
+    "failed_run_id": 29673240863,
+    "failed_step": "Kill the closed mutation catalog",
+    "cause": "set iteration made one mutant hash-seed dependent",
+    "remediation": "deterministic mixed-signal mutant plus multi-PYTHONHASHSEED regression"
   },
   "domain_regression": {
     "states": 16,

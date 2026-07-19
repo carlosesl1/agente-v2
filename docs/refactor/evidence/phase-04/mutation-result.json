@@ -61,7 +61,7 @@
     {
       "exit_code": 1,
       "killed": true,
-      "name": "choose_signal_when_mixed",
+      "name": "force_accept_when_mixed",
       "path": "reservation_confirmation/classifier.py",
       "test": "tests.test_phase4_classifier.ClassifierTests.test_mixed_signals_fail_closed"
     },

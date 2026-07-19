@@ -84,10 +84,10 @@ MUTANTS = (
         test="tests.test_phase4_classifier.ClassifierTests.test_context_is_required_even_for_explicit_acceptance",
     ),
     Mutant(
-        name="choose_signal_when_mixed",
+        name="force_accept_when_mixed",
         path="reservation_confirmation/classifier.py",
-        old="        if len(signals) != 1:\n",
-        new="        if not signals:\n",
+        old="        signals, accept_kind = _signals(item)\n",
+        new='''        signals, accept_kind = _signals(item)\n        if len(signals) > 1:\n            signals = {"accept"}\n            accept_kind = "explicit"\n''',
         test="tests.test_phase4_classifier.ClassifierTests.test_mixed_signals_fail_closed",
     ),
     Mutant(

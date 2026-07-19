@@ -49,6 +49,7 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R43 | Pedido de ajuste deixa resumo antigo autorizável | 2 | 5 | aceite posterior ao `ADJUST` cria comando | estado `awaiting_adjustment`, sem handler de confirmação; nova assinatura/versão/resumo obrigatórios | domain/QA | mitigado |
 | R44 | Consulta de atividade com janela/sem horário é rejeitada ao retornar ocorrência concreta | 3 | 4 | adapter positivo falha no `OfferedState` | ocorrência dentro da janela inclusiva; `start_time=None` como wildcard; replay/property Bókun desde workflow vazio | domain/adapters | mitigado |
 | R45 | Marcador positivo desconhecido ou pergunta é aceito como confirmação | 2 | 5 | “sim, talvez”/“confirmo?” gera `ACCEPT` | conjunto fechado; `?` ambíguo; corpus PT/EN, RED tardio e mutantes independentes | domain/AI/QA | mitigado |
+| R46 | Mutante depende da ordem de hash/set e produz evidence intermitente | 2 | 4 | mesmo catálogo alterna killed/survived entre processos | mutante força decisão determinística; testes com múltiplos `PYTHONHASHSEED`; CI regenera JSON | QA | mitigado |
 
 ## Processo
 

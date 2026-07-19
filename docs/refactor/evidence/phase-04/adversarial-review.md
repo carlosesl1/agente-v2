@@ -39,6 +39,14 @@ Escopo: resumo único, classificação, trusted binding, ajuste e autorização.
 - scans AST proíbem I/O, rede e runtimes externos no package;
 - regressões formais das Fases 0–3 permanecem gates de entrada.
 
+## Remediação observada no CI de closeout
+
+O primeiro CI do closeout (`f1e4bfb...`, run `29673240863`) revelou que o
+mutante de sinais mistos dependia da ordem de iteração de `set`: podia morrer ou
+sobreviver conforme o hash seed. O catálogo foi congelado novamente, o mutante
+passou a forçar `ACCEPT` deterministicamente e um teste regressivo exige a mesma
+morte sob `PYTHONHASHSEED` 0, 1 e 17. O gate completo voltou a 19/19.
+
 ## Limites e conclusão
 
 Não houve LLM, Hermes, ManyChat, provider live, write, banco, fila, worker ou

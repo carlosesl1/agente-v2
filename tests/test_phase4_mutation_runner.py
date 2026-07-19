@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -50,6 +52,7 @@ class Phase4MutationRunnerTests(unittest.TestCase):
             "allow_noop_adjustment_version",
             "accept_stale_draft_version",
             "emit_event_after_classifier_failure",
+            "force_accept_when_mixed",
             "remove_private_identifier_guard",
         ):
             self.assertIn(required, names)
@@ -80,6 +83,29 @@ class Phase4MutationRunnerTests(unittest.TestCase):
         )
         self.assertNotEqual(completed.returncode, 0)
         self.assertNotIn('"all_killed": true', completed.stdout)
+
+    def test_mixed_signal_mutant_is_hash_seed_independent(self) -> None:
+        for seed in ("0", "1", "17"):
+            with self.subTest(seed=seed):
+                environment = dict(os.environ)
+                environment["PYTHONHASHSEED"] = seed
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "scripts/run_phase4_mutations.py",
+                        "--only",
+                        "force_accept_when_mixed",
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                report = json.loads(completed.stdout)
+                self.assertTrue(report["all_killed"])
+                self.assertEqual(report["mutants"][0]["exit_code"], 1)
 
 
 if __name__ == "__main__":
