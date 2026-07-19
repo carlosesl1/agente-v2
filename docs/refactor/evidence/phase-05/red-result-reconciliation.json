@@ -27,6 +27,17 @@
       "errors": 0,
       "output_sha256": "a401905f849a2f384b6f6ff19c1244d282e50d1c47bd8064fd671b306f5f371e",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_claim_time_and_summary_invariants",
+      "base_sha": "a35b47ee3b6e35a8d4326d178fb5c6c22698c99c",
+      "command": "python3 -m unittest tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_consistency_rejects_coordinated_impossible_claim_histories tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_consistency_rejects_temporally_impossible_active_leases tests.test_phase5_reconciliation.Phase5ReconciliationTests.test_consistency_requires_the_inverse_summary_outbox_cardinality -v",
+      "exit_code": 1,
+      "tests_run": 3,
+      "failures": 6,
+      "errors": 0,
+      "output_sha256": "ec2b0d116d0de9578efe80e127706e1e1d32ee0a0ad7447394c62b3db9fb0179",
+      "raw_output_versioned": false
     }
   ]
 }

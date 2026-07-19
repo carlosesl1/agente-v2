@@ -11,6 +11,7 @@ from reservation_domain import (
     ManualReviewState,
 )
 from reservation_execution import LedgerStatus
+from reservation_execution.adapter import PreparationFailure
 from reservation_execution.reconciliation import Reconciler, ReconciliationResult
 from reservation_execution.sqlite_store import DataCorruption
 
@@ -19,12 +20,116 @@ from tests.phase5_helpers import (
     database_counts,
     fenced_store_fixture,
     queued_store_fixture,
+    worker_fixture,
 )
 
 R0 = T0 + timedelta(minutes=1)
 
 
 class Phase5ReconciliationTests(unittest.TestCase):
+    def test_consistency_rejects_coordinated_impossible_claim_histories(self) -> None:
+        cases = []
+
+        queued, _, _, queued_command_id = queued_store_fixture(self)
+        queued._connection.execute(
+            "UPDATE execution_ledger SET fencing_token=1, claim_count=1 "
+            "WHERE command_id=?",
+            (queued_command_id,),
+        )
+        cases.append(("never_started_with_claim", queued))
+
+        executing, _, _, executing_command_id = queued_store_fixture(self)
+        executing.claim_command(
+            worker_id="worker:expired",
+            now=R0,
+            lease_ttl=timedelta(seconds=30),
+        )
+        Reconciler(executing).run_once(now=R0 + timedelta(seconds=30))
+        executing._connection.execute(
+            "UPDATE execution_ledger SET fencing_token=0, claim_count=0 "
+            "WHERE command_id=?",
+            (executing_command_id,),
+        )
+        cases.append(("started_without_claim", executing))
+
+        terminal, terminal_worker, _, _, terminal_command_id = worker_fixture(
+            self,
+            ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+        terminal_worker.run_once(now=R0)
+        terminal._connection.execute(
+            "UPDATE execution_ledger SET fencing_token=0, claim_count=0 "
+            "WHERE command_id=?",
+            (terminal_command_id,),
+        )
+        cases.append(("terminal_without_claim", terminal))
+
+        failed, failed_worker, _, _, failed_command_id = worker_fixture(
+            self,
+            PreparationFailure(
+                reason="synthetic_preparation_failure",
+                retryable=False,
+                evidence=("a" * 64,),
+            ),
+        )
+        failed_worker.run_once(now=R0)
+        failed._connection.execute(
+            "UPDATE execution_ledger SET preparation_failures=0 "
+            "WHERE command_id=?",
+            (failed_command_id,),
+        )
+        cases.append(("not_called_without_failure", failed))
+
+        for name, store in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(DataCorruption):
+                    store.assert_execution_consistency()
+
+    def test_consistency_rejects_temporally_impossible_active_leases(self) -> None:
+        preparing, _, _, preparing_command_id = queued_store_fixture(self)
+        preparing.claim_command(
+            worker_id="worker:preparing",
+            now=R0,
+            lease_ttl=timedelta(seconds=30),
+        )
+        preparing._connection.execute(
+            "UPDATE execution_ledger SET updated_at=? WHERE command_id=?",
+            (
+                preparing.load_command(preparing_command_id).created_at.isoformat(),
+                preparing_command_id,
+            ),
+        )
+
+        fenced, _, _, fenced_command_id = fenced_store_fixture(self, R0)
+        fenced_ledger = fenced.load_ledger(fenced_command_id)
+        impossible_fence = (
+            fenced_ledger.lease_acquired_at - timedelta(seconds=1)
+        ).isoformat()
+        fenced._connection.execute(
+            "UPDATE execution_ledger SET dispatch_fenced_at=? WHERE command_id=?",
+            (impossible_fence, fenced_command_id),
+        )
+
+        for name, store in (("preparing", preparing), ("fenced", fenced)):
+            with self.subTest(name=name):
+                with self.assertRaises(DataCorruption):
+                    store.assert_execution_consistency()
+
+    def test_consistency_requires_the_inverse_summary_outbox_cardinality(self) -> None:
+        store, _, _, _ = queued_store_fixture(self)
+        row = store._connection.execute(
+            "SELECT message_id FROM outbox_messages "
+            "WHERE kind='summary_presented'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        store._connection.execute(
+            "DELETE FROM outbox_messages WHERE message_id=?",
+            (row[0],),
+        )
+
+        with self.assertRaises(DataCorruption):
+            store.assert_execution_consistency()
+
     def test_public_constructor_has_no_adapter_dispatch_or_callback(self) -> None:
         parameters = inspect.signature(Reconciler).parameters
         self.assertEqual(tuple(parameters), ("store",))

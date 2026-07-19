@@ -569,6 +569,32 @@ class SQLiteUnitOfWork:
             and snapshot.updated_at != command.created_at
         ):
             raise DataCorruption("initial queued ledger timestamp disagrees with command")
+        if snapshot.status in (
+            LedgerStatus.PREPARING,
+            LedgerStatus.DISPATCH_FENCED,
+        ):
+            if (
+                snapshot.lease_acquired_at is None
+                or snapshot.lease_expires_at is None
+                or not (
+                    snapshot.lease_acquired_at
+                    <= snapshot.updated_at
+                    < snapshot.lease_expires_at
+                )
+            ):
+                raise DataCorruption("active execution lease timeline is impossible")
+        if snapshot.status is LedgerStatus.DISPATCH_FENCED and (
+            snapshot.dispatch_fenced_at is None
+            or snapshot.dispatch_fenced_at != snapshot.updated_at
+            or snapshot.lease_acquired_at is None
+            or snapshot.dispatch_fenced_at < snapshot.lease_acquired_at
+        ):
+            raise DataCorruption("dispatch fence timeline is impossible")
+        if (
+            snapshot.dispatch_fenced_at is not None
+            and snapshot.dispatch_fenced_at > snapshot.updated_at
+        ):
+            raise DataCorruption("dispatch fence timestamp exceeds ledger update")
         if snapshot.outcome_json is not None:
             if _sha256_text(snapshot.outcome_json) != snapshot.outcome_hash:
                 raise DataCorruption("execution outcome hash mismatch")
@@ -931,11 +957,48 @@ class SQLiteUnitOfWork:
             represented: set[str] = set()
             for workflow_id in workflow_ids:
                 state = self._replay_workflow_history(workflow_id)
+                summary_ids: list[str] = []
+                execution_started = 0
+                for event_row in self._connection.execute(
+                    "SELECT event_id, workflow_id, revision, occurred_at, event_type, "
+                    "event_json, event_hash FROM domain_events "
+                    "WHERE workflow_id=? AND event_type IN "
+                    "('summary_recorded', 'execution_started') ORDER BY revision",
+                    (workflow_id,),
+                ):
+                    event = self._verified_event(event_row)
+                    if type(event) is SummaryRecorded:
+                        summary_ids.append(event.outbox_message_id)
+                    elif type(event) is ExecutionStarted:
+                        execution_started += 1
+                    else:
+                        raise DataCorruption(
+                            "execution consistency query returned an unexpected event"
+                        )
+                actual_summary_ids = tuple(
+                    row[0]
+                    for row in self._connection.execute(
+                        "SELECT message_id FROM outbox_messages "
+                        "WHERE workflow_id=? AND kind='summary_presented' "
+                        "ORDER BY message_id",
+                        (workflow_id,),
+                    )
+                )
+                if (
+                    len(summary_ids) != len(set(summary_ids))
+                    or tuple(sorted(summary_ids)) != actual_summary_ids
+                ):
+                    raise DataCorruption(
+                        "summary events and durable outbox cardinality disagree"
+                    )
+                for message_id in actual_summary_ids:
+                    self.load_outbox(message_id)
+
                 durable_ids = commands_by_workflow.get(workflow_id, [])
                 if not state.meta.command_ids:
-                    if durable_ids:
+                    if durable_ids or execution_started != 0:
                         raise DataCorruption(
-                            "workflow without command metadata owns a durable command"
+                            "workflow without command metadata owns execution history"
                         )
                     continue
                 if (
@@ -948,12 +1011,30 @@ class SQLiteUnitOfWork:
                 command = self.load_command(state.meta.command_ids[0])
                 ledger = self.load_ledger(command.command_id)
                 represented.add(command.command_id)
+                never_started = type(state) is ExecutionQueuedState
                 if (
                     ledger.fencing_token != ledger.claim_count
                     or ledger.preparation_failures > ledger.claim_count
+                    or (
+                        never_started
+                        and (
+                            execution_started != 0
+                            or ledger.fencing_token != 0
+                            or ledger.claim_count != 0
+                            or ledger.preparation_failures != 0
+                        )
+                    )
+                    or (
+                        not never_started
+                        and (execution_started != 1 or ledger.claim_count < 1)
+                    )
+                    or (
+                        type(state) is FailedBeforeProviderState
+                        and ledger.preparation_failures < 1
+                    )
                 ):
                     raise DataCorruption(
-                        "execution claim counters violate their monotonic history"
+                        "execution claim counters violate their event history"
                     )
                 if getattr(state, "command", None) != command:
                     raise DataCorruption(
@@ -1313,6 +1394,11 @@ class SQLiteUnitOfWork:
                     or ledger.claim_owner is None
                     or ledger.lease_acquired_at is None
                     or ledger.lease_expires_at is None
+                    or not (
+                        ledger.lease_acquired_at
+                        <= ledger.updated_at
+                        < ledger.lease_expires_at
+                    )
                     or now < ledger.updated_at
                     or now < ledger.lease_expires_at
                 ):
@@ -1326,6 +1412,8 @@ class SQLiteUnitOfWork:
                     "WHERE command_id=? AND status='preparing' "
                     "AND claim_owner=? AND fencing_token=? "
                     "AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND updated_at=? AND claim_count=? "
+                    "AND preparation_failures=? "
                     "AND lease_expires_at<=? AND dispatch_slots_consumed=0 "
                     "AND outcome_json IS NULL AND outcome_hash IS NULL",
                     (
@@ -1335,6 +1423,9 @@ class SQLiteUnitOfWork:
                         ledger.fencing_token,
                         ledger.lease_acquired_at.isoformat(),
                         ledger.lease_expires_at.isoformat(),
+                        ledger.updated_at.isoformat(),
+                        ledger.claim_count,
+                        ledger.preparation_failures,
                         now.isoformat(),
                     ),
                 )
@@ -1789,6 +1880,12 @@ class SQLiteUnitOfWork:
                     or ledger.claim_owner is None
                     or ledger.lease_acquired_at is None
                     or ledger.lease_expires_at is None
+                    or not (
+                        ledger.lease_acquired_at
+                        <= ledger.dispatch_fenced_at
+                        == ledger.updated_at
+                        < ledger.lease_expires_at
+                    )
                     or ledger.outcome_json is not None
                     or now < ledger.updated_at
                     or now < ledger.lease_expires_at
@@ -1873,7 +1970,9 @@ class SQLiteUnitOfWork:
                     "updated_at=? WHERE command_id=? "
                     "AND status='dispatch_fenced' AND claim_owner=? "
                     "AND fencing_token=? AND lease_acquired_at=? "
-                    "AND lease_expires_at=? AND lease_expires_at<=? "
+                    "AND lease_expires_at=? AND updated_at=? "
+                    "AND claim_count=? AND preparation_failures=? "
+                    "AND lease_expires_at<=? "
                     "AND dispatch_slots_consumed=1 "
                     "AND dispatch_request_hash=? AND dispatch_fenced_at=? "
                     "AND outcome_json IS NULL AND outcome_hash IS NULL",
@@ -1886,6 +1985,9 @@ class SQLiteUnitOfWork:
                         ledger.fencing_token,
                         ledger.lease_acquired_at.isoformat(),
                         ledger.lease_expires_at.isoformat(),
+                        ledger.updated_at.isoformat(),
+                        ledger.claim_count,
+                        ledger.preparation_failures,
                         now.isoformat(),
                         ledger.dispatch_request_hash,
                         ledger.dispatch_fenced_at.isoformat(),
