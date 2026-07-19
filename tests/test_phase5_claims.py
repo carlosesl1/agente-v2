@@ -3,17 +3,22 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta, timezone
+import hashlib
 import json
 import sqlite3
 from threading import Barrier
 import unittest
 
 from reservation_domain import (
+    ExecutionQueuedState,
+    ExecutionStarted,
     ExecutingState,
     ExecutionCertainty,
     FailedBeforeProviderState,
     dumps_command,
+    dumps_state,
     loads_outcome,
+    reduce,
 )
 from reservation_execution import (
     CommandClaim,
@@ -25,17 +30,52 @@ from reservation_execution import (
 )
 from reservation_execution.sqlite_store import (
     DispatchAlreadyFenced,
+    DataCorruption,
     IdentityConflict,
     SQLiteUnitOfWork,
     StaleLease,
 )
-from tests.phase5_helpers import T0, claim_fixture, database_counts
+from tests.phase5_helpers import (
+    T0,
+    claim_fixture,
+    database_counts,
+    workflow_events,
+)
 
 
 CLAIM_T0 = T0 + timedelta(seconds=10)
 
 
 class Phase5ClaimTests(unittest.TestCase):
+    def _rewrite_workflow_state(self, store, state) -> None:
+        raw = dumps_state(state)
+        store._connection.execute(
+            "UPDATE workflows SET state_type=?, state_json=?, state_hash=?, "
+            "updated_at=? WHERE workflow_id=?",
+            (
+                state.TYPE,
+                raw,
+                hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                state.meta.last_event_at.isoformat(),
+                state.meta.workflow_id,
+            ),
+        )
+
+    def _alternate_executing_state(self, workflow_id: str):
+        initial, script = workflow_events(
+            "bokun",
+            workflow_id=workflow_id,
+        )
+        state = initial
+        for event, _ in script:
+            state = reduce(state, event).state
+        started = ExecutionStarted(
+            event_id="event:claim:alternate-started",
+            occurred_at=state.command.created_at + timedelta(seconds=1),
+            command_id=state.command.command_id,
+        )
+        return reduce(state, started).state
+
     def test_first_claim_transitions_state_and_increments_token(self) -> None:
         store, claim_at = claim_fixture(self)
         before = database_counts(store.path)
@@ -169,7 +209,7 @@ class Phase5ClaimTests(unittest.TestCase):
                 now=CLAIM_T0 + timedelta(seconds=5),
             )
         failure = PreparationFailure(
-            reason="synthetic_backdated_preparation",
+            reason="synthetic_preparation_failure",
             retryable=True,
             evidence=("e" * 64,),
         )
@@ -180,6 +220,141 @@ class Phase5ClaimTests(unittest.TestCase):
                 now=CLAIM_T0 + timedelta(seconds=5),
             )
         self.assertEqual(store.load_ledger(renewed.command.command_id), before)
+
+    def test_live_claim_revalidates_exact_executing_state_command_and_meta(self) -> None:
+        operations = ("renew", "release", "fence")
+        tamper_kinds = ("state_type", "state_type", "command")
+        for operation, tamper_kind in zip(operations, tamper_kinds, strict=True):
+            with self.subTest(operation=operation, tamper=tamper_kind):
+                store, claim_at = claim_fixture(self)
+                claim = claim_at(CLAIM_T0)
+                state = store.load_workflow(claim.command.workflow_id)
+                if tamper_kind == "state_type":
+                    tampered = ExecutionQueuedState(
+                        meta=state.meta,
+                        draft=state.draft,
+                        summary=state.summary,
+                        confirmation=state.confirmation,
+                        command=state.command,
+                    )
+                elif tamper_kind == "command":
+                    tampered = self._alternate_executing_state(
+                        claim.command.workflow_id
+                    )
+                else:
+                    tampered = replace(
+                        state,
+                        meta=replace(state.meta, command_ids=()),
+                    )
+                self._rewrite_workflow_state(store, tampered)
+                before_ledger = store.load_ledger(claim.command.command_id)
+                before_counts = database_counts(store.path)
+                with self.assertRaisesRegex(
+                    DataCorruption,
+                    "live preparation claim requires exact executing workflow command",
+                ):
+                    if operation == "renew":
+                        store.renew_command_lease(
+                            claim,
+                            now=CLAIM_T0 + timedelta(seconds=2),
+                            lease_ttl=timedelta(seconds=30),
+                        )
+                    elif operation == "release":
+                        store.release_preparation_failure(
+                            claim,
+                            PreparationFailure(
+                                reason="synthetic_preparation_failure",
+                                retryable=True,
+                                evidence=("2" * 64,),
+                            ),
+                            now=CLAIM_T0 + timedelta(seconds=2),
+                        )
+                    else:
+                        request = DispatchRequest.from_command(
+                            claim.command,
+                            dumps_command(claim.command),
+                        )
+                        store.fence_dispatch(
+                            claim,
+                            request,
+                            now=CLAIM_T0 + timedelta(seconds=2),
+                        )
+                self.assertEqual(
+                    store.load_ledger(claim.command.command_id),
+                    before_ledger,
+                )
+                self.assertEqual(database_counts(store.path), before_counts)
+                store.close()
+
+    def test_preparation_failure_reason_is_closed_and_public_status_is_fixed(self) -> None:
+        for reason in (
+            "command_serialization_failed",
+            "command_validation_failed",
+            "synthetic_preparation_failure",
+            "synthetic_timeout",
+            "unsupported_operation",
+        ):
+            with self.subTest(allowed_reason=reason):
+                self.assertEqual(
+                    PreparationFailure(
+                        reason=reason,
+                        retryable=False,
+                        evidence=("0" * 64,),
+                    ).reason,
+                    reason,
+                )
+        for reason in (
+            "auth:token",
+            "provider:cloudbeds",
+            "offer:private",
+            "timeout",
+            "socket_failure",
+        ):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ValueError):
+                    PreparationFailure(
+                        reason=reason,
+                        retryable=False,
+                        evidence=("3" * 64,),
+                    )
+
+        store, claim_at = claim_fixture(self)
+        claim = claim_at(CLAIM_T0)
+        failure = PreparationFailure(
+            reason="synthetic_preparation_failure",
+            retryable=False,
+            evidence=("4" * 64,),
+        )
+        store.release_preparation_failure(
+            claim,
+            failure,
+            now=CLAIM_T0 + timedelta(seconds=2),
+        )
+        ledger = store.load_ledger(claim.command.command_id)
+        self.assertEqual(
+            loads_outcome(ledger.outcome_json).normalized_status,
+            "synthetic_preparation_failure",
+        )
+        row = store._connection.execute(
+            "SELECT message_id FROM outbox_messages WHERE command_id=?",
+            (claim.command.command_id,),
+        ).fetchone()
+        payload = json.loads(store.load_outbox(row[0]).canonical_payload)
+        self.assertEqual(payload["status"], "preparation_failed")
+
+        from reservation_execution import project_preparation_failure_outbox
+
+        arbitrary = claim.command.outcome(
+            certainty=ExecutionCertainty.NOT_CALLED,
+            normalized_status="provider:private",
+            evidence=("5" * 64,),
+        )
+        with self.assertRaises(ValueError):
+            project_preparation_failure_outbox(
+                claim.command,
+                arbitrary,
+                created_at=CLAIM_T0 + timedelta(seconds=3),
+            )
 
     def test_stale_token_cannot_renew_fence_or_release(self) -> None:
         store, claim_at = claim_fixture(self)
@@ -250,7 +425,7 @@ class Phase5ClaimTests(unittest.TestCase):
         first = claim_at(CLAIM_T0)
         before_counts = database_counts(store.path)
         failure = PreparationFailure(
-            reason="synthetic_retryable_preparation",
+            reason="synthetic_preparation_failure",
             retryable=True,
             evidence=("a" * 64,),
         )
@@ -278,7 +453,7 @@ class Phase5ClaimTests(unittest.TestCase):
         store, claim_at = claim_fixture(self)
         claim = claim_at(CLAIM_T0)
         failure = PreparationFailure(
-            reason="synthetic_projection_preparation",
+            reason="synthetic_preparation_failure",
             retryable=False,
             evidence=("1" * 64,),
         )
@@ -304,7 +479,7 @@ class Phase5ClaimTests(unittest.TestCase):
         claim = claim_at(CLAIM_T0)
         before = database_counts(store.path)
         failure = PreparationFailure(
-            reason="synthetic_definitive_preparation",
+            reason="synthetic_preparation_failure",
             retryable=False,
             evidence=("b" * 64, "a" * 64),
         )
@@ -335,7 +510,7 @@ class Phase5ClaimTests(unittest.TestCase):
             json.loads(message.canonical_payload),
             {
                 "certainty": ExecutionCertainty.NOT_CALLED.value,
-                "status": failure.reason,
+                "status": "preparation_failed",
             },
         )
         for forbidden in ("provider", "offer_id", "auth", "exception"):
@@ -352,7 +527,7 @@ class Phase5ClaimTests(unittest.TestCase):
     def test_third_retryable_failure_exhausts_budget_and_becomes_terminal(self) -> None:
         store, claim_at = claim_fixture(self)
         failure = PreparationFailure(
-            reason="synthetic_retryable_preparation",
+            reason="synthetic_preparation_failure",
             retryable=True,
             evidence=("c" * 64,),
         )
@@ -387,7 +562,7 @@ class Phase5ClaimTests(unittest.TestCase):
         store, claim_at = claim_fixture(self)
         claim = claim_at(CLAIM_T0)
         failure = PreparationFailure(
-            reason="synthetic_terminal_collision",
+            reason="synthetic_preparation_failure",
             retryable=False,
             evidence=("f" * 64,),
         )

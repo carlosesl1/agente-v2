@@ -948,6 +948,14 @@ class SQLiteUnitOfWork:
         if command != claim.command or state.meta.revision != claim.workflow_revision:
             raise StaleLease("claim command or workflow revision is no longer current")
         if (
+            type(state) is not ExecutingState
+            or state.command != command
+            or state.meta.command_ids != (command.command_id,)
+        ):
+            raise DataCorruption(
+                "live preparation claim requires exact executing workflow command"
+            )
+        if (
             ledger.status is not LedgerStatus.PREPARING
             or ledger.dispatch_slots_consumed != 0
             or ledger.claim_owner != lease.owner

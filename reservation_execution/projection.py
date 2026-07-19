@@ -24,6 +24,7 @@ from reservation_domain import (
     SummaryRecorded,
 )
 
+from .adapter import _require_preparation_failure_reason
 from .types import LedgerStatus, OutboxKind, OutboxMessage
 
 _HASH_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -234,11 +235,12 @@ def project_preparation_failure_outbox(
         or outcome.provider_reference is not None
     ):
         raise ValueError("preparation projection requires matching not_called outcome")
+    _require_preparation_failure_reason(outcome.normalized_status)
     template_id = "reservation.execution.not_called.v1"
     payload = json.dumps(
         {
             "certainty": outcome.certainty.value,
-            "status": outcome.normalized_status,
+            "status": "preparation_failed",
         },
         ensure_ascii=False,
         sort_keys=True,

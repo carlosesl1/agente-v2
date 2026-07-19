@@ -10,6 +10,24 @@ from reservation_domain import ExecutionOutcome, ReservationCommand
 from .types import DispatchRequest, _require_hash, _require_id
 
 
+_PREPARATION_FAILURE_REASONS = frozenset(
+    {
+        "command_serialization_failed",
+        "command_validation_failed",
+        "synthetic_preparation_failure",
+        "synthetic_timeout",
+        "unsupported_operation",
+    }
+)
+
+
+def _require_preparation_failure_reason(value: str) -> str:
+    reason = _require_id(value, "preparation_failure.reason")
+    if reason not in _PREPARATION_FAILURE_REASONS:
+        raise ValueError("preparation_failure.reason is outside the closed vocabulary")
+    return reason
+
+
 @dataclass(frozen=True, slots=True)
 class PreparationFailure(Exception):
     reason: str
@@ -20,7 +38,7 @@ class PreparationFailure(Exception):
         object.__setattr__(
             self,
             "reason",
-            _require_id(self.reason, "preparation_failure.reason"),
+            _require_preparation_failure_reason(self.reason),
         )
         if type(self.retryable) is not bool:
             raise ValueError("preparation_failure.retryable must be a boolean")

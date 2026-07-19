@@ -40,6 +40,19 @@
       "failure_class": "preparation_terminal_outbox_projection_was_owned_by_store_instead_of_pure_projection_module",
       "output_sha256": "c2e7a0bbb5e8e249a5e90fe7aa4eeb55c9f334c3d799aa368f0b59aa2fe4b543",
       "raw_output_versioned": false
+    },
+    {
+      "name": "independent_review_claim_state_and_reason_hardening",
+      "base_head": "0f915863d40accae1128f0b90a5a17efff5c1502",
+      "command": "python3 -m unittest tests.test_phase5_claims.Phase5ClaimTests.test_live_claim_revalidates_exact_executing_state_command_and_meta tests.test_phase5_claims.Phase5ClaimTests.test_preparation_failure_reason_is_closed_and_public_status_is_fixed -v",
+      "exit_code": 1,
+      "expected_failure": true,
+      "test_count": 2,
+      "failure_count": 9,
+      "error_count": 0,
+      "failure_class": "live_claim_accepted_canonical_state_rewrites_and_preparation_reason_reached_public_outbox",
+      "output_sha256": "718525c77694de71d6204ca0361d034043e104c5196220b7675132a6c5719df4",
+      "raw_output_versioned": false
     }
   ]
 }
