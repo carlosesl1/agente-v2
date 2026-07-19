@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -11,7 +12,7 @@ from .types import ProviderKind, ReadRequest, ReadResponse
 
 
 def _canonical_value(value: Any) -> Any:
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {
             str(key): _canonical_value(item)
             for key, item in sorted(value.items())

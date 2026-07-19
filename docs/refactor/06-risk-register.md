@@ -8,7 +8,7 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R02 | Migração big bang quebra estados ativos | 3 | 5 | conversões sem fallback | dual-read/single-write e shadow | domain | aberto |
 | R03 | Kernel novo replica bugs do legado | 3 | 5 | testes portados literalmente | testes por invariantes e incidentes, não implementação | QA/domain | aberto |
 | R04 | Provider chamado duas vezes após crash | 3 | 5 | attempt > 1 | comando durável + ledger + outcome incerto | execution | aberto |
-| R05 | Label volta a controlar identidade | 3 | 4 | matching por nome | `offer_id` opaco e tests metamórficos | lookup | aberto |
+| R05 | Label volta a controlar identidade | 3 | 4 | matching por nome | `offer_id` opaco, seleção exata e tests metamórficos/mutantes | lookup | mitigado |
 | R06 | Canary não corresponde ao deploy | 4 | 5 | rebuild/diff de hash | promover mesmo digest e manifesto | release | aberto |
 | R07 | Segredo/PII entra no novo repo | 2 | 5 | scanners/grep | `.gitignore`, validator e revisão | security | aberto |
 | R08 | Outbox perde mensagem após efeito comercial | 3 | 5 | backlog/stuck lease | store durável, lease/recovery, fault injection | messaging | aberto |
@@ -32,6 +32,13 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R26 | Property gate passa sem exercer uma obrigação positiva | 2 | 5 | contadores críticos ficam zero e result segue `passed` | workload mínimo, counters positivos, oráculo bilateral e mutation tests | QA/domain | mitigado |
 | R27 | Wire JSON permissivo normaliza payload ambíguo | 2 | 5 | bool/float como versão, chave duplicada ou ISO compacto é aceito | parser de chaves únicas, tipos exatos e escalares canônicos | domain/persistence | mitigado |
 | R28 | Matriz estado/evento se autocertifica a partir dos handlers | 2 | 4 | tipo novo recebe `ignore` sem decisão humana | política literal fechada e comparação bidirecional com handlers | domain/QA | mitigado |
+| R29 | Schema de leitura muda e falha parcial vira “sem disponibilidade” | 3 | 5 | aumento súbito de `NEGATIVE` após mudança de provider | parsing estrito; erro HTTP/schema/partial sempre `UNCERTAIN`; contract fixtures por versão | adapters/QA | mitigado |
+| R30 | Transporte injetado ganha rede/auth dentro do package puro | 2 | 5 | imports de HTTP/env/SDK ou headers nos DTOs | nenhum transporte default; AST/import scan; auth fica na futura fronteira de runtime | adapters/security | mitigado |
+| R31 | Fixture sintética diverge do schema provider real | 3 | 4 | contract verde e boundary real falha | source map explícito; replay sanitizado no boundary real obrigatório antes de canary | QA/adapters | aberto |
+| R32 | Canonicalização trata array semanticamente ordenado como conjunto | 2 | 4 | ordem futura altera significado, mas digest não | projeção provider-specific antes do hash e teste metamórfico por novo campo/schema | adapters/domain | monitorado |
+| R33 | DTO `frozen` retém subestrutura JSON mutável e altera digest após construção | 2 | 5 | `response_hash` muda após mutação do objeto-fonte | detach por JSON, deep-freeze recursivo, teste RED e mutante dedicado | adapters/domain | mitigado |
+| R34 | Mutation evidence é preenchida manualmente e pode ficar stale | 2 | 4 | JSON não corresponde ao código/teste atual | catálogo fechado executável em cópias temporárias; CI regenera e exige diff vazio | QA | mitigado |
+| R35 | Request DTO permite path traversal ou query injection em transporte futuro | 2 | 5 | path contém dot-segment/controle ou value contém delimitador | alfabetos fechados, path canônico, testes negativos e mutante dedicado | adapters/security | mitigado |
 
 ## Processo
 

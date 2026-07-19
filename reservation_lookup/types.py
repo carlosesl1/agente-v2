@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import re
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from reservation_domain import LookupEvidence, LookupStatus, OfferSnapshot, SearchQuery, ServiceKind
@@ -11,6 +12,8 @@ from reservation_domain import LookupEvidence, LookupStatus, OfferSnapshot, Sear
 _HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 _INTERNAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _QUERY_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
+_QUERY_VALUE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
+_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]{1,255}$")
 _FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -28,15 +31,14 @@ class ReadRequest:
     def __post_init__(self) -> None:
         if type(self.method) is not str or self.method != "GET":
             raise ValueError("read requests must use GET")
+        path_segments = self.path.split("/")[1:] if type(self.path) is str else ()
         if (
             type(self.path) is not str
-            or not self.path.startswith("/")
+            or not _PATH_RE.fullmatch(self.path)
             or self.path.startswith("//")
-            or "://" in self.path
-            or "?" in self.path
-            or "#" in self.path
+            or any(segment in {"", ".", ".."} for segment in path_segments)
         ):
-            raise ValueError("path must be an absolute relative path without query")
+            raise ValueError("path must be a canonical provider-relative path")
         if type(self.query) is not tuple:
             raise TypeError("query must be a tuple")
         normalized: list[tuple[str, str]] = []
@@ -47,7 +49,7 @@ class ReadRequest:
             key, value = item
             if type(key) is not str or not _QUERY_KEY_RE.fullmatch(key):
                 raise ValueError("invalid query key")
-            if type(value) is not str or not value or len(value) > 256:
+            if type(value) is not str or not _QUERY_VALUE_RE.fullmatch(value):
                 raise ValueError("invalid query value")
             if key in seen:
                 raise ValueError("duplicate query key")
@@ -65,7 +67,7 @@ class ReadResponse:
         if type(self.status_code) is not int or not 100 <= self.status_code <= 599:
             raise ValueError("status_code must be an HTTP integer")
         try:
-            json.dumps(
+            encoded = json.dumps(
                 self.body,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -74,6 +76,8 @@ class ReadResponse:
             )
         except (TypeError, ValueError) as exc:
             raise ValueError("body must be finite JSON") from exc
+        detached = json.loads(encoded)
+        object.__setattr__(self, "body", _freeze_json(detached))
 
 
 class ReadTransport(Protocol):
@@ -168,6 +172,12 @@ class LookupResult:
             raise ValueError("evidence query signature does not match query")
         if self.evidence.snapshot_hash != self.provenance.snapshot_hash:
             raise ValueError("evidence snapshot hash does not match provenance")
+        expected_service = {
+            ProviderKind.CLOUDBEDS: ServiceKind.LODGING,
+            ProviderKind.BOKUN: ServiceKind.ACTIVITY,
+        }[self.provenance.provider]
+        if self.query.service is not expected_service:
+            raise ValueError("provider does not support query service")
 
         status = self.evidence.status
         if status is LookupStatus.POSITIVE:
@@ -185,6 +195,10 @@ class LookupResult:
         from .identity import offer_id_for
 
         for offer in self.offers:
+            if not offer.provider_ref.startswith(
+                f"{self.provenance.provider.value}."
+            ):
+                raise ValueError("offer provider_ref namespace does not match provider")
             if offer.lookup_id != self.evidence.lookup_id:
                 raise ValueError("offer lookup_id does not match evidence")
             if offer.service is not self.query.service:
@@ -221,3 +235,13 @@ class LookupResult:
 def _validate_internal_id(value: str, field: str) -> None:
     if type(value) is not str or not _INTERNAL_ID_RE.fullmatch(value):
         raise ValueError(f"invalid {field}")
+
+
+def _freeze_json(value: Any) -> Any:
+    if type(value) is dict:
+        return MappingProxyType(
+            {key: _freeze_json(item) for key, item in value.items()}
+        )
+    if type(value) is list:
+        return tuple(_freeze_json(item) for item in value)
+    return value

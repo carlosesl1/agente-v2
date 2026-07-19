@@ -1,0 +1,53 @@
+{
+  "files": [
+    {
+      "bytes": 45,
+      "path": "tests/fixtures/phase3/bokun/activity.json",
+      "sha256": "38ed3105787f0b9f406d3129bd65c7c9c4631428743ca390b494c8685493c612"
+    },
+    {
+      "bytes": 334,
+      "path": "tests/fixtures/phase3/bokun/availabilities.json",
+      "sha256": "c471a18876f3afa7d096458b639857fb1b772d8959cf2d903e70709946847d23"
+    },
+    {
+      "bytes": 65,
+      "path": "tests/fixtures/phase3/bokun/mismatched-activity.json",
+      "sha256": "1f0b13cbf5762bc2d092d24087502a3a9a1c70533550eed0652d40b7f0194f85"
+    },
+    {
+      "bytes": 36,
+      "path": "tests/fixtures/phase3/bokun/no-availability.json",
+      "sha256": "e58ed9d49673ea5f60847619d1e21cee333b9ef5e0b7823e97c6c29d000c5d82"
+    },
+    {
+      "bytes": 510,
+      "path": "tests/fixtures/phase3/cloudbeds/available-room-types.json",
+      "sha256": "d6232b8fa4a9e0e0660a16378a18e34ee347c32b2123ab4823eaed956f5b2400"
+    },
+    {
+      "bytes": 522,
+      "path": "tests/fixtures/phase3/cloudbeds/missing-rate-plan.json",
+      "sha256": "3ae60a0cb681964cc3aa35ba0a68af042b022801f0ab9de8a8405355bd73b734"
+    },
+    {
+      "bytes": 36,
+      "path": "tests/fixtures/phase3/cloudbeds/no-availability.json",
+      "sha256": "e58ed9d49673ea5f60847619d1e21cee333b9ef5e0b7823e97c6c29d000c5d82"
+    },
+    {
+      "bytes": 117,
+      "path": "tests/fixtures/phase3/cloudbeds/rate-plans.json",
+      "sha256": "996d601bda88c6199cefdfc8d0b51233b97a7abe44285323dda7c6e5349fdf15"
+    }
+  ],
+  "fixture_count": 8,
+  "hash_algorithm": "sha256",
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "provider_counts": {
+    "bokun": 4,
+    "cloudbeds": 4
+  },
+  "schema_version": 1,
+  "synthetic_sanitized_only": true
+}

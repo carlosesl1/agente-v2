@@ -60,3 +60,18 @@ python3 -m unittest discover -s tests -v
 python3 scripts/run_phase2_properties.py --sequences 100000 --max-events 20 --seed 20260718
 python3 scripts/validate_phase2.py
 ```
+
+## Fase 3
+
+`phase-03/lookup-manifest.json` e `fixture-manifest.json` protegem o package
+read-only e oito fixtures sintéticas. `property-result.json` registra 50 mil
+casos bilaterais de seleção/invalidação; `source-map.json` documenta as fontes
+legadas somente leitura.
+
+Para verificar:
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/run_phase3_properties.py --cases 50000 --seed 20260718
+python3 scripts/validate_phase3.py
+```

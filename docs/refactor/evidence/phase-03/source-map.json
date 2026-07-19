@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "classification": "source_informed_contract",
+  "legacy_readonly": {
+    "head": "57408d8b2040399bc25ee7957505208079458884",
+    "status_entries": 80,
+    "status_sha256": "77c02eb09d415e01f45515ccacf9bc7b93f34d1d8a66aafc0af905d8734c940b"
+  },
+  "symbols": [
+    {
+      "source_path": "services/cloudbeds.py",
+      "source_sha256": "15cc293d985142a0f59a6faed07629efbf1376396567824384659cd13f013082",
+      "symbol": "_normalize_availability_response",
+      "line": 704,
+      "target": "reservation_lookup/cloudbeds.py::CloudbedsReadAdapter.lookup"
+    },
+    {
+      "source_path": "services/cloudbeds.py",
+      "source_sha256": "15cc293d985142a0f59a6faed07629efbf1376396567824384659cd13f013082",
+      "symbol": "_normalize_room_option",
+      "line": 738,
+      "target": "reservation_lookup/cloudbeds.py::_normalize_offers"
+    },
+    {
+      "source_path": "tools/cloudbeds_v2_tools.py",
+      "source_sha256": "43f0a0a8669f3030ee90a5fa1a1932769e1aa35dc46a0460cf0d5648f55f52ad",
+      "symbol": "cloudbeds_consultar_hospedagem_v2",
+      "line": 48,
+      "target": "tests/test_phase3_cloudbeds_adapter.py"
+    },
+    {
+      "source_path": "services/bokun.py",
+      "source_sha256": "5df4133cc2980d43ec8a8cab3bf8aa0a2d808c7dcad0138cd47a8b1d522be0ed",
+      "symbol": "_normalize_activity_availability",
+      "line": 2910,
+      "target": "reservation_lookup/bokun.py::BokunReadAdapter.lookup"
+    },
+    {
+      "source_path": "services/bokun.py",
+      "source_sha256": "5df4133cc2980d43ec8a8cab3bf8aa0a2d808c7dcad0138cd47a8b1d522be0ed",
+      "symbol": "_normalize_activity_option",
+      "line": 2947,
+      "target": "reservation_lookup/bokun.py::_normalize_offers"
+    },
+    {
+      "source_path": "tools/bokun_v2_tools.py",
+      "source_sha256": "239accab85abd62b5abb240381307c9b25d939e60b6ebe9630b3d5b2caaf4310",
+      "symbol": "bokun_consultar_passeio_v2",
+      "line": 50,
+      "target": "tests/test_phase3_bokun_adapter.py"
+    }
+  ],
+  "claims": {
+    "legacy_imported": false,
+    "legacy_runtime_executed": false,
+    "provider_network_executed": false,
+    "provider_payload_captured": false,
+    "fixtures_synthetic_sanitized": true
+  }
+}

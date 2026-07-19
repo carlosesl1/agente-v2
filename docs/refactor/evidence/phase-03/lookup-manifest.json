@@ -1,0 +1,49 @@
+{
+  "files": [
+    {
+      "bytes": 1196,
+      "path": "reservation_lookup/__init__.py",
+      "sha256": "b64b9e04503051792c19c5ccd4137acc7fa0947c9a925d2c0d429ea34b833626"
+    },
+    {
+      "bytes": 4613,
+      "path": "reservation_lookup/_common.py",
+      "sha256": "c43e75bf57e048ac09467b331042a24064474440a5021372c7c2943882758c0f"
+    },
+    {
+      "bytes": 9423,
+      "path": "reservation_lookup/bokun.py",
+      "sha256": "c3b05e8c8aa72759b8f5f214997108bf6caa9fb5945c2b0e138157192b0c2279"
+    },
+    {
+      "bytes": 10075,
+      "path": "reservation_lookup/cloudbeds.py",
+      "sha256": "20238863885fd2af558a649fca609665000b00bd25726544d1af3505230a7054"
+    },
+    {
+      "bytes": 4520,
+      "path": "reservation_lookup/identity.py",
+      "sha256": "521568b41853c422cecf4690d5a1f8d814e8658c309f56d9923045fa55676ee5"
+    },
+    {
+      "bytes": 14303,
+      "path": "reservation_lookup/properties.py",
+      "sha256": "1adf49fa80b9679686e1bdb138637d58fb2b4dd99abfeec8b76415d18cf1689f"
+    },
+    {
+      "bytes": 2278,
+      "path": "reservation_lookup/selection.py",
+      "sha256": "79b8538dfd6754bd7203511c83a54b663e03292489a9d11d29bd4250a0e4eefb"
+    },
+    {
+      "bytes": 10446,
+      "path": "reservation_lookup/types.py",
+      "sha256": "d57978fac936a3fc769032e9f4ef572216462f1a7c63d0436e6f048aeb7f3dfe"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "package": "reservation_lookup",
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "python_file_count": 8,
+  "schema_version": 1
+}

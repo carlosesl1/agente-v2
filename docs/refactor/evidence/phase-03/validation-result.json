@@ -1,0 +1,81 @@
+{
+  "evidence_hashes_checked": 37,
+  "failures": [],
+  "manifests": {
+    "fixture_count": 8,
+    "python_file_count": 8
+  },
+  "mutation": {
+    "all_killed": true,
+    "mutants": 13
+  },
+  "performance": {
+    "elapsed_seconds": 33.548,
+    "exit_code": 0,
+    "max_rss_kb": 25432,
+    "result": "passed"
+  },
+  "phase": "phase-03-lookups-and-offer-snapshots",
+  "previous_validators": {
+    "phase0": "ok",
+    "phase1": "ok",
+    "phase2": "ok"
+  },
+  "properties": {
+    "cases": 50000,
+    "executable_mutation_cases": 50000,
+    "expired_cases": 50000,
+    "false_authorizations": 0,
+    "label_equivalence_cases": 50000,
+    "missed_invalidations": 0,
+    "multiple_match_cases": 50000,
+    "positive_authorizations": 50000,
+    "unexpected_exceptions": 0,
+    "zero_match_cases": 50000
+  },
+  "purity": {
+    "forbidden_calls": [],
+    "forbidden_imports": [],
+    "imports": [
+      "__future__",
+      "_common",
+      "bokun",
+      "cloudbeds",
+      "collections",
+      "dataclasses",
+      "datetime",
+      "decimal",
+      "enum",
+      "hashlib",
+      "identity",
+      "json",
+      "properties",
+      "re",
+      "reservation_domain",
+      "selection",
+      "types",
+      "typing"
+    ],
+    "python_files": 8,
+    "transport_classes": [
+      "reservation_lookup/types.py:83:ReadTransport"
+    ],
+    "transport_send_owners": [
+      "reservation_lookup/_common.py:45"
+    ]
+  },
+  "recorded_at_utc": "2026-07-19T00:35:32Z",
+  "red": {
+    "expected": 5,
+    "valid": 5
+  },
+  "relative_links_checked": 13,
+  "schema_version": 1,
+  "source_map": {
+    "legacy_head": "57408d8b2040399bc25ee7957505208079458884",
+    "symbols": 6
+  },
+  "status": "ok",
+  "text_files_scanned": 159,
+  "validation_record": "self_recorded_after_zero_failure_preflight"
+}

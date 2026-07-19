@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -133,7 +134,7 @@ def _normalize_offers(
     offers: list[OfferSnapshot] = []
     seen_offer_ids: set[str] = set()
     for index, item in enumerate(room_items):
-        if type(item) is not dict:
+        if not isinstance(item, Mapping):
             raise ProviderSchemaError(f"room_{index}_not_object")
         available_units = _strict_int(item.get("roomsAvailable"), f"room_{index}_units")
         if available_units <= 0:
@@ -175,21 +176,21 @@ def _normalize_offers(
     return tuple(sorted(offers, key=lambda item: item.offer_id))
 
 
-def _provider_data(body, source: str) -> list:
-    if type(body) is not dict:
+def _provider_data(body, source: str) -> tuple:
+    if not isinstance(body, Mapping):
         raise ProviderSchemaError(f"{source}_envelope_not_object")
     if body.get("success") is not True:
         raise ProviderSchemaError(f"{source}_success_not_true")
     data = body.get("data")
-    if type(data) is not list:
+    if type(data) is not tuple:
         raise ProviderSchemaError(f"{source}_data_not_array")
     return data
 
 
-def _rate_plan_ids(items: list) -> set[str]:
+def _rate_plan_ids(items: tuple) -> set[str]:
     values: set[str] = set()
     for index, item in enumerate(items):
-        if type(item) is not dict:
+        if not isinstance(item, Mapping):
             raise ProviderSchemaError(f"rate_plan_{index}_not_object")
         rate_id = _technical_id(item.get("ratePlanID"), f"rate_plan_{index}_id")
         if rate_id in values:
@@ -214,13 +215,13 @@ def _daily_total(
     currency: str,
     room_index: int,
 ) -> Decimal:
-    if type(value) is not list:
+    if type(value) is not tuple:
         raise ProviderSchemaError(f"room_{room_index}_daily_rates_not_array")
     if len(value) != len(expected_dates):
         raise ProviderSchemaError(f"room_{room_index}_partial_stay")
     amounts: dict[str, Decimal] = {}
     for row_index, row in enumerate(value):
-        if type(row) is not dict:
+        if not isinstance(row, Mapping):
             raise ProviderSchemaError(f"room_{room_index}_rate_{row_index}_not_object")
         day = row.get("date")
         if type(day) is not str or day not in expected_dates or day in amounts:

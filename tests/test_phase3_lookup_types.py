@@ -86,6 +86,26 @@ class ReadBoundaryTypeTests(unittest.TestCase):
             ReadRequest(method="GET", path="https://provider.invalid/x", query=())
         with self.assertRaises(ValueError):
             ReadRequest(method="GET", path="api/no-leading-slash", query=())
+        for unsafe_path in (
+            "//provider.invalid/x",
+            "/../admin",
+            "/safe/./admin",
+            "/safe?override=true",
+            "/safe#fragment",
+            "/safe\\admin",
+            "/safe\nadmin",
+        ):
+            with self.subTest(path=unsafe_path):
+                with self.assertRaises(ValueError):
+                    ReadRequest(method="GET", path=unsafe_path, query=())
+        for unsafe_value in ("x&admin=true", "x=y", "x#fragment", "x\nvalue"):
+            with self.subTest(query_value=unsafe_value):
+                with self.assertRaises(ValueError):
+                    ReadRequest(
+                        method="GET",
+                        path="/safe",
+                        query=(("propertyID", unsafe_value),),
+                    )
         with self.assertRaises(ValueError):
             ReadRequest(method="GET", path="/x", query=(("a", "1"), ("a", "2")))
 
@@ -115,6 +135,18 @@ class ReadBoundaryTypeTests(unittest.TestCase):
             BokunLookupRequest(product_id="Mixila 1D", query=activity_query())
         with self.assertRaises(ValueError):
             BokunLookupRequest(product_id="913776", query=lodging_query())
+
+    def test_response_body_is_deeply_immutable_and_detached(self) -> None:
+        source = {"data": [{"id": "room.1"}]}
+        response = ReadResponse(status_code=200, body=source)
+        original_hash = response_hash(response)
+        source["data"][0]["id"] = "room.2"
+        self.assertEqual(response_hash(response), original_hash)
+        self.assertEqual(response.body["data"][0]["id"], "room.1")
+        with self.assertRaises(TypeError):
+            response.body["extra"] = True
+        with self.assertRaises(TypeError):
+            response.body["data"][0]["id"] = "room.3"
 
     def test_response_and_provenance_require_exact_types_and_hashes(self) -> None:
         response = ReadResponse(status_code=200, body={"data": []})
@@ -240,9 +272,11 @@ class LookupResultContractTests(unittest.TestCase):
             status=status,
         )
 
-    def provenance(self) -> LookupProvenance:
+    def provenance(
+        self, provider: ProviderKind = ProviderKind.CLOUDBEDS
+    ) -> LookupProvenance:
         return LookupProvenance(
-            provider=ProviderKind.CLOUDBEDS,
+            provider=provider,
             request_fingerprints=("a" * 64, "b" * 64),
             response_hashes=("c" * 64, "d" * 64),
         )
@@ -267,6 +301,50 @@ class LookupResultContractTests(unittest.TestCase):
                 evidence=self.evidence(LookupStatus.POSITIVE, provenance.snapshot_hash),
                 provenance=provenance,
                 offers=(),
+            )
+
+    def test_result_rejects_provider_ref_and_service_namespace_mismatch(self) -> None:
+        provenance = self.provenance()
+        wrong_ref_base = lodging_offer(
+            lookup_id="lookup:contract-result",
+            provider_ref="bokun.product.913776.start.3210363.rate.RATE1",
+        )
+        wrong_ref = replace(
+            wrong_ref_base,
+            offer_id=offer_id_for(
+                provider=ProviderKind.CLOUDBEDS,
+                offer=wrong_ref_base,
+            ),
+        )
+        with self.assertRaises(ValueError):
+            LookupResult(
+                query=lodging_query(),
+                evidence=self.evidence(
+                    LookupStatus.POSITIVE,
+                    provenance.snapshot_hash,
+                ),
+                provenance=provenance,
+                offers=(wrong_ref,),
+            )
+
+        bokun_provenance = self.provenance(ProviderKind.BOKUN)
+        bokun_ref_base = replace(
+            wrong_ref_base,
+            provider_ref="bokun.product.913776.start.3210363.rate.RATE1",
+        )
+        bokun_ref = replace(
+            bokun_ref_base,
+            offer_id=offer_id_for(provider=ProviderKind.BOKUN, offer=bokun_ref_base),
+        )
+        with self.assertRaises(ValueError):
+            LookupResult(
+                query=lodging_query(),
+                evidence=self.evidence(
+                    LookupStatus.POSITIVE,
+                    bokun_provenance.snapshot_hash,
+                ),
+                provenance=bokun_provenance,
+                offers=(bokun_ref,),
             )
 
     def test_negative_and_uncertain_results_fail_closed(self) -> None:

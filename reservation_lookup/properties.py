@@ -213,13 +213,24 @@ def run_lookup_properties(*, cases: int, seed: int) -> Phase3PropertyReport:
     )
 
 
-def _base_query(*, party: Party | None = None) -> SearchQuery:
+def _base_query(
+    *, provider: ProviderKind, party: Party | None = None
+) -> SearchQuery:
+    resolved_party = party or Party(adults=2, children=0)
+    if provider is ProviderKind.CLOUDBEDS:
+        return SearchQuery(
+            service=ServiceKind.LODGING,
+            start_date=date(2027, 2, 1),
+            end_date=date(2027, 2, 3),
+            start_time=None,
+            party=resolved_party,
+        )
     return SearchQuery(
         service=ServiceKind.ACTIVITY,
         start_date=date(2027, 2, 1),
         end_date=date(2027, 2, 8),
         start_time=None,
-        party=party or Party(adults=2, children=0),
+        party=resolved_party,
     )
 
 
@@ -228,8 +239,8 @@ def _positive_result(
     index: int,
     observed_at: datetime,
     label: str = "Passeio nº 2",
-    provider: ProviderKind = ProviderKind.CLOUDBEDS,
-    provider_ref: str = "provider.product.100.start.0730.rate.standard",
+    provider: ProviderKind = ProviderKind.BOKUN,
+    provider_ref: str | None = None,
     offer_date: date = date(2027, 2, 1),
     start_time: str = "07:30",
     party: Party | None = None,
@@ -237,7 +248,7 @@ def _positive_result(
     currency: str = "BRL",
 ) -> LookupResult:
     resolved_party = party or Party(adults=2, children=0)
-    query = _base_query(party=resolved_party)
+    query = _base_query(provider=provider, party=resolved_party)
     provenance = _provenance(index=index, observed_at=observed_at, provider=provider)
     lookup_id = lookup_id_for(
         provider=provider,
@@ -245,15 +256,29 @@ def _positive_result(
         observed_at=observed_at,
         response_hashes=provenance.response_hashes,
     )
+    if provider is ProviderKind.CLOUDBEDS:
+        resolved_ref = provider_ref or "cloudbeds.room.100.rate.standard"
+        service = ServiceKind.LODGING
+        resolved_end_date = query.end_date
+        resolved_start_time = None
+        resolved_label = "Quarto nº 2" if label == "Passeio nº 2" else label
+    else:
+        resolved_ref = (
+            provider_ref or "bokun.product.100.start.0730.rate.standard"
+        )
+        service = ServiceKind.ACTIVITY
+        resolved_end_date = None
+        resolved_start_time = start_time
+        resolved_label = label
     base = OfferSnapshot(
         offer_id="offer:pending",
         lookup_id=lookup_id,
-        service=ServiceKind.ACTIVITY,
-        provider_ref=provider_ref,
-        public_label=label,
+        service=service,
+        provider_ref=resolved_ref,
+        public_label=resolved_label,
         start_date=offer_date,
-        end_date=None,
-        start_time=start_time,
+        end_date=resolved_end_date,
+        start_time=resolved_start_time,
         party=resolved_party,
         total=Money(amount=amount, currency=currency),
         available=True,
@@ -277,8 +302,8 @@ def _positive_result(
 
 
 def _negative_result(*, index: int, observed_at: datetime) -> LookupResult:
-    query = _base_query()
-    provider = ProviderKind.CLOUDBEDS
+    provider = ProviderKind.BOKUN
+    query = _base_query(provider=provider)
     provenance = _provenance(index=index, observed_at=observed_at, provider=provider)
     lookup_id = lookup_id_for(
         provider=provider,
@@ -307,13 +332,13 @@ def _mutated_result(*, index: int, observed_at: datetime, kind: str) -> LookupRe
         return _positive_result(
             index=index,
             observed_at=observed_at,
-            provider=ProviderKind.BOKUN,
+            provider=ProviderKind.CLOUDBEDS,
         )
     if kind == "provider_ref":
         return _positive_result(
             index=index,
             observed_at=observed_at,
-            provider_ref="provider.product.101.start.0730.rate.standard",
+            provider_ref="bokun.product.101.start.0730.rate.standard",
         )
     if kind == "date":
         return _positive_result(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -124,7 +125,7 @@ def _normalize_offers(
     offers: list[OfferSnapshot] = []
     seen_offer_ids: set[str] = set()
     for index, item in enumerate(items):
-        if type(item) is not dict:
+        if not isinstance(item, Mapping):
             raise ProviderSchemaError(f"availability_{index}_not_object")
         option_date = _iso_date(item.get("date"), f"availability_{index}_date")
         if not request.query.start_date <= option_date <= end_bound:
@@ -183,7 +184,7 @@ def _normalize_offers(
 
 
 def _activity_title(body, expected_product_id: str) -> str:
-    if type(body) is not dict:
+    if not isinstance(body, Mapping):
         raise ProviderSchemaError("activity_envelope_not_object")
     if body.get("success") is False:
         raise ProviderSchemaError("activity_success_false")
@@ -199,13 +200,13 @@ def _activity_title(body, expected_product_id: str) -> str:
     return cleaned
 
 
-def _availability_data(body) -> list:
-    if type(body) is not dict:
+def _availability_data(body) -> tuple:
+    if not isinstance(body, Mapping):
         raise ProviderSchemaError("availability_envelope_not_object")
     if body.get("success") is not True:
         raise ProviderSchemaError("availability_success_not_true")
     data = body.get("data")
-    if type(data) is not list:
+    if type(data) is not tuple:
         raise ProviderSchemaError("availability_data_not_array")
     return data
 
