@@ -11,7 +11,7 @@
     "live_capabilities_used": false,
     "urls": 0
   },
-  "captured_at_utc": "2026-07-20T14:42:40Z",
+  "captured_at_utc": "2026-07-20T14:54:26Z",
   "catalog_attempt": {
     "all_killed": false,
     "mutants": 12,
@@ -137,7 +137,7 @@
     "tests_run": 1
   },
   "rollout": "NO-GO",
-  "status": "review_findings_corrected_terminal_regate_pending",
+  "status": "complete_terminally_approved",
   "subtest_protocol_red": {
     "exit_code": 1,
     "failures": 1,
@@ -151,6 +151,27 @@
     "reason": "canonical non-effect-confirmed outcomes replaced a mutation-only malformed outcome oracle"
   },
   "task": 13,
+  "terminal_review": {
+    "approvals": 3,
+    "batch": "deleg_f8aed020",
+    "critical": 0,
+    "evidence_commit": "06368ce456cc1689636d2849ce1ad92d31890d53",
+    "evidence_tree": "14bd1b58511a7d39a156f121739f8b72b5e03d7e",
+    "fresh_execution": {
+      "command": "python3 -B -m unittest tests.test_phase6_mutation_runner -v",
+      "duration_seconds": 7.028,
+      "exit_code": 0,
+      "tests_run": 10
+    },
+    "important": 0,
+    "lanes": [
+      "protocol fail-closed and shared-copy restoration",
+      "integral artifact and materiality after protocol correction",
+      "corrective provenance, proportionality, and capability-free boundary"
+    ],
+    "minor": 0,
+    "package_sha256": "bc224a8824201d5b3473ea3a40bdbb160a35fb0a179dac60e6d76dd312452011"
+  },
   "verification_budget": {
     "catalog": "rerun exactly once per required hash seed because kill classification changed",
     "contention": "not rerun; outside blast radius",
