@@ -121,6 +121,17 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: reservation_boundary.properties/faults/mutations",
+      "command": "python3 -B -m unittest tests.test_phase7_properties tests.test_phase7_fault_injection tests.test_phase7_mutation_runner -v",
+      "exit_code": 1,
+      "output_bytes": 2620,
+      "output_sha256": "2496f74fa96cc572d674072ec49bebca06f2e16985ed5c952be28d77da6cc4bd",
+      "task": 11,
+      "tests_failed": 0,
+      "tests_in_error": 3,
+      "tests_run": 3
     }
   ],
   "phase": 7,

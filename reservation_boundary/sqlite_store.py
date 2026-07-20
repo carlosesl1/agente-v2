@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
+from pathlib import Path
 import re
 import sqlite3
 from typing import Protocol
@@ -17,7 +18,7 @@ from reservation_followup import (
     to_wire_json as to_phase6_wire_json,
 )
 
-from reservation_boundary.schema import render_sqlite
+from reservation_boundary.schema import TABLE_NAMES, render_sqlite
 from reservation_boundary.serialization import from_wire_json, semantic_hash, to_wire_json
 from reservation_boundary.types import (
     BoundaryCommit,
@@ -129,6 +130,48 @@ class SQLiteBoundaryStore:
             connection.executescript(render_sqlite())
             if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
                 raise DataCorruption("SQLite foreign keys are disabled")
+            return cls(connection, _factory_token=_FACTORY_TOKEN)
+        except BaseException:
+            connection.close()
+            raise
+
+    @classmethod
+    def open_path(cls, path: Path) -> "SQLiteBoundaryStore":
+        if not isinstance(path, Path):
+            raise TypeError("path must be an exact pathlib.Path")
+        if path.exists() and not path.is_file():
+            raise ValueError("SQLite path must be a file or absent")
+        connection = sqlite3.connect(path, isolation_level=None, timeout=5.0)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            connection.execute("PRAGMA synchronous = FULL")
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if not names:
+                connection.executescript(render_sqlite())
+                names = set(TABLE_NAMES)
+            if names != set(TABLE_NAMES):
+                raise DataCorruption("SQLite table universe is not exact")
+            strict = {
+                row[1]: row[5]
+                for row in connection.execute("PRAGMA table_list")
+                if row[1] in names
+            }
+            if strict != {name: 1 for name in TABLE_NAMES}:
+                raise DataCorruption("SQLite tables are not all STRICT")
+            if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+                raise DataCorruption("SQLite foreign keys are disabled")
+            if str(mode).casefold() != "wal":
+                raise DataCorruption("SQLite WAL mode is unavailable")
+            if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
+                raise DataCorruption("SQLite synchronous mode is not FULL")
+            if connection.execute("PRAGMA foreign_key_check").fetchall():
+                raise DataCorruption("SQLite foreign key violations exist")
             return cls(connection, _factory_token=_FACTORY_TOKEN)
         except BaseException:
             connection.close()

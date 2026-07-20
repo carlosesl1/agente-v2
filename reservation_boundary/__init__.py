@@ -50,6 +50,29 @@ from reservation_boundary.shadow import (
     DecisionObservation,
     compare,
 )
+from reservation_boundary.properties import (
+    PROPERTY_CASES,
+    PROPERTY_SEED,
+    PropertyReport,
+    PropertyRow,
+    run_property_sequences,
+)
+from reservation_boundary.faults import (
+    CONTENTION_DOMAINS,
+    CONTENTION_ROUNDS_PER_DOMAIN,
+    MUTANT_COUNT,
+    RESTART_SCHEDULES,
+    FaultReport,
+    FaultRow,
+    run_fault_matrix,
+)
+from reservation_boundary.mutations import (
+    MUTANTS,
+    Mutant,
+    MutationReport,
+    MutationRow,
+    run_mutations,
+)
 
 __version__ = "0.7.0"
 __all__ = (
@@ -89,6 +112,23 @@ __all__ = (
     "DecisionComparisonSummary",
     "DecisionObservation",
     "compare",
+    "PROPERTY_CASES",
+    "PROPERTY_SEED",
+    "PropertyReport",
+    "PropertyRow",
+    "run_property_sequences",
+    "CONTENTION_DOMAINS",
+    "CONTENTION_ROUNDS_PER_DOMAIN",
+    "MUTANT_COUNT",
+    "RESTART_SCHEDULES",
+    "FaultReport",
+    "FaultRow",
+    "run_fault_matrix",
+    "MUTANTS",
+    "Mutant",
+    "MutationReport",
+    "MutationRow",
+    "run_mutations",
     "semantic_hash",
     "to_wire_json",
 )
