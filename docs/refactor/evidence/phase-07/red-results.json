@@ -110,6 +110,17 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: reservation_boundary.shadow",
+      "command": "python3 -B -m unittest tests.test_phase7_shadow -v",
+      "exit_code": 1,
+      "output_bytes": 898,
+      "output_sha256": "5d53eec2426efbfb7f90595e7b6485eb337e15f53c42794a7c9c663d617bc374",
+      "task": 10,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,

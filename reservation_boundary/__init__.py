@@ -42,6 +42,14 @@ from reservation_boundary.dispatch import (
     ToolDispatch,
     command_migration_counts,
 )
+from reservation_boundary.shadow import (
+    CRITICAL_FIELDS,
+    NONCRITICAL_FIELDS,
+    DecisionComparison,
+    DecisionComparisonSummary,
+    DecisionObservation,
+    compare,
+)
 
 __version__ = "0.7.0"
 __all__ = (
@@ -75,6 +83,12 @@ __all__ = (
     "ToolContract",
     "ToolDispatch",
     "command_migration_counts",
+    "CRITICAL_FIELDS",
+    "NONCRITICAL_FIELDS",
+    "DecisionComparison",
+    "DecisionComparisonSummary",
+    "DecisionObservation",
+    "compare",
     "semantic_hash",
     "to_wire_json",
 )
