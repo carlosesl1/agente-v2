@@ -197,6 +197,42 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
     table = f"{prefix}_outbox"
     workflow_table = f"{prefix}_workflows"
     workflow_id = "handoff_id" if prefix == "handoff" else "payment_id"
+    if prefix == "handoff":
+        lease_tuple = (
+            "((status = 'pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+            "AND lease_expires_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL "
+            "AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL) OR "
+            "(status = 'delivered' AND claim_owner IS NOT NULL AND lease_acquired_at IS NULL "
+            "AND lease_expires_at IS NULL))"
+        )
+        active_lease = (
+            "(status != 'leased' OR (claim_owner IS NOT NULL AND fencing_token >= 1 "
+            "AND lease_expires_at > lease_acquired_at))"
+        )
+        status_matrix = (
+            "((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR "
+            "(status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR "
+            "(status = 'delivered' AND claim_owner IS NOT NULL AND "
+            "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
+            "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
+        )
+    else:
+        lease_tuple = (
+            "((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) "
+            "OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL))"
+        )
+        active_lease = (
+            "(claim_owner IS NULL OR (fencing_token >= 1 "
+            "AND lease_expires_at > lease_acquired_at))"
+        )
+        status_matrix = (
+            "((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR "
+            "(status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR "
+            "(status = 'delivered' AND claim_owner IS NULL AND "
+            "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
+            "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
+        )
     constraints = [
         f"CONSTRAINT pk_{table} PRIMARY KEY (message_id)",
         f"CONSTRAINT fk_{table}_workflow FOREIGN KEY ({workflow_id}) "
@@ -215,24 +251,14 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             f"CONSTRAINT uq_{table}_effect_id UNIQUE (effect_id)",
             f"CONSTRAINT uq_{table}_receipt_binding UNIQUE "
             "(message_id, receipt_hash, delivered_at)",
-            f"CONSTRAINT ck_{table}_lease_tuple CHECK "
-            "((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) "
-            "OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL "
-            "AND lease_expires_at IS NOT NULL))",
-            f"CONSTRAINT ck_{table}_active_lease CHECK "
-            "(claim_owner IS NULL OR (fencing_token >= 1 "
-            "AND lease_expires_at > lease_acquired_at))",
+            f"CONSTRAINT ck_{table}_lease_tuple CHECK {lease_tuple}",
+            f"CONSTRAINT ck_{table}_active_lease CHECK {active_lease}",
             f"CONSTRAINT ck_{table}_receipt_tuple CHECK "
             "((delivered_at IS NULL AND receipt_hash IS NULL) OR "
             "(delivered_at IS NOT NULL AND receipt_hash IS NOT NULL))",
             f"CONSTRAINT ck_{table}_fencing_history CHECK "
             "(fencing_token >= delivery_attempts)",
-            f"CONSTRAINT ck_{table}_status_matrix CHECK "
-            "((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR "
-            "(status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR "
-            "(status = 'delivered' AND claim_owner IS NULL AND "
-            "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
-            "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))",
+            f"CONSTRAINT ck_{table}_status_matrix CHECK {status_matrix}",
         )
     )
     return tuple(constraints)

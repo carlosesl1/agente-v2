@@ -1,0 +1,49 @@
+diff --git a/tests/test_phase6_schema.py b/tests/test_phase6_schema.py
+index 1b8b8628f431f3e5a3fa6d2f3bcb1e92e1c14f7f..2b95636c9bc3e246446571e9dc031a33f6129345 100644
+--- a/tests/test_phase6_schema.py
++++ b/tests/test_phase6_schema.py
+@@ -1608,0 +1609,44 @@ class Phase6SchemaTests(unittest.TestCase):
++    def test_delivered_handoff_retains_historical_claim_owner_without_live_lease(self) -> None:
++        connection = self.open_database()
++        handoff_id = self.insert_handoff_workflow(connection, "delivered-owner")
++        try:
++            self.insert_handoff_outbox(
++                connection,
++                handoff_id,
++                "delivered-owner-valid",
++                status="delivered",
++                claim_owner="handoff-claim:" + "a" * 64,
++                fencing_token=1,
++                delivery_attempts=1,
++                delivered_at=LATER,
++                receipt_hash=HASH_D,
++            )
++        except sqlite3.IntegrityError as exc:
++            self.fail(f"historical delivered owner was rejected: {exc}")
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_handoff_outbox(
++                connection,
++                handoff_id,
++                "delivered-owner-missing",
++                status="delivered",
++                claim_owner=None,
++                fencing_token=1,
++                delivery_attempts=1,
++                delivered_at=LATER,
++                receipt_hash=HASH_D,
++            )
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.insert_handoff_outbox(
++                connection,
++                handoff_id,
++                "delivered-owner-live-lease",
++                status="delivered",
++                claim_owner="handoff-claim:" + "b" * 64,
++                fencing_token=1,
++                lease_acquired_at=NOW,
++                lease_expires_at=LATER,
++                delivery_attempts=1,
++                delivered_at=LATER,
++                receipt_hash=HASH_D,
++            )
++

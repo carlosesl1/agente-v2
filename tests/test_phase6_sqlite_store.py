@@ -979,9 +979,14 @@ class Phase6FollowupStoreTests(unittest.TestCase):
                     receipt_hash = "f" * 64
                     store._connection.execute(
                         "UPDATE handoff_outbox SET status='delivered', "
-                        "fencing_token=1, delivery_attempts=1, delivered_at=?, "
+                        "claim_owner=?, fencing_token=1, delivery_attempts=1, delivered_at=?, "
                         "receipt_hash=?, updated_at=?",
-                        (changed_at, receipt_hash, changed_at),
+                        (
+                            "handoff-claim:" + "a" * 64,
+                            changed_at,
+                            receipt_hash,
+                            changed_at,
+                        ),
                     )
                     if case == "delivered_with_receipt":
                         message_id = store._connection.execute(

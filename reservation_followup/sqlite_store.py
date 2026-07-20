@@ -632,8 +632,11 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption("handoff receipt record lease is impossible")
         try:
             receipt = from_wire_json(data["receipt_json"], HandoffReceipt)
+            canonical_receipt = to_wire_json(receipt)
         except (TypeError, ValueError) as exc:
             raise DataCorruption("handoff receipt payload is invalid") from exc
+        if canonical_receipt != data["receipt_json"]:
+            raise DataCorruption("handoff receipt payload is noncanonical")
         return receipt, data
 
     def _handoff_outbox_jobs(self, handoff_id: str) -> tuple[HandoffEffectJob, ...]:
@@ -703,7 +706,8 @@ class SQLiteFollowupUnitOfWork:
                     valid = created_at <= acquired < expires and updated_at == acquired
             elif status == "delivered":
                 valid = (
-                    row[9] is None
+                    type(row[9]) is str
+                    and bool(row[9])
                     and token >= 1
                     and row[11] is None
                     and row[12] is None
@@ -754,6 +758,7 @@ class SQLiteFollowupUnitOfWork:
                     or receipt.idempotency_key != job.effect_id
                     or receipt.delivered_at.isoformat() != row[14]
                     or receipt_row[4] != row[15]
+                    or claim_record["claim_owner"] != row[9]
                     or claim_record["message_payload_hash"] != row[7]
                     or claim_record["delivery_id"] != receipt.delivery_id
                     or claim_record["delivery_version"] != receipt.delivery_version
@@ -835,6 +840,26 @@ class SQLiteFollowupUnitOfWork:
             sorted(expected_jobs, key=lambda job: job.effect_id)
         ):
             raise DataCorruption("handoff outbox does not match reducer jobs")
+        acknowledgement_job = next(
+            job
+            for job in jobs
+            if job.kind is HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT
+        )
+        acknowledgement_receipt = self._connection.execute(
+            "SELECT receipt_id, delivered_at FROM main.handoff_receipts WHERE message_id=?",
+            (acknowledgement_job.effect_id,),
+        ).fetchone()
+        acknowledgement = replayed.acknowledgement
+        if acknowledgement_receipt is None:
+            if acknowledgement is not None:
+                raise DataCorruption("handoff acknowledgement lacks its durable receipt")
+        elif (
+            acknowledgement is None
+            or acknowledgement.effect_id != acknowledgement_job.effect_id
+            or acknowledgement.receipt_id != acknowledgement_receipt[0]
+            or acknowledgement.acknowledged_at.isoformat() != acknowledgement_receipt[1]
+        ):
+            raise DataCorruption("handoff acknowledgement receipt binding is divergent")
         failure_effect_ids = {failure.effect_id for failure in replayed.effect_failures}
         for job in jobs:
             operational = self._connection.execute(
@@ -1336,7 +1361,7 @@ class SQLiteFollowupUnitOfWork:
             ):
                 raise ValueError("handoff receipt chronology is invalid")
             cursor = self._connection.execute(
-                "UPDATE main.handoff_outbox SET status='delivered', claim_owner=NULL, "
+                "UPDATE main.handoff_outbox SET status='delivered', "
                 "lease_acquired_at=NULL, lease_expires_at=NULL, delivered_at=?, "
                 "receipt_hash=?, updated_at=? WHERE message_id=? AND status='leased' "
                 "AND claim_owner=? AND fencing_token=? AND lease_acquired_at=? "

@@ -139,6 +139,51 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             (message_id,),
         ).fetchone()
 
+    def rewrite_receipt_record(
+        self,
+        message_id: str,
+        mutate,
+        *,
+        receipt_id: str | None = None,
+    ) -> None:
+        raw = self.store._connection.execute(
+            "SELECT receipt_json FROM main.handoff_receipts WHERE message_id=?",
+            (message_id,),
+        ).fetchone()[0]
+        payload = json.loads(raw)
+        mutate(payload)
+        hostile = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        hostile_hash = hashlib.sha256(hostile.encode("utf-8")).hexdigest()
+        self.store._connection.execute("PRAGMA defer_foreign_keys=ON")
+        self.store._connection.execute("BEGIN IMMEDIATE")
+        try:
+            if receipt_id is None:
+                self.store._connection.execute(
+                    "UPDATE main.handoff_receipts SET receipt_json=?, receipt_hash=? "
+                    "WHERE message_id=?",
+                    (hostile, hostile_hash, message_id),
+                )
+            else:
+                self.store._connection.execute(
+                    "UPDATE main.handoff_receipts SET receipt_id=?, receipt_json=?, "
+                    "receipt_hash=? WHERE message_id=?",
+                    (receipt_id, hostile, hostile_hash, message_id),
+                )
+            self.store._connection.execute(
+                "UPDATE main.handoff_outbox SET receipt_hash=? WHERE message_id=?",
+                (hostile_hash, message_id),
+            )
+            self.store._connection.commit()
+        except BaseException:
+            self.store._connection.rollback()
+            raise
+
     def test_disabled_internal_email_creates_no_row_and_claims_ack_first(self) -> None:
         request, _ = self.open_handoff(optional_email=False)
         rows = tuple(
@@ -412,6 +457,10 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             lease_ttl=TTL,
         )
         before_payment = self.domain_fingerprint()
+        email_before = self.store._connection.execute(
+            "SELECT * FROM main.handoff_outbox WHERE handoff_id=? AND kind=?",
+            (request.handoff_id, HandoffEffectKind.INTERNAL_EMAIL.value),
+        ).fetchone()
         result = worker.run_once(now=NOW)
         self.assertEqual(result.disposition, HandoffWorkerDisposition.DELIVERED)
         self.assertEqual(len(delivery.messages), 1)
@@ -431,6 +480,26 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
                 (HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT.value, "delivered"),
                 (HandoffEffectKind.INTERNAL_EMAIL.value, "pending"),
             ),
+        )
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT * FROM main.handoff_outbox WHERE handoff_id=? AND kind=?",
+                (request.handoff_id, HandoffEffectKind.INTERNAL_EMAIL.value),
+            ).fetchone(),
+            email_before,
+        )
+        state = self.store.load_handoff(request.handoff_id)
+        self.assertEqual(state.effect_failures, ())
+        self.assertEqual(
+            tuple(
+                row[0]
+                for row in self.store._connection.execute(
+                    "SELECT event_type FROM main.handoff_events WHERE handoff_id=? "
+                    "ORDER BY revision",
+                    (request.handoff_id,),
+                )
+            ),
+            ("HandoffRequested", "HandoffAcknowledged"),
         )
         self.assertEqual(self.domain_fingerprint(), before_payment)
 
@@ -771,6 +840,94 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
         except BaseException:
             self.store._connection.rollback()
             raise
+        with self.assertRaises(DataCorruption):
+            self.store.load_handoff(request.handoff_id)
+
+    def test_coherent_worker_and_claim_owner_substitution_is_corruption(self) -> None:
+        request, _ = self.open_handoff(optional_email=False)
+        claim = self.claim(worker_id="worker:handoff:historical")
+        receipt = HandoffReceipt.for_message(
+            claim.message,
+            receipt_id="receipt:record:coherent-worker-tamper",
+            delivery_reference="delivery-reference:coherent-worker-tamper",
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
+            delivered_at=NOW,
+        )
+        self.store.complete_handoff_outbox(claim, receipt, now=NOW)
+        substituted_worker = "worker:handoff:coherently-substituted"
+        material = "\x00".join(
+            (substituted_worker, claim.delivery_id, str(claim.delivery_version))
+        )
+        substituted_owner = (
+            "handoff-claim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+        )
+
+        def mutate(payload):
+            payload["data"]["worker_id"] = substituted_worker
+            payload["data"]["claim_owner"] = substituted_owner
+
+        self.rewrite_receipt_record(claim.message.effect_id, mutate)
+        with self.assertRaises(DataCorruption):
+            self.store.load_handoff(request.handoff_id)
+
+    def test_ack_receipt_id_must_match_persisted_acknowledgement_event(self) -> None:
+        request, _ = self.open_handoff(optional_email=False)
+        claim = self.claim()
+        receipt = HandoffReceipt.for_message(
+            claim.message,
+            receipt_id="receipt:ack:historical",
+            delivery_reference="delivery-reference:ack-historical",
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
+            delivered_at=NOW,
+        )
+        self.store.complete_handoff_outbox(claim, receipt, now=NOW)
+        substituted_receipt_id = "receipt:ack:coherently-substituted"
+
+        def mutate(payload):
+            inner = json.loads(payload["data"]["receipt_json"])
+            inner["data"]["receipt_id"] = substituted_receipt_id
+            payload["data"]["receipt_json"] = json.dumps(
+                inner,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+
+        self.rewrite_receipt_record(
+            claim.message.effect_id,
+            mutate,
+            receipt_id=substituted_receipt_id,
+        )
+        with self.assertRaises(DataCorruption):
+            self.store.load_handoff(request.handoff_id)
+
+    def test_inner_receipt_json_must_be_canonical(self) -> None:
+        request, _ = self.open_handoff(optional_email=False)
+        claim = self.claim()
+        receipt = HandoffReceipt.for_message(
+            claim.message,
+            receipt_id="receipt:record:noncanonical-inner",
+            delivery_reference="delivery-reference:noncanonical-inner",
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
+            delivered_at=NOW,
+        )
+        self.store.complete_handoff_outbox(claim, receipt, now=NOW)
+
+        def mutate(payload):
+            inner = json.loads(payload["data"]["receipt_json"])
+            payload["data"]["receipt_json"] = json.dumps(
+                inner,
+                ensure_ascii=False,
+                sort_keys=False,
+                indent=2,
+                allow_nan=False,
+            )
+
+        self.rewrite_receipt_record(claim.message.effect_id, mutate)
         with self.assertRaises(DataCorruption):
             self.store.load_handoff(request.handoff_id)
 
