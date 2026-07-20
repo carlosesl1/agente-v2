@@ -1,0 +1,181 @@
+diff --git a/tests/test_phase6_mutation_runner.py b/tests/test_phase6_mutation_runner.py
+index 63c9db7ccceffb0a08864d5fcdb04835c6892268..ffb671eaf181509d63a102d635d98ad210713f29 100644
+--- a/tests/test_phase6_mutation_runner.py
++++ b/tests/test_phase6_mutation_runner.py
+@@ -6,14 +6,18 @@ import os
+ from pathlib import Path
+ import tempfile
+ import unittest
++from unittest.mock import patch
+ 
+ from scripts.run_phase6_mutations import (
+     MUTANTS,
+     MUTANT_CLASSES,
+     Mutant,
++    _ClassifiedRun,
+     _ProcessResult,
+     _classify_test_run,
+     _replace_target,
++    _run_one,
++    _run_test,
+     run_mutants,
+ )
+ 
+@@ -76,6 +80,7 @@ class Phase6MutationRunnerTests(unittest.TestCase):
+                     "tests_run": 1,
+                     "failures": 1,
+                     "errors": 0,
++                    "error_types": [],
+                     "successful": False,
+                 }
+             ),
+@@ -93,6 +98,7 @@ class Phase6MutationRunnerTests(unittest.TestCase):
+                         "tests_run": 0,
+                         "failures": 0,
+                         "errors": 1,
++                        "error_types": ["unittest.loader_error"],
+                         "successful": False,
+                     }
+                 ),
+@@ -111,6 +117,7 @@ class Phase6MutationRunnerTests(unittest.TestCase):
+                         "tests_run": 0,
+                         "failures": 1,
+                         "errors": 0,
++                        "error_types": [],
+                         "successful": False,
+                     }
+                 ),
+@@ -124,6 +131,74 @@ class Phase6MutationRunnerTests(unittest.TestCase):
+                 self.assertFalse(classified.killed)
+                 self.assertIsNotNone(classified.error)
+ 
++    def test_runtime_import_error_and_duplicate_json_keys_never_kill(self) -> None:
++        prefix = "__PHASE6_TEST_RESULT__"
++        runtime_import = _ProcessResult(
++            1,
++            prefix
++            + json.dumps(
++                {
++                    "loader_error": False,
++                    "tests_run": 1,
++                    "failures": 0,
++                    "errors": 1,
++                    "error_types": ["builtins.ImportError"],
++                    "successful": False,
++                }
++            ),
++            False,
++        )
++        classified = _classify_test_run(runtime_import)
++        self.assertEqual(classified.verdict, "infrastructure_error")
++        self.assertFalse(classified.killed)
++        self.assertIn("ImportError", classified.error or "")
++
++        duplicate_key = _ProcessResult(
++            1,
++            prefix
++            + '{"loader_error":false,"tests_run":1,"failures":1,'
++            '"errors":0,"error_types":[],"successful":true,"successful":false}',
++            False,
++        )
++        classified = _classify_test_run(duplicate_key)
++        self.assertEqual(classified.verdict, "invalid_protocol")
++        self.assertFalse(classified.killed)
++        self.assertIn("duplicate", classified.error or "")
++
++    def test_real_runtime_import_is_non_killing_but_subtest_behavior_error_kills(self) -> None:
++        with tempfile.TemporaryDirectory(prefix="phase6-mutation-protocol-") as directory:
++            root = Path(directory)
++            tests = root / "tests"
++            tests.mkdir()
++            (tests / "test_protocol_probe.py").write_text(
++                "import unittest\n"
++                "class ProtocolProbe(unittest.TestCase):\n"
++                "    def test_runtime_import(self):\n"
++                "        raise ImportError('synthetic runtime import')\n"
++                "    def test_subtest_behavior_error(self):\n"
++                "        with self.subTest(case='material'):\n"
++                "            raise TypeError('synthetic material error')\n",
++                encoding="utf-8",
++            )
++            _, runtime_import = _run_test(
++                root=root,
++                test=(
++                    "tests.test_protocol_probe.ProtocolProbe."
++                    "test_runtime_import"
++                ),
++            )
++            _, behavior_error = _run_test(
++                root=root,
++                test=(
++                    "tests.test_protocol_probe.ProtocolProbe."
++                    "test_subtest_behavior_error"
++                ),
++            )
++        self.assertEqual(runtime_import.verdict, "infrastructure_error")
++        self.assertFalse(runtime_import.killed)
++        self.assertEqual(behavior_error.verdict, "test_failure")
++        self.assertTrue(behavior_error.killed)
++
+     def test_replace_target_requires_exactly_one_material_occurrence_and_restores(self) -> None:
+         with tempfile.TemporaryDirectory(prefix="phase6-mutation-contract-") as directory:
+             path = Path(directory) / "target.py"
+@@ -183,6 +258,58 @@ class Phase6MutationRunnerTests(unittest.TestCase):
+         self.assertIsNone(report["mutants"][0]["error"])
+         self.assertEqual(scoped_digest(), before)
+ 
++    def test_shared_copy_is_restored_after_timeout_before_next_mutant(self) -> None:
++        with tempfile.TemporaryDirectory(prefix="phase6-mutation-restore-") as directory:
++            copy_root = Path(directory)
++            target = copy_root / "target.py"
++            target.write_text("alpha\nbeta\n", encoding="utf-8")
++            baseline = _ClassifiedRun(
++                "baseline_green", False, False, 1, 0, 0, None
++            )
++            first = Mutant(
++                "handoff_policy",
++                "timeout-mutant",
++                "target.py",
++                "beta",
++                "gamma",
++                "tests.synthetic.test_timeout",
++            )
++            second = Mutant(
++                "handoff_policy",
++                "next-mutant",
++                "target.py",
++                "beta",
++                "delta",
++                "tests.synthetic.test_next",
++            )
++            timeout = (
++                _ProcessResult(-2, "", True),
++                _ClassifiedRun("timeout", False, False, 0, 0, 0, "test timed out"),
++            )
++            killed = (
++                _ProcessResult(1, "", False),
++                _ClassifiedRun("test_failure", True, False, 1, 1, 0, None),
++            )
++            with patch(
++                "scripts.run_phase6_mutations._run_test",
++                side_effect=(timeout, killed),
++            ):
++                first_result = _run_one(
++                    copy_root=copy_root,
++                    mutant=first,
++                    baseline=baseline,
++                )
++                self.assertFalse(first_result["killed"])
++                self.assertEqual(target.read_bytes(), b"alpha\nbeta\n")
++                second_result = _run_one(
++                    copy_root=copy_root,
++                    mutant=second,
++                    baseline=baseline,
++                )
++            self.assertEqual(second_result["target_count"], 1)
++            self.assertTrue(second_result["killed"])
++            self.assertEqual(target.read_bytes(), b"alpha\nbeta\n")
++
+     def test_baseline_cache_runs_duplicate_test_once(self) -> None:
+         test_name = MUTANTS[0].test
+         same_test = tuple(mutant.name for mutant in MUTANTS if mutant.test == test_name)

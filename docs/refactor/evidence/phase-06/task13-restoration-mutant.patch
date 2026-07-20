@@ -1,0 +1,14 @@
+diff --git a/scripts/run_phase6_mutations.py b/scripts/run_phase6_mutations.py
+index 34bf273b7b0f075baebb8fc2fc8643cd1cb3c269..b348d2d871e2e07077d417b058a9aded26c4405e 100644
+--- a/scripts/run_phase6_mutations.py
++++ b/scripts/run_phase6_mutations.py
+@@ -589,9 +589,6 @@ def _run_one(
+     except (OSError, UnicodeError, ValueError) as exc:
+         result["error"] = str(exc)
+         return result
+-    finally:
+-        if original is not None:
+-            target.write_bytes(original)
+ 
+ 
+ def run_mutants(

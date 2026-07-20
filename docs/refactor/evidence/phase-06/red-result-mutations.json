@@ -5,13 +5,13 @@
   },
   "boundary_scan": {
     "blocked_imports": [],
-    "bytes": 57925,
+    "bytes": 65402,
     "emails": 0,
     "files": 3,
     "live_capabilities_used": false,
     "urls": 0
   },
-  "captured_at_utc": "2026-07-20T14:21:52Z",
+  "captured_at_utc": "2026-07-20T14:42:40Z",
   "catalog_attempt": {
     "all_killed": false,
     "mutants": 12,
@@ -30,11 +30,56 @@
     "mutants": 5,
     "output_sha256": "6d726d3cc87f11aba81e838adaf6adce0706ae218c552becb514432b444413cd"
   },
+  "corrective_green": {
+    "focused": {
+      "command": "python3 -B -m unittest tests.test_phase6_mutation_runner -v",
+      "exit_code": 0,
+      "output_sha256": "9df21413783b73a983428f42b727840c56c9b3ef6e924d9ce1a16f9d97bddd2c",
+      "tests_run": 10
+    },
+    "named_three": {
+      "exit_code": 0,
+      "output_sha256": "3656f454de8c1b95d112c1412dc90be54b0727116384c80f9c449d0c400b6734",
+      "tests_run": 3
+    },
+    "real_subprocess_protocol": {
+      "exit_code": 0,
+      "output_sha256": "d90f84286d39548e646ea38a79908c4c3a74a244f9cdc7d00cb40d53f5942475",
+      "tests_run": 1
+    },
+    "representative_material_probes": {
+      "all_killed": true,
+      "artifact_sha256": "52e9aa7756346f02aafc8a47788b353b319c34e69c45321164361a6d1b179357",
+      "channels": [
+        "assertion failure",
+        "subTest behavior errors"
+      ],
+      "mutants": 2
+    }
+  },
+  "corrective_review_red": {
+    "errors": 0,
+    "exit_code": 1,
+    "failures": 2,
+    "findings": [
+      "runtime ImportError lacked typed non-killing classification",
+      "duplicate JSON keys were accepted",
+      "shared-copy restoration lacked a direct oracle"
+    ],
+    "output_sha256": "625a3a70428e85e50defb4711ed943ff0033b977851639f8de07e9b405888d50",
+    "patch": "docs/refactor/evidence/phase-06/task13-review-red.patch",
+    "patch_sha256": "a3caba54abd29eb81f9bf7c7ab8da2f9dd7a6ea7d39d61adebbea04e3c33fa3c",
+    "reconstructed_tree": "48a9c51d64de7881e66436c0422fdb7ec05ca2ab",
+    "source_commit": "2f1450a871f931069321def859e2f525fe213099",
+    "tests_run": 3
+  },
   "final_catalog": {
     "all_killed": true,
     "artifact": "docs/refactor/evidence/phase-06/mutation-result.json",
     "artifact_sha256": "4220fac77c0bdc9de81b6d0373c4d2a8e31cbdeb488b7e0280b378679b2a415c",
     "baselines": 12,
+    "behavior_errors": 7,
+    "failures": 10,
     "loader_errors": 0,
     "mutants": 12,
     "outputs_byte_identical": true,
@@ -53,10 +98,24 @@
     "tests_run": 7
   },
   "functional": {
-    "commit": "196d39faba132fdf3ff309c3456492f8cc8e4f4a",
-    "tree": "d7a93b24b01caccd5aa604d85f8bd6561fb3d3b6"
+    "commit": "8c56a92d7cf96f2630322c56d333c99cbeb47f36",
+    "parent": "2f1450a871f931069321def859e2f525fe213099",
+    "tree": "0809c3e17b83e0f9d912a3224760d05d699b67f7"
   },
   "phase": "phase-06-handoff-and-payments",
+  "prior_candidate": {
+    "evidence": "2f1450a871f931069321def859e2f525fe213099",
+    "functional": "196d39faba132fdf3ff309c3456492f8cc8e4f4a",
+    "outcome": [
+      "Needs fixes",
+      "Approved",
+      "Approved"
+    ],
+    "reason": "any corrected Important invalidates approvals on the prior tree",
+    "review_batch": "deleg_c57360f1",
+    "terminal_approvals": 0,
+    "tree": "0f3bd6a4333a46e0ce08d5d936e3ca035389c135"
+  },
   "red": {
     "errors": 1,
     "exit_code": 1,
@@ -66,8 +125,26 @@
     "patch_sha256": "cb3663d743503725a6b9c84eaa69d9ad7a33ecc768d94900d58505f3b55aeaa7",
     "tests_run": 1
   },
+  "restoration_reverse_mutation": {
+    "causal_failure": "mutated bytes remained in the shared copy after timeout",
+    "exit_code": 1,
+    "failures": 1,
+    "mutant_tree": "4227ebee8d1cba866958cc209a084d527cca0957",
+    "output_sha256": "1dcf39b15ae3385c0aa7da66631fb961f0a28d3fd7f809f3a7bd4de55a9c826a",
+    "patch": "docs/refactor/evidence/phase-06/task13-restoration-mutant.patch",
+    "patch_sha256": "916b3e84364d18a92382da18d80e2de77b19da558b239cebd7e5d75f8dc4b6b5",
+    "source_commit": "8c56a92d7cf96f2630322c56d333c99cbeb47f36",
+    "tests_run": 1
+  },
   "rollout": "NO-GO",
-  "status": "implementation_verified_terminal_review_pending",
+  "status": "review_findings_corrected_terminal_regate_pending",
+  "subtest_protocol_red": {
+    "exit_code": 1,
+    "failures": 1,
+    "output_sha256": "3b14e87d5eaec43cf1594dcf63a75e7c7d1ca6f59cf48c8a13f9a23cb3e1bd76",
+    "reason": "unittest subTest errors bypass addError and initially produced an invalid protocol",
+    "tests_run": 1
+  },
   "survivor_oracle": {
     "patch": "docs/refactor/evidence/phase-06/task13-survivor-oracle.patch",
     "patch_sha256": "75934fa533db5981b88d8742169e5d39d67f5c095a2d0432b88106042733fdfb",
@@ -75,9 +152,10 @@
   },
   "task": 13,
   "verification_budget": {
+    "catalog": "rerun exactly once per required hash seed because kill classification changed",
     "contention": "not rerun; outside blast radius",
     "fault_matrix": "not rerun; outside blast radius",
-    "full_suite": "not rerun; no production code changed and exact 12 target baselines plus focused runner cover the diff",
+    "full_suite": "not rerun; only the capability-free mutation gate and tests changed",
     "restart_schedules": "not rerun; outside blast radius"
   }
 }
