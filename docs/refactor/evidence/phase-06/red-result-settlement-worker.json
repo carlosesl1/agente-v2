@@ -2,11 +2,11 @@
   "phase": 6,
   "task": 9,
   "title": "Settlement worker and conservative reconciliation",
-  "recorded_at_utc": "2026-07-20T06:20:50Z",
+  "recorded_at_utc": "2026-07-20T06:28:49Z",
   "base_sha": "3e4b0a890816a8e2546a68db4304f45abba57be3",
   "base_tree_sha": "eeff918d51f63c7d6334b3e973ade5844b848a3e",
-  "functional_commit": null,
-  "functional_tree": null,
+  "functional_commit": "9a7de45a7bf762b7fec855ff3926f52f1c9170dd",
+  "functional_tree": "75aec625b99ba636f9be20e003fa607a981fa60f",
   "rollout": "NO-GO",
   "postgresql_executed": false,
   "network_used": false,
@@ -34,7 +34,11 @@
   "task8_gate": {
     "terminal_evidence_commit": "3e4b0a890816a8e2546a68db4304f45abba57be3",
     "terminal_review": "deleg_6e9b4458",
-    "verdicts": ["Approved", "Approved", "Approved"],
+    "verdicts": [
+      "Approved",
+      "Approved",
+      "Approved"
+    ],
     "critical": 0,
     "important": 0,
     "minor": 0
@@ -141,5 +145,42 @@
     "critical": null,
     "important": null,
     "minor": null
+  },
+  "detached_gate": {
+    "commit": "9a7de45a7bf762b7fec855ff3926f52f1c9170dd",
+    "tree": "75aec625b99ba636f9be20e003fa607a981fa60f",
+    "worktree": "/tmp/phase6-task9-clean-gate",
+    "worktree_clean": true,
+    "focused": {
+      "tests": 14,
+      "result": "OK",
+      "output_sha256": "c77c26d59ea5a96875df5b8e3f0a1f2f88efd4bead239e4443607f13b7a57804"
+    },
+    "targeted_regressions": {
+      "tests": 110,
+      "result": "OK",
+      "output_sha256": "498ab4d15acd3f10366639144be50af23348414f65184796d151d7666716a4b6"
+    },
+    "full_suite": {
+      "tests": 572,
+      "result": "OK",
+      "output_sha256": "1061dfd93c7135ed0323830d34cd07538b067de3152d6c1fc4a94617c8e102cf"
+    },
+    "characterization": {
+      "scenarios": 30,
+      "result": "ok",
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_capability_reconciler_port_cross_ledger_scans": "passed"
   }
 }
