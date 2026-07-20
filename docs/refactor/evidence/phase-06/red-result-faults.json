@@ -1,4 +1,9 @@
 {
+  "advancement_gate": {
+    "closed_at": "2026-07-20T14:01:46Z",
+    "task_12": "closed",
+    "task_13": "unblocked"
+  },
   "base": {
     "commit": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
     "tree": "508579a66734abab393f86fd18b6ddd81c3a80f7"
@@ -103,7 +108,7 @@
     "parent": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
     "tree": "27e9f850e19c87aec933c2dd8cb24c1c368c01ab"
   },
-  "generated_at": "2026-07-20T13:49:24Z",
+  "generated_at": "2026-07-20T14:01:46Z",
   "historical_integral": {
     "anchor_commit": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
     "command": "python3 scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 <three write targets>",
@@ -187,11 +192,52 @@
     "violations": 0
   },
   "independent_review": {
-    "prior_batch": "deleg_2aa4e8aa",
-    "prior_batch_approvals": 0,
+    "approvals": 3,
+    "batch": "deleg_efc4cb98",
+    "critical": 0,
+    "important": 0,
+    "lanes": [
+      {
+        "critical": 0,
+        "fresh_tests": 3,
+        "important": 0,
+        "minor": 0,
+        "scope": "lock classification and bilateral contention oracle",
+        "summary_sha256": "b3cc9f6e5d274270ab412ae2a52d95e1b909c07521595109a3ca268819a42e71",
+        "verdict": "Approved"
+      },
+      {
+        "critical": 0,
+        "fresh_tests": 0,
+        "important": 0,
+        "minor": 0,
+        "scope": "corrected artifacts and proportional reuse",
+        "summary_sha256": "88b1cd0a34c71a2cb14b9c56f84d6f712d7902244655f6d31cc53d9574fc225e",
+        "verdict": "Approved"
+      },
+      {
+        "critical": 0,
+        "fresh_tests": 0,
+        "important": 0,
+        "minor": 0,
+        "scope": "honest provenance and capability boundary",
+        "summary_sha256": "7bbe53bd5d676056e8e958e25ea5cc69df5e7eb9e352014a2207d14663b63e8e",
+        "verdict": "Approved"
+      }
+    ],
+    "minor": 0,
+    "package": {
+      "bytes": 2104872,
+      "path": ".superpowers/sdd/review-fb90832-aa249d3-task12.diff",
+      "sha256": "60ec9b29be3c3448140deb6708bf7269106b7ca00be3a1c546dd940ff1a5f8b4"
+    },
     "required_approvals": 3,
+    "reviewed_evidence": {
+      "commit": "aa249d374f2a4c828e27b1955ed9dc1c8f5dd0e2",
+      "tree": "5328d44da650c8cebb47cf6af8f88de11bf8b72e"
+    },
     "same_sha_tree_required": true,
-    "status": "terminal_regate_pending",
+    "status": "approved",
     "timeout_or_missing_summary_counts_as_approval": false
   },
   "initial_review": {
@@ -359,6 +405,6 @@
   },
   "rollout": "NO-GO",
   "schema_version": 1,
-  "status": "review_findings_corrected_terminal_regate_pending",
+  "status": "complete_terminally_approved",
   "task": 12
 }
