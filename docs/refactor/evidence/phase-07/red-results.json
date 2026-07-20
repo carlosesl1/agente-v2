@@ -55,6 +55,17 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: reservation_boundary.legacy_state",
+      "command": "python3 -B -m unittest tests.test_phase7_legacy_state -v",
+      "exit_code": 1,
+      "output_bytes": 964,
+      "output_sha256": "68f30bfd8377872f4e225d451747e1167f9b1d65b965d9638a7ff4e0a1343c35",
+      "task": 5,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,

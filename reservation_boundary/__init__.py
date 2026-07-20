@@ -7,12 +7,14 @@ from reservation_boundary.serialization import (
     semantic_hash,
     to_wire_json,
 )
+from reservation_boundary.legacy_state import import_legacy_state
 
 __version__ = "0.7.0"
 __all__ = (
     "__version__",
     *_types_all,
     "from_wire_json",
+    "import_legacy_state",
     "semantic_hash",
     "to_wire_json",
 )

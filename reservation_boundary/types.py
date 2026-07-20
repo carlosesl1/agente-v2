@@ -154,6 +154,8 @@ class ImportReason(str, Enum):
     MALFORMED = "malformed"
     MISSING_IDENTITY = "missing_identity"
     AMBIGUOUS_IDENTITY = "ambiguous_identity"
+    CONFLICTING_IDENTITY = "conflicting_identity"
+    MISSING_PROVENANCE = "missing_provenance"
     UNSUPPORTED_STAGE = "unsupported_stage"
     INCONSISTENT_SELECTION = "inconsistent_selection"
     INCONSISTENT_CONFIRMATION = "inconsistent_confirmation"
