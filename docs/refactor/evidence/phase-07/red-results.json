@@ -10,6 +10,17 @@
       "tests_failed": 0,
       "tests_in_error": 2,
       "tests_run": 2
+    },
+    {
+      "causal_failure": "missing pyproject.toml and scripts/build_phase7_wheel.py",
+      "command": "python3 -B -m unittest tests.test_phase7_package -v",
+      "exit_code": 1,
+      "output_bytes": 3741,
+      "output_sha256": "a47b0a75c6349a66d221281f4bb36ca5f4f1419aee89f0d7339a63819b028dc0",
+      "task": 2,
+      "tests_failed": 2,
+      "tests_in_error": 1,
+      "tests_run": 3
     }
   ],
   "phase": 7,

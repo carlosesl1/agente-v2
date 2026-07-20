@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import tomllib
 import unittest
 
 
@@ -37,6 +38,17 @@ class Phase7EntryContractTests(unittest.TestCase):
         self.assertEqual(payload["phase6_validator"], "passed")
         self.assertEqual(payload["phase6_manifest"], "passed")
         self.assertEqual(payload["runtime_original_status_entries"], 80)
+
+    def test_wheel_bootstrap_is_closed_and_stdlib_only(self) -> None:
+        payload = tomllib.loads(read("pyproject.toml"))
+        self.assertEqual(payload["project"]["dependencies"], [])
+        self.assertNotIn("build-system", payload)
+        self.assertEqual(payload["project"]["version"], "0.7.0")
+        self.assertTrue((ROOT / "scripts/build_phase7_wheel.py").is_file())
+        self.assertEqual(
+            read("reservation_boundary/__init__.py").strip().splitlines()[-1],
+            '__version__ = "0.7.0"',
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+[project]
+name = "chapada-reservation-kernel"
+version = "0.7.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.phase7-wheel]
+packages = [
+  "reservation_domain",
+  "reservation_lookup",
+  "reservation_confirmation",
+  "reservation_execution",
+  "reservation_followup",
+  "reservation_boundary",
+]
