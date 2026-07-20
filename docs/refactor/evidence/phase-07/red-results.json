@@ -21,6 +21,17 @@
       "tests_failed": 2,
       "tests_in_error": 1,
       "tests_run": 3
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: reservation_boundary.types",
+      "command": "python3 -B -m unittest tests.test_phase7_types -v",
+      "exit_code": 1,
+      "output_bytes": 890,
+      "output_sha256": "a155e6c228592a3f419d9d7b935953be04e5f41b0cfa98d472d6209ec9b150cc",
+      "task": 3,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,
