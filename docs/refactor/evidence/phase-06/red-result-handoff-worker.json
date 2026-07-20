@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": 6,
   "task": 7,
-  "generated_at_utc": "2026-07-20T02:51:00Z",
+  "generated_at_utc": "2026-07-20T03:32:44Z",
   "base_commit": "26a60b3d4aff8f5bca62bb0411bb9a9e8a359c54",
   "base_tree": "a26ed9885f05892bd2a0e06b94f256e54f725da7",
   "tdd": {
@@ -78,18 +78,108 @@
       "errors": 0,
       "raw_output_path": "/tmp/phase6-task7-one-shot-mutation-red.out",
       "raw_output_sha256": "6a6a225832aa07f34f003b766f0b0642c764479c0360f11ea9e339323b3a5a0f",
+      "raw_output_versioned": false,
+      "status": "superseded by terminal mutation with explicit baseline commit/tree, mutant tree, command, and patch composition"
+    },
+    "terminal_review_red": {
+      "description": "Terminal independent review oracles applied to the rejected evidence-only Task 7 head; coherent worker+owner substitution, ACK receipt/event substitution, and noncanonical inner receipt remained accepted",
+      "base_commit": "1f25491725cebcbda723882081ce9199b7cba061",
+      "base_tree": "e787ff65632339c944f16c49fc3a6652e7467204",
+      "patch_path": "docs/refactor/evidence/phase-06/task7-terminal-review-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_apply_command": "git apply --index --unidiff-zero docs/refactor/evidence/phase-06/task7-terminal-review-red.patch",
+      "patch_sha256": "de4ad8d2572b15cc0ed32930c7f50f271a3a456ae553e9397a2da2633286fd6e",
+      "staged_tree": "74275350ce506d643859b693bc577b247a58cb2b",
+      "apply_check": "passed_against_clean_detached_base_with_exact_test_blob",
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
+      "exit_code": 1,
+      "tests_run": 24,
+      "failures": 3,
+      "errors": 0,
+      "failing_tests": [
+        "test_coherent_worker_and_claim_owner_substitution_is_corruption",
+        "test_ack_receipt_id_must_match_persisted_acknowledgement_event",
+        "test_inner_receipt_json_must_be_canonical"
+      ],
+      "raw_output_path": "/tmp/phase6-task7-terminal-review-immutable-red.out",
+      "raw_output_sha256": "2e5a019e88fe33ce2aba6a0881bb79b2aa987cb4807b460a0e84aa7e81dd6b49",
       "raw_output_versioned": false
+    },
+    "historical_owner_schema_red": {
+      "description": "Delivered handoff row must retain historical claim_owner while clearing live lease timestamps",
+      "base_commit": "1f25491725cebcbda723882081ce9199b7cba061",
+      "base_tree": "e787ff65632339c944f16c49fc3a6652e7467204",
+      "patch_path": "docs/refactor/evidence/phase-06/task7-historical-owner-schema-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_apply_command": "git apply --index --unidiff-zero docs/refactor/evidence/phase-06/task7-historical-owner-schema-red.patch",
+      "patch_sha256": "53584f7025575199db148d8a3474361ee916df7d56ea3879be86b9cbaaeea37d",
+      "staged_tree": "5d27cdd953d5151b68f5440023be024e2a606420",
+      "apply_check": "passed_against_clean_detached_base",
+      "command": "python3 -m unittest tests.test_phase6_schema.Phase6SchemaTests.test_delivered_handoff_retains_historical_claim_owner_without_live_lease -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task7-schema-owner-immutable-red.out",
+      "raw_output_sha256": "dc154b13588176dab34e748bd021ca86138fffbf5637481156b93731680ad780",
+      "raw_output_versioned": false
+    },
+    "terminal_mutations": {
+      "baseline": {
+        "commit": "a02ae23680dfaff01c6b5f482971e577618ab929",
+        "tree": "d111ee4f652697461c135ad91068a06c08e8c4d4",
+        "command": "python3 -m unittest tests.test_phase6_handoff_worker.Phase6HandoffWorkerTests.test_worker_delivers_at_most_one_when_two_messages_are_pending tests.test_phase6_handoff_worker.Phase6HandoffWorkerTests.test_coherent_worker_and_claim_owner_substitution_is_corruption -v",
+        "tests_run": 2,
+        "failures": 0,
+        "errors": 0,
+        "output_path": "/tmp/phase6-task7-terminal-mutation-baseline.out",
+        "output_sha256": "ec88686652c4a38e71b9ebbd645bc348d6c359fa020fe36a03131a3458ba4510"
+      },
+      "second_claim_release": {
+        "description": "After completing the first message, mutant claims and releases a second pending message before returning",
+        "composition": [
+          "checkout detached a02ae23680dfaff01c6b5f482971e577618ab929",
+          "apply only docs/refactor/evidence/phase-06/task7-second-claim-release-mutant.patch"
+        ],
+        "patch_path": "docs/refactor/evidence/phase-06/task7-second-claim-release-mutant.patch",
+        "patch_sha256": "f90c282e4c778b84409c8c5f17608f915d5b1bb87a93b35a9c03264ad35f286e",
+        "mutant_tree": "864dd6e36c227deb0c9d83f3e93c671ad5a194ea",
+        "command": "python3 -m unittest tests.test_phase6_handoff_worker.Phase6HandoffWorkerTests.test_worker_delivers_at_most_one_when_two_messages_are_pending -v",
+        "exit_code": 1,
+        "tests_run": 1,
+        "failures": 1,
+        "errors": 0,
+        "output_path": "/tmp/phase6-task7-second-claim-release-mutant.out",
+        "output_sha256": "5e9ae32304201c55aee628594f85fb5ce58f68defccf2b6d6af5b8e6b539fdc9"
+      },
+      "owner_authority_removed": {
+        "description": "Mutant removes the comparison between receipt claim_owner and the independent handoff_outbox historical owner",
+        "composition": [
+          "checkout detached a02ae23680dfaff01c6b5f482971e577618ab929",
+          "apply only docs/refactor/evidence/phase-06/task7-owner-authority-mutant.patch"
+        ],
+        "patch_path": "docs/refactor/evidence/phase-06/task7-owner-authority-mutant.patch",
+        "patch_sha256": "045ef3f199c4f0d24c6e10d9109f843bf67a7fa674d3cb71aa76e7b6b7439193",
+        "mutant_tree": "1e97dc576c34df1082497bf0671b6d4a97fd8658",
+        "command": "python3 -m unittest tests.test_phase6_handoff_worker.Phase6HandoffWorkerTests.test_coherent_worker_and_claim_owner_substitution_is_corruption -v",
+        "exit_code": 1,
+        "tests_run": 1,
+        "failures": 1,
+        "errors": 0,
+        "output_path": "/tmp/phase6-task7-owner-authority-mutant.out",
+        "output_sha256": "53f3023b95a3fe8491448639833b805f3104671de8d4f3f0c193f07dda57e39b"
+      }
     }
   },
   "gates": {
     "focused": {
       "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
-      "tests": 21,
+      "tests": 24,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-review-focused-final.out",
-      "output_sha256": "7291a49d085cdfcb8cda6ce0197d486a5332ec20f66b66922d659f6e729d99c7",
-      "duration_seconds": 1.671
+      "output_path": "/tmp/phase6-task7-terminal-clean-focused.out",
+      "output_sha256": "84ca4bd523cdd17b866f3458e7f193d626a64856cbfdf0da5fe39bf36169c182",
+      "duration_seconds": 1.79
     },
     "regressions": {
       "modules": [
@@ -100,21 +190,21 @@
         "tests.test_phase5_outbox",
         "tests.test_phase5_sqlite_store"
       ],
-      "tests": 173,
+      "tests": 174,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-review-regressions-final.out",
-      "output_sha256": "1898b8c0c3c6b3b5458c5d73869865e0a310680664f1ad91f89d2b97dcfc7009",
-      "duration_seconds": 9.027
+      "output_path": "/tmp/phase6-task7-terminal-clean-regressions.out",
+      "output_sha256": "de9f4c901807d4d7b7e3230ba9d56f2b39d6721f8e2fda6b5744d677453b250e",
+      "duration_seconds": 8.073
     },
     "full_suite": {
       "command": "python3 -m unittest discover -s tests -v",
-      "tests": 528,
+      "tests": 532,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-review-full-suite-final.out",
-      "output_sha256": "52fc8c7d4d4952de278d254ab2e9c11ebd538ea34728b4e68f0e3bfc7bd92aa9",
-      "duration_seconds": 68.98
+      "output_path": "/tmp/phase6-task7-terminal-clean-full-suite.out",
+      "output_sha256": "dde1360dc091ddbf360350665a9cef160762ae28b2899dc47d03af98eba399e8",
+      "duration_seconds": 69.587
     },
     "characterization": {
       "command": "python3 -m characterization.harness",
@@ -122,15 +212,15 @@
       "scenario_count": 30,
       "incident_count": 22,
       "violation_count": 37,
-      "output_path": "/tmp/phase6-task7-review-characterization-final.out",
+      "output_path": "/tmp/phase6-task7-terminal-clean-characterization.out",
       "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
     },
     "schema": {
       "drift": "zero",
       "table_count": 11,
       "schema_version": 1,
-      "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
-      "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
+      "sqlite_sha256": "489b63d9efea693a633d929e4fe03e2649a987e58aee45ec5e326d93db4b9f9a",
+      "postgresql_sha256": "b6c3906db01d8e2feeb7e7ba0dd2373fae33ab799d0f8929a2d9a5f25f8676ba",
       "sqlite_quick_check": "ok",
       "sqlite_foreign_key_check": [],
       "postgresql_executed": false
@@ -140,7 +230,16 @@
     "external_imports": [],
     "capability_client_hits": [],
     "anticipated_task8_9_methods": [],
-    "forbidden_artifacts": []
+    "forbidden_artifacts": [],
+    "schema_tests": {
+      "command": "python3 -m unittest tests.test_phase6_schema -v",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "output_path": "/tmp/phase6-task7-terminal-clean-schema.out",
+      "output_sha256": "03018f2577bfc60b7e3926a6333c31228a1841bd68d042110cceb0b07bdaf3bb",
+      "duration_seconds": 1.186
+    }
   },
   "capabilities_used": [],
   "network_used": false,
@@ -150,10 +249,10 @@
   "rollout": "NO-GO",
   "implementation_commit": "66eb77de9b4d5ec9f5eb7ffff7018bc0d4aa62d7",
   "implementation_tree": "3bd5e93c737f7072780808247a992d3e51fe9da6",
-  "review_correction_commit": "1ce1827fbe94ca664030d3e0f2a0827d594c8b9b",
-  "review_correction_tree": "103deebbeea860521bbbe04dffeefc3cd4ba9266",
-  "gates_bound_to_commit": "1ce1827fbe94ca664030d3e0f2a0827d594c8b9b",
-  "gates_bound_to_tree": "103deebbeea860521bbbe04dffeefc3cd4ba9266",
+  "review_correction_commit": "a02ae23680dfaff01c6b5f482971e577618ab929",
+  "review_correction_tree": "d111ee4f652697461c135ad91068a06c08e8c4d4",
+  "gates_bound_to_commit": "a02ae23680dfaff01c6b5f482971e577618ab929",
+  "gates_bound_to_tree": "d111ee4f652697461c135ad91068a06c08e8c4d4",
   "semantic_review_decisions": {
     "logical_now": {
       "decision": "no production change",
@@ -166,5 +265,8 @@
       "task7_plan_lines": "docs/superpowers/plans/2026-07-19-phase-6-handoff-payments.md:623-629",
       "task9_plan_lines": "docs/superpowers/plans/2026-07-19-phase-6-handoff-payments.md:716-750"
     }
-  }
+  },
+  "first_review_correction_commit": "1ce1827fbe94ca664030d3e0f2a0827d594c8b9b",
+  "first_review_correction_tree": "103deebbeea860521bbbe04dffeefc3cd4ba9266",
+  "terminal_review_status": "awaiting_independent_re_gate"
 }

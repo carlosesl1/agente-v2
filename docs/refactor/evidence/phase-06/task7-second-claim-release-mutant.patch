@@ -1,0 +1,14 @@
+diff --git a/reservation_followup/workers.py b/reservation_followup/workers.py
+index 07a43d45e17db6d77ea9844c7ca71b718ff858c8..e4f8ce62a4edd74ad0de747a415a3a69a1326c7f 100644
+--- a/reservation_followup/workers.py
++++ b/reservation_followup/workers.py
+@@ -108,0 +109,9 @@ class HandoffOutboxWorker:
++        second = self._store.claim_handoff_outbox(
++            worker_id=self._worker_id,
++            delivery_id=self._delivery_id,
++            delivery_version=self._delivery_version,
++            now=now,
++            lease_ttl=self._lease_ttl,
++        )
++        if second is not None:
++            self._store.release_handoff_outbox(second, now=now)

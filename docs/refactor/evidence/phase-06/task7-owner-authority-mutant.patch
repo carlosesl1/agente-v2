@@ -1,0 +1,6 @@
+diff --git a/reservation_followup/sqlite_store.py b/reservation_followup/sqlite_store.py
+index 9b4f83ab0a85fd8b75f74594c7ad17fa5f7c903e..704f82e6e8260a09a03f5ba2ecba3a8578b80cfe 100644
+--- a/reservation_followup/sqlite_store.py
++++ b/reservation_followup/sqlite_store.py
+@@ -761 +760,0 @@ class SQLiteFollowupUnitOfWork:
+-                    or claim_record["claim_owner"] != row[9]
