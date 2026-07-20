@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "phase": "phase-06-handoff-and-payments",
+  "task": 11,
+  "status": "green_pending_independent_review",
+  "generated_at": "2026-07-20T11:38:50Z",
+  "base": {
+    "commit": "32e9127fc92452a1ad95429bf479eb20bbcb3e7d",
+    "tree": "6bec44edc72f211dec5e869820e03cfc1f9cc738",
+    "meaning": "Task 10 terminal review closure"
+  },
+  "functional": {
+    "commit": "daa7ad6b984a1b5bdd4a31e0fe93ff1accb5c191",
+    "tree": "e9b966042c0d3ea57fdea1e8662a9fd2f0306aa0",
+    "files": [
+      "reservation_followup/properties.py",
+      "scripts/run_phase6_properties.py",
+      "tests/test_phase6_properties.py"
+    ]
+  },
+  "red": {
+    "patch": "docs/refactor/evidence/phase-06/task11-red.patch",
+    "patch_sha256": "3b005bf7e09cd6192dde5d4fb033278fd9fa74b2f089aef88626f0dbeabe3208",
+    "reconstructed_tree": "7e77045cfe0528c2aa1f07940d500ccbac00243c",
+    "command": "python3 -m unittest tests.test_phase6_properties -v",
+    "exit_code": 1,
+    "tests_run": 1,
+    "failures": 0,
+    "errors": 1,
+    "witness": "ModuleNotFoundError: reservation_followup.properties",
+    "output_sha256": "4d87253cecb46bd79c3b911e64e02f9f1817fbc51945fd64c27e4b61d1399af9"
+  },
+  "performance_history": [
+    {
+      "status": "functional_pass_performance_fail",
+      "cases": 20000,
+      "elapsed_seconds": 946.192347,
+      "limit_seconds": 900,
+      "property_result_sha256": "1ae167c5cda84e36ce9e42059f2d720da97bd7e6b794358f407c124ec30e4d84",
+      "accepted": false
+    },
+    {
+      "status": "passed",
+      "cases": 20000,
+      "elapsed_seconds": 874.041957,
+      "limit_seconds": 900,
+      "maxrss_kb": 219428,
+      "property_result_sha256": "285905b365a22d5ef11380cda420cd98c656bb266046341e99f8893c466e4296",
+      "accepted": true
+    }
+  ],
+  "integral_gate": {
+    "command": "python3 scripts/run_phase6_properties.py --cases 20000 --seed 2026071906 --write docs/refactor/evidence/phase-06/property-result.json",
+    "cases": 20000,
+    "seed": 2026071906,
+    "handoff_cases": 10000,
+    "payment_cases": 10000,
+    "shards": 20,
+    "max_workers": 4,
+    "deep_audits": 126,
+    "violations": 0,
+    "elapsed_seconds": 874.041957,
+    "within_15_minutes": true,
+    "property_result": "docs/refactor/evidence/phase-06/property-result.json",
+    "property_result_sha256": "285905b365a22d5ef11380cda420cd98c656bb266046341e99f8893c466e4296",
+    "property_result_bytes": 28102919,
+    "positive_counters": {
+      "handoff_cases": 10000,
+      "payment_cases": 10000,
+      "email_disabled_cases": 7500,
+      "method_switches": 1250,
+      "economic_version_changes": 1250,
+      "pix_cases": 3750,
+      "wise_cases": 3750,
+      "stripe_cases": 2500,
+      "evidence_conflicts": 1250,
+      "pre_fence_recoveries": 1250,
+      "post_fence_manual_reviews": 1250,
+      "required_effect_deliveries": 7500,
+      "optional_effect_failures": 3750
+    },
+    "safety_counters": {
+      "reservation_commands_after_anchor": 0,
+      "handoff_email_failures_do_not_block_required": 0,
+      "second_settlement_commands": 0,
+      "second_dispatch_slots": 0,
+      "proof_reuses": 0,
+      "outbox_settlement_retries": 0,
+      "unknown_automatic_retries": 0,
+      "partial_transactions": 0,
+      "wrong_target_settlements": 0
+    }
+  },
+  "gates": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_properties -v",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "e8bd5cd90087598c368efb51e994dee463508d57b80cd1433e9d143b9b3400b4"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 605,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "e0b326c480a695f84a973aa447d60f8a15458ae6a930163e19edcf54ba7ed7a5"
+    },
+    "characterization": {
+      "command": "python3 -m unittest tests.test_characterization_harness -v",
+      "tests": 13,
+      "scenario_floor": 30,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "5c4973e8c1af157441888ef1c4d6641df54c012c168bb2ca85f59546c88e20d6"
+    },
+    "static_boundary": {
+      "package_forbidden_imports": [],
+      "urls": [],
+      "test_imports": [],
+      "cli_process_sharding": true,
+      "max_workers": 4
+    },
+    "artifact_scan": {
+      "files": 5,
+      "bytes": 28195925,
+      "urls": [],
+      "emails": [],
+      "private_keys": [],
+      "api_keys": [],
+      "live_capability_words": []
+    }
+  },
+  "constraints": {
+    "live_capabilities_used": false,
+    "network_used": false,
+    "postgresql_executed": false,
+    "docker_used": false,
+    "external_dependencies_added": false,
+    "commercial_rollout": "NO-GO"
+  },
+  "independent_review": {
+    "status": "pending"
+  }
+}
