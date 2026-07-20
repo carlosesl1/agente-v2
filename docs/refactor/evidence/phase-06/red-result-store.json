@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 6,
   "title": "Atomic SQLite follow-up UnitOfWork",
-  "recorded_at_utc": "2026-07-20T01:15:05Z",
+  "recorded_at_utc": "2026-07-20T01:29:52Z",
   "base_sha": "7aff9b25f6b6cde7942ef031cef7b4be07ea9345",
   "rollout": "NO-GO",
   "postgresql_executed": false,
@@ -129,7 +129,7 @@
   "schema": {
     "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
     "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
-    "generator_output_sha256": "2f8c9d2cdc8f26a05a7f8cba549001d4c6c407477dcec77fdf8ed5e608f88053",
+    "generator_output_sha256": "6b8b8469d1c4309a7769a55fe742e38feac187b4dd4e82bad5ffe8d8f90c1f82",
     "sqlite_diff_bytes": 0,
     "postgresql_diff_bytes": 0,
     "drift_zero": true,
@@ -138,33 +138,33 @@
   },
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-second-review-focused-final.out 2>&1",
-      "tests": 26,
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-provenance-focused-final.out 2>&1",
+      "tests": 29,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 2.73,
-      "output_sha256": "050788604a48081809eec91291ed74c6ee784f7e617044673356258433a31780"
+      "duration_seconds": 2.701,
+      "output_sha256": "e5f833f182a115638b6daa95694e8a718b72612670fbe3a5f60bf1bcb106dbec"
     },
     "regressions": {
-      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-second-review-regressions-final.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-provenance-regressions-final.out 2>&1",
       "tests": 170,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 4.157,
-      "output_sha256": "4f66de0142c8ee94e14c3d9f07011a1701de7effe4da55a5db3a09dbc15909bd"
+      "duration_seconds": 3.634,
+      "output_sha256": "57fce65b7eeb40904c6402fe0e195cb6aff590276a44a04669454353dc5a40b0"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-second-review-full-suite-final.out 2>&1",
-      "tests": 504,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-provenance-full-suite-final.out 2>&1",
+      "tests": 507,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 67.772,
-      "output_sha256": "b21faa9f25f88a6a10bd2bc86e1bf4f07cf9188c798dbadd9e25996b6ca61769"
+      "duration_seconds": 67.44,
+      "output_sha256": "fc0b601f590db4a2310f4ea2ea2b0eba01af76742f0f74566a39c0293153534a"
     }
   },
   "artifact_sha256": {
     "reservation_followup/sqlite_store.py": "0dffdbd4d51e5fc71ddb7155279f3abeee2d30e582102022c1f3b54c2cb371ec",
-    "tests/test_phase6_sqlite_store.py": "74f25c8e86aebcd5c44c5a78033ab1f9ccf018fde96d361cc679281d6ea441d0",
+    "tests/test_phase6_sqlite_store.py": "4725f6b6de1b01180ee5e04ca364803e214f5e29af2b6553a2119acab785c38e",
     "tests/phase6_helpers.py": "f1545c3d471b54ab461c2cd6b7c338180b4891956a5549077197e6f2bbb943c9"
   },
   "scans": {
@@ -186,7 +186,10 @@
       "literal sqlite_ lookalike extras and preexisting FK violations fail closed",
       "connection and physical-corruption failures use the stable store taxonomy",
       "payment bootstrap replay remains idempotent after legitimate progression",
-      "Task 6 load accepts only initial pending handoff jobs and no receipts"
+      "Task 6 load accepts only initial pending handoff jobs and no receipts",
+      "malformed physical corruption has an independently reached immutable RED",
+      "receipt presence is isolated from noninitial delivered-state rejection",
+      "final production HEAD/tree and both review-package hashes are recorded self-contained"
     ],
     "unqualified_durable_sql": []
   },
@@ -237,7 +240,7 @@
       "important_findings_closed": [
         "literal sqlite_ lookalike extras are detected in the main table universe",
         "connect and closed-caller failures map to stable store errors without stealing rejected caller connections",
-        "preexisting foreign-key violations fail open as DataCorruption",
+        "preexisting foreign-key violations fail closed as DataCorruption",
         "physical SQLITE_CORRUPT/SQLITE_NOTADB failures classify as DataCorruption",
         "exact open_payment bootstrap replay remains a no-op after workflow progression",
         "Task 6 accepts only the exact initial pending handoff outbox tuple and no receipts"
@@ -246,6 +249,45 @@
         "schema bootstrap is one explicit transaction rather than executescript autocommit",
         "all durable domain SQL is main-qualified and attached databases are rejected"
       ]
+    },
+    {
+      "name": "terminal_provenance_isolation",
+      "rejected_base_sha": "e6d7585583ff5b2182e717a07944740934fdef50",
+      "test_tree_sha": "1138c39c1b8ec1d5d5b316aae87bbf6587e89906",
+      "patch_path": "docs/refactor/evidence/phase-06/task6-terminal-provenance-red.patch",
+      "patch_sha256": "a9fea45bcb3a6196e04824389a6a9bbb9869750f22d62b67e332e58aade7aa20",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task6-terminal-provenance-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-provenance-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 29,
+      "failures": 14,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task6-provenance-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "0de28cd23c0c541eaaaf2f73c331f8a16c4ff94680ea8b014757bb6f62e41322",
+      "isolated_findings": [
+        "malformed/SQLITE_NOTADB is an independently executed failing test rather than unreachable code after a prior assertion",
+        "receipt presence with an otherwise exact initial pending outbox independently reaches the receipt query"
+      ],
+      "failure_decomposition": {
+        "temp_or_attached_namespace": 3,
+        "literal_sqlite_lookalike": 1,
+        "path_and_closed_connection_taxonomy": 2,
+        "physical_corruption_taxonomy": 1,
+        "preexisting_foreign_key_violation": 1,
+        "progressed_payment_bootstrap_replay": 1,
+        "noninitial_outbox_operational_states": 4,
+        "receipt_only_with_initial_outbox": 1
+      }
     }
-  ]
+  ],
+  "production_correction_anchor": {
+    "head_sha": "96f1ce8b786ef4bf9a2f8a7d9eb264aa04d44f64",
+    "tree_sha": "a7098940aebc3293b4ea460b9146e548e267b67f",
+    "base_sha": "e6d7585583ff5b2182e717a07944740934fdef50",
+    "core_review_package_path": ".superpowers/sdd/review-e6d7585..96f1ce8-store.diff",
+    "core_review_package_sha256": "55c79b1aab51817481a7b96d247b5cba3f02993d9ab78534c28595893a4fcd75",
+    "proof_review_package_path": ".superpowers/sdd/review-e6d7585..96f1ce8-proof.diff",
+    "proof_review_package_sha256": "0428e9508c98f216f222a85497c5b09a905b49062c9dbcc580312e4b88f3647d"
+  }
 }

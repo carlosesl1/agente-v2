@@ -371,20 +371,17 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         if opened is not None:
             opened.close()
 
-    def test_open_maps_connection_failures_and_physical_corruption_stably(self) -> None:
-        failures = (
-            (self.root / "missing-parent" / "store.db", StoreUnavailable),
-        )
-        for target, expected in failures:
-            with self.subTest(target=target):
-                error = None
-                try:
-                    SQLiteFollowupUnitOfWork.open(target)
-                except BaseException as exc:
-                    error = exc
-                self.assertIsInstance(error, expected)
-                self.assertIsInstance(error.__cause__, sqlite3.Error)
+    def test_open_maps_path_connection_failure_stably(self) -> None:
+        target = self.root / "missing-parent" / "store.db"
+        error = None
+        try:
+            SQLiteFollowupUnitOfWork.open(target)
+        except BaseException as exc:
+            error = exc
+        self.assertIsInstance(error, StoreUnavailable)
+        self.assertIsInstance(error.__cause__, sqlite3.Error)
 
+    def test_open_maps_closed_caller_connection_failure_stably(self) -> None:
         closed = sqlite3.connect(":memory:")
         closed.close()
         error = None
@@ -395,6 +392,7 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         self.assertIsInstance(error, StoreUnavailable)
         self.assertIsInstance(error.__cause__, sqlite3.Error)
 
+    def test_open_maps_physical_corruption_to_data_corruption(self) -> None:
         malformed = self.root / "malformed.sqlite"
         malformed.write_bytes(b"not-a-sqlite-database")
         error = None
@@ -1007,6 +1005,46 @@ class Phase6FollowupStoreTests(unittest.TestCase):
                 except BaseException as exc:
                     error = exc
                 self.assertIsInstance(error, DataCorruption)
+
+    def test_task6_loader_rejects_receipt_even_with_initial_pending_outbox(self) -> None:
+        path = self.root / "handoff-outbox-receipt-only.db"
+        store = self.open_store(path)
+        request = handoff_requested(
+            handoff_id="handoff:store:receipt-only",
+            incident_key="incident:store:receipt-only",
+            source_event_id="source:event:store:receipt-only",
+        )
+        opened = store.open_handoff(
+            request,
+            HandoffEffectPolicy.default_email_disabled(),
+        )
+        message_id = store._connection.execute(
+            "SELECT message_id FROM main.handoff_outbox"
+        ).fetchone()[0]
+        delivered_at = (T0 + timedelta(seconds=1)).isoformat()
+        receipt_hash = "e" * 64
+        store._connection.execute("PRAGMA foreign_keys = OFF")
+        store._connection.execute(
+            "INSERT INTO main.handoff_receipts "
+            "(receipt_id, idempotency_key, message_id, receipt_json, "
+            "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
+            (
+                "receipt:store:receipt-only",
+                "receipt:store:receipt-only:idem",
+                message_id,
+                receipt_hash,
+                delivered_at,
+            ),
+        )
+        store._connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            with self.assertRaises(DataCorruption):
+                store.load_handoff(request.handoff_id)
+        finally:
+            store._connection.execute("PRAGMA foreign_keys = OFF")
+            store._connection.execute("DELETE FROM main.handoff_receipts")
+            store._connection.execute("PRAGMA foreign_keys = ON")
+        self.assertEqual(store.load_handoff(request.handoff_id), opened.state)
 
     def test_handoff_state_event_and_outbox_canonical_tamper_are_detected(self) -> None:
         tamper_cases = ("state_pretty", "state_hash", "revision", "status", "event", "outbox")
