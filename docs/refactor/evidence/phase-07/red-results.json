@@ -32,6 +32,18 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "BoundaryState rejected exact CollectingState from STATE_TYPES",
+      "command": "python3 -B -m unittest tests.test_phase7_types.Phase7TypeContractTests.test_boundary_state_accepts_only_exact_closed_universe_states -v",
+      "exit_code": 1,
+      "output_bytes": 1206,
+      "output_sha256": "5a25e69d90afef092d188f31882260b04f8cd8e4e09999ed973d30f1cd74b26b",
+      "red_kind": "late_contract",
+      "task": 3,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,

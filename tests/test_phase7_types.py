@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import get_args
 import unittest
 
-from reservation_domain import ReservationCommand
+from reservation_domain import ReservationCommand, new_workflow
 from reservation_followup import PaymentSettlementCommand
 from reservation_boundary.types import (
     ActivityDescriptionArguments,
@@ -149,6 +149,29 @@ class Phase7TypeContractTests(unittest.TestCase):
             ImportResult(ImportDisposition.MANUAL_REVIEW, state, ImportReason.MALFORMED)
         with self.assertRaises(ValueError):
             ImportResult(ImportDisposition.REJECTED, None, ImportReason.NONE)
+
+    def test_boundary_state_accepts_only_exact_closed_universe_states(self) -> None:
+        workflow = new_workflow(workflow_id="workflow-1", started_at=NOW)
+        state = BoundaryState(
+            schema_version=7,
+            lead_key="lead-1",
+            version=0,
+            workflow=workflow,
+            handoff=None,
+            payments=(),
+            processed_event_ids=(),
+        )
+        self.assertIs(state.workflow, workflow)
+        with self.assertRaises(TypeError):
+            BoundaryState(
+                schema_version=7,
+                lead_key="lead-1",
+                version=0,
+                workflow=object(),  # type: ignore[arg-type]
+                handoff=None,
+                payments=(),
+                processed_event_ids=(),
+            )
 
     def test_boundary_command_union_is_exact(self) -> None:
         self.assertEqual(

@@ -10,7 +10,7 @@ import math
 import re
 from typing import Final, TypeAlias, get_args
 
-from reservation_domain import ReservationCommand, WorkflowState
+from reservation_domain import ReservationCommand, STATE_TYPES, WorkflowState
 from reservation_execution import OutboxMessage
 from reservation_followup import HandoffWorkflow, PaymentSettlementCommand, PaymentWorkflow
 
@@ -478,8 +478,8 @@ class BoundaryState:
         _require_exact_int(self.schema_version, "BoundaryState.schema_version", minimum=1)
         _require_exact_str(self.lead_key, "BoundaryState.lead_key", identifier=True)
         _require_exact_int(self.version, "BoundaryState.version", minimum=0)
-        if self.workflow is not None and type(self.workflow) is not WorkflowState:
-            raise TypeError("BoundaryState.workflow must be an exact WorkflowState or None")
+        if self.workflow is not None and type(self.workflow) not in STATE_TYPES:
+            raise TypeError("BoundaryState.workflow must be an exact STATE_TYPES member or None")
         if self.handoff is not None and type(self.handoff) is not HandoffWorkflow:
             raise TypeError("BoundaryState.handoff must be an exact HandoffWorkflow or None")
         _require_exact_members(self.payments, "BoundaryState.payments", (PaymentWorkflow,))
