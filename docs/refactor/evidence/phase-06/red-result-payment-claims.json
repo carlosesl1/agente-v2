@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 8,
   "title": "Global payment evidence claims and permanently fenced settlement ledger",
-  "recorded_at_utc": "2026-07-20T05:55:41Z",
+  "recorded_at_utc": "2026-07-20T06:03:46Z",
   "base_sha": "bc6fd086b2e6c23f330f6103c59714ed280c6fdb",
   "base_tree_sha": "57d665115789418a5d28b398bd5e60687840d170",
   "functional_commit": "cedd8f1bf1839884cf29e3b2ea742a23c9e6a6b7",
@@ -154,11 +154,12 @@
     "payment_receipt_rows_created": 0
   },
   "independent_review": {
-    "status": "corrections complete; terminal re-gate pending after cedd8f1",
+    "status": "Approved terminally by deleg_6e9b4458",
     "critical": 0,
     "important": 0,
     "minor": 0,
-    "note": "counts describe unresolved findings after controller corrections, not an independent approval"
+    "audited_evidence_commit": "fcb3cedaf3f155e9d97bdf31e6c7060e78509aba",
+    "task9_authorized": true
   },
   "initial_functional_commit": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
   "initial_functional_tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
@@ -411,5 +412,56 @@
       "postgresql_executed": false
     },
     "compile_diff_capability_scans": "passed"
+  },
+  "terminal_independent_review": {
+    "delegation_id": "deleg_6e9b4458",
+    "audited_functional_commit": "cedd8f1bf1839884cf29e3b2ea742a23c9e6a6b7",
+    "audited_functional_tree": "d78cf41a34e3fb023542647577b8165aeaa7ffee",
+    "audited_evidence_commit": "fcb3cedaf3f155e9d97bdf31e6c7060e78509aba",
+    "audited_evidence_tree": "026fdc09fa1f17960941c1db2c9d20990a4830e3",
+    "review_package": ".superpowers/sdd/review-bc6fd08-fcb3ced-task8.diff",
+    "review_package_sha256": "359885b7e09fabdbe49f6efd70cd89a4b40ef679bbfd63a66d443885c44dbbf4",
+    "functional_to_evidence_prod_test_schema_diff": "empty",
+    "lane_a": {
+      "verdict": "Approved",
+      "tests_reexecuted": 2,
+      "result": "OK",
+      "critical": 0,
+      "important": 0,
+      "minor": 0,
+      "scope": "dispatch request hash binding and object-mutated permit rejection"
+    },
+    "lane_b": {
+      "verdict": "Approved",
+      "tests_reexecuted": 2,
+      "result": "OK",
+      "critical": 0,
+      "important": 0,
+      "minor": 0,
+      "scope": "first-write exact-expiry rejection and terminal non-mutating replay",
+      "first_write_stale": "rejected atomically",
+      "terminal_exact_replay_with_different_owner": "accepted only as no-op without mutation"
+    },
+    "lane_c": {
+      "verdict": "Approved",
+      "tests_reexecuted": 3,
+      "result": "OK",
+      "critical": 0,
+      "important": 0,
+      "minor": 0,
+      "scope": "RED, trees, hashes, evidence naming and final gate anchors",
+      "historical_not_reexecuted": [
+        "52/52 focused+store",
+        "355/355 regressions",
+        "558/558 full suite",
+        "30/30 characterization"
+      ],
+      "historical_outputs_authenticated": true
+    },
+    "terminal_verdict": "Approved",
+    "critical": 0,
+    "important": 0,
+    "minor": 0,
+    "task9_authorized": true
   }
 }
