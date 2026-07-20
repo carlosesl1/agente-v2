@@ -1,0 +1,196 @@
+{
+  "base": {
+    "commit": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
+    "tree": "508579a66734abab393f86fd18b6ddd81c3a80f7"
+  },
+  "boundary": {
+    "api_keys": 0,
+    "bytes_scanned": 62611,
+    "capabilities_used": [],
+    "emails": 0,
+    "files_scanned": 3,
+    "forbidden_imports": [],
+    "private_keys": 0,
+    "runner_test_imports": [],
+    "statement": "Only local temporary SQLite files, stdlib multiprocessing, synthetic in-memory/file logging ports, and unittest were used; no network, live provider, delivery, PostgreSQL, Docker, queue, or deployment capability was invoked.",
+    "urls": 0
+  },
+  "corrective_oracle_red": {
+    "command": "python3 -m unittest <fault matrix exact semantics + permissive-oracle tests> -v",
+    "errors": 16,
+    "exit_code": 1,
+    "output": {
+      "bytes": 16957,
+      "path": "/tmp/phase6-task12-oracle-red.out",
+      "sha256": "630a8c930f5cd0f9e0e5f479511001f1963a3d0c3709f6c87ce7ea37c5a9bb10"
+    },
+    "reason": "pre-correction rows lacked rollback fingerprints and exact recovered statuses",
+    "tests": 2
+  },
+  "focused_green": {
+    "command": "python3 -m unittest tests.test_phase6_fault_injection tests.test_phase6_concurrency -v",
+    "elapsed_seconds": 63.295,
+    "errors": 0,
+    "exit_code": 0,
+    "failures": 0,
+    "output": {
+      "bytes": 1988,
+      "path": "/tmp/phase6-task12-focused-final.out",
+      "sha256": "1d9c4c9338da397ccbc73b1593e8a8bf8bcdf9762cee3bf0d539aa36bed4b7c9"
+    },
+    "tests": 10
+  },
+  "functional": {
+    "commit": "86d5b0dfc496651652b1bdbdeb5cf67c25970ff5",
+    "parent": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
+    "tree": "27e9f850e19c87aec933c2dd8cb24c1c368c01ab"
+  },
+  "generated_at": "2026-07-20T13:19:18Z",
+  "independent_artifact_validation": {
+    "checks": [
+      "closed fault catalog",
+      "exact trigger/crash mechanism",
+      "rollback fingerprints",
+      "deterministic restart schedule",
+      "post-dispatch no redispatch",
+      "one winner and token 1 per domain",
+      "zero child/process errors"
+    ],
+    "output": {
+      "bytes": 615,
+      "path": "/tmp/phase6-task12-independent-validation.json",
+      "sha256": "ac35fb539e6f8caeb8aba1fce47a30cb6a5304100499c82fd664cac6ee619bff"
+    },
+    "result": "passed",
+    "summary": {
+      "contention_rounds_per_domain": {
+        "global_evidence_claim": 50,
+        "handoff_incident": 50,
+        "payment_command": 50,
+        "payment_outbox": 50
+      },
+      "contention_rows": 200,
+      "fault_rows": 27,
+      "hashes": {
+        "contention": "1f55f45d475f8bd01711c0533f0d0c1c0975a8ffec408d6a263566fdd3a769d4",
+        "fault": "ce5f339385015929dd64926b4f23e3cdeca6342f554c1279cd278d53be786403",
+        "restart": "0504622ca4409e053cf6c8fed55b8389c0d268c35c097d33b9d11ab0a1061378"
+      },
+      "real_fault_crashes": 12,
+      "restart_min_point_coverage": 166,
+      "restart_schedules": 2000,
+      "transaction_rollbacks": 15,
+      "violations": 0
+    },
+    "violations": 0
+  },
+  "independent_review": {
+    "required_approvals": 3,
+    "same_sha_tree_required": true,
+    "status": "pending",
+    "timeout_or_missing_summary_counts_as_approval": false
+  },
+  "integral": {
+    "command": "python3 scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 <three write targets>",
+    "contention": {
+      "bytes": 61496,
+      "domains": [
+        "handoff_incident",
+        "payment_command",
+        "global_evidence_claim",
+        "payment_outbox"
+      ],
+      "path": "docs/refactor/evidence/phase-06/concurrency-result.json",
+      "rounds_per_domain": 50,
+      "rows": 200,
+      "sha256": "1f55f45d475f8bd01711c0533f0d0c1c0975a8ffec408d6a263566fdd3a769d4",
+      "winners_per_domain": 50
+    },
+    "elapsed_seconds": 778.7575621269643,
+    "exit_code": 0,
+    "fault_matrix": {
+      "bytes": 25264,
+      "fault_points": 27,
+      "path": "docs/refactor/evidence/phase-06/fault-matrix.json",
+      "real_process_crashes": 12,
+      "sha256": "ce5f339385015929dd64926b4f23e3cdeca6342f554c1279cd278d53be786403",
+      "transaction_rollbacks": 15
+    },
+    "maxrss_kb": 47048,
+    "restart": {
+      "bytes": 1774249,
+      "minimum_point_coverage": 166,
+      "path": "docs/refactor/evidence/phase-06/restart-result.json",
+      "schedules": 2000,
+      "sha256": "0504622ca4409e053cf6c8fed55b8389c0d268c35c097d33b9d11ab0a1061378"
+    },
+    "seed": 2026071906,
+    "stdout": {
+      "bytes": 0,
+      "path": "/tmp/phase6-task12-integral.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "violations": 0
+  },
+  "phase": "phase-06-handoff-and-payments",
+  "red": {
+    "command": "python3 -m unittest tests.test_phase6_fault_injection tests.test_phase6_concurrency -v",
+    "errors": 2,
+    "exit_code": 1,
+    "failures": 0,
+    "output": {
+      "bytes": 1718,
+      "path": "/tmp/phase6-task12-red-final.out",
+      "sha256": "608eceade1d4aa0ea46edf754d0695144d06782f455e5e84856bb1f9a13c09a0"
+    },
+    "patch": {
+      "applies_to": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
+      "bytes": 16534,
+      "path": "docs/refactor/evidence/phase-06/task12-red.patch",
+      "reconstructed_tree": "34ebaa9823cc6f553d2c9049b267b0553aef0c9e",
+      "sha256": "a68fee3692457a05eb3512e8035aac9073a771dc6e1facdf63e250744e654952"
+    },
+    "reason": "both test modules failed to import because scripts.run_phase6_faults did not exist",
+    "tests": 2
+  },
+  "regression": {
+    "characterization": {
+      "command": "python3 -m unittest tests.test_characterization_harness -v",
+      "elapsed_seconds": 0.036,
+      "exit_code": 0,
+      "output": {
+        "bytes": 2335,
+        "path": "/tmp/phase6-task12-characterization.out",
+        "sha256": "6fc43095674f5100927d2cf56f9881ae15db4b726db31ae87987cf52c224c899"
+      },
+      "tests": 13
+    },
+    "full": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "elapsed_seconds": 274.753,
+      "exit_code": 0,
+      "note": "executed concurrently with the multiprocess integral gate",
+      "output": {
+        "bytes": 107767,
+        "path": "/tmp/phase6-task12-full.out",
+        "sha256": "30b1740b68cc2745366b0c373101b34d4bdbca609010d8b2cf75da67c37e28d3"
+      },
+      "tests": 616
+    },
+    "schema": {
+      "command": "python3 -m unittest tests.test_phase6_schema -v",
+      "elapsed_seconds": 1.413,
+      "exit_code": 0,
+      "output": {
+        "bytes": 5155,
+        "path": "/tmp/phase6-task12-schema-clean.out",
+        "sha256": "fa58676c75ad336c554c8d28a919df4ea5779fac7b68967e4eb42a750fa800a5"
+      },
+      "tests": 28
+    }
+  },
+  "rollout": "NO-GO",
+  "schema_version": 1,
+  "status": "implementation_verified_independent_review_pending",
+  "task": 12
+}
