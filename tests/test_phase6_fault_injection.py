@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from scripts.run_phase6_faults import (
+    FAULT_POINTS,
+    _fault_violations,
+    run_fault_matrix,
+    run_restart_schedules,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "run_phase6_faults.py"
+SEED = 2026071906
+EXPECTED_FAULT_POINTS = (
+    "handoff_before_event",
+    "handoff_after_event_before_state",
+    "handoff_after_state_before_required_outbox",
+    "handoff_after_required_outbox_before_optional_outbox",
+    "handoff_after_optional_outbox_before_commit",
+    "handoff_after_commit_before_claim",
+    "handoff_during_delivery",
+    "handoff_after_delivery_before_receipt",
+    "payment_before_anchor",
+    "payment_after_anchor_before_state",
+    "payment_after_state_before_event",
+    "payment_after_event_before_commit",
+    "payment_before_evidence_claim",
+    "payment_after_evidence_before_command",
+    "payment_after_command_before_ledger",
+    "payment_after_ledger_before_commit",
+    "settlement_after_claim_before_prepare",
+    "settlement_after_prepare_before_fence",
+    "settlement_after_fence_before_dispatch",
+    "settlement_during_dispatch",
+    "settlement_after_dispatch_before_outcome",
+    "settlement_after_outcome_before_state",
+    "settlement_after_state_before_outboxes",
+    "settlement_after_outboxes_before_commit",
+    "payment_effect_after_commit_before_claim",
+    "payment_effect_during_delivery",
+    "payment_effect_after_delivery_before_receipt",
+)
+TRANSACTION_POINTS = frozenset(
+    point
+    for point in EXPECTED_FAULT_POINTS
+    if point.startswith("handoff_") and point.endswith(("event", "state", "outbox", "commit"))
+    or point.startswith("payment_") and point.endswith(("anchor", "state", "event", "command", "ledger", "commit"))
+    or point.startswith("settlement_") and point.endswith(("state", "outboxes", "commit"))
+)
+POST_DISPATCH_POINTS = frozenset(
+    {
+        "settlement_during_dispatch",
+        "settlement_after_dispatch_before_outcome",
+        "settlement_after_outcome_before_state",
+        "settlement_after_state_before_outboxes",
+        "settlement_after_outboxes_before_commit",
+    }
+)
+
+
+class Phase6FaultInjectionTests(unittest.TestCase):
+    def test_fault_manifest_is_closed_exact_and_independent(self) -> None:
+        self.assertEqual(FAULT_POINTS, EXPECTED_FAULT_POINTS)
+        self.assertEqual(len(FAULT_POINTS), 27)
+        self.assertEqual(len(set(FAULT_POINTS)), 27)
+        self.assertEqual(sum(point.startswith("handoff_") for point in FAULT_POINTS), 8)
+        self.assertEqual(sum(point.startswith("payment_") for point in FAULT_POINTS), 11)
+        self.assertEqual(sum(point.startswith("settlement_") for point in FAULT_POINTS), 8)
+
+    def test_fault_matrix_uses_real_rollback_or_child_crash_and_closes_invariants(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase6-fault-matrix-") as directory:
+            report = run_fault_matrix(seed=SEED, workdir=Path(directory))
+
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["phase"], "phase-06-handoff-and-payments")
+        self.assertEqual(tuple(report["fault_points"]), EXPECTED_FAULT_POINTS)
+        self.assertEqual(report["result"], "passed")
+        self.assertEqual(report["violations"], 0)
+        self.assertEqual(len(report["schedules"]), 27)
+        for schedule in report["schedules"]:
+            with self.subTest(point=schedule["fault_point"]):
+                expected_mechanism = (
+                    "transaction_trigger"
+                    if schedule["fault_point"] in TRANSACTION_POINTS
+                    else "process_crash"
+                )
+                self.assertEqual(schedule["mechanism"], expected_mechanism)
+                self.assertEqual(
+                    schedule["child_exit_code"],
+                    None if expected_mechanism == "transaction_trigger" else 91,
+                )
+                self.assertEqual(schedule["partial_transactions"], 0)
+                self.assertLessEqual(schedule["settlement_commands"], 1)
+                self.assertLessEqual(schedule["dispatch_slots"], 1)
+                self.assertLessEqual(schedule["evidence_owners"], 1)
+                self.assertLessEqual(schedule["handoff_receipts"], 1)
+                self.assertLessEqual(schedule["payment_receipts"], 1)
+                self.assertEqual(schedule["unknown_automatic_retries"], 0)
+                self.assertEqual(schedule["violations"], [])
+                if expected_mechanism == "transaction_trigger":
+                    self.assertTrue(schedule["rollback_verified"])
+
+        by_point = {row["fault_point"]: row for row in report["schedules"]}
+        for point in (
+            "handoff_after_commit_before_claim",
+            "handoff_during_delivery",
+            "handoff_after_delivery_before_receipt",
+        ):
+            row = by_point[point]
+            self.assertEqual(row["final_handoff_outbox_status"], "delivered")
+            self.assertEqual(row["handoff_receipts"], 1)
+        for point in (
+            "payment_effect_after_commit_before_claim",
+            "payment_effect_during_delivery",
+            "payment_effect_after_delivery_before_receipt",
+        ):
+            row = by_point[point]
+            self.assertEqual(row["final_payment_outbox_status"], "delivered")
+            self.assertEqual(row["payment_receipts"], 1)
+        before_claim = by_point["payment_before_evidence_claim"]
+        self.assertEqual(before_claim["evidence_owners"], 1)
+        self.assertEqual(before_claim["settlement_commands"], 1)
+        self.assertEqual(before_claim["final_settlement_status"], "queued")
+        for point in (
+            "settlement_after_claim_before_prepare",
+            "settlement_after_prepare_before_fence",
+        ):
+            row = by_point[point]
+            self.assertEqual(row["final_settlement_status"], "outcome_recorded")
+            self.assertEqual(row["provider_calls_after_child"], 0)
+            self.assertEqual(row["provider_calls_during_recovery"], 1)
+        fenced = by_point["settlement_after_fence_before_dispatch"]
+        self.assertEqual(fenced["final_settlement_status"], "manual_review")
+        self.assertEqual(fenced["provider_calls_final"], 0)
+
+    def test_post_dispatch_crashes_never_call_provider_during_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase6-fault-post-dispatch-") as directory:
+            report = run_fault_matrix(seed=SEED, workdir=Path(directory))
+        by_point = {row["fault_point"]: row for row in report["schedules"]}
+        for point in POST_DISPATCH_POINTS:
+            with self.subTest(point=point):
+                row = by_point[point]
+                self.assertLessEqual(row["provider_calls_setup_baseline"], 1)
+                self.assertEqual(row["provider_calls_after_child"], 1)
+                self.assertEqual(row["provider_calls_final"], 1)
+                self.assertEqual(row["provider_calls_during_recovery"], 0)
+                self.assertEqual(
+                    row["provider_calls_final"] - row["provider_calls_after_child"],
+                    0,
+                )
+                self.assertEqual(row["final_settlement_status"], "manual_review")
+
+    def test_fault_oracle_rejects_permissive_false_greens(self) -> None:
+        valid = {
+            "fault_point": "settlement_during_dispatch",
+            "mechanism": "process_crash",
+            "child_exit_code": 91,
+            "partial_transactions": 0,
+            "settlement_commands": 1,
+            "dispatch_slots": 1,
+            "evidence_owners": 1,
+            "handoff_receipts": 0,
+            "payment_receipts": 0,
+            "unknown_automatic_retries": 0,
+            "provider_calls_setup_baseline": 0,
+            "provider_calls_after_child": 1,
+            "provider_calls_final": 1,
+            "provider_calls_during_recovery": 0,
+            "final_settlement_status": "manual_review",
+            "rollback_verified": None,
+            "final_handoff_outbox_status": None,
+            "final_payment_outbox_status": None,
+            "delivery_calls_setup_baseline": 0,
+            "delivery_calls_after_child": 0,
+            "delivery_calls_final": 0,
+            "delivery_calls_during_recovery": 0,
+        }
+        self.assertEqual(_fault_violations(valid), ())
+        for changes in (
+            {"provider_calls_final": 2},
+            {"provider_calls_during_recovery": 1},
+            {"dispatch_slots": 2},
+            {"partial_transactions": 1},
+            {"child_exit_code": 0},
+            {"final_settlement_status": "dispatch_fenced"},
+        ):
+            self.assertTrue(_fault_violations({**valid, **changes}), changes)
+
+    def test_restart_schedules_are_deterministic_safe_and_cover_every_restart_point(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase6-restarts-a-") as first_dir:
+            first = run_restart_schedules(seed=SEED, schedules=54, workdir=Path(first_dir))
+        with tempfile.TemporaryDirectory(prefix="phase6-restarts-b-") as second_dir:
+            second = run_restart_schedules(seed=SEED, schedules=54, workdir=Path(second_dir))
+        self.assertEqual(first, second)
+        self.assertEqual(first["result"], "passed")
+        self.assertEqual(first["violations"], 0)
+        self.assertEqual(first["configuration"]["schedules"], 54)
+        self.assertTrue(all(value > 0 for value in first["fault_point_counts"].values()))
+        self.assertTrue(all(row["child_exit_code"] == 91 for row in first["schedules"]))
+
+    def test_cli_gate_minimums_and_smoke_three_envelopes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase6-fault-cli-") as directory:
+            base = Path(directory)
+            paths = {
+                "faults": base / "faults.json",
+                "restart": base / "restart.json",
+                "concurrency": base / "concurrency.json",
+            }
+            rejected = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--seed",
+                    str(SEED),
+                    "--restart-schedules",
+                    "1999",
+                    "--contention-rounds",
+                    "49",
+                    "--write-fault-matrix",
+                    str(paths["faults"]),
+                    "--write-restart",
+                    str(paths["restart"]),
+                    "--write-concurrency",
+                    str(paths["concurrency"]),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("restart-schedules must be at least 2000", rejected.stderr)
+            self.assertIn("contention-rounds must be at least 50", rejected.stderr)
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--seed",
+                    str(SEED),
+                    "--restart-schedules",
+                    "8",
+                    "--contention-rounds",
+                    "2",
+                    "--smoke",
+                    "--write-fault-matrix",
+                    str(paths["faults"]),
+                    "--write-restart",
+                    str(paths["restart"]),
+                    "--write-concurrency",
+                    str(paths["concurrency"]),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            envelopes = {name: json.loads(path.read_text()) for name, path in paths.items()}
+        self.assertEqual(tuple(envelopes["faults"]["fault_points"]), EXPECTED_FAULT_POINTS)
+        self.assertEqual(envelopes["restart"]["configuration"]["schedules"], 8)
+        self.assertEqual(envelopes["concurrency"]["configuration"]["rounds"], 2)
+        self.assertTrue(all(value["result"] == "passed" for value in envelopes.values()))
+        self.assertTrue(all(value["violations"] == 0 for value in envelopes.values()))
+
+
+if __name__ == "__main__":
+    unittest.main()
