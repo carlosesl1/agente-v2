@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "task": 10,
-  "recorded_at_utc": "2026-07-20T08:53:44Z",
-  "status": "review_findings_corrected_terminal_regate_pending",
+  "recorded_at_utc": "2026-07-20T09:19:34Z",
+  "status": "terminally_approved",
   "base_commit": "54d0a3177c5694123d63b2046717551ed9f1f012",
   "base_tree": "da27307e36f4e23b3433d81ed95570ca1e222589",
   "functional_commit": "bee8cf79220a4e022c3cd441c3be4a70b2159497",
@@ -184,7 +184,7 @@
   "live_capabilities_executed": [],
   "postgresql_executed": false,
   "independent_review": {
-    "status": "initial_batch_needs_fixes_corrected_terminal_regate_pending",
+    "status": "terminally_approved",
     "initial_batch": "deleg_5d6d34e3",
     "initial_terminal_approvals": 0,
     "initial_lane_verdicts": [
@@ -199,7 +199,42 @@
       "payment outbox allowed fencing token greater than delivery attempts",
       "all-jobs-missing RED lacked source patch and reconstructed tree"
     ],
-    "terminal_approvals": 0
+    "terminal_reviewed_commit": "94ae7bb06df057c7acc92ab1cd6fd684cd76f4e5",
+    "terminal_reviewed_tree": "93fd5baddec19e7574d90cffa219bfe5184143d3",
+    "terminal_package_sha256": "aba12d481f8642d5f64d16109f870ede6e0719e826f9d23477560281dfb2397e",
+    "primary_regate": {
+      "batch": "deleg_23385081",
+      "lifecycle_schema_isolation": "Approved",
+      "provenance_boundary": "Approved",
+      "worker_claim_receipt_replay": "timeout_zero_approval"
+    },
+    "replacement_worker_regate": {
+      "batch": "deleg_cf40dc15",
+      "verdict": "Approved",
+      "focused_tests": 20,
+      "corrective_tests": 6
+    },
+    "terminal_lanes": [
+      {
+        "scope": "lifecycle_schema_isolation",
+        "batch": "deleg_23385081",
+        "verdict": "Approved"
+      },
+      {
+        "scope": "provenance_boundary",
+        "batch": "deleg_23385081",
+        "verdict": "Approved"
+      },
+      {
+        "scope": "worker_claim_receipt_replay",
+        "batch": "deleg_cf40dc15",
+        "verdict": "Approved"
+      }
+    ],
+    "terminal_approvals": 3,
+    "critical": 0,
+    "important": 0,
+    "minor": 0
   },
   "rollout": "NO-GO",
   "initial_implementation": {
@@ -217,5 +252,15 @@
     "critical": 1,
     "important": 4,
     "minor": 0
+  },
+  "terminal_reviewed_evidence_commit": "94ae7bb06df057c7acc92ab1cd6fd684cd76f4e5",
+  "terminal_reviewed_evidence_tree": "93fd5baddec19e7574d90cffa219bfe5184143d3",
+  "terminal_focused_verification": {
+    "command": "python3 -m unittest tests.test_phase6_payment_outbox -v",
+    "tests": 20,
+    "result": "OK",
+    "output_sha256": "4761e90ada963615d420546622b19eecb745d84a5c1de5aed55d5648ab6257a8",
+    "raw_output_path": "/tmp/phase6-task10-terminal-focused.out",
+    "raw_output_versioned": false
   }
 }
