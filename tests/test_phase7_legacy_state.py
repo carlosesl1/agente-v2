@@ -2,19 +2,45 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import unittest
 
-from reservation_domain import CollectingState
-from reservation_followup import HandoffStatus
+from reservation_domain import (
+    CollectingState,
+    CommercialDraft,
+    ExecutionQueuedState,
+    SelectedState,
+    ServiceKind,
+    SucceededState,
+    UncertainState,
+    dumps_outcome,
+    dumps_state,
+)
+from reservation_confirmation import SummaryLocale, render_summary
+from reservation_followup import (
+    BusinessUnit,
+    ConfirmedReservationAnchor,
+    HandoffStatus,
+    PaymentStatus,
+    PaymentWorkflow,
+    new_payment,
+    to_wire_json as to_phase6_wire_json,
+)
 from reservation_boundary.legacy_state import import_legacy_state
+from reservation_boundary.serialization import (
+    from_wire_json as from_boundary_wire_json,
+    to_wire_json as to_boundary_wire_json,
+)
 from reservation_boundary.types import (
     ImportDisposition,
     ImportReason,
     LegacyLeadSnapshot,
 )
+from tests.phase6_helpers import payment_effect_policy
+from tests.test_phase2_serialization import all_domain_samples, complete_flow
 
 
 UTC = timezone.utc
@@ -89,6 +115,113 @@ def handoff_metadata(**changes: object) -> dict[str, object]:
     }
     metadata.update(changes)
     return metadata
+
+
+def _offer_ids(state: object) -> tuple[str, ...]:
+    if isinstance(state, SelectedState):
+        return (state.offer.offer_id,)
+    if hasattr(state, "draft"):
+        return tuple(item.offer_id for item in state.draft.components)
+    if hasattr(state, "command"):
+        return tuple(item.offer_id for item in state.command.payload.components)
+    return ()
+
+
+def advanced_metadata(state: object, **changes: object) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "workflow_id": state.meta.workflow_id,
+        "state_updated_at": state.meta.last_event_at.isoformat(),
+        "phase2_workflow_wire": dumps_state(state),
+    }
+    offer_ids = _offer_ids(state)
+    if len(offer_ids) == 1:
+        metadata["selected_offer_id"] = offer_ids[0]
+    elif offer_ids:
+        metadata["selected_offer_ids"] = list(offer_ids)
+    if hasattr(state, "draft"):
+        metadata["summary_version"] = state.draft.version
+        metadata["confirmation_signature"] = state.draft.subject_signature
+        metadata["rendered_summary_hash"] = render_summary(
+            state.draft,
+            locale=SummaryLocale.PT_BR,
+        ).content_hash
+    elif hasattr(state, "command"):
+        metadata["summary_version"] = state.command.draft_version
+        metadata["confirmation_signature"] = state.command.subject_signature
+        draft = CommercialDraft(
+            draft_id=state.command.draft_id,
+            version=state.command.draft_version,
+            created_at=state.command.created_at,
+            components=state.command.payload.components,
+            customer=state.command.payload.customer,
+            terms=state.command.payload.terms,
+            subject_signature=state.command.subject_signature,
+        )
+        metadata["rendered_summary_hash"] = render_summary(
+            draft,
+            locale=SummaryLocale.PT_BR,
+        ).content_hash
+    metadata.update(changes)
+    return metadata
+
+
+def _succeeded_state() -> SucceededState:
+    states, _, _ = all_domain_samples()
+    return next(state for state in states if isinstance(state, SucceededState))
+
+
+def _uncertain_state() -> UncertainState:
+    states, _, _ = all_domain_samples()
+    return next(state for state in states if isinstance(state, UncertainState))
+
+
+def payment_fixture(
+    *,
+    target_id: str = "reservation-serializer",
+) -> tuple[LegacyLeadSnapshot, SucceededState, PaymentWorkflow, dict[str, object]]:
+    state = _succeeded_state()
+    outcome = state.outcome
+    anchor = ConfirmedReservationAnchor(
+        reservation_workflow_id=state.meta.workflow_id,
+        reservation_command_id=state.command.command_id,
+        reservation_subject_signature=state.command.subject_signature,
+        reservation_outcome_hash=hashlib.sha256(
+            dumps_outcome(outcome).encode("utf-8")
+        ).hexdigest(),
+        reservation_outcome=outcome,
+        provider_reference=outcome.provider_reference,
+        service=ServiceKind.ACTIVITY,
+        business_unit=BusinessUnit.AGENCY,
+        payment_target_id=target_id,
+        amount_minor=55000,
+        currency="BRL",
+        receiver_profile_id="receiver:agency:synthetic:001",
+        confirmed_at=state.meta.last_event_at,
+        payment_deadline=state.meta.last_event_at + timedelta(days=2),
+    )
+    payment = new_payment(anchor, payment_effect_policy()).state
+    reservation = {
+        "id": "reservation-serializer",
+        "service": "agency",
+        "status": "confirmed",
+        "amount_due": 550.0,
+        "currency": "BRL",
+        "created_at": state.meta.last_event_at.isoformat(),
+        "payment_expires_at": anchor.payment_deadline.isoformat(),
+        "payment_status": "pending",
+        "payment_method": "",
+        "payment_confirmed_at": "",
+    }
+    metadata = advanced_metadata(
+        state,
+        phase6_payment_wires=[to_phase6_wire_json(payment)],
+    )
+    value = snapshot(
+        stage="payment_pending",
+        agency_bookings=[reservation],
+        metadata=metadata,
+    )
+    return value, state, payment, reservation
 
 
 class Phase7LegacyStateTests(unittest.TestCase):
@@ -230,6 +363,110 @@ class Phase7LegacyStateTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertIs(source.raw_fields, before)
         self.assertEqual(hash(first), hash(second))
+
+    def test_selected_state_preserves_only_opaque_offer_identity(self) -> None:
+        states, _, _ = complete_flow()
+        selected = states[3]
+        self.assertIsInstance(selected, SelectedState)
+        value = snapshot(stage="fechamento", metadata=advanced_metadata(selected))
+        first = import_legacy_state(value)
+        second = import_legacy_state(value)
+        self.assertIs(first.disposition, ImportDisposition.MIGRATED)
+        self.assertEqual(first, second)
+        self.assertEqual(first.state.workflow, selected)
+        self.assertEqual(first.state.workflow.offer.offer_id, "offer-serializer")
+        self.assertEqual(first.state.payments, ())
+
+    def test_confirmed_state_preserves_signature_without_emitting_new_command(self) -> None:
+        states, _, command = complete_flow()
+        queued = states[-1]
+        self.assertIsInstance(queued, ExecutionQueuedState)
+        value = snapshot(stage="fechamento", metadata=advanced_metadata(queued))
+        result = import_legacy_state(value)
+        self.assertIs(result.disposition, ImportDisposition.MIGRATED)
+        self.assertEqual(result.state.workflow, queued)
+        self.assertEqual(result.state.workflow.command, command)
+        self.assertEqual(
+            result.state.workflow.command.subject_signature,
+            result.state.workflow.confirmation.subject_signature,
+        )
+        self.assertEqual(result.state.payments, ())
+
+        mismatch = import_legacy_state(
+            snapshot(
+                stage="fechamento",
+                metadata=advanced_metadata(
+                    queued,
+                    rendered_summary_hash="f" * 64,
+                ),
+            )
+        )
+        self.assertIs(mismatch.disposition, ImportDisposition.REJECTED)
+        self.assertIs(mismatch.reason, ImportReason.INCONSISTENT_CONFIRMATION)
+
+    def test_payment_workflow_preserves_confirmed_anchor_and_binding(self) -> None:
+        value, state, payment, _ = payment_fixture()
+        result = import_legacy_state(value)
+        self.assertIs(result.disposition, ImportDisposition.MIGRATED)
+        self.assertEqual(result.state.workflow, state)
+        self.assertEqual(result.state.payments, (payment,))
+        self.assertIs(payment.status, PaymentStatus.AWAITING_METHOD)
+        self.assertEqual(
+            result.state.payments[0].subject.confirmed_reservation_anchor,
+            payment.subject.confirmed_reservation_anchor,
+        )
+        wire = to_boundary_wire_json(result.state)
+        self.assertEqual(
+            from_boundary_wire_json(wire, type(result.state)),
+            result.state,
+        )
+
+    def test_duplicate_subject_and_payment_anchor_mismatch_are_rejected(self) -> None:
+        _, state, payment, reservation = payment_fixture()
+        metadata = advanced_metadata(
+            state,
+            phase6_payment_wires=[to_phase6_wire_json(payment)],
+        )
+        duplicate = import_legacy_state(
+            snapshot(
+                stage="payment_pending",
+                agency_bookings=[reservation, reservation],
+                metadata=metadata,
+            )
+        )
+        self.assertIs(duplicate.disposition, ImportDisposition.REJECTED)
+        self.assertIs(duplicate.reason, ImportReason.AMBIGUOUS_IDENTITY)
+
+        mismatched, _, _, _ = payment_fixture(target_id="different-target")
+        mismatch = import_legacy_state(mismatched)
+        self.assertIs(mismatch.disposition, ImportDisposition.REJECTED)
+        self.assertIs(mismatch.reason, ImportReason.UNVERIFIED_PAYMENT)
+
+    def test_missing_wire_and_unknown_historical_outcome_route_to_review(self) -> None:
+        missing = import_legacy_state(
+            snapshot(
+                stage="fechamento",
+                metadata={
+                    "workflow_id": "workflow-serializer",
+                    "state_updated_at": T0.isoformat(),
+                    "selected_offer_id": "offer-serializer",
+                    "confirmation_signature": "a" * 64,
+                },
+            )
+        )
+        self.assertIs(missing.disposition, ImportDisposition.MANUAL_REVIEW)
+        self.assertIs(missing.reason, ImportReason.MISSING_PROVENANCE)
+
+        uncertain = _uncertain_state()
+        unknown = import_legacy_state(
+            snapshot(
+                stage="payment_pending",
+                metadata=advanced_metadata(uncertain),
+            )
+        )
+        self.assertIs(unknown.disposition, ImportDisposition.MANUAL_REVIEW)
+        self.assertIs(unknown.reason, ImportReason.UNKNOWN_HISTORICAL_OUTCOME)
+        self.assertIsNone(unknown.state)
 
 
 if __name__ == "__main__":

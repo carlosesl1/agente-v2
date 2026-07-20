@@ -66,6 +66,17 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "advanced canonical wires classified as manual/rejected instead of migrated",
+      "command": "python3 -B -m unittest tests.test_phase7_legacy_state -v",
+      "exit_code": 1,
+      "output_bytes": 6329,
+      "output_sha256": "57a0516162e03245548dc518f1dd2d15cea90241334aac3525128d860d8526e1",
+      "task": 6,
+      "tests_failed": 5,
+      "tests_in_error": 0,
+      "tests_run": 14
     }
   ],
   "phase": 7,
