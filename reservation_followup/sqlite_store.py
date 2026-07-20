@@ -171,6 +171,11 @@ def _handoff_receipt_record(
         "schema_version": 1,
         "type": "handoff_receipt_record",
         "data": {
+            "claim_owner": _handoff_claim_owner(
+                claim.worker_id,
+                claim.delivery_id,
+                claim.delivery_version,
+            ),
             "delivery_attempts": claim.delivery_attempts,
             "delivery_id": claim.delivery_id,
             "delivery_version": claim.delivery_version,
@@ -565,6 +570,7 @@ class SQLiteFollowupUnitOfWork:
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise DataCorruption("handoff receipt record is not valid JSON") from exc
         expected_data = {
+            "claim_owner",
             "delivery_attempts",
             "delivery_id",
             "delivery_version",
@@ -595,6 +601,7 @@ class SQLiteFollowupUnitOfWork:
             or type(data["delivery_version"]) is not int
             or data["delivery_version"] < 1
             or type(data["delivery_id"]) is not str
+            or type(data["claim_owner"]) is not str
             or type(data["worker_id"]) is not str
             or type(data["message_payload_hash"]) is not str
             or type(data["receipt_json"]) is not str
@@ -603,8 +610,16 @@ class SQLiteFollowupUnitOfWork:
         try:
             _require_id(data["worker_id"], "handoff receipt worker_id")
             _require_id(data["delivery_id"], "handoff receipt delivery_id")
+            _require_id(data["claim_owner"], "handoff receipt claim_owner")
         except ValueError as exc:
             raise DataCorruption("handoff receipt record IDs are invalid") from exc
+        expected_owner = _handoff_claim_owner(
+            data["worker_id"],
+            data["delivery_id"],
+            data["delivery_version"],
+        )
+        if data["claim_owner"] != expected_owner:
+            raise DataCorruption("handoff receipt claim owner is divergent")
         acquired = _canonical_time(
             data["lease_acquired_at"],
             "handoff receipt lease_acquired_at",

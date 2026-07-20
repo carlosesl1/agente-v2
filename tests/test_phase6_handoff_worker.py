@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
 import hashlib
@@ -9,6 +10,7 @@ import tempfile
 import traceback
 import unittest
 from pathlib import Path
+from threading import Barrier
 
 from reservation_followup import (
     EffectRequirement,
@@ -89,10 +91,11 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             lease_ttl=ttl,
         )
 
-    def domain_fingerprint(self):
+    @staticmethod
+    def payment_fingerprint_for(connection):
         return tuple(
             tuple(
-                self.store._connection.execute(
+                connection.execute(
                     f"SELECT * FROM main.{table} ORDER BY 1"
                 )
             )
@@ -106,6 +109,27 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
                 "payment_receipts",
             )
         )
+
+    def domain_fingerprint(self):
+        return self.payment_fingerprint_for(self.store._connection)
+
+    def handoff_fingerprint(self):
+        return tuple(
+            tuple(
+                self.store._connection.execute(
+                    f"SELECT * FROM main.{table} ORDER BY 1"
+                )
+            )
+            for table in (
+                "handoff_workflows",
+                "handoff_events",
+                "handoff_outbox",
+                "handoff_receipts",
+            )
+        )
+
+    def persistence_fingerprint(self):
+        return self.handoff_fingerprint(), self.domain_fingerprint()
 
     def outbox_row(self, message_id: str):
         return self.store._connection.execute(
@@ -158,6 +182,21 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
                 first, receipt, now=NOW + timedelta(seconds=31)
             )
 
+    def test_live_claim_rejects_owner_delivery_token_and_attempt_substitutions_orthogonally(self) -> None:
+        self.open_handoff(optional_email=False)
+        claim = self.claim(worker_id="worker:handoff:orthogonal")
+        mutations = (
+            replace(claim, worker_id="worker:handoff:other"),
+            replace(claim, delivery_id="delivery:scripted:other"),
+            replace(claim, delivery_version=claim.delivery_version + 1),
+            replace(claim, fencing_token=claim.fencing_token + 1),
+        )
+        before = self.persistence_fingerprint()
+        for forged in mutations:
+            with self.subTest(forged=forged), self.assertRaises(StaleLease):
+                self.store.release_handoff_outbox(forged, now=NOW)
+            self.assertEqual(self.persistence_fingerprint(), before)
+
     def test_claim_contract_rejects_bool_counters_and_nonpositive_ttl(self) -> None:
         self.open_handoff()
         with self.assertRaises(ValueError):
@@ -192,9 +231,11 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
         first = self.store.complete_handoff_outbox(
             claim, receipt, now=NOW + timedelta(seconds=1)
         )
+        before_replay = self.persistence_fingerprint()
         replay = self.store.complete_handoff_outbox(
             claim, receipt, now=NOW + timedelta(days=1)
         )
+        self.assertEqual(self.persistence_fingerprint(), before_replay)
         state = self.store.load_handoff(request.handoff_id)
         self.assertEqual(state.status, HandoffStatus.ACKNOWLEDGED)
         self.assertIsNotNone(state.acknowledgement)
@@ -219,7 +260,7 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             delivered_at=NOW + timedelta(seconds=1),
         )
         self.store.complete_handoff_outbox(claim, receipt, now=receipt.delivered_at)
-        before = self.outbox_row(claim.message.effect_id)
+        before = self.persistence_fingerprint()
         with self.assertRaises(IdentityConflict):
             self.store.complete_handoff_outbox(
                 claim,
@@ -238,7 +279,7 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             self.store.complete_handoff_outbox(
                 forged, receipt, now=NOW + timedelta(seconds=2)
             )
-        self.assertEqual(self.outbox_row(claim.message.effect_id), before)
+        self.assertEqual(self.persistence_fingerprint(), before)
 
     def test_receipt_chronology_and_delivery_identity_fail_closed(self) -> None:
         self.open_handoff(optional_email=False)
@@ -250,21 +291,30 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             delivery_id=claim.delivery_id,
             delivery_version=claim.delivery_version,
         )
-        before = self.outbox_row(claim.message.effect_id)
-        for receipt, now in (
-            (HandoffReceipt.for_message(delivered_at=T0 - timedelta(seconds=1), **base), NOW),
-            (HandoffReceipt.for_message(delivered_at=NOW + timedelta(seconds=2), **base), NOW),
-            (
-                HandoffReceipt.for_message(
-                    delivered_at=NOW + timedelta(seconds=1),
-                    **{**base, "delivery_id": "delivery:forged:handoff"},
-                ),
-                NOW + timedelta(seconds=1),
-            ),
-        ):
-            with self.subTest(receipt=receipt), self.assertRaises((ValueError, IdentityConflict)):
-                self.store.complete_handoff_outbox(claim, receipt, now=now)
-        self.assertEqual(self.outbox_row(claim.message.effect_id), before)
+        before = self.persistence_fingerprint()
+        too_early = HandoffReceipt.for_message(
+            delivered_at=T0 - timedelta(seconds=1),
+            **base,
+        )
+        future = HandoffReceipt.for_message(
+            delivered_at=NOW + timedelta(seconds=2),
+            **base,
+        )
+        wrong_delivery = HandoffReceipt.for_message(
+            delivered_at=NOW + timedelta(seconds=1),
+            **{**base, "delivery_id": "delivery:forged:handoff"},
+        )
+        for receipt in (too_early, future):
+            with self.subTest(receipt=receipt), self.assertRaises(ValueError):
+                self.store.complete_handoff_outbox(claim, receipt, now=NOW)
+            self.assertEqual(self.persistence_fingerprint(), before)
+        with self.assertRaises(IdentityConflict):
+            self.store.complete_handoff_outbox(
+                claim,
+                wrong_delivery,
+                now=NOW + timedelta(seconds=1),
+            )
+        self.assertEqual(self.persistence_fingerprint(), before)
 
     def test_delivery_failure_releases_message_records_failure_and_isolates_domains(self) -> None:
         request, _ = self.open_handoff(optional_email=False)
@@ -288,6 +338,7 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
 
     def test_optional_email_failure_does_not_regress_ack_or_queue(self) -> None:
         request, _ = self.open_handoff(optional_email=True)
+        before_payment = self.domain_fingerprint()
         ack_claim = self.claim()
         ack_receipt = HandoffReceipt.for_message(
             ack_claim.message,
@@ -307,6 +358,81 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
         self.assertEqual(state.status, HandoffStatus.ACKNOWLEDGED)
         self.assertTrue(state.queue_active)
         self.assertEqual(len(state.effect_failures), 1)
+        self.assertEqual(self.domain_fingerprint(), before_payment)
+
+    def test_optional_email_failure_is_reclaimable_and_later_success_preserves_state(self) -> None:
+        request, _ = self.open_handoff(optional_email=True)
+        before_payment = self.domain_fingerprint()
+        ack_claim = self.claim()
+        ack_receipt = HandoffReceipt.for_message(
+            ack_claim.message,
+            receipt_id="receipt:ack:optional-retry",
+            delivery_reference="delivery-reference:ack-optional-retry",
+            delivery_id=ack_claim.delivery_id,
+            delivery_version=ack_claim.delivery_version,
+            delivered_at=NOW,
+        )
+        self.store.complete_handoff_outbox(ack_claim, ack_receipt, now=NOW)
+        email_claim = self.claim(now=NOW + timedelta(seconds=1))
+        failed = self.store.release_handoff_outbox(
+            email_claim,
+            now=NOW + timedelta(seconds=2),
+        )
+        retry = self.claim(now=NOW + timedelta(seconds=3))
+        self.assertEqual(retry.message, email_claim.message)
+        self.assertEqual(retry.fencing_token, email_claim.fencing_token + 1)
+        self.assertEqual(retry.delivery_attempts, email_claim.delivery_attempts + 1)
+        email_receipt = HandoffReceipt.for_message(
+            retry.message,
+            receipt_id="receipt:email:optional-retry-success",
+            delivery_reference="delivery-reference:email-optional-retry-success",
+            delivery_id=retry.delivery_id,
+            delivery_version=retry.delivery_version,
+            delivered_at=NOW + timedelta(seconds=3),
+        )
+        completed = self.store.complete_handoff_outbox(
+            retry,
+            email_receipt,
+            now=NOW + timedelta(seconds=3),
+        )
+        state = self.store.load_handoff(request.handoff_id)
+        self.assertEqual(failed.state, completed.state)
+        self.assertEqual(state.status, HandoffStatus.ACKNOWLEDGED)
+        self.assertTrue(state.queue_active)
+        self.assertEqual(len(state.effect_failures), 1)
+        self.assertEqual(self.domain_fingerprint(), before_payment)
+
+    def test_worker_delivers_at_most_one_when_two_messages_are_pending(self) -> None:
+        request, _ = self.open_handoff(optional_email=True)
+        delivery = ScriptedDelivery((NOW, NOW))
+        worker = HandoffOutboxWorker(
+            store=self.store,
+            delivery=delivery,
+            worker_id="worker:handoff:one-shot",
+            lease_ttl=TTL,
+        )
+        before_payment = self.domain_fingerprint()
+        result = worker.run_once(now=NOW)
+        self.assertEqual(result.disposition, HandoffWorkerDisposition.DELIVERED)
+        self.assertEqual(len(delivery.messages), 1)
+        self.assertEqual(
+            delivery.messages[0].kind,
+            HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT,
+        )
+        self.assertEqual(
+            tuple(
+                self.store._connection.execute(
+                    "SELECT kind, status FROM main.handoff_outbox "
+                    "WHERE handoff_id=? ORDER BY kind",
+                    (request.handoff_id,),
+                )
+            ),
+            (
+                (HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT.value, "delivered"),
+                (HandoffEffectKind.INTERNAL_EMAIL.value, "pending"),
+            ),
+        )
+        self.assertEqual(self.domain_fingerprint(), before_payment)
 
     def test_worker_one_shot_then_idle_and_does_not_swallow_base_exception(self) -> None:
         self.open_handoff(optional_email=False)
@@ -365,23 +491,58 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             "".join(traceback.format_exception(caught.exception)),
         )
 
-    def test_two_connections_have_exactly_one_winner_for_one_message(self) -> None:
-        self.open_handoff(optional_email=False)
-        other = SQLiteFollowupUnitOfWork.open(self.path)
-        self.addCleanup(other.close)
-        first = self.claim(worker_id="worker:handoff:first")
-        second = other.claim_handoff_outbox(
-            worker_id="worker:handoff:second",
-            delivery_id=ScriptedDelivery.delivery_id,
-            delivery_version=ScriptedDelivery.delivery_version,
-            now=NOW,
-            lease_ttl=TTL,
-        )
-        self.assertIsNotNone(first)
-        self.assertIsNone(second)
+    def test_two_connections_have_exactly_one_winner_under_real_contention(self) -> None:
+        for round_index in range(10):
+            request = handoff_requested(
+                handoff_id=f"handoff:contention:{round_index}",
+                incident_key=f"incident:contention:{round_index}",
+                source_event_id=f"source:contention:{round_index}",
+            )
+            self.store.open_handoff(
+                request,
+                HandoffEffectPolicy.default_email_disabled(),
+            )
+            barrier = Barrier(2)
+
+            def contender(worker_id: str):
+                store = SQLiteFollowupUnitOfWork.open(self.path)
+                try:
+                    barrier.wait(timeout=5)
+                    return store.claim_handoff_outbox(
+                        worker_id=worker_id,
+                        delivery_id=ScriptedDelivery.delivery_id,
+                        delivery_version=ScriptedDelivery.delivery_version,
+                        now=NOW,
+                        lease_ttl=TTL,
+                    )
+                finally:
+                    store.close()
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = tuple(
+                    executor.map(
+                        contender,
+                        (
+                            f"worker:handoff:first:{round_index}",
+                            f"worker:handoff:second:{round_index}",
+                        ),
+                    )
+                )
+            winners = tuple(claim for claim in results if claim is not None)
+            self.assertEqual(len(winners), 1)
+            self.assertEqual(winners[0].message.handoff_id, request.handoff_id)
+            self.assertEqual(
+                self.store._connection.execute(
+                    "SELECT status, fencing_token, delivery_attempts "
+                    "FROM main.handoff_outbox WHERE handoff_id=?",
+                    (request.handoff_id,),
+                ).fetchone(),
+                ("leased", 1, 1),
+            )
 
     def test_internal_email_success_preserves_acknowledgement_and_queue(self) -> None:
         request, _ = self.open_handoff(optional_email=True)
+        before_payment = self.domain_fingerprint()
         ack_claim = self.claim()
         ack_receipt = HandoffReceipt.for_message(
             ack_claim.message,
@@ -418,6 +579,7 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             ).fetchone(),
             (2,),
         )
+        self.assertEqual(self.domain_fingerprint(), before_payment)
 
     def test_complete_faults_roll_back_every_atomic_write_after_reopen(self) -> None:
         cases = (
@@ -450,6 +612,8 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             with self.subTest(label=label):
                 path = Path(self.temporary.name) / f"fault-{index}.db"
                 store = SQLiteFollowupUnitOfWork.open(path)
+                self.addCleanup(store.close)
+                before_payment = self.payment_fingerprint_for(store._connection)
                 request = handoff_requested(
                     handoff_id=f"handoff:fault:{index}",
                     incident_key=f"incident:fault:{index}",
@@ -505,6 +669,18 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
                         ).fetchone(),
                         (1,),
                     )
+                    self.assertEqual(
+                        self.payment_fingerprint_for(reopened._connection),
+                        before_payment,
+                    )
+                    self.assertEqual(
+                        reopened._connection.execute("PRAGMA quick_check").fetchone(),
+                        ("ok",),
+                    )
+                    self.assertEqual(
+                        reopened._connection.execute("PRAGMA foreign_key_check").fetchall(),
+                        [],
+                    )
                 finally:
                     reopened.close()
 
@@ -526,6 +702,51 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
         ).fetchone()[0]
         payload = json.loads(raw)
         payload["data"]["worker_id"] = ""
+        hostile = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        hostile_hash = hashlib.sha256(hostile.encode("utf-8")).hexdigest()
+        self.store._connection.execute("PRAGMA defer_foreign_keys=ON")
+        self.store._connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.store._connection.execute(
+                "UPDATE main.handoff_receipts SET receipt_json=?, receipt_hash=? "
+                "WHERE message_id=?",
+                (hostile, hostile_hash, claim.message.effect_id),
+            )
+            self.store._connection.execute(
+                "UPDATE main.handoff_outbox SET receipt_hash=? WHERE message_id=?",
+                (hostile_hash, claim.message.effect_id),
+            )
+            self.store._connection.commit()
+        except BaseException:
+            self.store._connection.rollback()
+            raise
+        with self.assertRaises(DataCorruption):
+            self.store.load_handoff(request.handoff_id)
+
+    def test_valid_worker_substitution_with_bilateral_rehash_is_corruption(self) -> None:
+        request, _ = self.open_handoff(optional_email=False)
+        claim = self.claim(worker_id="worker:handoff:original")
+        receipt = HandoffReceipt.for_message(
+            claim.message,
+            receipt_id="receipt:record:valid-worker-tamper",
+            delivery_reference="delivery-reference:valid-worker-tamper",
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
+            delivered_at=NOW,
+        )
+        self.store.complete_handoff_outbox(claim, receipt, now=NOW)
+        raw = self.store._connection.execute(
+            "SELECT receipt_json FROM main.handoff_receipts WHERE message_id=?",
+            (claim.message.effect_id,),
+        ).fetchone()[0]
+        payload = json.loads(raw)
+        payload["data"]["worker_id"] = "worker:handoff:substituted"
         hostile = json.dumps(
             payload,
             ensure_ascii=False,
