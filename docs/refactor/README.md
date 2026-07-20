@@ -15,7 +15,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 | 4. Resumo e confirmação únicos | **concluída** | Uma versão, um resumo, uma confirmação posterior |
 | 5. Comando e execução duráveis | **concluída e publicada; seis workflows verdes** | Retirar writes do turno síncrono da LLM |
 | 6. Handoff e pagamentos | **concluída e publicada; sete workflows verdes** | Separar workflows e side effects obrigatórios/opcionais |
-| 7. Migração das fronteiras | bloqueada | Fazer runner/plugin/executor usarem o mesmo kernel |
+| 7. Migração das fronteiras | **em execução — spec/plano aprovados** | Fazer runner/plugin/executor usarem o mesmo kernel |
 | 8. Shadow, canary e rollout | bloqueada | Validar e promover o mesmo digest gradualmente |
 | 9. Remoção do legado | bloqueada | Eliminar metadata, aliases e policies duplicadas |
 

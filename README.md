@@ -12,7 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 6 concluída, publicada e com sete workflows remotos verdes; Fase 7 bloqueada**.
+- Fase ativa: **Fase 7 — migração das fronteiras, com spec/plano aprovados e
+  execução TDD econômica iniciada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -32,11 +33,17 @@ Contrato central:
   passaram; o gate corrigido preservou 20.000 properties em 857,092 s, abaixo
   do budget de 900 s. O validator de pureza foi fechado contra execução de
   processos; os sete workflows remotos e os seis jobs da Fase 6 ficaram verdes.
-- Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
+- Fase 7: **em execução** na branch `phase7-boundary-migration`, com
+  `LegacyStateImporter`, `TurnCoordinator`, `ToolDispatch` e
+  `DecisionComparator` como fronteiras únicas. Quatro writes têm command owner
+  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout.
+- Runtime atual: apenas fonte de evidência; a árvore operacional com 80 entradas
+  locais permanece somente leitura e será reproduzida em clone isolado.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
-- Rollout comercial: **NO-GO**; migração, shadow e canary pertencem às fases
-  posteriores. A Fase 7 permanece bloqueada e não foi iniciada.
+- Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem
+  capability live. Shadow live/canary pertencem à Fase 8, que permanece
+  bloqueada.
 
 ## Navegação
 
@@ -55,6 +62,7 @@ Contrato central:
 - [Execução da Fase 4](docs/refactor/phases/phase-04-single-summary-and-confirmation.md)
 - [Execução da Fase 5](docs/refactor/phases/phase-05-durable-command-execution.md)
 - [Execução da Fase 6](docs/refactor/phases/phase-06-handoff-and-payments.md)
+- [Execução da Fase 7](docs/refactor/phases/phase-07-boundary-migration.md)
 
 ## Regras de execução
 
@@ -78,4 +86,4 @@ python3 scripts/validate_phase5.py
 python3 scripts/validate_phase6.py
 ```
 
-O rollout permanece `NO-GO` e `phase7_started=false`.
+O rollout permanece `NO-GO`; `phase7_started=true` e `phase8_started=false`.

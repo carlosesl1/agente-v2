@@ -139,3 +139,15 @@ python3 scripts/validate_phase6.py
 ```
 
 PostgreSQL não foi executado; rollout `NO-GO`; `phase7_started=false`.
+
+## Fase 7
+
+`phase-07/entry-baseline.json` fixa o closeout publicado da Fase 6, o baseline
+focused 14/14, os validators verdes, as versões locais e o runtime observado
+somente leitura. `phase-07/red-results.json` registra REDs sanitizados sem raw
+output.
+
+A fase opera com RED/GREEN focused e regressão por blast radius. Existe uma
+janela pesada por candidato congelado: runtime privado local e um ciclo remoto
+não sobreposto. Nenhuma capability live foi executada; rollout `NO-GO` e
+`phase8_started=false`.

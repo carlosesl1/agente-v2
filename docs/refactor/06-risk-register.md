@@ -66,6 +66,15 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R60 | Pix visual é alegado como confirmação bancária | 3 | 4 | mensagem/evidência diz “banco confirmou” sem API | tipo `PixVisualEvidence`, wording fechado e review factual | payments/product | mitigado |
 | R61 | Stripe/Wise contornam verificação pelo schema Pix | 2 | 5 | caller escolhe método genérico com booleano | evidence unions fechadas e ports/verifiers específicos | payments/security | mitigado |
 | R62 | Troca de método reabre/reexecuta reserva | 2 | 5 | novo `ReservationCommand` após anchor confirmada | workflow financeiro irmão; property counter exige zero reservation commands | payments/domain | mitigado |
+| R63 | Réplica não corresponde ao candidato operacional | 3 | 5 | base/diff/untracked divergem | clone `--no-local`, allowlist, manifests e hashes antes/depois | runtime/release | aberto |
+| R64 | Importer inventa identidade ausente | 2 | 5 | label/texto vira offer/target ID | proibir inferência, manual review e mutantes de identidade | domain | aberto |
+| R65 | Dual-read vira dual-write | 3 | 5 | adapter grava `LeadState` e estado novo | port legado read-only, AST scan e contention de gênese | persistence | aberto |
+| R66 | Coordinator vira novo cérebro comercial | 3 | 5 | regra de confirmação/provider no coordinator | `KernelPort` único owner; coordinator só ordena/persiste | runtime/domain | aberto |
+| R67 | ToolDispatch preserva provider write no turno | 3 | 5 | executor/provider chamado pela Maya | commands Fases 5/6 ou block; zero provider no turno | runtime/execution | aberto |
+| R68 | Comparator se autocertifica | 2 | 5 | oracle importa reducer ou deriva totais do summary | política literal, rows completas, mutantes e totais reconstruídos | QA | aberto |
+| R69 | Package testado por checkout diverge do wheel | 2 | 4 | import resolve source local | wheel stdlib duplo, install target e checkout fora do `sys.path` | release | aberto |
+| R70 | Validação pesada repete sem nova evidência | 4 | 3 | full/properties rerodam no mesmo tree | uma janela por candidato e matriz de blast radius | QA/release | aberto |
+| R71 | Tool ativa não possui command durável publicado | 4 | 5 | Wise/link Stripe alcança executor ad hoc | `BLOCKED_UNMIGRATED`, manual review e rollout `NO-GO` | payments/runtime | aberto |
 
 ## Processo
 
