@@ -74,6 +74,10 @@ _PAYMENT_EVENT_TYPES = (
     PaymentCancelled,
 )
 _PAYMENT_EVENT_BY_NAME = {event_type.__name__: event_type for event_type in _PAYMENT_EVENT_TYPES}
+_OPERATIONAL_HANDOFF_EVENTS = (
+    HandoffAcknowledged,
+    HandoffEffectFailed,
+)
 _OPERATIONAL_PAYMENT_EVENTS = (
     PaymentEvidenceRecorded,
     SettlementStarted,
@@ -656,6 +660,10 @@ class SQLiteFollowupUnitOfWork:
         expected_revision = _require_revision(expected_revision)
         if type(event) not in _HANDOFF_EVENT_TYPES:
             raise TypeError("event must be an exact HandoffEvent")
+        if type(event) in _OPERATIONAL_HANDOFF_EVENTS:
+            raise UnsupportedEffect(
+                "handoff delivery event requires Task 7 outbox and receipt persistence"
+            )
         with self._transaction("apply_handoff"):
             current, revision = self._load_handoff(handoff_id)
             event_id = _handoff_event_id(event)

@@ -14,7 +14,12 @@ from reservation_followup import (
     FinancialConfirmationReceived,
     FinancialSummaryRecorded,
     HandoffAcknowledged,
+    HandoffCancellationCode,
+    HandoffCancelled,
+    HandoffEffectFailed,
+    HandoffEffectFailureCode,
     HandoffEffectJob,
+    HandoffEffectKind,
     HandoffEffectPolicy,
     HandoffReasonCode,
     HandoffTransitionStatus,
@@ -22,6 +27,8 @@ from reservation_followup import (
     PaymentMethod,
     PaymentMethodSelected,
     PaymentTransitionStatus,
+    SettlementCertainty,
+    SettlementFinished,
     SettlementStarted,
     financial_summary_hash,
     from_wire_json,
@@ -51,6 +58,9 @@ from tests.phase6_helpers import (
     payment_evidence_trust,
     pix_visual_evidence,
 )
+from tests.test_phase6_payment_reducer import outcome
+
+ROOT = Path(__file__).resolve().parents[1]
 
 TABLES = tuple(table.name for table in schema_contract())
 HANDOFF_TABLES = (
@@ -246,6 +256,41 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         finally:
             drift.close()
 
+    def test_exact_schema_definition_partial_universe_and_triggers_fail_closed(self) -> None:
+        cases = ("altered_definition", "partial_valid_universe", "trigger")
+        for index, case in enumerate(cases):
+            with self.subTest(case=case):
+                path = self.root / f"schema-hostile-{index}.db"
+                connection = sqlite3.connect(path)
+                if case == "altered_definition":
+                    sql = (ROOT / "schemas/phase6/sqlite.sql").read_text(
+                        encoding="utf-8"
+                    )
+                    mutated = sql.replace(
+                        "CHECK (revision >= 0)",
+                        "CHECK (revision >= -1)",
+                        1,
+                    )
+                    self.assertNotEqual(mutated, sql)
+                    connection.executescript(mutated)
+                else:
+                    connection.executescript(
+                        (ROOT / "schemas/phase6/sqlite.sql").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    if case == "partial_valid_universe":
+                        connection.execute("DROP TABLE payment_receipts")
+                    else:
+                        connection.execute(
+                            "CREATE TRIGGER hostile_after_handoff "
+                            "AFTER INSERT ON handoff_workflows BEGIN SELECT 1; END"
+                        )
+                connection.commit()
+                connection.close()
+                with self.assertRaises(DataCorruption):
+                    SQLiteFollowupUnitOfWork.open(path)
+
     def test_open_handoff_persists_request_state_and_policy_jobs_then_reopens(self) -> None:
         for index, policy in enumerate(
             (HandoffEffectPolicy.default_email_disabled(), optional_email_policy())
@@ -358,6 +403,7 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         )
         with self.assertRaises(IdentityConflict):
             store.open_payment(divergent_anchor, policy)
+        self.assertEqual(database_fingerprint(self.path), before)
         with self.assertRaises(PaymentNotFound):
             store.load_payment("payment:store:missing")
 
@@ -391,8 +437,10 @@ class Phase6FollowupStoreTests(unittest.TestCase):
                     incident_key=f"incident:store:fault:{index}",
                     source_event_id=f"source:event:store:fault:{index}",
                 )
-                with self.assertRaises(StoreError):
+                with self.assertRaises(StoreError) as raised:
                     store.open_handoff(request, optional_email_policy())
+                self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
+                self.assertIn(f"fault:{index}", str(raised.exception.__cause__))
                 self.close_store(store)
                 reopened = self.open_store(path)
                 self.assert_all_zero(path)
@@ -407,8 +455,10 @@ class Phase6FollowupStoreTests(unittest.TestCase):
             "BEFORE INSERT ON main.payment_workflows "
             "BEGIN SELECT RAISE(ABORT, 'fault:payment-workflow'); END"
         )
-        with self.assertRaises(StoreError):
+        with self.assertRaises(StoreError) as raised:
             store.open_payment(confirmed_anchor(), payment_effect_policy())
+        self.assertIsInstance(raised.exception.__cause__, sqlite3.DatabaseError)
+        self.assertIn("fault:payment-workflow", str(raised.exception.__cause__))
         self.close_store(store)
         reopened = self.open_store(path)
         self.assert_all_zero(path)
@@ -476,33 +526,31 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         store._connection.set_authorizer(None)
         self.assert_all_zero(self.path)
 
-    def test_apply_handoff_persists_event_state_and_duplicate_noop_after_reopen(self) -> None:
+    def test_apply_handoff_persists_nonoperational_cancellation_and_duplicate_noop_after_reopen(self) -> None:
         store = self.open_store()
         request = handoff_requested()
-        opened = store.open_handoff(
+        store.open_handoff(
             request,
             HandoffEffectPolicy.default_email_disabled(),
         )
-        ack_job = new_handoff(request, opened.state.policy).effect_jobs[0]
-        acknowledged = HandoffAcknowledged(
+        cancelled = HandoffCancelled(
             handoff_id=request.handoff_id,
             incident_key=request.incident_key,
-            effect_id=ack_job.effect_id,
-            receipt_id="receipt:handoff:store:1",
-            acknowledged_at=T0 + timedelta(seconds=1),
+            cancellation_code=HandoffCancellationCode.REQUEST_WITHDRAWN,
+            cancelled_at=T0 + timedelta(seconds=1),
         )
-        applied = store.apply_handoff(request.handoff_id, 1, acknowledged)
+        applied = store.apply_handoff(request.handoff_id, 1, cancelled)
         self.assertIs(applied.status, HandoffTransitionStatus.APPLIED)
         self.assertEqual(database_counts(self.path)["handoff_events"], 2)
         before = database_fingerprint(self.path)
-        replay = store.apply_handoff(request.handoff_id, 0, acknowledged)
+        replay = store.apply_handoff(request.handoff_id, 0, cancelled)
         self.assertIs(replay.status, HandoffTransitionStatus.NOOP)
         self.assertEqual(replay.state, applied.state)
         self.assertEqual(database_fingerprint(self.path), before)
 
         divergent = replace(
-            acknowledged,
-            acknowledged_at=acknowledged.acknowledged_at + timedelta(seconds=1),
+            cancelled,
+            cancelled_at=cancelled.cancelled_at + timedelta(seconds=1),
         )
         with self.assertRaises(IdentityConflict):
             store.apply_handoff(request.handoff_id, 2, divergent)
@@ -512,27 +560,104 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         reopened = self.open_store()
         self.assertEqual(reopened.load_handoff(request.handoff_id), applied.state)
 
+    def test_operational_handoff_events_fail_before_write_and_reopen(self) -> None:
+        path = self.root / "handoff-operational-boundary.db"
+        store = self.open_store(path)
+        request = handoff_requested()
+        opened = store.open_handoff(
+            request,
+            HandoffEffectPolicy.default_email_disabled(),
+        )
+        ack_job = new_handoff(request, opened.state.policy).effect_jobs[0]
+        events = (
+            HandoffAcknowledged(
+                handoff_id=request.handoff_id,
+                incident_key=request.incident_key,
+                effect_id=ack_job.effect_id,
+                receipt_id="receipt:handoff:store:forged",
+                acknowledged_at=T0 + timedelta(seconds=1),
+            ),
+            HandoffEffectFailed(
+                handoff_id=request.handoff_id,
+                incident_key=request.incident_key,
+                effect_id=ack_job.effect_id,
+                kind=HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT,
+                failure_code=HandoffEffectFailureCode.EFFECT_UNAVAILABLE,
+                failed_at=T0 + timedelta(seconds=1),
+            ),
+        )
+        before = database_fingerprint(path)
+        for event in events:
+            with self.subTest(event=type(event).__name__), self.assertRaises(
+                UnsupportedEffect
+            ):
+                store.apply_handoff(request.handoff_id, 1, event)
+            self.assertEqual(database_fingerprint(path), before)
+        self.close_store(store)
+        reopened = self.open_store(path)
+        self.assertEqual(reopened.load_handoff(request.handoff_id), opened.state)
+        self.assertEqual(database_counts(path)["handoff_events"], 1)
+        self.assertEqual(database_counts(path)["handoff_receipts"], 0)
+        self.assertEqual(
+            reopened._connection.execute(
+                "SELECT status FROM handoff_outbox"
+            ).fetchall(),
+            [("pending",)],
+        )
+
     def test_two_connections_only_one_expected_handoff_revision_wins(self) -> None:
         first = self.open_store()
         second = self.open_store()
         request = handoff_requested()
         first.open_handoff(request, HandoffEffectPolicy.default_email_disabled())
         self.assertEqual(second.load_handoff(request.handoff_id), first.load_handoff(request.handoff_id))
-        ack_job = new_handoff(request, HandoffEffectPolicy.default_email_disabled()).effect_jobs[0]
-        acknowledged = HandoffAcknowledged(
+        cancelled = HandoffCancelled(
             handoff_id=request.handoff_id,
             incident_key=request.incident_key,
-            effect_id=ack_job.effect_id,
-            receipt_id="receipt:handoff:store:race",
-            acknowledged_at=T0 + timedelta(seconds=1),
+            cancellation_code=HandoffCancellationCode.REQUEST_WITHDRAWN,
+            cancelled_at=T0 + timedelta(seconds=1),
         )
-        first.apply_handoff(request.handoff_id, 1, acknowledged)
-        stale = replace(acknowledged, receipt_id="receipt:handoff:store:stale")
+        first.apply_handoff(request.handoff_id, 1, cancelled)
+        stale = handoff_requested(
+            handoff_id=request.handoff_id,
+            incident_key="incident:store:race:stale",
+            source_event_id="source:event:store:race:stale",
+            reason_code=HandoffReasonCode.OPERATIONAL_REVIEW,
+            requested_at=T0 + timedelta(seconds=2),
+        )
         before = database_fingerprint(self.path)
         with self.assertRaises(ConcurrencyConflict):
             second.apply_handoff(request.handoff_id, 1, stale)
         self.assertEqual(database_fingerprint(self.path), before)
-        self.assertEqual(second.load_handoff(request.handoff_id).acknowledgement, acknowledged)
+        self.assertEqual(second.load_handoff(request.handoff_id).cancellation, cancelled)
+
+    def test_two_connections_only_one_expected_payment_revision_wins(self) -> None:
+        first = self.open_store()
+        second = self.open_store()
+        initial = first.open_payment(
+            confirmed_anchor(),
+            payment_effect_policy(),
+        ).state
+        self.assertEqual(second.load_payment(initial.subject.payment_id), initial)
+        first_event = method_event(
+            initial,
+            event_id="payment:event:store:race:first",
+        )
+        first.apply_payment(initial.subject.payment_id, 0, first_event)
+        stale_event = PaymentMethodSelected(
+            event_id="payment:event:store:race:stale",
+            payment_id=initial.subject.payment_id,
+            method=PaymentMethod.WISE,
+            selected_at=T0 + timedelta(seconds=1),
+        )
+        before = database_fingerprint(self.path)
+        with self.assertRaises(ConcurrencyConflict):
+            second.apply_payment(initial.subject.payment_id, 0, stale_event)
+        self.assertEqual(database_fingerprint(self.path), before)
+        self.assertEqual(
+            second.load_payment(initial.subject.payment_id).history,
+            (first_event,),
+        )
 
     def test_apply_payment_persists_nonoperational_events_and_old_duplicate_is_noop(self) -> None:
         store = self.open_store()
@@ -616,6 +741,19 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         )
         with self.assertRaises(UnsupportedEffect):
             store.apply_payment(payment_id, 3, operational)
+        self.assertEqual(database_fingerprint(self.path), before)
+
+        finished = SettlementFinished(
+            event_id="payment:event:store:settlement-finished",
+            payment_id=payment_id,
+            payment_version=confirmed.state.subject.payment_version,
+            economic_signature=confirmed.state.subject.economic_signature,
+            settlement_command_id=command.settlement_command_id,
+            outcome=outcome(SettlementCertainty.SETTLED),
+            finished_at=T0 + timedelta(seconds=6),
+        )
+        with self.assertRaises(UnsupportedEffect):
+            store.apply_payment(payment_id, 3, finished)
         self.assertEqual(database_fingerprint(self.path), before)
 
         self.close_store(store)

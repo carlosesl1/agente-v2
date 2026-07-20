@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 6,
   "title": "Atomic SQLite follow-up UnitOfWork",
-  "recorded_at_utc": "2026-07-19T23:53:13Z",
+  "recorded_at_utc": "2026-07-20T00:13:31Z",
   "base_sha": "7aff9b25f6b6cde7942ef031cef7b4be07ea9345",
   "rollout": "NO-GO",
   "postgresql_executed": false,
@@ -95,12 +95,26 @@
     "optimistic_revision": true,
     "identical_replay": "no-op",
     "divergent_replay": "identity conflict",
-    "later_task_methods_present": []
+    "later_task_methods_present": [],
+    "operational_handoff_events_rejected_before_write": [
+      "HandoffAcknowledged",
+      "HandoffEffectFailed"
+    ],
+    "nonoperational_handoff_apply_proof": "HandoffCancelled",
+    "two_connection_optimistic_revision_domains": [
+      "handoff",
+      "payment"
+    ],
+    "schema_hostile_probes": [
+      "altered table definition",
+      "partial valid table universe",
+      "hostile trigger"
+    ]
   },
   "schema": {
     "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
     "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
-    "generator_output_sha256": "79143b22671103c12852a9ec586f4167c00513e2e70dccd688c8cac9ae6a65af",
+    "generator_output_sha256": "4be738d97b1775063825f4e09148a267ab5f157275940067002f93998908e7df",
     "sqlite_diff_bytes": 0,
     "postgresql_diff_bytes": 0,
     "drift_zero": true,
@@ -109,33 +123,33 @@
   },
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-focused-final.out 2>&1",
-      "tests": 17,
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-review-focused-final.out 2>&1",
+      "tests": 20,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 4.079,
-      "output_sha256": "07bd379485ae01d60031e57d7c7213a47e4bc127c10634ec18306b65fff49f8e"
+      "duration_seconds": 4.497,
+      "output_sha256": "fa19a5fa7b8cb92e6a30c73a0aaaacd893d444d07884eafefdc2b21650c7daac"
     },
     "regressions": {
-      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-regressions-final.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-review-regressions-final.out 2>&1",
       "tests": 170,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 3.798,
-      "output_sha256": "6b4dbb9931f7525453619d828666060eedff22891bd256663bb2ef2f3de30f27"
+      "duration_seconds": 3.637,
+      "output_sha256": "01d6bd213694a0446da61cbec699b51b1a4c6f6668d67dd26b4fb836521430a0"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-full-suite-final.out 2>&1",
-      "tests": 495,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-review-full-suite-final.out 2>&1",
+      "tests": 498,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 68.111,
-      "output_sha256": "5cce70061024aaa8580b77a2bb16cfaf4497aae0beb15ae473e6e1321f00dbf1"
+      "duration_seconds": 69.557,
+      "output_sha256": "bb0aa33e98bd4e948efceba24f2608241ec255d31f0f232a919e11f5a941a277"
     }
   },
   "artifact_sha256": {
-    "reservation_followup/sqlite_store.py": "8dfcdde8aa1ccc1d0a6b11a6f83ed2f71e53f7406927fcbb304b4297bd7f3453",
-    "tests/test_phase6_sqlite_store.py": "b97df99e77eb13e13dbfde575518fec5a92e11c7217746c1930104ea9cea406d",
+    "reservation_followup/sqlite_store.py": "f9332d7c141ed6f9d129cf94669193aacff3c39f55ed49ad3e00c84548b887a3",
+    "tests/test_phase6_sqlite_store.py": "f0a18dec8f017ee33a748b7ffd264601cd1ea4ef5f5ecab81478eac1c2c88457",
     "tests/phase6_helpers.py": "f1545c3d471b54ab461c2cd6b7c338180b4891956a5549077197e6f2bbb943c9"
   },
   "scans": {
@@ -145,7 +159,42 @@
     "forbidden_capability_terms": [],
     "anticipated_task_7_8_methods": [],
     "sensitive_hits": [],
-    "forbidden_db_wal_shm_log_artifacts": []
+    "forbidden_db_wal_shm_log_artifacts": [],
+    "review_findings_closed": [
+      "Task 7 exclusively owns acknowledgement/failure delivery commits; generic Task 6 apply rejects them before transaction",
+      "schema drift guards have hostile definition, partial-universe, and trigger probes",
+      "payment optimistic revision has a two-connection stale-writer proof",
+      "all three operational payment events are explicitly rejected before write",
+      "fault tests assert the exact injected SQLite sentinel cause"
+    ]
   },
-  "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only"
+  "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only",
+  "review_reds": [
+    {
+      "name": "independent_task6_boundary_and_oracle_findings",
+      "rejected_base_sha": "96f77e298319fe58319388f52dbdb0ffd9e79586",
+      "test_tree_sha": "948c3b6daf7df681159f0d8e86f8da944c9e90b1",
+      "patch_path": "docs/refactor/evidence/phase-06/task6-review-red.patch",
+      "patch_sha256": "81109b5d6830dd55d98603e9372e780ba5ecb35137868fb1e8798da427d21d26",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task6-review-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-review-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 20,
+      "failures": 2,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task6-review-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "542ddab1a7cf41f4c25a43333b7e4f032f40be6a63c3da096d1f864fd27182ff",
+      "critical_counterexample": "caller could persist HandoffAcknowledged before delivery, leaving handoff outbox pending and receipts empty while workflow claimed acknowledgement",
+      "important_false_greens": [
+        "exact table definition, partial valid table universe, and hostile trigger were not independently probed",
+        "payment optimistic revision had no two-connection stale writer proof"
+      ],
+      "minor_proof_closures": [
+        "SettlementFinished later-task boundary is explicitly tested",
+        "fault assertions bind to the injected SQLite sentinel cause",
+        "divergent open_payment proves fingerprint immutability"
+      ]
+    }
+  ]
 }
