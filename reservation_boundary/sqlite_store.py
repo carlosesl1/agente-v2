@@ -181,6 +181,21 @@ class SQLiteBoundaryStore:
         exact_lead_key = _require_id(lead_key, "lead_key")
         return self._load_state_in_transaction(exact_lead_key)
 
+    def event_hash(self, lead_key: str, event_id: str) -> str | None:
+        self._ensure_open()
+        exact_lead_key = _require_id(lead_key, "lead_key")
+        exact_event_id = _require_id(event_id, "event_id")
+        row = self._connection.execute(
+            "SELECT event_hash FROM boundary_events WHERE lead_key=? AND event_id=?",
+            (exact_lead_key, exact_event_id),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return _require_hash(row[0], "stored event_hash")
+        except ValueError as exc:
+            raise DataCorruption("stored event hash is invalid") from exc
+
     def import_genesis(
         self,
         snapshot: LegacyLeadSnapshot,

@@ -24,6 +24,15 @@ from reservation_boundary.sqlite_store import (
     SQLiteBoundaryStore,
     StateNotFound,
 )
+from reservation_boundary.coordinator import (
+    CoordinationError,
+    InvalidIntent,
+    InvalidKernelDecision,
+    TurnCoordinator,
+    TurnDeadlineExceeded,
+    TurnEventConflict,
+    TurnImportRejected,
+)
 
 __version__ = "0.7.0"
 __all__ = (
@@ -43,6 +52,13 @@ __all__ = (
     "render_postgresql",
     "render_sqlite",
     "schema_hash",
+    "CoordinationError",
+    "InvalidIntent",
+    "InvalidKernelDecision",
+    "TurnCoordinator",
+    "TurnDeadlineExceeded",
+    "TurnEventConflict",
+    "TurnImportRejected",
     "semantic_hash",
     "to_wire_json",
 )
