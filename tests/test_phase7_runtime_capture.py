@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -104,6 +105,16 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         "  'whatsapp_phone': '+5575999992939',\n"
         "  'changed': True,\n"
         "}\n"
+        "PHONE_EVENT = {'phone_number': '5575999992939'}\n"
+        "FOREIGN_EVENT = {'telefone': '5411999998888'}\n"
+        "TOOL_REQUEST = {'name': 'cloudbeds_criar_reserva_v2'}\n"
+        "EXPECTED_PHONE = '+55 75 99999-2939'\n"
+        "assert LEAD['name'] == 'Carlos Eduardo'\n"
+        "assert PHONE_EVENT['phone_number'] == '5575999992939'\n"
+        "def test_parser_phone_relation():\n"
+        "    payload = {'phone_number': '5575999992939'}\n"
+        "    assert event.phone == '+5511888887777'\n"
+        "    assert 'telefone=+55 11 88888-7777' in prompt\n"
     )
     (source / "tests/test_bokun_v2_tools.py").write_text(
         "CONTACT = {'whatsapp_phone': '+5522777776666', 'changed': True}\n"
@@ -149,10 +160,38 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertNotIn("Eduardo", redacted)
             self.assertNotIn("+5575999992939", redacted)
             self.assertIn("Synthetic Lead", redacted)
-            self.assertIn("+5500000000000", redacted)
+            self.assertIn("'name': 'cloudbeds_criar_reserva_v2'", redacted)
+            self.assertRegex(redacted, r"'whatsapp_phone': '\+55\d{11}'")
+            self.assertRegex(redacted, r"'phone_number': '55\d{11}'")
+            self.assertRegex(redacted, r"'telefone': '54\d{11}'")
+            raw_phone = re.search(r"'phone_number': '(55\d{11})'", redacted)
+            expected_phone = re.search(r"EXPECTED_PHONE = '(\+55\d{11})'", redacted)
+            self.assertIsNotNone(raw_phone)
+            self.assertIsNotNone(expected_phone)
+            self.assertEqual("+" + raw_phone.group(1), expected_phone.group(1))
+            relation = re.search(
+                r"def test_parser_phone_relation\(\):.*?phone_number': '(55\d{11})'.*?"
+                r"assert event\.phone == '(\+55\d{11})'",
+                redacted,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(relation)
+            self.assertEqual("+" + relation.group(1), relation.group(2))
+            prompt_phone = re.search(
+                r"def test_parser_phone_relation\(\):.*?telefone=(\+55\d{11})",
+                redacted,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(prompt_phone)
+            self.assertEqual(relation.group(2), prompt_phone.group(1))
             provider_test = (output / "tests/test_bokun_v2_tools.py").read_text()
-            self.assertIn("+5500000000000", provider_test)
+            self.assertRegex(provider_test, r"'whatsapp_phone': '\+55\d{11}'")
             self.assertNotIn("+5522777776666", provider_test)
+            first_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", redacted)
+            second_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", provider_test)
+            self.assertIsNotNone(first_phone)
+            self.assertIsNotNone(second_phone)
+            self.assertNotEqual(first_phone.group(1), second_phone.group(1))
             self.assertEqual(run_git(output, "status", "--porcelain"), "")
             self.assertEqual(result.source_head, head)
             self.assertEqual(

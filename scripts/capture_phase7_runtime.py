@@ -54,6 +54,9 @@ _SECRET_PATTERNS: Final = (
     ),
 )
 _PHONE_RE: Final = re.compile(r"(?<!\d)\+\d{10,15}(?!\d)")
+_FORMATTED_PHONE_RE: Final = re.compile(
+    r"(?<!\w)\+(?:[\s().-]*\d){10,15}(?!\d)"
+)
 _CPF_RE: Final = re.compile(r"(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)")
 _LONG_DIGITS_RE: Final = re.compile(r"(?<!\d)\d{9,16}(?!\d)")
 _ALLOWED_SECRET_VALUES: Final = (
@@ -188,8 +191,129 @@ def _synthetic_digits(value: str) -> str:
     return generated[: len(value)]
 
 
+def _synthetic_phone(value: str) -> str:
+    source_digits = "".join(character for character in value if character.isdigit())
+    digest = hashlib.sha256(source_digits.encode()).digest()
+    tail = "".join(str(byte % 10) for byte in digest)
+    country_prefix = source_digits[:2] if len(source_digits) >= 12 else "55"
+    synthetic_digits = country_prefix + tail[:11]
+    return "+" + synthetic_digits if value.lstrip().startswith("+") else synthetic_digits
+
+
 def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     count = 0
+    literal_map: dict[str, str] = {}
+    phone_replacements: set[str] = set()
+
+    def values_for_key(key: str) -> tuple[str, ...]:
+        pattern = re.compile(
+            rf"(?P<prefix>['\"]{re.escape(key)}['\"]\s*:\s*)"
+            rf"(?P<quote>['\"])(?P<value>[^'\"]*)(?P=quote)"
+        )
+        return tuple(match.group("value") for match in pattern.finditer(text))
+
+    first_names = values_for_key("first_name")
+    last_names = values_for_key("last_name")
+    full_names = values_for_key("full_name")
+    for value in first_names:
+        literal_map[value] = "Synthetic"
+    for value in last_names:
+        literal_map[value] = "Lead"
+    for value in full_names:
+        literal_map[value] = "Synthetic Lead"
+    personal_full_names = set(full_names)
+    personal_full_names.update(
+        f"{first} {last}".strip()
+        for first in first_names
+        for last in last_names
+    )
+    for value in values_for_key("name"):
+        if value in personal_full_names:
+            literal_map[value] = "Synthetic Lead"
+
+    for key in (
+        "phone",
+        "phone_number",
+        "whatsapp_phone",
+        "telefone",
+        "telefone_whatsapp",
+        "guest_phone",
+        "contact_phone",
+    ):
+        pattern = re.compile(
+            rf"['\"]{key}['\"]\s*:\s*(?P<quote>['\"])(?P<value>[^'\"]*)(?P=quote)"
+        )
+        for match in pattern.finditer(text):
+            value = match.group("value")
+            if value:
+                replacement = _synthetic_phone(value)
+                literal_map[value] = replacement
+                phone_replacements.add(replacement)
+
+    for original, replacement in sorted(literal_map.items(), key=lambda row: (-len(row[0]), row[0])):
+        for quote in ("'", '"'):
+            needle = quote + original + quote
+            occurrences = text.count(needle)
+            if occurrences:
+                text = text.replace(needle, quote + replacement + quote)
+                count += occurrences
+
+    function_pattern = re.compile(
+        r"(?ms)^def\s+[A-Za-z_][A-Za-z0-9_]*\([^\n]*\):.*?(?=^(?:def|class)\s|\Z)"
+    )
+    phone_key_pattern = re.compile(
+        r"['\"](?:phone|phone_number|whatsapp_phone|telefone|telefone_whatsapp|"
+        r"guest_phone|contact_phone)['\"]\s*:\s*"
+        r"(?P<quote>['\"])(?P<value>[^'\"]+)(?P=quote)"
+    )
+    phone_assert_pattern = re.compile(
+        r"(?P<prefix>assert\s+[A-Za-z_][A-Za-z0-9_.]*\.phone\s*==\s*)"
+        r"(?P<quote>['\"])[^'\"]+(?P=quote)"
+    )
+    prompt_phone_pattern = re.compile(
+        r"(?P<quote>['\"])telefone=[^'\"]+(?P=quote)"
+    )
+
+    def align_function_phone(match: re.Match[str]) -> str:
+        nonlocal count
+        block = match.group(0)
+        digit_sets = {
+            "".join(character for character in item.group("value") if character.isdigit())
+            for item in phone_key_pattern.finditer(block)
+        }
+        digit_sets.discard("")
+        if len(digit_sets) != 1:
+            return block
+        digits = next(iter(digit_sets))
+        if len(digits) != 13 or not digits.startswith("55"):
+            return block
+        replacement = "+" + digits
+
+        def align_assertion(assertion: re.Match[str]) -> str:
+            nonlocal count
+            count += 1
+            quote = assertion.group("quote")
+            return assertion.group("prefix") + quote + replacement + quote
+
+        aligned = phone_assert_pattern.sub(align_assertion, block)
+
+        def align_prompt_phone(assertion: re.Match[str]) -> str:
+            nonlocal count
+            count += 1
+            quote = assertion.group("quote")
+            return quote + "telefone=" + replacement + quote
+
+        return prompt_phone_pattern.sub(align_prompt_phone, aligned)
+
+    text = function_pattern.sub(align_function_phone, text)
+
+    protected = {
+        f"__PHASE7_PHONE_{index}__": value
+        for index, value in enumerate(sorted(phone_replacements, key=len, reverse=True))
+    }
+    protected["__PHASE7_CPF__"] = "000.000.000-00"
+    for token, value in protected.items():
+        text = text.replace(value, token)
 
     def replace_digits(match: re.Match[str]) -> str:
         nonlocal count
@@ -197,25 +321,17 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
         return _synthetic_digits(match.group(0))
 
     text = _LONG_DIGITS_RE.sub(replace_digits, text)
-    text, phone_count = _PHONE_RE.subn("+5500000000000", text)
-    count += phone_count
-    text, cpf_count = _CPF_RE.subn("000.000.000-00", text)
+    def replace_phone(match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return _synthetic_phone(match.group(0))
+
+    text, phone_count = _FORMATTED_PHONE_RE.subn(replace_phone, text)
+    _ = phone_count
+    text, cpf_count = _CPF_RE.subn("__PHASE7_CPF__", text)
     count += cpf_count
-    for key, replacement in (
-        ("first_name", "Synthetic"),
-        ("last_name", "Lead"),
-        ("name", "Synthetic Lead"),
-    ):
-        pattern = re.compile(
-            rf"(?P<prefix>['\"]{key}['\"]\s*:\s*['\"])[^'\"]*(?P<suffix>['\"])"
-        )
-        text, replacements = pattern.subn(
-            lambda match, value=replacement: (
-                match.group("prefix") + value + match.group("suffix")
-            ),
-            text,
-        )
-        count += replacements
+    for token, value in protected.items():
+        text = text.replace(token, value)
     return text, count
 
 
@@ -251,7 +367,6 @@ def _scan_text(
     for match in _PHONE_RE.finditer(text):
         if (
             allow_pii_redaction
-            and match.group(0) == "+5500000000000"
         ):
             continue
         line_start = text.rfind("\n", 0, match.start()) + 1
