@@ -2,11 +2,11 @@
   "phase": 6,
   "task": 8,
   "title": "Global payment evidence claims and permanently fenced settlement ledger",
-  "recorded_at_utc": "2026-07-20T05:07:08Z",
+  "recorded_at_utc": "2026-07-20T05:12:32Z",
   "base_sha": "bc6fd086b2e6c23f330f6103c59714ed280c6fdb",
   "base_tree_sha": "57d665115789418a5d28b398bd5e60687840d170",
-  "functional_commit": null,
-  "functional_tree": null,
+  "functional_commit": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
+  "functional_tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
   "rollout": "NO-GO",
   "postgresql_executed": false,
   "network_used": false,
@@ -148,5 +148,51 @@
     "critical": null,
     "important": null,
     "minor": null
+  },
+  "detached_gate": {
+    "worktree": "/tmp/phase6-task8-gate",
+    "head": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
+    "tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
+    "clean": true,
+    "focused_and_store": {
+      "command": "python3 -m unittest tests.test_phase6_payment_claims tests.test_phase6_sqlite_store -v",
+      "tests": 47,
+      "result": "OK",
+      "output_sha256": "2ee78b74ba02199da3c5d98a38865bdf93d9ba0507dabca521f49e1403193c6a"
+    },
+    "phase5_phase6_regressions": {
+      "tests": 350,
+      "result": "OK",
+      "output_sha256": "d8438b75f6e4f9420ae0f14ddcb5f5912d17048e2d144e8ef639b1ecab8f89a3"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 553,
+      "result": "OK",
+      "output_sha256": "d4bc02e4d311c5e666137be829abdc24d1132f5b47d7771a5e2d91d0ff9739b6"
+    },
+    "characterization": {
+      "command": "python3 -m characterization.harness",
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_capability_scans": "passed",
+    "external_imports": [],
+    "capability_symbols": [],
+    "urls": [],
+    "forbidden_task9_apis": []
   }
 }
