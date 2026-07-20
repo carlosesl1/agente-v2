@@ -151,13 +151,15 @@ def _canonical_time(raw: object, field_name: str) -> datetime:
 
 
 def _sqlite_error(exc: sqlite3.Error, operation: str) -> StoreError:
-    detail = str(exc).casefold()
-    if isinstance(exc, sqlite3.OperationalError) and (
-        "locked" in detail or "busy" in detail
-    ):
+    code = getattr(exc, "sqlite_errorcode", None)
+    primary_code = code & 0xFF if type(code) is int else None
+    if primary_code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
         return ConcurrencyConflict(f"{operation} could not acquire the SQLite lock")
-    if isinstance(exc, sqlite3.IntegrityError):
-        return DataCorruption(f"{operation} violated SQLite integrity")
+    if isinstance(exc, sqlite3.IntegrityError) or primary_code in (
+        sqlite3.SQLITE_CORRUPT,
+        sqlite3.SQLITE_NOTADB,
+    ):
+        return DataCorruption(f"{operation} detected SQLite corruption")
     return StoreUnavailable(f"{operation} failed in SQLite")
 
 
@@ -270,22 +272,64 @@ class SQLiteFollowupUnitOfWork:
         path_or_connection: Path | str | sqlite3.Connection,
     ) -> "SQLiteFollowupUnitOfWork":
         connection: sqlite3.Connection | None = None
-        if type(path_or_connection) is sqlite3.Connection:
-            connection = path_or_connection
-            if connection.in_transaction:
-                raise ValueError("SQLite connection must not have an open transaction")
-            connection.isolation_level = None
-        elif isinstance(path_or_connection, Path):
-            if path_or_connection.exists() and not path_or_connection.is_file():
-                raise ValueError("SQLite path must be a file or absent")
-            connection = sqlite3.connect(path_or_connection, isolation_level=None, timeout=5.0)
-        elif type(path_or_connection) is str:
-            if not path_or_connection or "\x00" in path_or_connection:
-                raise ValueError("SQLite path text must be non-empty and canonical")
-            connection = sqlite3.connect(path_or_connection, isolation_level=None, timeout=5.0)
-        else:
-            raise TypeError("path_or_connection must be Path, str, or sqlite3.Connection")
+        caller_supplied = type(path_or_connection) is sqlite3.Connection
+        caller_configured = False
+        original_isolation_level: str | None = None
+        original_foreign_keys: int | None = None
+
+        def cleanup_rejected_connection() -> None:
+            if connection is None:
+                return
+            if caller_supplied:
+                if not caller_configured:
+                    return
+                try:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    if original_foreign_keys is not None:
+                        connection.execute(
+                            f"PRAGMA foreign_keys = {'ON' if original_foreign_keys else 'OFF'}"
+                        )
+                    connection.isolation_level = original_isolation_level
+                except sqlite3.Error:
+                    pass
+                return
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+
         try:
+            if caller_supplied:
+                connection = path_or_connection
+                if connection.in_transaction:
+                    raise ValueError("SQLite connection must not have an open transaction")
+                original_isolation_level = connection.isolation_level
+                original_foreign_keys = connection.execute(
+                    "PRAGMA foreign_keys"
+                ).fetchone()[0]
+                connection.isolation_level = None
+                caller_configured = True
+            elif isinstance(path_or_connection, Path):
+                if path_or_connection.exists() and not path_or_connection.is_file():
+                    raise ValueError("SQLite path must be a file or absent")
+                connection = sqlite3.connect(
+                    path_or_connection,
+                    isolation_level=None,
+                    timeout=5.0,
+                )
+            elif type(path_or_connection) is str:
+                if not path_or_connection or "\x00" in path_or_connection:
+                    raise ValueError("SQLite path text must be non-empty and canonical")
+                connection = sqlite3.connect(
+                    path_or_connection,
+                    isolation_level=None,
+                    timeout=5.0,
+                )
+            else:
+                raise TypeError(
+                    "path_or_connection must be Path, str, or sqlite3.Connection"
+                )
             connection.execute("PRAGMA foreign_keys = ON")
             if connection.execute("PRAGMA foreign_keys").fetchone() != (1,):
                 raise DataCorruption("SQLite foreign keys could not be enabled")
@@ -293,10 +337,10 @@ class SQLiteFollowupUnitOfWork:
             store._initialize_or_validate_schema()
             return store
         except sqlite3.Error as exc:
-            connection.close()
+            cleanup_rejected_connection()
             raise _sqlite_error(exc, "open") from exc
         except BaseException:
-            connection.close()
+            cleanup_rejected_connection()
             raise
 
     def __enter__(self) -> "SQLiteFollowupUnitOfWork":
@@ -350,18 +394,48 @@ class SQLiteFollowupUnitOfWork:
                 raise _sqlite_error(exc, operation) from exc
             raise
 
+    def _validate_connection_namespace(self) -> None:
+        databases = tuple(
+            row[1] for row in self._connection.execute("PRAGMA database_list")
+        )
+        attached = tuple(name for name in databases if name not in ("main", "temp"))
+        if attached:
+            raise DataCorruption(
+                f"SQLite follow-up connection must not attach databases: {attached}"
+            )
+        temporary_objects = tuple(
+            self._connection.execute(
+                "SELECT type, name FROM sqlite_temp_master "
+                "WHERE name NOT GLOB 'sqlite_*' ORDER BY type, name"
+            )
+        )
+        if temporary_objects:
+            raise DataCorruption(
+                "SQLite follow-up connection must not contain TEMP schema objects"
+            )
+
     def _table_rows(self) -> tuple[tuple[str, str], ...]:
         return tuple(
-            self._connection.execute(
-                "SELECT name, sql FROM sqlite_master "
-                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
+            row
+            for row in self._connection.execute(
+                "SELECT name, sql FROM main.sqlite_master "
+                "WHERE type='table' ORDER BY rowid"
             )
+            if not row[0].startswith("sqlite_")
         )
 
     def _initialize_or_validate_schema(self) -> None:
+        self._validate_connection_namespace()
         rows = self._table_rows()
         if not rows:
-            self._connection.executescript(render_sqlite())
+            with self._transaction("initialize_schema"):
+                for statement in _schema_statements()[1:]:
+                    qualified = statement.replace(
+                        "CREATE TABLE ",
+                        "CREATE TABLE main.",
+                        1,
+                    )
+                    self._connection.execute(qualified)
             rows = self._table_rows()
         names = tuple(row[0] for row in rows)
         if names != _EXPECTED_TABLES:
@@ -376,16 +450,18 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption("SQLite foreign keys are disabled")
         if tuple(
             self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name"
+                "SELECT name FROM main.sqlite_master WHERE type='trigger' ORDER BY name"
             )
         ):
             raise DataCorruption("SQLite follow-up schema must not contain triggers")
+        if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
+            raise DataCorruption("SQLite follow-up schema contains foreign key violations")
 
     def _handoff_workflow_row(self, handoff_id: str):
         return self._connection.execute(
             "SELECT handoff_id, incident_key, revision, status, lead_key_hash, "
             "state_json, state_hash, created_at, updated_at "
-            "FROM handoff_workflows WHERE handoff_id=?",
+            "FROM main.handoff_workflows WHERE handoff_id=?",
             (_require_id(handoff_id, "handoff_id"),),
         ).fetchone()
 
@@ -393,7 +469,7 @@ class SQLiteFollowupUnitOfWork:
         return self._connection.execute(
             "SELECT payment_id, revision, payment_version, economic_signature, "
             "status, state_json, state_hash, created_at, updated_at "
-            "FROM payment_workflows WHERE payment_id=?",
+            "FROM main.payment_workflows WHERE payment_id=?",
             (_require_id(payment_id, "payment_id"),),
         ).fetchone()
 
@@ -419,7 +495,7 @@ class SQLiteFollowupUnitOfWork:
                 "template_id, payload_json, payload_hash, status, claim_owner, "
                 "fencing_token, lease_acquired_at, lease_expires_at, "
                 "delivery_attempts, delivered_at, receipt_hash, created_at, updated_at "
-                "FROM handoff_outbox WHERE handoff_id=? ORDER BY effect_id",
+                "FROM main.handoff_outbox WHERE handoff_id=? ORDER BY effect_id",
                 (handoff_id,),
             )
         )
@@ -438,22 +514,34 @@ class SQLiteFollowupUnitOfWork:
                 to_wire_json(job),
                 semantic_hash(job),
             )
-            if row[:8] != immutable or row[16] != job.created_at.isoformat():
-                raise DataCorruption("handoff outbox immutable binding is divergent")
+            initial_operational_tuple = (
+                "pending",
+                None,
+                0,
+                None,
+                None,
+                0,
+                None,
+                None,
+                job.created_at.isoformat(),
+                job.created_at.isoformat(),
+            )
+            if row[:8] != immutable or row[8:] != initial_operational_tuple:
+                raise DataCorruption(
+                    "Task 6 handoff outbox row is not in its exact initial state"
+                )
             if type(row[10]) is not int or type(row[13]) is not int:
                 raise DataCorruption("handoff outbox counters have wrong SQLite types")
-            _canonical_time(row[16], "handoff_outbox.created_at")
-            updated = _canonical_time(row[17], "handoff_outbox.updated_at")
-            if updated < job.created_at:
-                raise DataCorruption("handoff outbox update predates its job")
-            for index, field_name in (
-                (11, "lease_acquired_at"),
-                (12, "lease_expires_at"),
-                (14, "delivered_at"),
-            ):
-                if row[index] is not None:
-                    _canonical_time(row[index], f"handoff_outbox.{field_name}")
             jobs.append(job)
+        receipt = self._connection.execute(
+            "SELECT 1 FROM main.handoff_receipts AS receipt "
+            "JOIN main.handoff_outbox AS outbox "
+            "ON outbox.message_id=receipt.message_id "
+            "WHERE outbox.handoff_id=? LIMIT 1",
+            (handoff_id,),
+        ).fetchone()
+        if receipt is not None:
+            raise DataCorruption("Task 6 handoff workflow must not contain receipts")
         return tuple(jobs)
 
     @staticmethod
@@ -479,7 +567,7 @@ class SQLiteFollowupUnitOfWork:
         events_rows = tuple(
             self._connection.execute(
                 "SELECT event_id, handoff_id, revision, event_type, event_json, "
-                "event_hash, occurred_at FROM handoff_events "
+                "event_hash, occurred_at FROM main.handoff_events "
                 "WHERE handoff_id=? ORDER BY revision",
                 (handoff_id,),
             )
@@ -558,7 +646,7 @@ class SQLiteFollowupUnitOfWork:
     ) -> None:
         raw = to_wire_json(event)
         self._connection.execute(
-            "INSERT INTO handoff_events "
+            "INSERT INTO main.handoff_events "
             "(event_id, handoff_id, revision, event_type, event_json, event_hash, occurred_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
@@ -577,7 +665,7 @@ class SQLiteFollowupUnitOfWork:
             raw = to_wire_json(job)
             timestamp = job.created_at.isoformat()
             self._connection.execute(
-                "INSERT INTO handoff_outbox "
+                "INSERT INTO main.handoff_outbox "
                 "(message_id, idempotency_key, effect_id, handoff_id, kind, "
                 "template_id, payload_json, payload_hash, status, claim_owner, "
                 "fencing_token, lease_acquired_at, lease_expires_at, "
@@ -611,13 +699,13 @@ class SQLiteFollowupUnitOfWork:
         with self._transaction("open_handoff"):
             collisions = tuple(
                 self._connection.execute(
-                    "SELECT handoff_id FROM handoff_workflows "
+                    "SELECT handoff_id FROM main.handoff_workflows "
                     "WHERE handoff_id=? OR incident_key=? ORDER BY handoff_id",
                     (request.handoff_id, request.incident_key),
                 )
             )
             event_owner = self._connection.execute(
-                "SELECT handoff_id FROM handoff_events WHERE event_id=?",
+                "SELECT handoff_id FROM main.handoff_events WHERE event_id=?",
                 (request.source_event_id,),
             ).fetchone()
             if collisions or event_owner is not None:
@@ -632,7 +720,7 @@ class SQLiteFollowupUnitOfWork:
             raw = to_wire_json(state)
             timestamp = request.requested_at.isoformat()
             self._connection.execute(
-                "INSERT INTO handoff_workflows "
+                "INSERT INTO main.handoff_workflows "
                 "(handoff_id, incident_key, revision, status, lead_key_hash, state_json, "
                 "state_hash, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
                 (
@@ -668,7 +756,7 @@ class SQLiteFollowupUnitOfWork:
             current, revision = self._load_handoff(handoff_id)
             event_id = _handoff_event_id(event)
             existing_row = self._connection.execute(
-                "SELECT handoff_id, event_type, event_json, event_hash FROM handoff_events "
+                "SELECT handoff_id, event_type, event_json, event_hash FROM main.handoff_events "
                 "WHERE event_id=?",
                 (event_id,),
             ).fetchone()
@@ -695,7 +783,7 @@ class SQLiteFollowupUnitOfWork:
             raw = to_wire_json(transition.state)
             updated_at = _handoff_event_time(event).isoformat()
             updated = self._connection.execute(
-                "UPDATE handoff_workflows SET revision=?, status=?, state_json=?, "
+                "UPDATE main.handoff_workflows SET revision=?, status=?, state_json=?, "
                 "state_hash=?, updated_at=? WHERE handoff_id=? AND revision=?",
                 (
                     next_revision,
@@ -722,7 +810,7 @@ class SQLiteFollowupUnitOfWork:
             self._connection.execute(
                 "SELECT event_id, payment_id, revision, payment_version, "
                 "economic_signature, event_type, event_json, event_hash, occurred_at "
-                "FROM payment_events WHERE payment_id=? ORDER BY revision",
+                "FROM main.payment_events WHERE payment_id=? ORDER BY revision",
                 (payment_id,),
             )
         )
@@ -808,13 +896,16 @@ class SQLiteFollowupUnitOfWork:
             existing = self._payment_workflow_row(payment_id)
             if existing is not None:
                 persisted, _ = self._load_payment(payment_id)
-                if persisted == state:
+                if (
+                    persisted.subject.confirmed_reservation_anchor == anchor
+                    and persisted.policy == policy
+                ):
                     return _payment_noop(persisted)
                 raise IdentityConflict("payment identity already exists with divergent data")
             raw = to_wire_json(state)
             timestamp = anchor.confirmed_at.isoformat()
             self._connection.execute(
-                "INSERT INTO payment_workflows "
+                "INSERT INTO main.payment_workflows "
                 "(payment_id, revision, payment_version, economic_signature, status, "
                 "state_json, state_hash, created_at, updated_at) "
                 "VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)",
@@ -840,7 +931,7 @@ class SQLiteFollowupUnitOfWork:
     ) -> None:
         raw = to_wire_json(event)
         self._connection.execute(
-            "INSERT INTO payment_events "
+            "INSERT INTO main.payment_events "
             "(event_id, payment_id, revision, payment_version, economic_signature, "
             "event_type, event_json, event_hash, occurred_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -875,7 +966,7 @@ class SQLiteFollowupUnitOfWork:
             current, revision = self._load_payment(payment_id)
             existing_row = self._connection.execute(
                 "SELECT payment_id, event_type, event_json, event_hash "
-                "FROM payment_events WHERE event_id=?",
+                "FROM main.payment_events WHERE event_id=?",
                 (event.event_id,),
             ).fetchone()
             if existing_row is not None:
@@ -902,7 +993,7 @@ class SQLiteFollowupUnitOfWork:
             raw = to_wire_json(transition.state)
             updated_at = _payment_event_time(event).isoformat()
             updated = self._connection.execute(
-                "UPDATE payment_workflows SET revision=?, payment_version=?, "
+                "UPDATE main.payment_workflows SET revision=?, payment_version=?, "
                 "economic_signature=?, status=?, state_json=?, state_hash=?, updated_at=? "
                 "WHERE payment_id=? AND revision=?",
                 (

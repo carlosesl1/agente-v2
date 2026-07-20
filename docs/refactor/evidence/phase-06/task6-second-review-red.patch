@@ -1,0 +1,256 @@
+diff --git a/tests/test_phase6_sqlite_store.py b/tests/test_phase6_sqlite_store.py
+index a884600541357fa9c75eade969e673cc1ccc15a1..ca6f84fc3e3a29dc4e98ea9fda6068d201b893bf 100644
+--- a/tests/test_phase6_sqlite_store.py
++++ b/tests/test_phase6_sqlite_store.py
+@@ -49,0 +50 @@ from reservation_followup.sqlite_store import (
++    StoreUnavailable,
+@@ -293,0 +295,147 @@ class Phase6FollowupStoreTests(unittest.TestCase):
++    def test_open_rejects_temp_objects_and_attached_databases_without_stealing_caller_connection(self) -> None:
++        cases = ("temp_table", "temp_trigger", "attached_database")
++        for case in cases:
++            with self.subTest(case=case):
++                connection = sqlite3.connect(":memory:")
++                connection.executescript(
++                    (ROOT / "schemas/phase6/sqlite.sql").read_text(encoding="utf-8")
++                )
++                connection.execute("PRAGMA foreign_keys = OFF")
++                original_isolation_level = connection.isolation_level
++                original_foreign_keys = connection.execute(
++                    "PRAGMA foreign_keys"
++                ).fetchone()
++                if case == "temp_table":
++                    connection.execute(
++                        "CREATE TEMP TABLE handoff_workflows(shadow TEXT)"
++                    )
++                elif case == "temp_trigger":
++                    connection.execute(
++                        "CREATE TEMP TRIGGER shadow_handoff AFTER INSERT "
++                        "ON main.handoff_workflows BEGIN SELECT 1; END"
++                    )
++                else:
++                    connection.execute("ATTACH DATABASE ':memory:' AS hostile")
++                try:
++                    opened = None
++                    error = None
++                    try:
++                        opened = SQLiteFollowupUnitOfWork.open(connection)
++                    except BaseException as exc:
++                        error = exc
++                    self.assertIsInstance(error, DataCorruption)
++                    if opened is not None:
++                        opened.close()
++                    else:
++                        self.assertEqual(connection.execute("SELECT 1").fetchone(), (1,))
++                        self.assertEqual(
++                            connection.isolation_level,
++                            original_isolation_level,
++                        )
++                        self.assertEqual(
++                            connection.execute("PRAGMA foreign_keys").fetchone(),
++                            original_foreign_keys,
++                        )
++                        if case == "attached_database":
++                            self.assertIn(
++                                "hostile",
++                                {
++                                    row[1]
++                                    for row in connection.execute(
++                                        "PRAGMA database_list"
++                                    )
++                                },
++                            )
++                finally:
++                    try:
++                        connection.close()
++                    except sqlite3.Error:
++                        pass
++
++    def test_open_rejects_literal_sqlite_lookalike_extra_table(self) -> None:
++        path = self.root / "sqlite-lookalike-extra.db"
++        connection = sqlite3.connect(path)
++        connection.executescript(
++            (ROOT / "schemas/phase6/sqlite.sql").read_text(encoding="utf-8")
++        )
++        connection.execute("CREATE TABLE sqliteXextra(value TEXT)")
++        connection.commit()
++        connection.close()
++        opened = None
++        error = None
++        try:
++            opened = SQLiteFollowupUnitOfWork.open(path)
++        except BaseException as exc:
++            error = exc
++        self.assertIsInstance(error, DataCorruption)
++        if opened is not None:
++            opened.close()
++
++    def test_open_maps_connection_failures_and_physical_corruption_stably(self) -> None:
++        failures = (
++            (self.root / "missing-parent" / "store.db", StoreUnavailable),
++        )
++        for target, expected in failures:
++            with self.subTest(target=target):
++                error = None
++                try:
++                    SQLiteFollowupUnitOfWork.open(target)
++                except BaseException as exc:
++                    error = exc
++                self.assertIsInstance(error, expected)
++                self.assertIsInstance(error.__cause__, sqlite3.Error)
++
++        closed = sqlite3.connect(":memory:")
++        closed.close()
++        error = None
++        try:
++            SQLiteFollowupUnitOfWork.open(closed)
++        except BaseException as exc:
++            error = exc
++        self.assertIsInstance(error, StoreUnavailable)
++        self.assertIsInstance(error.__cause__, sqlite3.Error)
++
++        malformed = self.root / "malformed.sqlite"
++        malformed.write_bytes(b"not-a-sqlite-database")
++        error = None
++        try:
++            SQLiteFollowupUnitOfWork.open(malformed)
++        except BaseException as exc:
++            error = exc
++        self.assertIsInstance(error, DataCorruption)
++        self.assertIsInstance(error.__cause__, sqlite3.DatabaseError)
++
++    def test_open_rejects_preexisting_foreign_key_violations(self) -> None:
++        path = self.root / "foreign-key-corruption.db"
++        store = self.open_store(path)
++        self.close_store(store)
++        connection = sqlite3.connect(path)
++        connection.execute("PRAGMA foreign_keys = OFF")
++        connection.execute(
++            "INSERT INTO handoff_events "
++            "(event_id, handoff_id, revision, event_type, event_json, event_hash, occurred_at) "
++            "VALUES (?, ?, 1, 'HandoffRequested', '{}', ?, ?)",
++            (
++                "event:orphan",
++                "handoff:orphan",
++                hashlib.sha256(b"{}").hexdigest(),
++                T0.isoformat(),
++            ),
++        )
++        connection.commit()
++        connection.close()
++        opened = None
++        error = None
++        try:
++            opened = SQLiteFollowupUnitOfWork.open(path)
++        except BaseException as exc:
++            error = exc
++        if opened is not None:
++            opened.close()
++        connection = sqlite3.connect(path)
++        connection.execute("PRAGMA foreign_keys = OFF")
++        connection.execute("DELETE FROM handoff_events")
++        connection.commit()
++        connection.close()
++        self.assertIsInstance(error, DataCorruption)
++
+@@ -415,0 +564,31 @@ class Phase6FollowupStoreTests(unittest.TestCase):
++    def test_open_payment_exact_bootstrap_replay_is_noop_after_progression(self) -> None:
++        store = self.open_store()
++        anchor = confirmed_anchor()
++        policy = payment_effect_policy()
++        opened = store.open_payment(anchor, policy)
++        selected = store.apply_payment(
++            opened.state.subject.payment_id,
++            0,
++            method_event(opened.state),
++        )
++        before = database_fingerprint(self.path)
++        replay = None
++        error = None
++        try:
++            replay = store.open_payment(anchor, policy)
++        except BaseException as exc:
++            error = exc
++        self.assertIsNone(error)
++        self.assertIsNotNone(replay)
++        self.assertIs(replay.status, PaymentTransitionStatus.NOOP)
++        self.assertEqual(replay.state, selected.state)
++        self.assertEqual(database_fingerprint(self.path), before)
++
++        divergent_anchor = confirmed_anchor(
++            confirmed_at=T0 + timedelta(seconds=1),
++            payment_deadline=T0 + timedelta(days=2),
++        )
++        with self.assertRaises(IdentityConflict):
++            store.open_payment(divergent_anchor, policy)
++        self.assertEqual(database_fingerprint(self.path), before)
++
+@@ -762,0 +942,69 @@ class Phase6FollowupStoreTests(unittest.TestCase):
++    def test_task6_loader_rejects_every_noninitial_handoff_outbox_state(self) -> None:
++        cases = (
++            "pending_history",
++            "leased",
++            "delivered_without_receipt",
++            "delivered_with_receipt",
++        )
++        for index, case in enumerate(cases):
++            with self.subTest(case=case):
++                path = self.root / f"handoff-outbox-operational-{index}.db"
++                store = self.open_store(path)
++                request = handoff_requested(
++                    handoff_id=f"handoff:store:outbox-operational:{index}",
++                    incident_key=f"incident:store:outbox-operational:{index}",
++                    source_event_id=f"source:event:store:outbox-operational:{index}",
++                )
++                store.open_handoff(
++                    request,
++                    HandoffEffectPolicy.default_email_disabled(),
++                )
++                changed_at = (T0 + timedelta(seconds=1)).isoformat()
++                if case == "pending_history":
++                    store._connection.execute(
++                        "UPDATE handoff_outbox SET fencing_token=1, "
++                        "delivery_attempts=1, updated_at=?",
++                        (changed_at,),
++                    )
++                elif case == "leased":
++                    store._connection.execute(
++                        "UPDATE handoff_outbox SET status='leased', "
++                        "claim_owner='worker:synthetic', fencing_token=1, "
++                        "lease_acquired_at=?, lease_expires_at=?, updated_at=?",
++                        (
++                            changed_at,
++                            (T0 + timedelta(seconds=2)).isoformat(),
++                            changed_at,
++                        ),
++                    )
++                else:
++                    receipt_hash = "f" * 64
++                    store._connection.execute(
++                        "UPDATE handoff_outbox SET status='delivered', "
++                        "fencing_token=1, delivery_attempts=1, delivered_at=?, "
++                        "receipt_hash=?, updated_at=?",
++                        (changed_at, receipt_hash, changed_at),
++                    )
++                    if case == "delivered_with_receipt":
++                        message_id = store._connection.execute(
++                            "SELECT message_id FROM handoff_outbox"
++                        ).fetchone()[0]
++                        store._connection.execute(
++                            "INSERT INTO handoff_receipts "
++                            "(receipt_id, idempotency_key, message_id, receipt_json, "
++                            "receipt_hash, delivered_at) VALUES (?, ?, ?, '{}', ?, ?)",
++                            (
++                                f"receipt:store:outbox:{index}",
++                                f"receipt:store:outbox:idem:{index}",
++                                message_id,
++                                receipt_hash,
++                                changed_at,
++                            ),
++                        )
++                error = None
++                try:
++                    store.load_handoff(request.handoff_id)
++                except BaseException as exc:
++                    error = exc
++                self.assertIsInstance(error, DataCorruption)
++

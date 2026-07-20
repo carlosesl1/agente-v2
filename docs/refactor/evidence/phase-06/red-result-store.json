@@ -2,7 +2,7 @@
   "phase": 6,
   "task": 6,
   "title": "Atomic SQLite follow-up UnitOfWork",
-  "recorded_at_utc": "2026-07-20T00:13:31Z",
+  "recorded_at_utc": "2026-07-20T01:15:05Z",
   "base_sha": "7aff9b25f6b6cde7942ef031cef7b4be07ea9345",
   "rollout": "NO-GO",
   "postgresql_executed": false,
@@ -109,12 +109,27 @@
       "altered table definition",
       "partial valid table universe",
       "hostile trigger"
+    ],
+    "durable_schema": "main",
+    "durable_sql_main_qualified": true,
+    "temporary_schema_objects_rejected": true,
+    "attached_databases_rejected": true,
+    "caller_connection_rejected_without_ownership_transfer": true,
+    "schema_bootstrap_transactional": true,
+    "literal_extra_table_detection": true,
+    "foreign_key_check_on_open": true,
+    "task6_handoff_outbox_state": "exact initial pending tuple; no receipts",
+    "payment_bootstrap_replay_after_progression": "no-op returning current persisted state",
+    "stable_sqlite_error_taxonomy": [
+      "ConcurrencyConflict",
+      "DataCorruption",
+      "StoreUnavailable"
     ]
   },
   "schema": {
     "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
     "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
-    "generator_output_sha256": "4be738d97b1775063825f4e09148a267ab5f157275940067002f93998908e7df",
+    "generator_output_sha256": "2f8c9d2cdc8f26a05a7f8cba549001d4c6c407477dcec77fdf8ed5e608f88053",
     "sqlite_diff_bytes": 0,
     "postgresql_diff_bytes": 0,
     "drift_zero": true,
@@ -123,33 +138,33 @@
   },
   "green": {
     "focused": {
-      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-review-focused-final.out 2>&1",
-      "tests": 20,
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-second-review-focused-final.out 2>&1",
+      "tests": 26,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 4.497,
-      "output_sha256": "fa19a5fa7b8cb92e6a30c73a0aaaacd893d444d07884eafefdc2b21650c7daac"
+      "duration_seconds": 2.73,
+      "output_sha256": "050788604a48081809eec91291ed74c6ee784f7e617044673356258433a31780"
     },
     "regressions": {
-      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-review-regressions-final.out 2>&1",
+      "command": "python3 -m unittest tests.test_phase5_sqlite_store tests.test_phase6_types tests.test_phase6_handoff tests.test_phase6_payment tests.test_phase6_payment_reducer tests.test_phase6_schema -v >/tmp/phase6-task6-second-review-regressions-final.out 2>&1",
       "tests": 170,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 3.637,
-      "output_sha256": "01d6bd213694a0446da61cbec699b51b1a4c6f6668d67dd26b4fb836521430a0"
+      "duration_seconds": 4.157,
+      "output_sha256": "4f66de0142c8ee94e14c3d9f07011a1701de7effe4da55a5db3a09dbc15909bd"
     },
     "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-review-full-suite-final.out 2>&1",
-      "tests": 498,
+      "command": "python3 -m unittest discover -s tests -v >/tmp/phase6-task6-second-review-full-suite-final.out 2>&1",
+      "tests": 504,
       "failures": 0,
       "errors": 0,
-      "duration_seconds": 69.557,
-      "output_sha256": "bb0aa33e98bd4e948efceba24f2608241ec255d31f0f232a919e11f5a941a277"
+      "duration_seconds": 67.772,
+      "output_sha256": "b21faa9f25f88a6a10bd2bc86e1bf4f07cf9188c798dbadd9e25996b6ca61769"
     }
   },
   "artifact_sha256": {
-    "reservation_followup/sqlite_store.py": "f9332d7c141ed6f9d129cf94669193aacff3c39f55ed49ad3e00c84548b887a3",
-    "tests/test_phase6_sqlite_store.py": "f0a18dec8f017ee33a748b7ffd264601cd1ea4ef5f5ecab81478eac1c2c88457",
+    "reservation_followup/sqlite_store.py": "0dffdbd4d51e5fc71ddb7155279f3abeee2d30e582102022c1f3b54c2cb371ec",
+    "tests/test_phase6_sqlite_store.py": "74f25c8e86aebcd5c44c5a78033ab1f9ccf018fde96d361cc679281d6ea441d0",
     "tests/phase6_helpers.py": "f1545c3d471b54ab461c2cd6b7c338180b4891956a5549077197e6f2bbb943c9"
   },
   "scans": {
@@ -165,8 +180,15 @@
       "schema drift guards have hostile definition, partial-universe, and trigger probes",
       "payment optimistic revision has a two-connection stale-writer proof",
       "all three operational payment events are explicitly rejected before write",
-      "fault tests assert the exact injected SQLite sentinel cause"
-    ]
+      "fault tests assert the exact injected SQLite sentinel cause",
+      "TEMP shadow objects and attached databases are rejected before ownership transfer",
+      "all durable domain SQL is explicitly main-qualified",
+      "literal sqlite_ lookalike extras and preexisting FK violations fail closed",
+      "connection and physical-corruption failures use the stable store taxonomy",
+      "payment bootstrap replay remains idempotent after legitimate progression",
+      "Task 6 load accepts only initial pending handoff jobs and no receipts"
+    ],
+    "unqualified_durable_sql": []
   },
   "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only",
   "review_reds": [
@@ -194,6 +216,35 @@
         "SettlementFinished later-task boundary is explicitly tested",
         "fault assertions bind to the injected SQLite sentinel cause",
         "divergent open_payment proves fingerprint immutability"
+      ]
+    },
+    {
+      "name": "independent_task6_foundation_and_semantic_findings",
+      "rejected_base_sha": "e6d7585583ff5b2182e717a07944740934fdef50",
+      "test_tree_sha": "82a0afc66d8da321f6eaf874b620f90f71a445ed",
+      "patch_path": "docs/refactor/evidence/phase-06/task6-second-review-red.patch",
+      "patch_sha256": "ab3ff21c6caf495a340806c7dcfbaf6f6c2cc8a061d47aa8a56e92b63b5da9d6",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task6-second-review-red.patch",
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v >/tmp/phase6-task6-second-review-immutable-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 26,
+      "failures": 12,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task6-second-review-immutable-red.out",
+      "raw_output_versioned": false,
+      "output_sha256": "c82438654f947255461d0c2f6ff15e87da1aedb342b0baa711902a8cc511db19",
+      "critical_counterexample": "caller-supplied connection could shadow durable tables with TEMP objects, report success, then lose writes when the connection closed",
+      "important_findings_closed": [
+        "literal sqlite_ lookalike extras are detected in the main table universe",
+        "connect and closed-caller failures map to stable store errors without stealing rejected caller connections",
+        "preexisting foreign-key violations fail open as DataCorruption",
+        "physical SQLITE_CORRUPT/SQLITE_NOTADB failures classify as DataCorruption",
+        "exact open_payment bootstrap replay remains a no-op after workflow progression",
+        "Task 6 accepts only the exact initial pending handoff outbox tuple and no receipts"
+      ],
+      "minor_closures": [
+        "schema bootstrap is one explicit transaction rather than executescript autocommit",
+        "all durable domain SQL is main-qualified and attached databases are rejected"
       ]
     }
   ]
