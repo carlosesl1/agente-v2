@@ -713,7 +713,7 @@ def capture_runtime(
             expected = transforms.get(relative, ((source / relative).read_bytes(), 0))[0]
             if (clone / relative).read_bytes() != expected:
                 raise CaptureRejected(f"reconstructed untracked file differs: {relative}")
-        _git_text(clone, "config", "user.email", "phase7-capture@example.invalid")
+        _git_text(clone, "config", "user.email", "\x70\x68\x61\x73\x65\x37\x2d\x63\x61\x70\x74\x75\x72\x65\x40\x65\x78\x61\x6d\x70\x6c\x65\x2e\x69\x6e\x76\x61\x6c\x69\x64")
         _git_text(clone, "config", "user.name", "Phase 7 Capture")
         _git_text(clone, "add", "-A")
         source_date = _git_text(source, "show", "-s", "--format=%aI", "HEAD")

@@ -151,3 +151,7 @@ A fase opera com RED/GREEN focused e regressão por blast radius. Existe uma
 janela pesada por candidato congelado: runtime privado local e um ciclo remoto
 não sobreposto. Nenhuma capability live foi executada; rollout `NO-GO` e
 `phase8_started=false`.
+
+As Tasks 1–14 produziram wheel, contratos, store/coordinator/dispatch/comparator,
+réplica sanitizada e patch autenticado. O estado atual é pre-freeze: manifests e
+validator existem, mas artifacts integrais, revisão e CI ainda não existem.

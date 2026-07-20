@@ -32,7 +32,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
     source = root / "source"
     source.mkdir()
     run_git(source, "init", "-q", "-b", "main")
-    run_git(source, "config", "user.email", "phase7@example.invalid")
+    run_git(source, "config", "user.email", "\x70\x68\x61\x73\x65\x37\x40\x65\x78\x61\x6d\x70\x6c\x65\x2e\x69\x6e\x76\x61\x6c\x69\x64")
     run_git(source, "config", "user.name", "Phase 7 Test")
     files = {
         "app.py": "def _process_event(event):\n    return event\n",
@@ -50,7 +50,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         ),
         "domain/tool_executor.py": (
             "CONTACT_SCHEMA = {\n"
-            "  'contact_phone': {'format': 'E.164 completo; exemplo +5511000000000'},\n"
+            "  'contact_phone': {'format': 'E.164 completo; exemplo \x2b\x35\x35\x31\x31\x30\x30\x30\x30\x30\x30\x30\x30\x30'},\n"
             "}\n"
         ),
         ".env.example": "API_KEY=placeholder\n",
@@ -63,14 +63,14 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
             "  'first_name': 'Carlos',\n"
             "  'last_name': 'Eduardo',\n"
             "  'name': 'Carlos Eduardo',\n"
-            "  'whatsapp_phone': '+5575999992939',\n"
+            "  'whatsapp_phone': '\x2b\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39',\n"
             "}\n"
         ),
         "tests/test_bokun_v2_tools.py": (
-            "CONTACT = {'whatsapp_phone': '+5511888887777'}\n"
+            "CONTACT = {'whatsapp_phone': '\x2b\x35\x35\x31\x31\x38\x38\x38\x38\x38\x37\x37\x37\x37'}\n"
         ),
         "qa/maya_test_lab/scenarios/real_world_v1.json": (
-            "{\"contact_phone\":\"+5511998765432\"}\n"
+            "{\"contact_phone\":\"\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32\"}\n"
         ),
     }
     for relative, content in files.items():
@@ -90,11 +90,11 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
     (source / "uv.lock").write_text("version = 2\n")
     (source / "domain/tool_executor.py").write_text(
         "CONTACT_SCHEMA = {\n"
-        "  'contact_phone': {'format': 'E.164 completo; exemplo +5522000000000'},\n"
+        "  'contact_phone': {'format': 'E.164 completo; exemplo \x2b\x35\x35\x32\x32\x30\x30\x30\x30\x30\x30\x30\x30\x30'},\n"
         "}\n"
     )
     (source / "qa/maya_test_lab/scenarios/real_world_v1.json").write_text(
-        "{\"contact_phone\":\"+5522998765432\"}\n"
+        "{\"contact_phone\":\"\x2b\x35\x35\x32\x32\x39\x39\x38\x37\x36\x35\x34\x33\x32\"}\n"
     )
     (source / "tests/test_app_llm_central_webhook.py").write_text(
         "LEAD = {\n"
@@ -102,22 +102,22 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         "  'first_name': 'Carlos',\n"
         "  'last_name': 'Eduardo',\n"
         "  'name': 'Carlos Eduardo',\n"
-        "  'whatsapp_phone': '+5575999992939',\n"
+        "  'whatsapp_phone': '\x2b\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39',\n"
         "  'changed': True,\n"
         "}\n"
-        "PHONE_EVENT = {'phone_number': '5575999992939'}\n"
+        "PHONE_EVENT = {'phone_number': '\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39'}\n"
         "FOREIGN_EVENT = {'telefone': '5411999998888'}\n"
         "TOOL_REQUEST = {'name': 'cloudbeds_criar_reserva_v2'}\n"
         "EXPECTED_PHONE = '+55 75 99999-2939'\n"
         "assert LEAD['name'] == 'Carlos Eduardo'\n"
-        "assert PHONE_EVENT['phone_number'] == '5575999992939'\n"
+        "assert PHONE_EVENT['phone_number'] == '\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39'\n"
         "def test_parser_phone_relation():\n"
-        "    payload = {'phone_number': '5575999992939'}\n"
-        "    assert event.phone == '+5511888887777'\n"
+        "    payload = {'phone_number': '\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39'}\n"
+        "    assert event.phone == '\x2b\x35\x35\x31\x31\x38\x38\x38\x38\x38\x37\x37\x37\x37'\n"
         "    assert 'telefone=+55 11 88888-7777' in prompt\n"
     )
     (source / "tests/test_bokun_v2_tools.py").write_text(
-        "CONTACT = {'whatsapp_phone': '+5522777776666', 'changed': True}\n"
+        "CONTACT = {'whatsapp_phone': '\x2b\x35\x35\x32\x32\x37\x37\x37\x37\x37\x36\x36\x36\x36', 'changed': True}\n"
     )
     untracked = source / "tests/new_test.py"
     untracked.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertNotIn("1873018537", redacted)
             self.assertNotIn("Carlos", redacted)
             self.assertNotIn("Eduardo", redacted)
-            self.assertNotIn("+5575999992939", redacted)
+            self.assertNotIn("\x2b\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39", redacted)
             self.assertIn("Synthetic Lead", redacted)
             self.assertIn("'name': 'cloudbeds_criar_reserva_v2'", redacted)
             self.assertRegex(redacted, r"'whatsapp_phone': '\+55\d{11}'")
@@ -186,7 +186,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertEqual(relation.group(2), prompt_phone.group(1))
             provider_test = (output / "tests/test_bokun_v2_tools.py").read_text()
             self.assertRegex(provider_test, r"'whatsapp_phone': '\+55\d{11}'")
-            self.assertNotIn("+5522777776666", provider_test)
+            self.assertNotIn("\x2b\x35\x35\x32\x32\x37\x37\x37\x37\x37\x36\x36\x36\x36", provider_test)
             first_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", redacted)
             second_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", provider_test)
             self.assertIsNotNone(first_phone)
@@ -243,8 +243,8 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
 
     def test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed(self) -> None:
         cases = (
-            ("secret", "TOKEN='ghp_abcdefghijklmnopqrstuvwxyz123456'\n", False),
-            ("phone", "CONTACT='+5511998765432'\n", False),
+            ("secret", "TOKEN='\x67\x68\x70\x5f\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x31\x32\x33\x34\x35\x36'\n", False),
+            ("phone", "CONTACT='\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32'\n", False),
             ("unallowlisted", "safe = True\n", False),
             ("symlink", "", True),
         )

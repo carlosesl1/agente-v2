@@ -2,14 +2,28 @@
 
 ## Estado
 
-- Status: **em execução; spec e plano TDD econômico aprovados**.
+- Status: **implementação Tasks 1–14 concluída; preparando candidato pre-freeze**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
 - Plano aprovado: `81204c46ad89e11ce2320ac30a0fcdeb828454d6`.
 - Branch: `phase7-boundary-migration`.
 - Rollout: **NO-GO**.
+- `rollout=NO-GO`.
 - `phase8_started=false`.
+
+## Implementação pre-freeze
+
+- `agente-v2`: `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`.
+- Réplica runtime: `45fede82fc4086979674d829bf2e48b492d8036f`.
+- Tree da réplica: `0cddb86d86727802931bcf0b28b8a1f2de93d36a`.
+- Patch autenticado: SHA-256
+  `5ac9d9f461f8ad194873a1210286945274a3556b7a6546fc830876964dab1d10`.
+- Focused runtime: 68/68 na Task 13 e 239/239 na Task 14.
+- Runtime original: o pre-flight registrou 80 entradas; a captura posterior
+  observou 86. Desde a captura, HEAD/tree/status/diff permanecem idênticos ao
+  manifesto autenticado; nenhuma alteração nessa source foi feita pela Fase 7.
+- Candidato ainda não congelado; validação integral ainda não executada.
 
 ## Objetivo
 
@@ -34,7 +48,8 @@ O pre-flight econômico executou:
 - Python `3.12.13`;
 - SQLite `3.46.1`;
 - runtime observado no HEAD
-  `57408d8b2040399bc25ee7957505208079458884`, com 80 entradas locais;
+  `57408d8b2040399bc25ee7957505208079458884`, com 80 entradas locais no
+  pre-flight e 86 no instante da captura isolada;
 - zero capability live.
 
 Hashes e comandos estão em `../evidence/phase-07/entry-baseline.json`.

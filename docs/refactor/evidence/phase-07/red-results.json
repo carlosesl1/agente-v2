@@ -321,6 +321,17 @@
       "tests_failed": 1,
       "tests_in_error": 0,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: scripts.generate_phase7_manifest",
+      "command": "python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests -v",
+      "exit_code": 1,
+      "output_bytes": 920,
+      "output_sha256": "6aabb7aae70d88711be34881be1aac3c1dd6f547a4c522e9ae0de532cf426baf",
+      "task": 15,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,

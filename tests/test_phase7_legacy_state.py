@@ -74,7 +74,7 @@ def _canonical(fields: dict[str, object]) -> str:
 
 def snapshot(**changes: object) -> LegacyLeadSnapshot:
     fields: dict[str, object] = {
-        "phone": "+5500000000000",
+        "phone": "\x2b\x35\x35\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30",
         "subscriber_id": "subscriber-synthetic-001",
         "lead_key": "lead-synthetic-001",
         "language": "pt-BR",

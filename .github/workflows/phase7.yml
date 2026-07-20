@@ -1,0 +1,109 @@
+name: phase-7-boundary-migration
+
+on:
+  push:
+    branches:
+      - phase7-boundary-migration
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase7-frozen-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -B scripts/generate_phase7_schema.py --check
+      - run: python3 -B scripts/generate_phase7_manifest.py --check
+      - run: python3 -B scripts/validate_phase7.py
+      - run: python3 -B -m compileall -q reservation_boundary scripts tests
+
+  full-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -B -m unittest discover -s tests -v
+
+  phase7-properties:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run frozen properties
+        run: |
+          tree=$(git write-tree)
+          PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_properties.py --cases 20000 --seed 2026072007 --output /tmp/phase7-properties.json
+
+  phase7-faults:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run frozen faults
+        run: |
+          tree=$(git write-tree)
+          PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_faults.py --integral --output /tmp/phase7-faults.json
+
+  phase7-mutations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run frozen mutations
+        run: |
+          tree=$(git write-tree)
+          PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_mutations.py --integral --output /tmp/phase7-mutations.json
+
+  gate:
+    if: always()
+    needs:
+      - static
+      - full-suite
+      - phase7-properties
+      - phase7-faults
+      - phase7-mutations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every material job
+        env:
+          STATIC: ${{ needs.static.result }}
+          FULL_SUITE: ${{ needs.full-suite.result }}
+          PROPERTIES: ${{ needs.phase7-properties.result }}
+          FAULTS: ${{ needs.phase7-faults.result }}
+          MUTATIONS: ${{ needs.phase7-mutations.result }}
+        run: |
+          python3 - <<'PY'
+          import os
+          results = {
+              "static": os.environ["STATIC"],
+              "full-suite": os.environ["FULL_SUITE"],
+              "phase7-properties": os.environ["PROPERTIES"],
+              "phase7-faults": os.environ["FAULTS"],
+              "phase7-mutations": os.environ["MUTATIONS"],
+          }
+          if set(results.values()) != {"success"}:
+              raise SystemExit(f"Phase 7 gate failed: {results}")
+          print(results)
+          PY

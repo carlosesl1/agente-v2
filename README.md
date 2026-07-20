@@ -12,8 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — migração das fronteiras, com spec/plano aprovados e
-  execução TDD econômica iniciada**.
+- Fase ativa: **Fase 7 — implementação focused concluída; pre-freeze em
+  preparação, sem validação pesada ainda**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -33,12 +33,15 @@ Contrato central:
   passaram; o gate corrigido preservou 20.000 properties em 857,092 s, abaixo
   do budget de 900 s. O validator de pureza foi fechado contra execução de
   processos; os sete workflows remotos e os seis jobs da Fase 6 ficaram verdes.
-- Fase 7: **em execução** na branch `phase7-boundary-migration`, com
+- Fase 7: **em execução pre-freeze** na branch `phase7-boundary-migration`, com
   `LegacyStateImporter`, `TurnCoordinator`, `ToolDispatch` e
   `DecisionComparator` como fronteiras únicas. Quatro writes têm command owner
-  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout.
-- Runtime atual: apenas fonte de evidência; a árvore operacional com 80 entradas
-  locais permanece somente leitura e será reproduzida em clone isolado.
+  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. A
+  integração isolada está em `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`;
+  o candidato ainda não foi congelado.
+- Runtime atual: apenas fonte de evidência; a árvore operacional permanece
+  somente leitura. A réplica sanitizada foi integrada no commit local
+  `45fede82fc4086979674d829bf2e48b492d8036f`.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
 - Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem
@@ -84,6 +87,8 @@ python3 scripts/validate_phase3.py
 python3 scripts/validate_phase4.py
 python3 scripts/validate_phase5.py
 python3 scripts/validate_phase6.py
+python3 scripts/generate_phase7_manifest.py --check
+python3 scripts/validate_phase7.py
 ```
 
 O rollout permanece `NO-GO`; `phase7_started=true` e `phase8_started=false`.

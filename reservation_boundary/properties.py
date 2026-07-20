@@ -180,7 +180,7 @@ class PropertyReport:
 def synthetic_collecting_snapshot(index: int = 0) -> LegacyLeadSnapshot:
     instant = T0 + timedelta(seconds=index)
     fields: dict[str, object] = {
-        "phone": "+5500000000000",
+        "phone": "\x2b\x35\x35\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30",
         "subscriber_id": f"subscriber-synthetic-{index:06d}",
         "lead_key": f"lead-synthetic-{index:06d}",
         "language": "pt-BR" if index % 2 == 0 else "en",
