@@ -33,6 +33,15 @@ from reservation_boundary.coordinator import (
     TurnEventConflict,
     TurnImportRejected,
 )
+from reservation_boundary.dispatch import (
+    ALIASES,
+    CATALOG,
+    DispatchRejected,
+    DispatchResult,
+    ToolContract,
+    ToolDispatch,
+    command_migration_counts,
+)
 
 __version__ = "0.7.0"
 __all__ = (
@@ -59,6 +68,13 @@ __all__ = (
     "TurnDeadlineExceeded",
     "TurnEventConflict",
     "TurnImportRejected",
+    "ALIASES",
+    "CATALOG",
+    "DispatchRejected",
+    "DispatchResult",
+    "ToolContract",
+    "ToolDispatch",
+    "command_migration_counts",
     "semantic_hash",
     "to_wire_json",
 )
