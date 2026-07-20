@@ -2620,6 +2620,223 @@ class SQLiteFollowupUnitOfWork:
             )
             return transition
 
+    def recover_expired_pre_dispatch_settlement(
+        self,
+        *,
+        now: datetime,
+    ) -> tuple[PreDispatchReleaseDisposition, str] | None:
+        """Recover at most one expired pre-fence lease without an external port."""
+
+        now = _require_utc_input(now, "now")
+        with self._transaction("recover_expired_pre_dispatch_settlement"):
+            candidates = tuple(
+                self._connection.execute(
+                    "SELECT settlement_command_id, payment_id FROM main.payment_ledger "
+                    "WHERE status='leased' AND dispatch_slots_consumed=0 "
+                    "AND outcome_json IS NULL AND lease_expires_at<=? "
+                    "ORDER BY updated_at, settlement_command_id",
+                    (now.isoformat(),),
+                )
+            )
+            if not candidates:
+                return None
+            command_id, payment_id = candidates[0]
+            current, revision = self._load_payment(payment_id)
+            records = self._payment_financial_records(current)
+            if records is None:
+                raise DataCorruption("expired pre-fence ledger lacks financial records")
+            claim_record, command, ledger = records
+            lease = ledger["lease"]
+            if (
+                command.settlement_command_id != command_id
+                or ledger["status"] != "leased"
+                or lease is None
+                or ledger["dispatch_slots"] != 0
+                or ledger["outcome"] is not None
+                or now < lease.expires_at
+                or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+            ):
+                raise DataCorruption("expired pre-fence settlement is divergent")
+            if ledger["claim_count"] < _MAX_PRE_DISPATCH_CLAIMS:
+                updated = self._connection.execute(
+                    "UPDATE main.payment_ledger SET status='queued', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                    "WHERE settlement_command_id=? AND status='leased' "
+                    "AND claim_owner=? AND fencing_token=? AND claim_count=? "
+                    "AND dispatch_slots_consumed=0 AND lease_expires_at<=?",
+                    (
+                        now.isoformat(),
+                        command_id,
+                        lease.owner,
+                        lease.fencing_token,
+                        ledger["claim_count"],
+                        now.isoformat(),
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise StaleLease("expired pre-fence recovery lost its lease")
+                evidence = self._connection.execute(
+                    "UPDATE main.payment_evidence_claims SET status='retryable' "
+                    "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                    (command.evidence_claim_key,),
+                )
+                if evidence.rowcount != 1:
+                    raise DataCorruption("pre-fence recovery evidence lifecycle is divergent")
+                return PreDispatchReleaseDisposition.REQUEUED, command_id
+
+            outcome = SettlementOutcome(
+                certainty=SettlementCertainty.NOT_DISPATCHED,
+                payment_registered=False,
+                reservation_target_confirmed=False,
+                provider_reference_fingerprint=None,
+                requires_reconciliation=False,
+                claim_evidence=(),
+            )
+            event = SettlementFinished(
+                event_id=_settlement_event_id("finish", command_id),
+                payment_id=command.payment_id,
+                payment_version=command.payment_version,
+                economic_signature=command.economic_signature,
+                settlement_command_id=command_id,
+                outcome=outcome,
+                finished_at=now,
+            )
+            transition = reduce_payment(current, event)
+            outcome_raw = to_wire_json(outcome)
+            updated = self._connection.execute(
+                "UPDATE main.payment_ledger SET status='outcome_recorded', "
+                "claim_owner=NULL, lease_acquired_at=NULL, lease_expires_at=NULL, "
+                "outcome_certainty=?, outcome_json=?, outcome_hash=?, "
+                "outcome_recorded_at=?, updated_at=? WHERE settlement_command_id=? "
+                "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                "AND claim_count=? AND dispatch_slots_consumed=0 "
+                "AND lease_expires_at<=?",
+                (
+                    outcome.certainty.value,
+                    outcome_raw,
+                    semantic_hash(outcome),
+                    now.isoformat(),
+                    now.isoformat(),
+                    command_id,
+                    lease.owner,
+                    lease.fencing_token,
+                    ledger["claim_count"],
+                    now.isoformat(),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StaleLease("terminal pre-fence recovery lost its lease")
+            evidence = self._connection.execute(
+                "UPDATE main.payment_evidence_claims SET status='completed', consumed_at=? "
+                "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                (now.isoformat(), command.evidence_claim_key),
+            )
+            if evidence.rowcount != 1:
+                raise DataCorruption("terminal pre-fence evidence lifecycle is divergent")
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return PreDispatchReleaseDisposition.TERMINAL_NOT_DISPATCHED, command_id
+
+    def recover_expired_fenced_settlement(self, *, now: datetime) -> str | None:
+        """Fence an expired post-dispatch row permanently into unknown/manual review."""
+
+        now = _require_utc_input(now, "now")
+        with self._transaction("recover_expired_fenced_settlement"):
+            candidates = tuple(
+                self._connection.execute(
+                    "SELECT settlement_command_id, payment_id FROM main.payment_ledger "
+                    "WHERE status='dispatch_fenced' AND dispatch_slots_consumed=1 "
+                    "AND outcome_json IS NULL AND lease_expires_at<=? "
+                    "ORDER BY updated_at, settlement_command_id",
+                    (now.isoformat(),),
+                )
+            )
+            if not candidates:
+                return None
+            command_id, payment_id = candidates[0]
+            current, revision = self._load_payment(payment_id)
+            records = self._payment_financial_records(current)
+            if records is None:
+                raise DataCorruption("expired fenced ledger lacks financial records")
+            claim_record, command, ledger = records
+            lease = ledger["lease"]
+            request_hash = ledger["request_hash"]
+            fenced_at = ledger["fenced_at"]
+            if (
+                command.settlement_command_id != command_id
+                or ledger["status"] != "dispatch_fenced"
+                or lease is None
+                or ledger["dispatch_slots"] != 1
+                or ledger["outcome"] is not None
+                or now < lease.expires_at
+                or not _is_digest(request_hash)
+                or fenced_at is None
+                or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+            ):
+                raise DataCorruption("expired fenced settlement is divergent")
+            outcome = SettlementOutcome(
+                certainty=SettlementCertainty.DISPATCHED_UNKNOWN,
+                payment_registered=False,
+                reservation_target_confirmed=False,
+                provider_reference_fingerprint=None,
+                requires_reconciliation=True,
+                claim_evidence=(request_hash,),
+            )
+            event = SettlementFinished(
+                event_id=_settlement_event_id("finish", command_id),
+                payment_id=command.payment_id,
+                payment_version=command.payment_version,
+                economic_signature=command.economic_signature,
+                settlement_command_id=command_id,
+                outcome=outcome,
+                finished_at=now,
+            )
+            transition = reduce_payment(current, event)
+            outcome_raw = to_wire_json(outcome)
+            updated = self._connection.execute(
+                "UPDATE main.payment_ledger SET status='manual_review', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, outcome_certainty=?, "
+                "outcome_json=?, outcome_hash=?, outcome_recorded_at=?, updated_at=? "
+                "WHERE settlement_command_id=? AND status='dispatch_fenced' "
+                "AND claim_owner=? AND fencing_token=? AND claim_count=? "
+                "AND dispatch_slots_consumed=1 AND dispatch_request_hash=? "
+                "AND dispatch_fenced_at=? AND lease_expires_at<=?",
+                (
+                    outcome.certainty.value,
+                    outcome_raw,
+                    semantic_hash(outcome),
+                    now.isoformat(),
+                    now.isoformat(),
+                    command_id,
+                    lease.owner,
+                    lease.fencing_token,
+                    ledger["claim_count"],
+                    request_hash,
+                    fenced_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StaleLease("expired fenced recovery lost its permanent fence")
+            evidence = self._connection.execute(
+                "UPDATE main.payment_evidence_claims SET status='manual_review', consumed_at=? "
+                "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                (now.isoformat(), command.evidence_claim_key),
+            )
+            if evidence.rowcount != 1:
+                raise DataCorruption("fenced recovery evidence lifecycle is divergent")
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return command_id
+
 
 __all__ = [
     "StoreError",

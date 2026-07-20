@@ -1,0 +1,145 @@
+{
+  "phase": 6,
+  "task": 9,
+  "title": "Settlement worker and conservative reconciliation",
+  "recorded_at_utc": "2026-07-20T06:20:50Z",
+  "base_sha": "3e4b0a890816a8e2546a68db4304f45abba57be3",
+  "base_tree_sha": "eeff918d51f63c7d6334b3e973ade5844b848a3e",
+  "functional_commit": null,
+  "functional_tree": null,
+  "rollout": "NO-GO",
+  "postgresql_executed": false,
+  "network_used": false,
+  "live_capabilities_executed": [],
+  "scope": {
+    "implemented": [
+      "caller-supplied SettlementPort with prepare and dispatch",
+      "one-shot PaymentSettlementWorker",
+      "typed retryable and terminal preparation failures",
+      "permanent fence-before-dispatch order",
+      "post-fence exception and invalid-return promotion to DISPATCHED_UNKNOWN",
+      "one-shot store-only PaymentReconciler",
+      "exact-expiry pre-fence requeue or terminal NOT_DISPATCHED",
+      "exact-expiry post-fence DISPATCHED_UNKNOWN manual review without port",
+      "sanitized ordinary exception paths and BaseException propagation"
+    ],
+    "excluded": [
+      "default or live SettlementPort adapter",
+      "network, provider SDK, credentials, environment or subprocess",
+      "PaymentEffectJob and payment outbox projection/delivery from Task 10",
+      "PostgreSQL execution",
+      "Docker, Supabase, Redis, deploy or rollout"
+    ]
+  },
+  "task8_gate": {
+    "terminal_evidence_commit": "3e4b0a890816a8e2546a68db4304f45abba57be3",
+    "terminal_review": "deleg_6e9b4458",
+    "verdicts": ["Approved", "Approved", "Approved"],
+    "critical": 0,
+    "important": 0,
+    "minor": 0
+  },
+  "tdd": {
+    "initial_red": {
+      "command": "python3 -m unittest tests.test_phase6_payment_worker tests.test_phase6_reconciliation -v >/tmp/phase6-task9-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 2,
+      "failures": 0,
+      "errors": 2,
+      "classification": "honest absent-contract RED at module/API import boundaries; it does not independently prove downstream matrix rows",
+      "missing_contracts": [
+        "PaymentSettlementWorker and settlement worker public contracts",
+        "reservation_followup.reconciliation and PaymentReconciler"
+      ],
+      "patch_path": "docs/refactor/evidence/phase-06/task9-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_sha256": "0cf0069d295a2371d72ad33353c191bcbbd334609d613b899a8a338b2db0faaf",
+      "patch_bytes": 21145,
+      "staged_tree_sha": "2f2da867e8c95adf7fe52fdc8e64340f1d3f7fc7",
+      "reconstructed_tree_sha": "2f2da867e8c95adf7fe52fdc8e64340f1d3f7fc7",
+      "output_sha256": "38e138138532756ac8a546cc41d83b96b5a3fa58c01e5172caed4a2da692d67e",
+      "output_bytes": 1847,
+      "raw_output_path": "/tmp/phase6-task9-red.out",
+      "raw_output_versioned": false
+    },
+    "fixture_corrections_before_final_green": [
+      "two-payment tests received distinct confirmed anchors",
+      "two-payment tests received distinct canonical Pix E2E identities"
+    ],
+    "first_full_focused_green": {
+      "command": "python3 -m unittest tests.test_phase6_payment_worker tests.test_phase6_reconciliation -v",
+      "tests": 12,
+      "result": "OK",
+      "output_sha256": "8ea53821e60e83eb3ce3d9edf6cf5804a3fbc148f3ecb7d74562fd34216148a3"
+    },
+    "adversarial_additions": [
+      "raw prepare exception absent from release-failure chain",
+      "raw dispatch exception absent from outcome-write-failure chain",
+      "public Task 9 boundary replaces the intentional Task 8 absence oracle"
+    ]
+  },
+  "precommit_gates": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_payment_worker tests.test_phase6_reconciliation -v",
+      "tests": 14,
+      "result": "OK",
+      "output_sha256": "0814d46601b2a51a8fcdeeb800f1586a40ffe18fcd10a6f67815033529b21d88"
+    },
+    "targeted_regressions": {
+      "command": "python3 -m unittest tests.test_phase5_worker tests.test_phase5_reconciliation tests.test_phase6_payment_claims tests.test_phase6_sqlite_store tests.test_phase6_handoff_worker -v",
+      "tests": 110,
+      "result": "OK",
+      "output_sha256": "9dcb963ee711d60ac3177c6f5b445a8bcd3c23fa13d2a10839a61922f07414b0"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 572,
+      "result": "OK",
+      "output_sha256": "46efffb3db5b700aaa10fe8fb248495badf51e9f47c9cfdb28970a178cc26e5d"
+    },
+    "characterization": {
+      "command": "python3 -m characterization.harness",
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_capability_and_cross_ledger_scans": "passed",
+    "scanner_note": "reservation_target_confirmed caused a substring false positive; the corrected AST/SQL scanner found recovery writes only to payment_ledger and payment_evidence_claims"
+  },
+  "invariants": {
+    "worker_one_shot": true,
+    "fence_before_dispatch": true,
+    "max_dispatch_slots": 1,
+    "invalid_post_fence_not_dispatched_promoted_unknown": true,
+    "ordinary_dispatch_exception_promoted_unknown": true,
+    "base_exception_propagates": true,
+    "reconciler_has_port": false,
+    "exact_expiry_pre_fence_recoverable": true,
+    "exact_expiry_post_fence_manual_review": true,
+    "second_dispatch_after_unknown_or_partial": false,
+    "recovery_cross_ledger_writes": []
+  },
+  "task10_boundary": {
+    "payment_effect_types_present": false,
+    "payment_outbox_worker_present": false,
+    "interpretation": "Task 9 persists settlement/manual-review truth; Task 10 owns deterministic payment effect job types, projection and delivery. No incompatible placeholder outbox row is created."
+  },
+  "independent_review": {
+    "status": "pending",
+    "critical": null,
+    "important": null,
+    "minor": null
+  }
+}

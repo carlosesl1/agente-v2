@@ -84,6 +84,18 @@ from .workers import (
     HandoffOutboxWorker,
     HandoffWorkerDisposition,
     HandoffWorkerResult,
+    PaymentSettlementWorker,
+    RetryableSettlementPreparationError,
+    SettlementPort,
+    SettlementPreparationError,
+    SettlementWorkerDisposition,
+    SettlementWorkerResult,
+    TerminalSettlementPreparationError,
+)
+from .reconciliation import (
+    PaymentReconciler,
+    SettlementRecoveryDisposition,
+    SettlementRecoveryResult,
 )
 
 __all__ = [
@@ -166,4 +178,14 @@ __all__ = [
     "HandoffOutboxWorker",
     "HandoffWorkerDisposition",
     "HandoffWorkerResult",
+    "SettlementPreparationError",
+    "RetryableSettlementPreparationError",
+    "TerminalSettlementPreparationError",
+    "SettlementPort",
+    "SettlementWorkerDisposition",
+    "SettlementWorkerResult",
+    "PaymentSettlementWorker",
+    "SettlementRecoveryDisposition",
+    "SettlementRecoveryResult",
+    "PaymentReconciler",
 ]

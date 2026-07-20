@@ -997,10 +997,10 @@ class Phase6PaymentIntegrityTests(PaymentClaimStoreCase):
 
 
 class Phase6Task9BoundaryTests(unittest.TestCase):
-    def test_task8_defines_no_settlement_port_worker_reconciler_or_external_effect(self) -> None:
-        self.assertFalse(hasattr(followup_workers, "SettlementPort"))
-        self.assertFalse(hasattr(followup_workers, "PaymentSettlementWorker"))
-        self.assertIsNone(importlib.util.find_spec("reservation_followup.reconciliation"))
+    def test_task9_exposes_worker_and_reconciler_without_store_side_effect_adapters(self) -> None:
+        self.assertTrue(hasattr(followup_workers, "SettlementPort"))
+        self.assertTrue(hasattr(followup_workers, "PaymentSettlementWorker"))
+        self.assertIsNotNone(importlib.util.find_spec("reservation_followup.reconciliation"))
         source = Path(SQLiteFollowupUnitOfWork.__module__.replace(".", "/") + ".py")
         self.assertFalse(hasattr(SQLiteFollowupUnitOfWork, "dispatch_settlement"))
         self.assertFalse(hasattr(SQLiteFollowupUnitOfWork, "reconcile_settlement"))
