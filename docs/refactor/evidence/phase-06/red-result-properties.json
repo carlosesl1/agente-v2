@@ -2,19 +2,19 @@
   "schema_version": 1,
   "phase": "phase-06-handoff-and-payments",
   "task": 11,
-  "status": "green_pending_independent_review",
-  "generated_at": "2026-07-20T11:38:50Z",
+  "status": "green_pending_independent_regate",
+  "generated_at": "2026-07-20T12:18:07Z",
   "base": {
     "commit": "32e9127fc92452a1ad95429bf479eb20bbcb3e7d",
     "tree": "6bec44edc72f211dec5e869820e03cfc1f9cc738",
     "meaning": "Task 10 terminal review closure"
   },
   "functional": {
-    "commit": "daa7ad6b984a1b5bdd4a31e0fe93ff1accb5c191",
-    "tree": "e9b966042c0d3ea57fdea1e8662a9fd2f0306aa0",
+    "commit": "b06f01c9f0d6e265c7351ec76e684938b6959bb1",
+    "tree": "ce245d9ba427d6e978c452e79ccc83c2face1c1e",
+    "parent": "5a4b30b4cb2a91f27a6cf5f909b5e1a2b10e926f",
     "files": [
       "reservation_followup/properties.py",
-      "scripts/run_phase6_properties.py",
       "tests/test_phase6_properties.py"
     ]
   },
@@ -40,12 +40,21 @@
       "accepted": false
     },
     {
-      "status": "passed",
+      "status": "passed_but_superseded_by_review_correction",
       "cases": 20000,
       "elapsed_seconds": 874.041957,
       "limit_seconds": 900,
       "maxrss_kb": 219428,
       "property_result_sha256": "285905b365a22d5ef11380cda420cd98c656bb266046341e99f8893c466e4296",
+      "accepted": false
+    },
+    {
+      "status": "passed_review_correction",
+      "cases": 20000,
+      "elapsed_seconds": 865.8379271253943,
+      "limit_seconds": 900,
+      "maxrss_kb": 219360,
+      "property_result_sha256": "5ee4f40f051643e641744fd5e25e512c0a3f4d0bfe7feb036c52d06ec3e1d9a5",
       "accepted": true
     }
   ],
@@ -59,11 +68,11 @@
     "max_workers": 4,
     "deep_audits": 126,
     "violations": 0,
-    "elapsed_seconds": 874.041957,
+    "elapsed_seconds": 865.8379271253943,
     "within_15_minutes": true,
     "property_result": "docs/refactor/evidence/phase-06/property-result.json",
-    "property_result_sha256": "285905b365a22d5ef11380cda420cd98c656bb266046341e99f8893c466e4296",
-    "property_result_bytes": 28102919,
+    "property_result_sha256": "5ee4f40f051643e641744fd5e25e512c0a3f4d0bfe7feb036c52d06ec3e1d9a5",
+    "property_result_bytes": 28100672,
     "positive_counters": {
       "handoff_cases": 10000,
       "payment_cases": 10000,
@@ -89,22 +98,30 @@
       "unknown_automatic_retries": 0,
       "partial_transactions": 0,
       "wrong_target_settlements": 0
+    },
+    "payment_dimension_counts": {
+      "pix|lodging|hostel": 2500,
+      "pix|activity|agency": 1250,
+      "wise|lodging|hostel": 1250,
+      "wise|activity|agency": 2500,
+      "stripe|lodging|hostel": 1250,
+      "stripe|activity|agency": 1250
     }
   },
   "gates": {
     "focused": {
       "command": "python3 -m unittest tests.test_phase6_properties -v",
-      "tests": 8,
+      "tests": 9,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "e8bd5cd90087598c368efb51e994dee463508d57b80cd1433e9d143b9b3400b4"
+      "output_sha256": "8f82edbf10a8314e508f7abaca4dd66262c89b3bd6e7ad99b996ee24c3542116"
     },
     "full_suite": {
       "command": "python3 -m unittest discover -s tests -v",
-      "tests": 605,
+      "tests": 606,
       "failures": 0,
       "errors": 0,
-      "output_sha256": "e0b326c480a695f84a973aa447d60f8a15458ae6a930163e19edcf54ba7ed7a5"
+      "output_sha256": "f4fb6207b4c9e095aa9e64333f567545dc895c612d188c2bd181d3d1fdae3f2c"
     },
     "characterization": {
       "command": "python3 -m unittest tests.test_characterization_harness -v",
@@ -122,8 +139,8 @@
       "max_workers": 4
     },
     "artifact_scan": {
-      "files": 5,
-      "bytes": 28195925,
+      "files": 6,
+      "bytes": 28202853,
       "urls": [],
       "emails": [],
       "private_keys": [],
@@ -140,6 +157,26 @@
     "commercial_rollout": "NO-GO"
   },
   "independent_review": {
-    "status": "pending"
+    "status": "pending_regate",
+    "prior_batch": "deleg_36881321",
+    "prior_terminal_approvals": 0
+  },
+  "review_correction_red": {
+    "review_batch": "deleg_36881321",
+    "review_result": "one Needs fixes and two timeouts; zero terminal approvals",
+    "patch": "docs/refactor/evidence/phase-06/task11-review-red.patch",
+    "patch_sha256": "d4486c11df1f3bd2abc46246be760b2e02c9642fba7e8fbf5203a8fb504eee43",
+    "reconstructed_tree": "1d0bd04c67bd9c64ea07bbdfb52d13863ed617c3",
+    "command": "python3 -m unittest tests.test_phase6_properties.Phase6PropertyTests.test_passed_is_derived_and_hollow_or_divergent_rows_fail_closed tests.test_phase6_properties.Phase6PropertyTests.test_every_payment_method_covers_both_reservation_dimensions -v",
+    "exit_code": 1,
+    "tests_run": 2,
+    "failures": 2,
+    "errors": 0,
+    "witnesses": [
+      "hollow repeated row kept report.passed true",
+      "payment methods covered only activity/agency"
+    ],
+    "output_sha256": "95015657e411c271d5423b2299175fc2dc624fbcd4c3d8051d4b6da99d5e259f",
+    "green_output_sha256": "5ae2e94c2889488bee3cf52263c8e1b3f0da4b3d2a24bce80e872dea28de3092"
   }
 }
