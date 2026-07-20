@@ -151,6 +151,7 @@ git commit -m "docs(phase-7): activate boundary migration"
 
 **Files:**
 - Create: `pyproject.toml`
+- Create: `reservation_boundary/__init__.py` (somente `__version__` nesta tarefa)
 - Create: `scripts/build_phase7_wheel.py`
 - Create: `tests/test_phase7_package.py`
 - Modify: `tests/test_phase7_closeout.py`
@@ -232,6 +233,10 @@ def write_member(archive: ZipFile, name: str, payload: bytes) -> None:
 
 Sort source paths, normalize LF, reject symlinks/non-`.py`, compute URL-safe SHA-256 `RECORD`, and ensure `RECORD` itself has empty hash/size.
 
+Create `reservation_boundary/__init__.py` with only
+`__version__ = "0.7.0"`; no domain type or behavior is implemented before the
+Task 3 RED.
+
 - [ ] **Step 5: Run focused GREEN and smoke install**
 
 ```bash
@@ -248,7 +253,8 @@ Expected: equal SHA-256 and import only from target.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml scripts/build_phase7_wheel.py \
+git add pyproject.toml reservation_boundary/__init__.py \
+  scripts/build_phase7_wheel.py \
   tests/test_phase7_package.py tests/test_phase7_closeout.py \
   docs/refactor/evidence/phase-07/red-results.json
 git commit -m "build(phase-7): add deterministic kernel wheel"
@@ -259,7 +265,7 @@ git commit -m "build(phase-7): add deterministic kernel wheel"
 ### Task 3: Tipos fechados da fronteira
 
 **Files:**
-- Create: `reservation_boundary/__init__.py`
+- Modify: `reservation_boundary/__init__.py`
 - Create: `reservation_boundary/types.py`
 - Create: `tests/phase7_helpers.py`
 - Create: `tests/test_phase7_types.py`
@@ -299,7 +305,8 @@ python3 -B -m unittest tests.test_phase7_types -v \
   >/tmp/phase7-task3-red.out 2>&1
 ```
 
-Expected: `ModuleNotFoundError: reservation_boundary`.
+Expected: import failure for absent `reservation_boundary.types`/public symbols;
+the package bootstrap itself already exists from Task 2.
 
 - [ ] **Step 3: Implement exact public contracts**
 
