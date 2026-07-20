@@ -1,0 +1,89 @@
+diff --git a/tests/test_phase6_closeout.py b/tests/test_phase6_closeout.py
+index 29d134dabc532158faa405c09f9d70c41ca9de78..726e3a3deb17d1ade7e9e90dc18ad13a0bf75698 100644
+--- a/tests/test_phase6_closeout.py
++++ b/tests/test_phase6_closeout.py
+@@ -331,0 +332,3 @@ class Phase6CloseoutContractTests(unittest.TestCase):
++                "import asyncio as aio\n"
++                "import concurrent.futures as futures\n"
++                "import multiprocessing as mp\n"
+@@ -334 +337,8 @@ class Phase6CloseoutContractTests(unittest.TestCase):
+-                "from os import system as launch\n\n"
++                "from asyncio import create_subprocess_shell as create_shell\n"
++                "from concurrent.futures import ProcessPoolExecutor as Pool\n"
++                "from multiprocessing import Process as Worker\n"
++                "from os import execv as execute_exec\n"
++                "from os import posix_spawn as execute_posix_spawn\n"
++                "from os import spawnv as execute_spawn\n"
++                "from os import system as launch\n"
++                "from subprocess import run as run_command\n\n"
+@@ -339 +349,15 @@ class Phase6CloseoutContractTests(unittest.TestCase):
+-                "    sp.run(['curl', 'https://example.invalid'])\n",
++                "    os.execv('/bin/false', ['/bin/false'])\n"
++                "    execute_exec('/bin/false', ['/bin/false'])\n"
++                "    os.spawnv(0, '/bin/false', ['/bin/false'])\n"
++                "    execute_spawn(0, '/bin/false', ['/bin/false'])\n"
++                "    os.posix_spawn('/bin/false', ['/bin/false'], {})\n"
++                "    execute_posix_spawn('/bin/false', ['/bin/false'], {})\n"
++                "    sp.run(['curl', 'https://example.invalid'])\n"
++                "    run_command(['curl', 'https://example.invalid'])\n"
++                "    mp.Process()\n"
++                "    Worker()\n"
++                "    aio.create_subprocess_exec('/bin/false')\n"
++                "    aio.create_subprocess_shell('/bin/false')\n"
++                "    create_shell('/bin/false')\n"
++                "    futures.ProcessPoolExecutor()\n"
++                "    Pool()\n",
+@@ -348,2 +372,33 @@ class Phase6CloseoutContractTests(unittest.TestCase):
+-            self.assertTrue(summary["external_imports"])
+-            self.assertGreaterEqual(len(summary["process_executions"]), 4)
++            self.assertTrue(
++                any(item.endswith(":subprocess") for item in summary["external_imports"]),
++                summary["external_imports"],
++            )
++            self.assertTrue(
++                any(item.endswith(":multiprocessing") for item in summary["external_imports"]),
++                summary["external_imports"],
++            )
++            self.assertEqual(len(summary["process_executions"]), 18)
++            for marker in (
++                "os.popen",
++                "os.system",
++                "launch",
++                "os.execv",
++                "execute_exec",
++                "os.spawnv",
++                "execute_spawn",
++                "os.posix_spawn",
++                "execute_posix_spawn",
++                "sp.run",
++                "run_command",
++                "mp.Process",
++                "Worker",
++                "aio.create_subprocess_exec",
++                "aio.create_subprocess_shell",
++                "create_shell",
++                "futures.ProcessPoolExecutor",
++                "Pool",
++            ):
++                self.assertTrue(
++                    any(item.endswith(f":{marker}") for item in summary["process_executions"]),
++                    (marker, summary["process_executions"]),
++                )
+@@ -355,0 +411,17 @@ class Phase6CloseoutContractTests(unittest.TestCase):
++    def test_real_package_purity_baseline_has_no_capability_lists(self) -> None:
++        failures: list[str] = []
++        summary = check_package_purity(failures)
++        self.assertEqual(failures, [])
++        self.assertEqual(summary["python_files"], 11)
++        self.assertEqual(
++            {key: value for key, value in summary.items() if key != "python_files"},
++            {
++                "external_imports": [],
++                "environment_reads": [],
++                "process_executions": [],
++                "reconciler_capabilities": [],
++                "outbox_ledger_references": [],
++                "cross_workflow_writes": [],
++            },
++        )
++

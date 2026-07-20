@@ -1,0 +1,21 @@
+{
+  "files": [
+    {
+      "bytes": 24271,
+      "dialect": "postgresql",
+      "path": "schemas/phase6/postgresql.sql",
+      "sha256": "5ba013b78beb2f9d05c6296f578f252c8f577424c036105fa924d29d84c00e89"
+    },
+    {
+      "bytes": 57052,
+      "dialect": "sqlite",
+      "path": "schemas/phase6/sqlite.sql",
+      "sha256": "a5ccfed67df810b80c695e44fc7609991b49b39ee37b9b52b356260885b2f541"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "phase": "phase-06-handoff-and-payments",
+  "postgresql_executed": false,
+  "schema_version": 1,
+  "sqlite_executed": true
+}

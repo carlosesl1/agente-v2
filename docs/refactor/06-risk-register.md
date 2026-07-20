@@ -57,15 +57,15 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R51 | SQLite verde mascara incompatibilidade PostgreSQL | 3 | 4 | DDL futuro falha ou locking diverge | contrato comum/DDL regenerável, claims limitados e prova PostgreSQL obrigatória antes da migração | persistence/QA | aberto |
 | R52 | Outcome `effect_confirmed` sem evidência sustenta promessa pública falsa | 2 | 5 | success sem provider reference/evidence | contrato endurecido, projection fechada, serializer hostil e mutante | domain/worker | mitigado |
 | R53 | Banco/ledger de teste vaza PII em evidência | 2 | 5 | SQLite/WAL/log entra no Git ou relatório | temp dirs, `.gitignore`, fixtures sintéticas, scan e manifest sem bancos/logs | security/QA | mitigado |
-| R54 | Handoff terminal deixa confirmação antiga reaparecer | 2 | 5 | resposta mistura handoff e nova confirmação | precedência terminal no reducer/projection e corpus adversarial | handoff/domain | aberto |
-| R55 | E-mail opcional bloqueia fila ou resposta pública | 3 | 4 | incidente ativo sem acknowledgement porque SMTP está off | efeitos required/optional fechados; fila+ack obrigatórios, e-mail opcional | handoff/messaging | aberto |
-| R56 | Pagamento nasce de reserva incerta ou não executada | 2 | 5 | payment target sem `effect_confirmed` | `ConfirmedReservationAnchor` recomposta de state/command/outcome canônicos | payments/domain | aberto |
-| R57 | Mesmo comprovante/evento paga targets diferentes | 3 | 5 | E2E/event/credit repetido com nova idempotency key | claim global por identidade econômica, independente de target/unidade | payments/security | aberto |
-| R58 | Falha pós-dispatch financeiro retorna a retry | 2 | 5 | settlement/provider count > 1 após timeout | fence permanente, outcome partial/unknown e reconciliação manual | payments/worker | aberto |
-| R59 | Falha de outbox/form/e-mail repete settlement | 2 | 5 | provider delta cresce durante replay de follow-up | ledger financeiro separado e jobs duráveis por efeito | payments/messaging | aberto |
-| R60 | Pix visual é alegado como confirmação bancária | 3 | 4 | mensagem/evidência diz “banco confirmou” sem API | tipo `PixVisualEvidence`, wording fechado e review factual | payments/product | aberto |
-| R61 | Stripe/Wise contornam verificação pelo schema Pix | 2 | 5 | caller escolhe método genérico com booleano | evidence unions fechadas e ports/verifiers específicos | payments/security | aberto |
-| R62 | Troca de método reabre/reexecuta reserva | 2 | 5 | novo `ReservationCommand` após anchor confirmada | workflow financeiro irmão; property counter exige zero reservation commands | payments/domain | aberto |
+| R54 | Handoff terminal deixa confirmação antiga reaparecer | 2 | 5 | resposta mistura handoff e nova confirmação | precedência terminal no reducer/projection e corpus adversarial | handoff/domain | mitigado |
+| R55 | E-mail opcional bloqueia fila ou resposta pública | 3 | 4 | incidente ativo sem acknowledgement porque SMTP está off | efeitos required/optional fechados; fila+ack obrigatórios, e-mail opcional | handoff/messaging | mitigado |
+| R56 | Pagamento nasce de reserva incerta ou não executada | 2 | 5 | payment target sem `effect_confirmed` | `ConfirmedReservationAnchor` recomposta de state/command/outcome canônicos | payments/domain | mitigado |
+| R57 | Mesmo comprovante/evento paga targets diferentes | 3 | 5 | E2E/event/credit repetido com nova idempotency key | claim global por identidade econômica, independente de target/unidade | payments/security | mitigado |
+| R58 | Falha pós-dispatch financeiro retorna a retry | 2 | 5 | settlement/provider count > 1 após timeout | fence permanente, outcome partial/unknown e reconciliação manual | payments/worker | mitigado |
+| R59 | Falha de outbox/form/e-mail repete settlement | 2 | 5 | provider delta cresce durante replay de follow-up | ledger financeiro separado e jobs duráveis por efeito | payments/messaging | mitigado |
+| R60 | Pix visual é alegado como confirmação bancária | 3 | 4 | mensagem/evidência diz “banco confirmou” sem API | tipo `PixVisualEvidence`, wording fechado e review factual | payments/product | mitigado |
+| R61 | Stripe/Wise contornam verificação pelo schema Pix | 2 | 5 | caller escolhe método genérico com booleano | evidence unions fechadas e ports/verifiers específicos | payments/security | mitigado |
+| R62 | Troca de método reabre/reexecuta reserva | 2 | 5 | novo `ReservationCommand` após anchor confirmada | workflow financeiro irmão; property counter exige zero reservation commands | payments/domain | mitigado |
 
 ## Processo
 

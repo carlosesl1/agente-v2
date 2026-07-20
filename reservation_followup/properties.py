@@ -12,9 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from pathlib import Path
-import shutil
-import tempfile
+import sqlite3
 from types import MappingProxyType
 
 from reservation_domain import (
@@ -695,16 +693,6 @@ def _digest(payload: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
-
-
-def _temporary_directory() -> tempfile.TemporaryDirectory[str]:
-    shared_memory = Path("/dev/shm")
-    if shared_memory.is_dir():
-        try:
-            return tempfile.TemporaryDirectory(prefix="phase6-properties-", dir=shared_memory)
-        except OSError:
-            pass
-    return tempfile.TemporaryDirectory(prefix="phase6-properties-")
 
 
 def _confirmed_anchor(*, index: int, seed: int) -> ConfirmedReservationAnchor:
@@ -1630,16 +1618,13 @@ def _run_followup_property_range(
     deep_audits = 0
     quick_check = "ok"
     foreign_key_violations = 0
-    with _temporary_directory() as directory:
-        base = Path(directory)
-        template_path = base / "schema-template.db"
-        template_store = SQLiteFollowupUnitOfWork.open(template_path)
-        template_store.close()
+    template_store = SQLiteFollowupUnitOfWork.open(":memory:")
+    try:
         for index in range(start, start + cases):
             mode = FOLLOWUP_MODES[index % len(FOLLOWUP_MODES)]
-            db_path = base / f"case-{index}.db"
-            shutil.copyfile(template_path, db_path)
-            store = SQLiteFollowupUnitOfWork.open(db_path)
+            connection = sqlite3.connect(":memory:", isolation_level=None, timeout=5.0)
+            template_store._connection.backup(connection)
+            store = SQLiteFollowupUnitOfWork.open(connection)
             store._connection.execute("PRAGMA journal_mode=MEMORY")
             store._connection.execute("PRAGMA synchronous=OFF")
             store._connection.execute("PRAGMA temp_store=MEMORY")
@@ -1711,7 +1696,8 @@ def _run_followup_property_range(
                     foreign_key_violations += case_foreign_keys
             finally:
                 store.close()
-                db_path.unlink(missing_ok=True)
+    finally:
+        template_store.close()
     audit = FollowupPropertyAudit(
         start=start,
         cases=cases,

@@ -10,6 +10,7 @@ import sys
 import tempfile
 from types import MappingProxyType
 import unittest
+from unittest.mock import patch
 
 from reservation_followup.properties import (
     BUSINESS_UNIT_KEYS,
@@ -231,6 +232,16 @@ class Phase6PropertyTests(unittest.TestCase):
             {"hostel": 40, "agency": 40},
         )
         self.assertTrue(report.passed)
+
+    def test_each_case_uses_an_in_memory_clone_of_the_same_schema_template(self) -> None:
+        expected = run_followup_properties(cases=16, seed=SEED)
+        with patch(
+            "tempfile.TemporaryDirectory",
+            side_effect=AssertionError("filesystem-backed property case"),
+        ):
+            actual = run_followup_properties(cases=16, seed=SEED)
+        self.assertEqual(actual.to_dict(), expected.to_dict())
+        self.assertTrue(actual.passed)
 
     def test_sharding_is_nonoverlapping_and_case_rows_match_direct_global_indexes(self) -> None:
         ranges = _partition_ranges(cases=20_000, shard_cases=250)

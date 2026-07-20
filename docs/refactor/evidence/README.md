@@ -123,4 +123,19 @@ limites sem capability live. A spec e a página da fase formalizam dois
 workflows irmãos: handoff e pagamento.
 
 Na abertura, nenhuma reserva, settlement, mensagem, e-mail, provider, banco ou
-runtime é executado; rollout permanece `NO-GO`.
+runtime foi executado; rollout permaneceu `NO-GO`.
+
+O candidato local da Task 14 foi corrigido e aguarda re-gate independente. Os
+gates frescos registram 642 testes e 20.000 properties em 857,092 s; os gates
+imutáveis preservados registram 27 faults, 2.000 restarts, 200 rows de
+contention e 12/12 mutantes mortos. Publicação e CI remoto ainda não são
+alegados.
+
+Para verificar o closeout local, após os artefatos terminais:
+
+```bash
+python3 scripts/generate_phase6_manifest.py --check
+python3 scripts/validate_phase6.py
+```
+
+PostgreSQL não foi executado; rollout `NO-GO`; `phase7_started=false`.

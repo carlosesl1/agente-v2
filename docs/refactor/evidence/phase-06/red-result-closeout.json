@@ -1,0 +1,150 @@
+{
+  "base_commit": "507627b63065dbacee478960bb3e92a40fb735b0",
+  "gates": {
+    "compileall": {
+      "result": "passed"
+    },
+    "faults": {
+      "command": "/usr/local/bin/python3 -B scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix docs/refactor/evidence/phase-06/fault-matrix.json --write-restart docs/refactor/evidence/phase-06/restart-result.json --write-concurrency docs/refactor/evidence/phase-06/concurrency-result.json",
+      "elapsed_seconds": 707.295305935666,
+      "exit_code": 0,
+      "facts": {
+        "contention_rows": 200,
+        "fault_points": 27,
+        "restart_schedules": 2000
+      },
+      "max_rss_kb": 47372,
+      "output_bytes": 0,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "elapsed_seconds": 230.8144193869084,
+      "exit_code": 0,
+      "facts": {
+        "tests_run": 642
+      },
+      "max_rss_kb": 135764,
+      "output_bytes": 112745,
+      "output_sha256": "3705a65a9ce5106ed5adc8da18c4b45afdfcdf83aa020bf8861eb56c895436be"
+    },
+    "git_checks": {
+      "result": "passed"
+    },
+    "manifests": {
+      "result": "passed"
+    },
+    "mutations": {
+      "command": "/usr/local/bin/python3 -B scripts/run_phase6_mutations.py --write docs/refactor/evidence/phase-06/mutation-result.json",
+      "elapsed_seconds": 14.983244072645903,
+      "exit_code": 0,
+      "facts": {
+        "all_killed": true,
+        "mutants": 12
+      },
+      "max_rss_kb": 32644,
+      "output_bytes": 6375,
+      "output_sha256": "4220fac77c0bdc9de81b6d0373c4d2a8e31cbdeb488b7e0280b378679b2a415c"
+    },
+    "properties": {
+      "command": "/usr/local/bin/python3 -B scripts/run_phase6_properties.py --cases 20000 --seed 2026071906 --write /tmp/phase6-properties-budget.json",
+      "elapsed_seconds": 857.0920979008079,
+      "exit_code": 0,
+      "facts": {
+        "cases": 20000,
+        "seed": 2026071906
+      },
+      "max_rss_kb": 218792,
+      "output_bytes": 28100672,
+      "output_sha256": "5ee4f40f051643e641744fd5e25e512c0a3f4d0bfe7feb036c52d06ec3e1d9a5"
+    }
+  },
+  "live_capabilities_executed": false,
+  "live_database_calls": 0,
+  "live_delivery_calls": 0,
+  "live_provider_calls": 0,
+  "network_calls": 0,
+  "phase": "phase-06-handoff-and-payments",
+  "phase7_started": false,
+  "postgresql_executed": false,
+  "rollout": "NO-GO",
+  "scans": {
+    "live_claims": "passed",
+    "package_purity": "passed",
+    "postgresql": "static_ddl_only",
+    "secrets_pii": "passed"
+  },
+  "schema_version": 1,
+  "status": "local_terminal_gates_passed",
+  "task": 14,
+  "tdd": {
+    "focused_green": {
+      "command": "python3 -m unittest tests.test_phase6_properties tests.test_phase6_closeout -v",
+      "elapsed_seconds": 60.998,
+      "exit_code": 0,
+      "output_sha256": "841fd92155218e78658ab214a2b677530552af7ac84a20e217d25800e328acdb",
+      "tests_run": 24
+    },
+    "hardening_reds": [
+      {
+        "label": "recursive call graph",
+        "output_path": "/tmp/phase6-task14-callgraph-red.out",
+        "output_sha256": "7f98a2fec4f94fd3f2cc7ecd7264e16e8b9d269ce82658a9deb9d6e3b613a6d3"
+      },
+      {
+        "label": "extra evidence file",
+        "output_path": "/tmp/phase6-task14-extra-red.out",
+        "output_sha256": "dcf38c1a23ad5348c9b58819cd94a396f85091ddc7288fa2e6e7db507c6c6c85"
+      },
+      {
+        "label": "closed CI envelope",
+        "output_path": "/tmp/phase6-task14-ci-red.out",
+        "output_sha256": "90b263168e45317d4f9866130066fa4eef6a7e32aff503f677e085d442b7f17f"
+      },
+      {
+        "label": "workflow checkout and mutation structure",
+        "output_path": "/tmp/phase6-task14-workflow-red.out",
+        "output_sha256": "920aec4c125046ae31d2c83c18df5b0dd52ba909028c9a1e57af85a3740bd821"
+      },
+      {
+        "label": "environment/reconciler/cross-owner purity",
+        "output_path": "/tmp/phase6-task14-purity-red2.out",
+        "output_sha256": "4518600f3e344b8891d8b9561c030d8ba62f72c54778e4765d6fd1301e234302"
+      },
+      {
+        "label": "confirmed identities and contention owners",
+        "output_path": "/tmp/phase6-task14-identities-red.out",
+        "output_sha256": "b964013e605e0d664ad843eed571a226a3d36786192e3dc613d9d7c6985a8afb"
+      },
+      {
+        "label": "explicit mutation target inventory",
+        "output_path": "/tmp/phase6-task14-focused-final.out",
+        "output_sha256": "b757cd224df8755da33b07f07a4ea6d4497ef05448645880a22886e7de958c27"
+      },
+      {
+        "label": "CI budget oracle",
+        "output_path": "/tmp/phase6-task14-budget-red.out",
+        "output_sha256": "37fcafb53554e42fd36a21241aa1e75ff7d18463067b9d66ddc59bcd04b8eb33"
+      },
+      {
+        "label": "in-memory schema clone",
+        "output_path": "/tmp/phase6-task14-inmemory-red.out",
+        "output_sha256": "9deac148406c60a0bcad9147dd56c02c464357b85c710162d5b10ac3a45dda88"
+      },
+      {
+        "label": "process-execution purity fail-closed",
+        "output_path": "/tmp/phase6-task14-process-purity-red.out",
+        "output_sha256": "5d2c335da79e6c8198ef9a9fcd7b7694c5591f00a005b9123127a9e3be0993d7"
+      }
+    ],
+    "initial_red": {
+      "command": "python3 -m unittest tests.test_phase6_closeout -v",
+      "exit_code": 1,
+      "output_path": "/tmp/phase6-task14-red.out",
+      "output_sha256": "7f0382f65fa70d531fd9e3f4b587efcf0e6cda4d8861320dd5a09d6ad58080ae",
+      "patch_path": "docs/refactor/evidence/phase-06/task14-red.patch",
+      "patch_sha256": "66eb0563b81f8c3860a08c571ff0eaadd052aa611c6ccdd5581a3adf7020cebf",
+      "raw_output_versioned": false
+    }
+  }
+}

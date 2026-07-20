@@ -1,0 +1,40 @@
+diff --git a/tests/test_phase6_closeout.py b/tests/test_phase6_closeout.py
+index c5717a9eda64d80caf013f8c96a4ee660eaa1cdd..5a7174d2429c4fbbc55017c6c97babf6511fa007 100644
+--- a/tests/test_phase6_closeout.py
++++ b/tests/test_phase6_closeout.py
+@@ -29,0 +30 @@ from scripts.validate_phase6 import (
++    check_closeout_payload,
+@@ -467,0 +469,16 @@ class Phase6CloseoutContractTests(unittest.TestCase):
++    def test_closeout_rejects_any_gate_over_the_ci_budget(self) -> None:
++        payload = load_json("red-result-closeout.json")
++        payload["status"] = "local_terminal_gates_passed"
++        payload["gates"]["properties"]["elapsed_seconds"] = 899.999
++        failures: list[str] = []
++        check_closeout_payload(failures, payload)
++        self.assertEqual(failures, [])
++
++        payload["gates"]["properties"]["elapsed_seconds"] = 900.000001
++        failures = []
++        check_closeout_payload(failures, payload)
++        self.assertTrue(
++            any("budget" in item.lower() for item in failures),
++            failures,
++        )
++
+diff --git a/tests/test_phase6_properties.py b/tests/test_phase6_properties.py
+index 53902227cbf6ef2ef270580f265cf2f82a8f23be..29c732ac81a2940435aa584980d034363e58a269 100644
+--- a/tests/test_phase6_properties.py
++++ b/tests/test_phase6_properties.py
+@@ -12,0 +13 @@ import unittest
++from unittest.mock import patch
+@@ -234,0 +236,10 @@ class Phase6PropertyTests(unittest.TestCase):
++    def test_each_case_uses_an_in_memory_clone_of_the_same_schema_template(self) -> None:
++        expected = run_followup_properties(cases=16, seed=SEED)
++        with patch(
++            "tempfile.TemporaryDirectory",
++            side_effect=AssertionError("filesystem-backed property case"),
++        ):
++            actual = run_followup_properties(cases=16, seed=SEED)
++        self.assertEqual(actual.to_dict(), expected.to_dict())
++        self.assertTrue(actual.passed)
++

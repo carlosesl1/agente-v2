@@ -2,7 +2,7 @@
 
 ## Status
 
-`design e plano TDD aprovados; Task 1 em execução`
+`segundo ciclo corretivo da Task 14; re-gate, publicação e CI remoto pendentes`
 
 Aberta em `2026-07-19T17:48:53Z`, a partir do commit-base
 `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`.
@@ -84,6 +84,21 @@ a reserva.
 12. commit publicado e remoto conferido;
 13. rollout permanece `NO-GO`.
 
+## Gate local executado
+
+- [x] suíte completa fresca: 642/642 em 229,843 s;
+- [x] properties: 20.000 casos, seed `2026071906`, em 857,092 s para budget de 900 s;
+- [x] fault matrix: 27/27;
+- [x] restart: 2.000 schedules;
+- [x] contention: 50 rounds × quatro domínios, 200/200 single-winner;
+- [x] mutation catalog: 12/12 mortos;
+- [x] manifests determinísticos e validator fechado independente;
+- [x] DDL SQLite/PostgreSQL sem drift, com PostgreSQL apenas estático;
+- [x] zero capability live e rollout `NO-GO`;
+- [ ] commit publicado e SHA remoto conferido;
+- [ ] sete workflows remotos verdes;
+- [ ] commit documental terminal.
+
 ## Evidência de entrada
 
 - `../evidence/phase-06/entry-baseline.json`.
@@ -97,3 +112,12 @@ live é executada nesta fase.
 
 A Fase 7 permanece bloqueada. O fechamento da Fase 6 não a inicia
 automaticamente.
+
+Estado vinculante do closeout local:
+
+- implementação funcional e gates adversariais das Tasks 1–13 aprovados;
+- validator de pureza fechado contra execução de processos; novo re-gate pendente;
+- publicação e CI remoto ainda não alegados;
+- PostgreSQL não foi executado;
+- rollout `NO-GO`;
+- `phase7_started=false`.

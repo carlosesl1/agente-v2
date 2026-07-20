@@ -1,0 +1,96 @@
+name: phase-6-handoff-and-payments
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate previous phases
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: |
+          python3 scripts/validate_phase0.py
+          python3 scripts/validate_phase1.py
+          python3 scripts/validate_phase2.py
+          python3 scripts/validate_phase3.py
+          python3 scripts/validate_phase4.py
+          python3 scripts/validate_phase5.py
+      - name: Regenerate schemas and manifests
+        run: |
+          python3 scripts/generate_phase6_schema.py --sqlite /tmp/phase6-sqlite.sql --postgresql /tmp/phase6-postgresql.sql
+          diff -u schemas/phase6/sqlite.sql /tmp/phase6-sqlite.sql
+          diff -u schemas/phase6/postgresql.sql /tmp/phase6-postgresql.sql
+          python3 scripts/generate_phase6_manifest.py --check
+      - name: Validate Phase 6 evidence and purity
+        env:
+          PHASE1_LEGACY_SOURCE: /path-not-present-in-ci
+        run: python3 scripts/validate_phase6.py
+      - name: Compile and whitespace
+        run: |
+          python3 -m compileall -q reservation_domain reservation_lookup reservation_confirmation reservation_execution reservation_followup characterization scripts tests
+          git diff --check
+
+  full-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run all tests
+        run: python3 -m unittest discover -s tests -v
+
+  properties:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run Phase 6 properties
+        run: |
+          python3 scripts/run_phase6_properties.py --cases 20000 --seed 2026071906 --write docs/refactor/evidence/phase-06/property-result.json >/tmp/phase6-properties.stdout
+          git diff --exit-code -- docs/refactor/evidence/phase-06/property-result.json
+
+  fault-restart-contention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run fault restart and contention gates
+        run: |
+          python3 scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix docs/refactor/evidence/phase-06/fault-matrix.json --write-restart docs/refactor/evidence/phase-06/restart-result.json --write-concurrency docs/refactor/evidence/phase-06/concurrency-result.json >/tmp/phase6-faults.stdout
+          git diff --exit-code -- docs/refactor/evidence/phase-06/fault-matrix.json docs/refactor/evidence/phase-06/restart-result.json docs/refactor/evidence/phase-06/concurrency-result.json
+
+  mutations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Focused runner under hash seed 1
+        run: PYTHONHASHSEED=1 python3 -B -m unittest tests.test_phase6_mutation_runner -v
+      - name: Focused runner under hash seed 777
+        run: PYTHONHASHSEED=777 python3 -B -m unittest tests.test_phase6_mutation_runner -v
+      - name: Kill the closed mutation catalog once
+        run: python3 -B scripts/run_phase6_mutations.py --write docs/refactor/evidence/phase-06/mutation-result.json >/tmp/phase6-mutations.stdout
+      - name: Verify committed mutation evidence
+        run: git diff --exit-code -- docs/refactor/evidence/phase-06/mutation-result.json
+
+  phase6-gate:
+    needs: [static-validation, full-suite, properties, fault-restart-contention, mutations]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Confirm every Phase 6 gate passed
+        run: echo "All Phase 6 gates passed without weakening the 15-minute job budget."

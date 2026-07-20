@@ -1,0 +1,23 @@
+diff --git a/tests/test_phase6_closeout.py b/tests/test_phase6_closeout.py
+index 5a7174d2429c4fbbc55017c6c97babf6511fa007..29d134dabc532158faa405c09f9d70c41ca9de78 100644
+--- a/tests/test_phase6_closeout.py
++++ b/tests/test_phase6_closeout.py
+@@ -330,0 +331,11 @@ class Phase6CloseoutContractTests(unittest.TestCase):
++            (package / "processes.py").write_text(
++                "import os\n"
++                "import subprocess as sp\n"
++                "from os import system as launch\n\n"
++                "def execute_external():\n"
++                "    os.popen('curl https://example.invalid')\n"
++                "    os.system('curl https://example.invalid')\n"
++                "    launch('curl https://example.invalid')\n"
++                "    sp.run(['curl', 'https://example.invalid'])\n",
++                encoding="utf-8",
++            )
+@@ -336,0 +348,6 @@ class Phase6CloseoutContractTests(unittest.TestCase):
++            self.assertTrue(summary["external_imports"])
++            self.assertGreaterEqual(len(summary["process_executions"]), 4)
++            self.assertTrue(
++                any("process execution" in failure for failure in failures),
++                failures,
++            )

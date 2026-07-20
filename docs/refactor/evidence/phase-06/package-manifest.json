@@ -1,0 +1,64 @@
+{
+  "files": [
+    {
+      "bytes": 5441,
+      "path": "reservation_followup/__init__.py",
+      "sha256": "d0f3367554983123c46bb4053d1d1d4f5c9a3881afea6587170b8ea018fd75ec"
+    },
+    {
+      "bytes": 38904,
+      "path": "reservation_followup/handoff.py",
+      "sha256": "aca67b8f6d8481a72d912b95e082341afa664eda4655015b5c470c46076d0224"
+    },
+    {
+      "bytes": 84037,
+      "path": "reservation_followup/payment.py",
+      "sha256": "f259d1ed1f3a385670c28b7a19fe0a8950229f09b22b76913241841bd198c917"
+    },
+    {
+      "bytes": 4485,
+      "path": "reservation_followup/projection.py",
+      "sha256": "1593a3dd317e2974864729cb7b119f634ced6268a0bef86225c86a65924de55c"
+    },
+    {
+      "bytes": 63574,
+      "path": "reservation_followup/properties.py",
+      "sha256": "d59fec9c6e3300f4c30b65a6b779e7b8dacf2af20a6987baec37371e5dbfc5fa"
+    },
+    {
+      "bytes": 3041,
+      "path": "reservation_followup/reconciliation.py",
+      "sha256": "40eeb323cfa8d27df5392b48985143d1fcc767d401b31e21443ac1618f681c23"
+    },
+    {
+      "bytes": 24352,
+      "path": "reservation_followup/schema.py",
+      "sha256": "a2976a63303c6c7cf5257bca617ddc0f41e10a78a0f070ad559c582d465f0e4e"
+    },
+    {
+      "bytes": 12521,
+      "path": "reservation_followup/serialization.py",
+      "sha256": "fe3fae5d69a140b6795e9a6609d2709d8ac2154051e45f6477f50190009f4a9e"
+    },
+    {
+      "bytes": 147766,
+      "path": "reservation_followup/sqlite_store.py",
+      "sha256": "a2b6b9cf833c0be7adbd32133c8ae8fbb834f68933a5183a972c9fc785a9c466"
+    },
+    {
+      "bytes": 32904,
+      "path": "reservation_followup/types.py",
+      "sha256": "908d8072fad645192548867e3c3768b6a5f1548f0d7767bf4eada87581957820"
+    },
+    {
+      "bytes": 15327,
+      "path": "reservation_followup/workers.py",
+      "sha256": "f1910d73d62fb9e72851431774e00b4aa18701f92dedd576c7264811d07d4bc4"
+    }
+  ],
+  "hash_algorithm": "sha256",
+  "package": "reservation_followup",
+  "phase": "phase-06-handoff-and-payments",
+  "python_file_count": 11,
+  "schema_version": 1
+}
