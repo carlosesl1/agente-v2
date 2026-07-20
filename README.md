@@ -12,7 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 6 — segundo ciclo corretivo da Task 14 em validação**.
+- Fase ativa: **Fase 6 concluída, publicada e com sete workflows remotos verdes; Fase 7 bloqueada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -24,18 +24,19 @@ Contrato central:
 - Fase 5: **concluída e publicada** no commit
   `9199b2c70fb3a26d9f12949b25d135f625b2317d`; seis workflows remotos verdes,
   sem Docker, PostgreSQL, Supabase, provider ou delivery live.
-- Fase 6: **segundo ciclo corretivo local, ainda não publicado**; aberta no commit-base terminal da Fase 5
+- Fase 6: **concluída e publicada** no commit
+  `8f23a8376f1d226f2ada5d80a45cbb930a79429e`; aberta no commit-base terminal da Fase 5
   `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`; design separa
   `HandoffWorkflow` e `PaymentWorkflow`, sem integração live. Properties,
   faults/restarts/contention, mutations, manifests, validator e suíte terminal
   passaram; o gate corrigido preservou 20.000 properties em 857,092 s, abaixo
   do budget de 900 s. O validator de pureza foi fechado contra execução de
-  processos; novo re-gate, publicação e CI remoto permanecem pendentes.
+  processos; os sete workflows remotos e os seis jobs da Fase 6 ficaram verdes.
 - Runtime atual: apenas fonte de evidência; não é alterado por esta fase.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
 - Rollout comercial: **NO-GO**; migração, shadow e canary pertencem às fases
-  posteriores. A abertura da Fase 6 foi autorizada após o closeout da Fase 5.
+  posteriores. A Fase 7 permanece bloqueada e não foi iniciada.
 
 ## Navegação
 

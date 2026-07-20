@@ -2,7 +2,7 @@
 
 ## Status
 
-`segundo ciclo corretivo da Task 14; re-gate, publicação e CI remoto pendentes`
+`concluída, publicada e com sete workflows remotos verdes`
 
 Aberta em `2026-07-19T17:48:53Z`, a partir do commit-base
 `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`.
@@ -95,9 +95,23 @@ a reserva.
 - [x] manifests determinísticos e validator fechado independente;
 - [x] DDL SQLite/PostgreSQL sem drift, com PostgreSQL apenas estático;
 - [x] zero capability live e rollout `NO-GO`;
-- [ ] commit publicado e SHA remoto conferido;
-- [ ] sete workflows remotos verdes;
-- [ ] commit documental terminal.
+- [x] commit `8f23a8376f1d226f2ada5d80a45cbb930a79429e` publicado e SHA remoto conferido;
+- [x] sete workflows remotos verdes;
+- [x] seis jobs do workflow da Fase 6 em `success`;
+- [x] commit documental terminal preparado para publicação.
+
+## Closeout remoto
+
+- gate terminal `deleg_a0d93273`: três verdicts `Approved`, sem findings;
+- `main == origin/main == remote == 8f23a8376f1d226f2ada5d80a45cbb930a79429e` após o push;
+- workflows 0–6 concluídos em `success` para esse SHA;
+- jobs `static-validation`, `full-suite`, `properties`,
+  `fault-restart-contention`, `mutations` e `phase6-gate` concluídos em
+  `success`;
+- IDs e URLs estão em `evidence/phase-06/ci-result.json`;
+- o commit documental usa skip de CI porque não altera produção e evita repetir
+  a validação pesada do candidato já congelado;
+- rollout comercial permanece `NO-GO` e `phase7_started=false`.
 
 ## Evidência de entrada
 
@@ -116,8 +130,8 @@ automaticamente.
 Estado vinculante do closeout local:
 
 - implementação funcional e gates adversariais das Tasks 1–13 aprovados;
-- validator de pureza fechado contra execução de processos; novo re-gate pendente;
-- publicação e CI remoto ainda não alegados;
+- Task 14 aprovada terminalmente 3/3;
+- publicação e CI remoto autenticados em `ci-result.json`;
 - PostgreSQL não foi executado;
 - rollout `NO-GO`;
 - `phase7_started=false`.

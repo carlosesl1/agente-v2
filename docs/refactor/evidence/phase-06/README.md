@@ -2,7 +2,7 @@
 
 Fase: `phase-06-handoff-and-payments`.
 
-Status: **matriz de regressão de pureza fechada; re-gate, publicação e CI remoto ainda pendentes**.
+Status: **Fase 6 concluída, publicada e com sete workflows remotos verdes**.
 
 Design e plano TDD versionados:
 
@@ -40,8 +40,11 @@ avanço e o boundary sem capabilities live.
   subprocesso/multiprocessing e chamadas de execução de processo;
 - matriz focused cobre 18 formas de execução de processo, os dois imports
   proibidos e o baseline real com todas as listas de capability vazias;
-- manifests, checksums e re-gate terminal serão congelados no novo candidato;
-- CI remoto permanece pendente e não é alegado por este candidato.
+- gate terminal independente: 3/3 `Approved`, sem findings;
+- implementação publicada em `8f23a8376f1d226f2ada5d80a45cbb930a79429e`;
+- `main`, `origin/main` e remoto foram conferidos no mesmo SHA;
+- sete workflows remotos e os seis jobs da Fase 6 concluíram em `success`;
+- IDs e URLs verificáveis estão em `ci-result.json`.
 
 ## Regras de evidência
 
@@ -59,5 +62,5 @@ avanço e o boundary sem capabilities live.
 - rollout: `NO-GO`;
 - `phase7_started=false`;
 - a Fase 7 permanece bloqueada;
-- nenhuma alegação de publicação ou CI remoto verde é feita antes da evidência
-  correspondente em `ci-result.json`.
+- publicação e CI remoto estão vinculados à evidência em `ci-result.json`;
+- o fechamento da Fase 6 não autoriza nem inicia a Fase 7.

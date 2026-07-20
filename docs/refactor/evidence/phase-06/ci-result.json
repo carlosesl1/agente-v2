@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "phase": "phase-06-handoff-and-payments",
+  "implementation_commit": "8f23a8376f1d226f2ada5d80a45cbb930a79429e",
+  "checked_at_utc": "2026-07-20T18:21:27Z",
+  "all_success": true,
+  "workflow_count": 7,
+  "workflows": [
+    {
+      "id": 29766723216,
+      "name": "phase-0-validation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723216"
+    },
+    {
+      "id": 29766723293,
+      "name": "phase-1-characterization",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723293"
+    },
+    {
+      "id": 29766723469,
+      "name": "phase-2-domain",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723469"
+    },
+    {
+      "id": 29766723299,
+      "name": "phase-3-lookups",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723299"
+    },
+    {
+      "id": 29766723371,
+      "name": "phase-4-confirmation",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723371"
+    },
+    {
+      "id": 29766723416,
+      "name": "phase-5-durable-execution",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723416"
+    },
+    {
+      "id": 29766723407,
+      "name": "phase-6-handoff-and-payments",
+      "conclusion": "success",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29766723407",
+      "jobs": [
+        {
+          "id": 88434653858,
+          "name": "static-validation",
+          "conclusion": "success"
+        },
+        {
+          "id": 88434653753,
+          "name": "full-suite",
+          "conclusion": "success"
+        },
+        {
+          "id": 88434653836,
+          "name": "properties",
+          "conclusion": "success"
+        },
+        {
+          "id": 88434653745,
+          "name": "fault-restart-contention",
+          "conclusion": "success"
+        },
+        {
+          "id": 88434653747,
+          "name": "mutations",
+          "conclusion": "success"
+        },
+        {
+          "id": 88436599517,
+          "name": "phase6-gate",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "phase7_authorized_after_closeout": false,
+  "phase7_started": false,
+  "rollout": "NO-GO"
+}

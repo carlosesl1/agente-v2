@@ -240,6 +240,7 @@ REQUIRED = (
     "docs/refactor/evidence/phase-06/package-manifest.json",
     "docs/refactor/evidence/phase-06/validation-result.json",
     "docs/refactor/evidence/phase-06/performance-result.json",
+    "docs/refactor/evidence/phase-06/ci-result.json",
     "docs/refactor/evidence/phase-06/adversarial-review.md",
     "docs/refactor/evidence/phase-06/task14-red.patch",
     "docs/refactor/evidence/phase-06/task14-budget-red.patch",

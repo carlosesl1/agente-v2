@@ -125,13 +125,13 @@ workflows irmãos: handoff e pagamento.
 Na abertura, nenhuma reserva, settlement, mensagem, e-mail, provider, banco ou
 runtime foi executado; rollout permaneceu `NO-GO`.
 
-O candidato local da Task 14 foi corrigido e aguarda re-gate independente. Os
-gates frescos registram 642 testes e 20.000 properties em 857,092 s; os gates
-imutáveis preservados registram 27 faults, 2.000 restarts, 200 rows de
-contention e 12/12 mutantes mortos. Publicação e CI remoto ainda não são
-alegados.
+O candidato da Task 14 foi aprovado 3/3, publicado em
+`8f23a8376f1d226f2ada5d80a45cbb930a79429e` e validado pelos sete workflows
+remotos. Os gates registram 642 testes, 20.000 properties em 857,092 s, 27
+faults, 2.000 restarts, 200 rows de contention e 12/12 mutantes mortos. IDs e
+URLs verificáveis estão em `phase-06/ci-result.json`.
 
-Para verificar o closeout local, após os artefatos terminais:
+Para verificar o closeout publicado:
 
 ```bash
 python3 scripts/generate_phase6_manifest.py --check

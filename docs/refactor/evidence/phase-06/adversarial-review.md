@@ -3,10 +3,10 @@
 Escopo: workflows de handoff/payment, claims, settlement, outboxes, properties,
 faults/restarts/contention, mutations e closeout local capability-free.
 
-Estado: re-gate anterior invalidado; segundo ciclo fecha execução de processos
-no oracle de pureza e aguarda novo gate terminal. Properties permanecem em
-857,092 s para budget de 900 s. Rollout `NO-GO`;
-`phase7_started=false`; publicação e CI remoto ainda não alegados.
+Estado: gate terminal aprovado 3/3 e implementação publicada no commit
+`8f23a8376f1d226f2ada5d80a45cbb930a79429e`; sete workflows remotos e os seis
+jobs da Fase 6 concluíram em `success`. Properties permanecem em 857,092 s para
+budget de 900 s. Rollout `NO-GO`; `phase7_started=false`.
 
 ## Perguntas vinculantes
 

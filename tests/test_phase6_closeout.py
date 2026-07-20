@@ -496,6 +496,11 @@ class Phase6CloseoutContractTests(unittest.TestCase):
             self.assertTrue(failures, "comment-only workflow false-greened")
 
     def test_ci_validator_requires_exact_seven_successful_workflows_and_phase6_jobs(self) -> None:
+        actual = load_json("ci-result.json")
+        actual_failures: list[str] = []
+        check_ci_payload(actual_failures, actual)
+        self.assertEqual(actual_failures, [])
+
         names = (
             "phase-0-validation",
             "phase-1-characterization",
