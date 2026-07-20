@@ -698,7 +698,7 @@ Uma única **janela de validação pesada** é aberta quando:
 - tree funcional está congelada;
 - manifests e patch da réplica estão fechados;
 - não existe delta unstaged;
-- a branch ainda não foi publicada nem recebeu PR.
+- a branch ainda não foi publicada.
 
 A janela possui dois estágios não sobrepostos. Nenhum gate roda nos dois.
 
@@ -716,8 +716,8 @@ Este estágio não executa a suíte integral nem properties do `agente-v2`.
 
 #### Estágio remoto — candidato `agente-v2`
 
-Depois do estágio privado verde, a branch congelada é publicada uma vez e um
-único PR/ciclo de CI é aberto. Esse ciclo executa:
+Depois do estágio privado verde, a branch congelada é publicada uma vez. O
+primeiro push desse branch dispara um único ciclo de `phase7.yml`, que executa:
 
 1. suíte integral do `agente-v2`;
 2. properties de import/dual-read/shadow;
@@ -728,11 +728,12 @@ Depois do estágio privado verde, a branch congelada é publicada uma vez e um
 7. wheel reproducibility e manifest checks;
 8. compile, checksums e scans.
 
-Os workflows históricos podem participar desse mesmo ciclo de PR, mas não são
-rodados localmente antes nem novamente após merge. A integração em `main` usa um
-merge commit com `[skip ci]` somente se seu tree for byte-idêntico ao tree do
-candidato aprovado no PR; qualquer delta funcional invalida essa dispensa. O
-closeout documental também usa `[skip ci]` quando não contém delta funcional.
+Os workflows históricos não escutam o branch da Fase 7; seus validators estáticos
+necessários rodam dentro de `phase7.yml`, sem repetir workloads pesados. Depois do
+ciclo verde e da revisão terminal, a integração em `main` usa merge commit com
+`[skip ci]` somente se seu tree for byte-idêntico ao tree do candidato aprovado;
+qualquer delta funcional invalida essa dispensa. O closeout documental também
+usa `[skip ci]` quando não contém delta funcional.
 
 Após congelamento, correção sem delta de produção repete apenas o focused e o
 gate afetado. Mudança material em package público, wire, schema, algoritmo de
@@ -764,6 +765,19 @@ Workflow `phase7.yml` contém jobs paralelos:
 3. `boundary-properties-faults`;
 4. `package-runtime-contract`;
 5. `phase7-gate`.
+
+Triggers fechados:
+
+```yaml
+on:
+  push:
+    branches: [phase7-boundary-migration]
+  workflow_dispatch:
+```
+
+Não há trigger de `pull_request` ou `main`. O branch é publicado somente depois
+do estágio privado e nunca recebe push sem nova tree funcional. O merge em
+`main` usa `[skip ci]` e tree idêntico, evitando um segundo ciclo pesado.
 
 O CI do `agente-v2` é autocontido: não clona o repositório operacional e não usa
 credenciais cross-repo. Ele valida:
