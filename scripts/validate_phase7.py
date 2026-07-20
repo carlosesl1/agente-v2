@@ -45,8 +45,8 @@ EXPECTED_RUNTIME_SOURCE = {
     "source_status_hash": "e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a",
     "source_tracked_diff_hash": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
     "source_tree": "67b5fe18d4685281778e41cd61cd584dd063ea60",
-    "synthetic_baseline_commit": "947934b2f61f1f1294955c4837ded1ccbd20053d",
-    "synthetic_baseline_tree": "4be7fbffb3ee8cd1a69fa117bc2b61e6b8278cb2",
+    "synthetic_baseline_commit": "9d519e23fc66ae8d39fca574ff5079ccad7a53aa",
+    "synthetic_baseline_tree": "417066d15d544677df4ad184951fb3482d11d560",
 }
 
 

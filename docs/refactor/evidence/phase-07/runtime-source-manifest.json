@@ -370,15 +370,21 @@
   ],
   "redacted_paths": [
     {
+      "path": "tests/test_agencia_migration.py",
+      "redaction_count": 1,
+      "replica_sha256": "ae64130dd173034151036a33bf9bf5aaa5551ecf1595d278faf9630fe8e9a074",
+      "source_sha256": "7ca020ee56006b5285f102aab51bafadee4daea4e64905c1b8c6c32ec31d806a"
+    },
+    {
       "path": "tests/test_app_llm_central_webhook.py",
-      "redaction_count": 12,
-      "replica_sha256": "00c146121e1745760c2ca28e161c4e9359cd5cbbba1e604102ffc0ee30219be3",
+      "redaction_count": 14,
+      "replica_sha256": "0230cc98d67b33e058390cc33b8ed46c1bdc54ceb64f947267d5196870717493",
       "source_sha256": "c5336db3efe1480fd311a7f5288351ed5c32f822a9f7ba437de625c297f07e85"
     },
     {
       "path": "tests/test_app_shadow_webhook.py",
-      "redaction_count": 73,
-      "replica_sha256": "1d49c6aa3a3c98f265466f7f8bee2f49a6c67e560721da9a7297b3a6685025a0",
+      "redaction_count": 88,
+      "replica_sha256": "c7710a9f9aaf3a76ba634c4c02d2198b1d50d6ea1450faff67ce0e068cf8cff7",
       "source_sha256": "46ba38459d1af6ea5a5e5d4894e0a116d37db40401c71885b31805f6127da770"
     },
     {
@@ -389,38 +395,50 @@
     },
     {
       "path": "tests/test_bokun_v2_tools.py",
-      "redaction_count": 8,
-      "replica_sha256": "ed0ff647690442c75bf538815339b4ff0cef20993901408079ad6294d8cd2c02",
+      "redaction_count": 4,
+      "replica_sha256": "4660c7c84d36b8782f338ef1f83afda2f368dadcb5d43a7bfb5474fec5d8f80d",
       "source_sha256": "295f05701f96956d9c4633c8a05dde8ee3f36d8949cfae7b109470ba356173dc"
     },
     {
       "path": "tests/test_chapada_native_tools.py",
-      "redaction_count": 8,
-      "replica_sha256": "90076cf73161c5e8329347e5442318a47de3e20afc4d89a5c300b67b91755bca",
+      "redaction_count": 35,
+      "replica_sha256": "7fdd1b3be97116ce2ba48a353114084d8719ddc6c0b4418cec2cf24fbbc02ade",
       "source_sha256": "3954ce97e9b6e8df0dfb3d229e340b59b9cd0bd3b6ea397979ad89dddc527c30"
     },
     {
+      "path": "tests/test_fechamento_migration.py",
+      "redaction_count": 1,
+      "replica_sha256": "9fbda24f346607f393f739a6808d156faf3b3c9dfb983afbc37071ddd41c5969",
+      "source_sha256": "3686e2c254a1e2b0d0140186e365f49d5b54ad8e758a8c119e0811f64f98347f"
+    },
+    {
       "path": "tests/test_hermes_native_runner.py",
-      "redaction_count": 21,
-      "replica_sha256": "ebecc2524708faff587648a11180b8788d4175df384f180837c696db7233b9d4",
+      "redaction_count": 116,
+      "replica_sha256": "60743c8a6245e20d0e18cee86e61d794d6875c541f1eaaf23431e1e3d69f3eba",
       "source_sha256": "f2cf8d67bd73cd043c5a62c2c1af7ebd419974e72c6f7d25d2499292d924e5ff"
     },
     {
+      "path": "tests/test_hostel_migration.py",
+      "redaction_count": 1,
+      "replica_sha256": "88650f8499af09408a7a3aa678505491dabefee106cbc787f43a91fc2a02aba9",
+      "source_sha256": "c56735aae63392a83a4f7fdae3a6250bd6b13e4296af0bb5404e4f5ca27fef5c"
+    },
+    {
       "path": "tests/test_manychat_single_confirmation_flow.py",
-      "redaction_count": 3,
-      "replica_sha256": "1d6156160370dac507e047bb5672515b197a9cb8ddbdd3072b488d0b9f28f25b",
+      "redaction_count": 2,
+      "replica_sha256": "8404b3b728b2ddd4e678eb482be81423138ac2c64d39e4485cb96a1b3be7baa2",
       "source_sha256": "77487f6eab16cdf62a160d807c412382857d29638814be402222e9c088d224bf"
     },
     {
       "path": "tests/test_maya_cloudbeds_v2_fake_conversation.py",
       "redaction_count": 9,
-      "replica_sha256": "c28113aa51e9108937a87874f922601566bd22f97fa39e597a6c2be378625977",
+      "replica_sha256": "b7beba53acf80a980e2d8ff0df5932924c1742ae2cc3877dc066d9a313835799",
       "source_sha256": "1197f43953ce9d0dc3d0a49f4fed74e92f3828dc42668a417f7b17337b0d7ff8"
     },
     {
       "path": "tests/test_maya_v2_fake_conversation.py",
-      "redaction_count": 8,
-      "replica_sha256": "04bed54fe1d699240a0ed35795dfbf82661434ac7cc37dbb773197efce8e1467",
+      "redaction_count": 4,
+      "replica_sha256": "42eef314c604bc685524f9a7e636cf37ef6cc21f90849867437ff0cfeb0527cf",
       "source_sha256": "3a63b0bf512cb365ffd450ba7fc01276ec49a123e639da67060b241e969bd121"
     },
     {
@@ -437,15 +455,15 @@
     },
     {
       "path": "tests/test_requested_regressions.py",
-      "redaction_count": 6,
-      "replica_sha256": "6c7abafb3eb48dc0a55fcbf8483817a18f1546dda38ed9e12f3733d5a17ae0f0",
+      "redaction_count": 10,
+      "replica_sha256": "5602f17e93f6c18ebaddc092f537b1ac44cc36cfadbdefbf33ded99199435978",
       "source_sha256": "907f29f2581b719f61076690f956c0705a43ac796bd3846164e59a8504278fb2"
     },
     {
-      "path": "tests/test_runtime_tool_policy.py",
+      "path": "tests/test_security_guardrails.py",
       "redaction_count": 2,
-      "replica_sha256": "54042601c46a61dc72de07e5f7428b2ec1a899c55ef65bf9b6ba3dd39154e134",
-      "source_sha256": "b919fb44d7625a6618be40b6879ccbb67bd92a55216f7f722304958a7e393f69"
+      "replica_sha256": "42bb479e59ebb08c0d3b0a5ba13ad8fd2b978a8bd528aea66832f7bfe57ba2b2",
+      "source_sha256": "2e4936e0474442af0ebf006df7d45727757bfaded81891480e3d3dd6fcebeabe"
     },
     {
       "path": "tests/test_side_effect_ledger.py",
@@ -455,14 +473,14 @@
     },
     {
       "path": "tests/test_tool_cache_and_turn_budget.py",
-      "redaction_count": 2,
-      "replica_sha256": "7130df50ca0dd9e2a3bd2668fa473db2b555d42e9e56e4bb84e7bfb87393117a",
+      "redaction_count": 1,
+      "replica_sha256": "8cbb560651558bdac88681253b8800488cfff7c62f54ea41997198964d9c3d6c",
       "source_sha256": "a6e81a258de636a1f57bf8829cf7f6c24ed15ac01ed309e0a7930e2c060f0f58"
     },
     {
       "path": "tests/test_tool_executor.py",
-      "redaction_count": 113,
-      "replica_sha256": "79eef3c31d4e25d23eba04f5255066078bc3c9b98cbf0227ead77227ba7a4972",
+      "redaction_count": 110,
+      "replica_sha256": "757cfb94b00b77a60ad0a0b6bf90af07b421ab2dc2149a07b4ac80b732f57cc7",
       "source_sha256": "8ab9fd9eab79431dd7a132bda9c5e646f65cc3c7d24abce02556c6d3fa6f33b1"
     }
   ],
@@ -474,8 +492,8 @@
   "source_tracked_diff_hash": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
   "source_tree": "67b5fe18d4685281778e41cd61cd584dd063ea60",
   "source_unchanged": true,
-  "synthetic_baseline_commit": "947934b2f61f1f1294955c4837ded1ccbd20053d",
-  "synthetic_baseline_tree": "4be7fbffb3ee8cd1a69fa117bc2b61e6b8278cb2",
+  "synthetic_baseline_commit": "9d519e23fc66ae8d39fca574ff5079ccad7a53aa",
+  "synthetic_baseline_tree": "417066d15d544677df4ad184951fb3482d11d560",
   "untracked_paths": [
     {
       "kind": "file",

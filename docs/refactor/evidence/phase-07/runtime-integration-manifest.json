@@ -1,48 +1,30 @@
 {
-  "baseline_commit": "947934b2f61f1f1294955c4837ded1ccbd20053d",
-  "baseline_tree": "4be7fbffb3ee8cd1a69fa117bc2b61e6b8278cb2",
-  "changed_file_count": 18,
+  "baseline_commit": "9d519e23fc66ae8d39fca574ff5079ccad7a53aa",
+  "baseline_tree": "417066d15d544677df4ad184951fb3482d11d560",
+  "changed_file_count": 6,
   "changed_files": [
     ".hermes/plugins/chapada_leads_tools/__init__.py",
     "app.py",
     "domain/tool_dispatch_adapter.py",
     "domain/turn_coordinator_adapter.py",
-    "tests/test_app_llm_central_webhook.py",
-    "tests/test_app_shadow_webhook.py",
-    "tests/test_bokun_v2_tools.py",
-    "tests/test_chapada_native_tools.py",
-    "tests/test_hermes_native_runner.py",
-    "tests/test_manychat_single_confirmation_flow.py",
-    "tests/test_maya_cloudbeds_v2_fake_conversation.py",
-    "tests/test_maya_v2_fake_conversation.py",
     "tests/test_phase7_tool_dispatch_adapter.py",
-    "tests/test_phase7_turn_coordinator_adapter.py",
-    "tests/test_requested_regressions.py",
-    "tests/test_runtime_tool_policy.py",
-    "tests/test_tool_cache_and_turn_budget.py",
-    "tests/test_tool_executor.py"
+    "tests/test_phase7_turn_coordinator_adapter.py"
   ],
   "focused_tests": [
     {
       "exit_code": 0,
       "failed": 0,
-      "passed": 68,
-      "scope": "task13_adapter_and_webhooks"
-    },
-    {
-      "exit_code": 0,
-      "failed": 0,
-      "passed": 239,
-      "scope": "task14_runner_executor_native_tools"
+      "passed": 36,
+      "scope": "candidate2_collection_and_boundary_adapters"
     }
   ],
-  "integration_commit": "45fede82fc4086979674d829bf2e48b492d8036f",
-  "integration_tree": "0cddb86d86727802931bcf0b28b8a1f2de93d36a",
+  "integration_commit": "b9ac6fe6328e0db58a78e75b80cfc9f0cd5bc8a7",
+  "integration_tree": "ac13d8ed3618f8a19b6b9bff88dbf0685ea49f75",
   "live_capabilities_executed": [],
   "patch_applies": true,
-  "patch_bytes": 177667,
+  "patch_bytes": 37500,
   "patch_path": "docs/refactor/evidence/phase-07/runtime-integration.patch",
-  "patch_sha256": "5ac9d9f461f8ad194873a1210286945274a3556b7a6546fc830876964dab1d10",
+  "patch_sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0",
   "phase": 7,
   "phase8_started": false,
   "production_files": [
@@ -52,17 +34,16 @@
     "domain/turn_coordinator_adapter.py"
   ],
   "rollout": "NO-GO",
-  "runtime_contract_manifest_sha256": "817eaa2a2361c2126378f7655762cf548ed3070c8fdb4b075172248230a0c7c6",
+  "runtime_contract_manifest_sha256": "4dbdcedaea80452f9ce6d4f031ef77d15cb06a144b55eb623a513a8ec203f013",
   "runtime_integration_contract_manifest_sha256": "a927fa7bd780fbaf6fe7f061d37afda74ea8ffa14283a6ec7f897e218ec4f135",
   "schema_version": 1,
   "source_head": "57408d8b2040399bc25ee7957505208079458884",
+  "source_status_entries": 86,
   "source_status_hash": "e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a",
   "source_tracked_diff_hash": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
   "source_tree": "67b5fe18d4685281778e41cd61cd584dd063ea60",
   "source_unchanged": true,
-  "task13_commit": "2750becfd3acd205dc20bef529f09449cb3b061c",
-  "task13_tree": "7d8d9dce8e80184801f9fdb38e969f434a04bab4",
-  "wheel_bytes": 210572,
-  "wheel_sha256": "e67ca895d386cade29f095ae59ddf0a628e633821cb29ca2e70726e8a8ae5a61",
+  "wheel_bytes": 210582,
+  "wheel_sha256": "663734180622f53d4ec89305ac91209a5e301e27308dc9e410b1a52b6351f177",
   "wheel_version": "0.7.0"
 }

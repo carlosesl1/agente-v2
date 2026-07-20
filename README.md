@@ -37,11 +37,11 @@ Contrato central:
   `LegacyStateImporter`, `TurnCoordinator`, `ToolDispatch` e
   `DecisionComparator` como fronteiras únicas. Quatro writes têm command owner
   nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. A
-  integração isolada está em `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`;
-  o candidato ainda não foi congelado.
+  integração isolada foi corrigida após um collection failure do primeiro
+  candidato; o sucessor ainda não foi congelado.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
-  `45fede82fc4086979674d829bf2e48b492d8036f`.
+  `b9ac6fe6328e0db58a78e75b80cfc9f0cd5bc8a7`.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
 - Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem

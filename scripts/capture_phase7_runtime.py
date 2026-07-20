@@ -41,6 +41,7 @@ PII_REDACTION_ALLOWLIST: Final = frozenset(
         "tests/test_manychat_single_confirmation_flow.py",
     )
 )
+SENSITIVE_SCENARIO_PATH: Final = "qa/maya_test_lab/scenarios/real_world_v1.json"
 _SAFE_TEXT_SUFFIXES: Final = frozenset(
     (".bash", ".html", ".json", ".lock", ".md", ".py", ".sh", ".toml", ".yaml", ".yml")
 )
@@ -141,13 +142,22 @@ def _forbidden_path(relative: str) -> bool:
         return True
     if any("backup" in part for part in lowered):
         return True
-    if lowered[:3] == ("qa", "maya_test_lab", "scenarios"):
+    if path.as_posix().casefold() == SENSITIVE_SCENARIO_PATH.casefold():
         return True
     if name.endswith((".db", ".sqlite", ".sqlite3", ".log", ".pem", ".key")):
         return True
     if name in ("id_rsa", "id_ed25519"):
         return True
     return False
+
+
+def _remove_from_baseline(relative: str) -> bool:
+    """Remove secret artifacts, but retain the tracked safe scenario fixture."""
+
+    return _forbidden_path(relative) and (
+        PurePosixPath(relative).as_posix().casefold()
+        != SENSITIVE_SCENARIO_PATH.casefold()
+    )
 
 
 def _file_digest(path: Path) -> tuple[str, int]:
@@ -680,7 +690,7 @@ def capture_runtime(
             if not raw:
                 continue
             relative = _safe_relative(raw.decode("utf-8"))
-            if _forbidden_path(relative):
+            if _remove_from_baseline(relative):
                 target = clone / relative
                 if target.is_dir():
                     shutil.rmtree(target)

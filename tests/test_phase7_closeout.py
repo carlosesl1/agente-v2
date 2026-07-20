@@ -146,7 +146,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertTrue(manifest["patch_applies"])
         self.assertEqual(
             manifest["integration_tree"],
-            "0cddb86d86727802931bcf0b28b8a1f2de93d36a",
+            "ac13d8ed3618f8a19b6b9bff88dbf0685ea49f75",
         )
         self.assertEqual(
             manifest["changed_file_count"], len(manifest["changed_files"])

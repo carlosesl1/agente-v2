@@ -69,8 +69,16 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         "tests/test_bokun_v2_tools.py": (
             "CONTACT = {'whatsapp_phone': '\x2b\x35\x35\x31\x31\x38\x38\x38\x38\x38\x37\x37\x37\x37'}\n"
         ),
+        "qa/maya_test_lab/scenarios/__init__.py": (
+            "from pathlib import Path\n"
+            "BUILTIN_CORE_SUITE = Path(__file__).with_name('core_smoke.json')\n"
+            "BUILTIN_REAL_WORLD_SUITE = Path(__file__).with_name('real_world_v1.json')\n"
+        ),
+        "qa/maya_test_lab/scenarios/core_smoke.json": (
+            "{\"schema_version\":1,\"scenarios\":[]}\n"
+        ),
         "qa/maya_test_lab/scenarios/real_world_v1.json": (
-            "{\"contact_phone\":\"\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32\"}\n"
+            "{\"schema_version\":1,\"fixture\":\"tracked-safe-baseline\"}\n"
         ),
     }
     for relative, content in files.items():
@@ -151,8 +159,15 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             )
             self.assertTrue((output / "tests/new_test.py").is_file())
             self.assertFalse((output / ".env.example").exists())
-            self.assertFalse(
-                (output / "qa/maya_test_lab/scenarios/real_world_v1.json").exists()
+            self.assertTrue(
+                (output / "qa/maya_test_lab/scenarios/__init__.py").is_file()
+            )
+            self.assertTrue(
+                (output / "qa/maya_test_lab/scenarios/core_smoke.json").is_file()
+            )
+            self.assertEqual(
+                (output / "qa/maya_test_lab/scenarios/real_world_v1.json").read_text(),
+                "{\"schema_version\":1,\"fixture\":\"tracked-safe-baseline\"}\n",
             )
             redacted = (output / "tests/test_app_llm_central_webhook.py").read_text()
             self.assertNotIn("1873018537", redacted)
