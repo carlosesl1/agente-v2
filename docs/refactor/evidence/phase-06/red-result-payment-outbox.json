@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "task": 10,
-  "recorded_at_utc": "2026-07-20T08:17:35Z",
-  "status": "implementation_complete_review_pending",
+  "recorded_at_utc": "2026-07-20T08:53:44Z",
+  "status": "review_findings_corrected_terminal_regate_pending",
   "base_commit": "54d0a3177c5694123d63b2046717551ed9f1f012",
   "base_tree": "da27307e36f4e23b3433d81ed95570ca1e222589",
-  "functional_commit": "a5d2a3cb7bde378bcbc14eb52c77f97e53890ac0",
-  "functional_tree": "05994d85d1bbd334569e960089d288ddf9cdc003",
+  "functional_commit": "bee8cf79220a4e022c3cd441c3be4a70b2159497",
+  "functional_tree": "69298d569359df22baf348d4a0584e3acc646a30",
   "scope": {
     "implemented": [
       "immutable payment outbox claim and receipt contracts",
@@ -17,7 +17,11 @@
       "required-before-optional deterministic claim ordering",
       "paid and manual-review state monotonicity during effect delivery",
       "global fail-closed consistency scan for every settlement outcome with missing jobs",
-      "receipt and outbox canonicality, binding, replay, and rollback checks"
+      "receipt and outbox canonicality, binding, replay, and rollback checks",
+      "delivery/release double-failure exception-chain sanitization",
+      "self-bound payment claim message identity and claim-bound receipt replay identity",
+      "exact payment outbox fencing-token and delivery-attempt equality in DTO, loader, live claim, SQLite, and static PostgreSQL DDL",
+      "reproducible all-jobs-missing mutation RED with immutable base and reconstructed tree"
     ],
     "excluded": [
       "settlement dispatch or replay",
@@ -66,42 +70,74 @@
       "raw_output_versioned": false
     },
     "all_jobs_missing_red": {
+      "base_commit": "1639e91bb8508037854975f4c9afba001ae177e2",
+      "base_tree": "c7ba3eaba02eb60836b7ade3c17e1218a7d8c27f",
+      "patch_path": "docs/refactor/evidence/phase-06/task10-all-jobs-missing-red.patch",
+      "patch_format": "git diff --binary --full-index -U0 mutation reproduction",
+      "patch_sha256": "54274695299f36faab6b3d1b68f9aa51a4b7bd26188d1799d49076eac91e3129",
+      "patch_bytes": 684,
+      "reconstructed_tree": "409f3d70d925898dd9b03f54f45fe8659f2632cc",
       "command": "python3 -m unittest tests.test_phase6_payment_outbox.Phase6PaymentOutboxTests.test_missing_required_job_fails_closed_without_recreating_it -v",
       "exit_code": 1,
       "tests": 1,
       "failures": 1,
       "errors": 0,
       "failure_mode": "a payment with every required job deleted was mistaken for an empty global queue",
-      "output_sha256": "04c6bf6a8677e53c984df9356ab53de895caf6fc18d266ba1eff394476ecffb8",
-      "output_bytes": 978,
-      "raw_output_path": "/tmp/phase6-task10-all-jobs-missing-red.out",
-      "raw_output_versioned": false
+      "output_sha256": "591c9ac2fa97deb66fa41070cf46a9b97563b490f9c783c3a8da886fd38c8fa0",
+      "output_bytes": 952,
+      "raw_output_path": "/tmp/phase6-task10-all-jobs-missing-red-reproduced.out",
+      "raw_output_versioned": false,
+      "historical_unanchored_output": {
+        "output_sha256": "04c6bf6a8677e53c984df9356ab53de895caf6fc18d266ba1eff394476ecffb8",
+        "output_bytes": 978,
+        "raw_output_path": "/tmp/phase6-task10-all-jobs-missing-red.out",
+        "superseded_for_provenance_by_reproducible_mutation": true
+      }
     },
     "green": {
-      "tests": 15,
+      "tests": 20,
       "result": "OK",
-      "output_sha256": "9adb05bfc97b73891a3a505132fbb75236cf4b59f8a3220c4521b397c0cf6b7d"
+      "output_sha256": "8f3418bffc27f92a8d9885cd046db49e7e17500c6aa5bf32ea471e14a2ef6bc4"
+    },
+    "review_findings_red": {
+      "base_commit": "1639e91bb8508037854975f4c9afba001ae177e2",
+      "base_tree": "c7ba3eaba02eb60836b7ade3c17e1218a7d8c27f",
+      "patch_path": "docs/refactor/evidence/phase-06/task10-review-findings-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_sha256": "fc50ca6e5f2ed60add4e1d7260101641a43ce6dcaf4472c38005f5b8c7cacbdb",
+      "patch_bytes": 5339,
+      "reconstructed_tree": "f3d1173615fc5b663291760a61403134df11655b",
+      "command": "python3 -m unittest <six named Task 10 corrective tests> -v",
+      "exit_code": 1,
+      "tests": 6,
+      "failures": 6,
+      "errors": 0,
+      "failure_mode": "worker replay identity, double-failure exception chain, self-binding, fence equality, loader equality, and governing module exports remained open",
+      "output_sha256": "88b696e8ea994809e182d935e28d7b381bf90f052d38b4ba43df5a471fa1e187",
+      "output_bytes": 5219,
+      "raw_output_path": "/tmp/phase6-task10-review-findings-red-detached.out",
+      "raw_output_versioned": false
     }
   },
   "detached_gate": {
-    "worktree": "/tmp/phase6-task10-clean-gate",
-    "commit": "a5d2a3cb7bde378bcbc14eb52c77f97e53890ac0",
-    "tree": "05994d85d1bbd334569e960089d288ddf9cdc003",
+    "worktree": "/tmp/phase6-task10-review-clean-gate",
+    "commit": "bee8cf79220a4e022c3cd441c3be4a70b2159497",
+    "tree": "69298d569359df22baf348d4a0584e3acc646a30",
     "worktree_clean": true,
     "focused": {
-      "tests": 15,
+      "tests": 20,
       "result": "OK",
-      "output_sha256": "dd676c29f150e65a28ef5527cb9e52c7c8a8552ed72e14ad97491423b0c09f97"
+      "output_sha256": "80aecbafdc7f8c7d07f08f1a9699efb1481c5ac3ff9e3d6e043a7656771477be"
     },
     "targeted_regressions": {
       "tests": 146,
       "result": "OK",
-      "output_sha256": "65957b2dce597f6bb84221e7b9f46b7feb8addae77c09313d888bc24ab03c27f"
+      "output_sha256": "5ba283161bd8a5b1ad4648daf93fce1ab63a888e8fd78cd44a08d486a213942e"
     },
     "full_suite": {
-      "tests": 592,
+      "tests": 597,
       "result": "OK",
-      "output_sha256": "da463c8017213121b8227ec579e5a8f1d0c985e5797be11fb32bc8d1845500cb"
+      "output_sha256": "47b04094b9de378f3038917bb6d5c810f3408933f3d09ecea7cf8b5dfd9a1a3c"
     },
     "characterization": {
       "scenarios": 30,
@@ -111,8 +147,8 @@
     "schema": {
       "drift": 0,
       "table_count": 11,
-      "sqlite_sha256": "038c02de48612504ef848f8303a0e5b34aaa7cb80643fea26c4f38220d4423e0",
-      "postgresql_sha256": "761ad4e6121b48ec9833b8b77b0bea4c762cf392102bee9b639106af40869273",
+      "sqlite_sha256": "a5ccfed67df810b80c695e44fc7609991b49b39ee37b9b52b356260885b2f541",
+      "postgresql_sha256": "5ba013b78beb2f9d05c6296f578f252c8f577424c036105fa924d29d84c00e89",
       "quick_check": "ok",
       "foreign_key_check": [],
       "foreign_keys_enabled": true,
@@ -123,7 +159,6 @@
   "invariants": {
     "one_job_per_run": true,
     "claim_exact_expiry_is_stale": true,
-    "fencing_token_never_trails_attempts": true,
     "stale_claim_cannot_release_or_complete": true,
     "receipt_and_delivery_commit_atomically": true,
     "required_jobs_precede_optional_jobs": true,
@@ -135,7 +170,12 @@
     "old_event_cannot_regress_paid": true,
     "delivery_replay_cannot_create_settlement_command": true,
     "base_exception_leaves_lease_for_expiry_recovery": true,
-    "two_connection_single_job_claim_winners": 1
+    "two_connection_single_job_claim_winners": 1,
+    "fencing_token_equals_delivery_attempts": true,
+    "claim_message_identity_self_bound": true,
+    "receipt_idempotency_equals_message_id": true,
+    "receipt_binds_canonical_full_claim_hash": true,
+    "delivery_release_double_failure_drops_private_context": true
   },
   "financial_writes_from_outbox_methods": [],
   "financial_consistency_reads": [
@@ -144,8 +184,38 @@
   "live_capabilities_executed": [],
   "postgresql_executed": false,
   "independent_review": {
-    "status": "pending",
+    "status": "initial_batch_needs_fixes_corrected_terminal_regate_pending",
+    "initial_batch": "deleg_5d6d34e3",
+    "initial_terminal_approvals": 0,
+    "initial_lane_verdicts": [
+      "Needs fixes",
+      "Approved",
+      "Needs fixes"
+    ],
+    "resolved_findings": [
+      "private delivery exception retained through release failure context",
+      "claim message id and receipt idempotency were not self-bound",
+      "exact replay accepted divergent worker identity",
+      "payment outbox allowed fencing token greater than delivery attempts",
+      "all-jobs-missing RED lacked source patch and reconstructed tree"
+    ],
     "terminal_approvals": 0
   },
-  "rollout": "NO-GO"
+  "rollout": "NO-GO",
+  "initial_implementation": {
+    "functional_commit": "a5d2a3cb7bde378bcbc14eb52c77f97e53890ac0",
+    "functional_tree": "05994d85d1bbd334569e960089d288ddf9cdc003",
+    "evidence_commit": "1639e91bb8508037854975f4c9afba001ae177e2",
+    "evidence_tree": "c7ba3eaba02eb60836b7ade3c17e1218a7d8c27f",
+    "review_batch": "deleg_5d6d34e3",
+    "terminal_approvals": 0,
+    "lane_verdicts": [
+      "Needs fixes",
+      "Approved",
+      "Needs fixes"
+    ],
+    "critical": 1,
+    "important": 4,
+    "minor": 0
+  }
 }
