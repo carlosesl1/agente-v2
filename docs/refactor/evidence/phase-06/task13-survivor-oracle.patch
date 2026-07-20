@@ -1,0 +1,15 @@
+diff --git a/tests/test_phase6_payment.py b/tests/test_phase6_payment.py
+index 9de180a8729a97f19c09f71f08a19533fa23a569..fbd3b949cec4cc522fd5dd0548ca5d7a442b8e14 100644
+--- a/tests/test_phase6_payment.py
++++ b/tests/test_phase6_payment.py
+@@ -196,9 +196,8 @@ class Phase6PaymentEvidenceTests(unittest.TestCase):
+         for certainty in ExecutionCertainty:
+             if certainty is ExecutionCertainty.EFFECT_CONFIRMED:
+                 continue
+-            anchor = confirmed_anchor()
+-            object.__setattr__(anchor.reservation_outcome, "certainty", certainty)
+             with self.subTest(certainty=certainty), self.assertRaises(ValueError):
++                anchor = confirmed_anchor(outcome=outcome(certainty=certainty))
+                 PaymentSubject.from_anchor(
+                     anchor,
+                     payment_id="payment:synthetic:1",

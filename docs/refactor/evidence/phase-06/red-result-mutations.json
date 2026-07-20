@@ -1,0 +1,83 @@
+{
+  "base": {
+    "commit": "22c01872e9c57059970f9834391a01664bfdb6ec",
+    "tree": "d46b06b1787fae64fb368b775ad050b81201878b"
+  },
+  "boundary_scan": {
+    "blocked_imports": [],
+    "bytes": 57925,
+    "emails": 0,
+    "files": 3,
+    "live_capabilities_used": false,
+    "urls": 0
+  },
+  "captured_at_utc": "2026-07-20T14:21:52Z",
+  "catalog_attempt": {
+    "all_killed": false,
+    "mutants": 12,
+    "output_sha256": "18fc8f4b1a21774c5b67975d54572d6a6873d2ecb90bdf393694631eadb8f5b6",
+    "seed": 1,
+    "survivors_or_invalid": [
+      "accept_nonconfirmed_reservation_outcome",
+      "treat_wise_and_stripe_as_pix",
+      "remove_global_payment_evidence_claim",
+      "accept_divergent_pix_economics_and_receiver",
+      "payment_outbox_rewrites_settlement_ledger"
+    ]
+  },
+  "corrected_five": {
+    "all_killed": true,
+    "mutants": 5,
+    "output_sha256": "6d726d3cc87f11aba81e838adaf6adce0706ae218c552becb514432b444413cd"
+  },
+  "final_catalog": {
+    "all_killed": true,
+    "artifact": "docs/refactor/evidence/phase-06/mutation-result.json",
+    "artifact_sha256": "4220fac77c0bdc9de81b6d0373c4d2a8e31cbdeb488b7e0280b378679b2a415c",
+    "baselines": 12,
+    "loader_errors": 0,
+    "mutants": 12,
+    "outputs_byte_identical": true,
+    "runner_errors": 0,
+    "seeds": [
+      1,
+      777
+    ],
+    "survivors": 0,
+    "target_count_per_mutant": 1
+  },
+  "focused": {
+    "command": "python3 -B -m unittest tests.test_phase6_mutation_runner -v",
+    "exit_code": 0,
+    "output_sha256": "c03787f7fc1ffebe0a48808abae605bad6768ebeb3ba76f2c842778ca537c6fc",
+    "tests_run": 7
+  },
+  "functional": {
+    "commit": "196d39faba132fdf3ff309c3456492f8cc8e4f4a",
+    "tree": "d7a93b24b01caccd5aa604d85f8bd6561fb3d3b6"
+  },
+  "phase": "phase-06-handoff-and-payments",
+  "red": {
+    "errors": 1,
+    "exit_code": 1,
+    "kind": "initial_missing_runner",
+    "output_sha256": "bd3550957c7a9a0c79cdde1298613266f84ea267c95aeac423a45786ea6a590f",
+    "patch": "docs/refactor/evidence/phase-06/task13-red.patch",
+    "patch_sha256": "cb3663d743503725a6b9c84eaa69d9ad7a33ecc768d94900d58505f3b55aeaa7",
+    "tests_run": 1
+  },
+  "rollout": "NO-GO",
+  "status": "implementation_verified_terminal_review_pending",
+  "survivor_oracle": {
+    "patch": "docs/refactor/evidence/phase-06/task13-survivor-oracle.patch",
+    "patch_sha256": "75934fa533db5981b88d8742169e5d39d67f5c095a2d0432b88106042733fdfb",
+    "reason": "canonical non-effect-confirmed outcomes replaced a mutation-only malformed outcome oracle"
+  },
+  "task": 13,
+  "verification_budget": {
+    "contention": "not rerun; outside blast radius",
+    "fault_matrix": "not rerun; outside blast radius",
+    "full_suite": "not rerun; no production code changed and exact 12 target baselines plus focused runner cover the diff",
+    "restart_schedules": "not rerun; outside blast radius"
+  }
+}
