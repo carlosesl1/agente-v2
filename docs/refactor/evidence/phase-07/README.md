@@ -25,7 +25,7 @@ exit, classe causal, SHA-256 e bytes. Raw outputs permanecem em `/tmp`.
 - `runtime-integration-manifest.json`: commits/trees/wheel/testes focused;
 - `runtime-integration-contract-manifest.json`: contrato após integração.
 
-O patch reproduz a tree `ac13d8ed3618f8a19b6b9bff88dbf0685ea49f75`.
+O patch reproduz a tree `207a71c07688a63ad60d572e9b7b0c150dc585a0`.
 O source operacional permaneceu no HEAD `57408d8b2040399bc25ee7957505208079458884`.
 O pre-flight registrou 80 entradas locais; o manifesto de captura fixa as 86
 entradas observadas posteriormente e seus hashes exatos. A Fase 7 autentica o
@@ -53,3 +53,7 @@ O candidato `4eb0495a2296ac76d4b2ab25038b6a822f19ec18` foi invalidado
 após uma única tentativa local terminar em collection exit 2. A causa e a saída
 autenticada serão preservadas no resultado local do candidato sucessor; a tree
 inválida não foi reexecutada.
+
+O sucessor `76f56f07d9e2a8a9ee49a12b65b918ac5b4b0591` também teve uma
+única tentativa, com cinco falhas de fidelidade da captura. A tree foi
+invalidada e não reexecutada.

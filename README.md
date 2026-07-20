@@ -41,7 +41,7 @@ Contrato central:
   candidato; o sucessor ainda não foi congelado.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
-  `b9ac6fe6328e0db58a78e75b80cfc9f0cd5bc8a7`.
+  `0724c2c9170af42a8c26b674ee76c6311bfbc0de`.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
 - Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem

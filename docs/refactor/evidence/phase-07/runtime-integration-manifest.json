@@ -1,6 +1,6 @@
 {
-  "baseline_commit": "9d519e23fc66ae8d39fca574ff5079ccad7a53aa",
-  "baseline_tree": "417066d15d544677df4ad184951fb3482d11d560",
+  "baseline_commit": "318ba9f6ec970b53f25989e9dc8a33d39cfaa7c0",
+  "baseline_tree": "c2a2d5c3cf11ac606625553162ba433dd6dfa159",
   "changed_file_count": 6,
   "changed_files": [
     ".hermes/plugins/chapada_leads_tools/__init__.py",
@@ -14,12 +14,12 @@
     {
       "exit_code": 0,
       "failed": 0,
-      "passed": 36,
-      "scope": "candidate2_collection_and_boundary_adapters"
+      "passed": 18,
+      "scope": "candidate3_prior_failures_and_boundary_adapters"
     }
   ],
-  "integration_commit": "b9ac6fe6328e0db58a78e75b80cfc9f0cd5bc8a7",
-  "integration_tree": "ac13d8ed3618f8a19b6b9bff88dbf0685ea49f75",
+  "integration_commit": "0724c2c9170af42a8c26b674ee76c6311bfbc0de",
+  "integration_tree": "207a71c07688a63ad60d572e9b7b0c150dc585a0",
   "live_capabilities_executed": [],
   "patch_applies": true,
   "patch_bytes": 37500,

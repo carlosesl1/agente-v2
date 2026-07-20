@@ -15,8 +15,8 @@
 ## Implementação pre-freeze
 
 - `agente-v2`: `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`.
-- Réplica runtime corrigida: `b9ac6fe6328e0db58a78e75b80cfc9f0cd5bc8a7`.
-- Tree da réplica corrigida: `ac13d8ed3618f8a19b6b9bff88dbf0685ea49f75`.
+- Réplica runtime corrigida: `0724c2c9170af42a8c26b674ee76c6311bfbc0de`.
+- Tree da réplica corrigida: `207a71c07688a63ad60d572e9b7b0c150dc585a0`.
 - Patch autenticado: SHA-256
   `f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0`.
 - Focused runtime: 68/68 e 239/239 nas Tasks 13/14 originais; 36/36 na
@@ -31,6 +31,11 @@ foi invalidado por dois erros de collection: a captura removia o package
 `qa.maya_test_lab.scenarios` junto com o delta local sensível. Nenhum rerun foi
 feito nessa tree. A correção mantém os fixtures seguros rastreados do HEAD e
 exclui somente a modificação local de `real_world_v1.json`.
+
+O sucessor `76f56f07d9e2a8a9ee49a12b65b918ac5b4b0591` também foi
+invalidado sem rerun: cinco testes mostraram que a captura removia o baseline
+seguro de `.env.example` e reescrevia IDs operacionais. A terceira reconstrução
+mantém baselines seguros e limita a sanitização a campos explícitos de contato.
 
 ## Objetivo
 

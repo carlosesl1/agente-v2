@@ -12,6 +12,7 @@ import unittest
 
 from scripts.capture_phase7_runtime import (
     CaptureRejected,
+    _sanitize_allowlisted_test,
     build_runtime_contract_manifest,
     capture_runtime,
     source_fingerprint,
@@ -116,6 +117,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         "PHONE_EVENT = {'phone_number': '\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39'}\n"
         "FOREIGN_EVENT = {'telefone': '5411999998888'}\n"
         "TOOL_REQUEST = {'name': 'cloudbeds_criar_reserva_v2'}\n"
+        "OPERATIONAL_SOURCE_ID = 'ss-960889123456'\n"
         "EXPECTED_PHONE = '+55 75 99999-2939'\n"
         "assert LEAD['name'] == 'Carlos Eduardo'\n"
         "assert PHONE_EVENT['phone_number'] == '\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39'\n"
@@ -134,6 +136,12 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
 
 
 class Phase7RuntimeCaptureTests(unittest.TestCase):
+    def test_sanitizer_preserves_non_contact_operational_ids(self) -> None:
+        source = "OPERATIONAL_SOURCE_ID = 'ss-960889123456'\n"
+        sanitized, redactions = _sanitize_allowlisted_test(source)
+        self.assertEqual(sanitized, source)
+        self.assertEqual(redactions, 0)
+
     def test_capture_reconstructs_safe_dirty_state_without_source_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase7-capture-test-") as directory:
             root = Path(directory)
@@ -158,7 +166,10 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
                 "    return {'ok': event, 'configured': bool(api_key)}\n",
             )
             self.assertTrue((output / "tests/new_test.py").is_file())
-            self.assertFalse((output / ".env.example").exists())
+            self.assertEqual(
+                (output / ".env.example").read_text(),
+                "API_KEY=placeholder\n",
+            )
             self.assertTrue(
                 (output / "qa/maya_test_lab/scenarios/__init__.py").is_file()
             )
@@ -176,6 +187,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertNotIn("\x2b\x35\x35\x37\x35\x39\x39\x39\x39\x39\x32\x39\x33\x39", redacted)
             self.assertIn("Synthetic Lead", redacted)
             self.assertIn("'name': 'cloudbeds_criar_reserva_v2'", redacted)
+            self.assertIn("OPERATIONAL_SOURCE_ID = 'ss-960889123456'", redacted)
             self.assertRegex(redacted, r"'whatsapp_phone': '\+55\d{11}'")
             self.assertRegex(redacted, r"'phone_number': '55\d{11}'")
             self.assertRegex(redacted, r"'telefone': '54\d{11}'")

@@ -42,6 +42,7 @@ PII_REDACTION_ALLOWLIST: Final = frozenset(
     )
 )
 SENSITIVE_SCENARIO_PATH: Final = "qa/maya_test_lab/scenarios/real_world_v1.json"
+BASELINE_ONLY_PATHS: Final = frozenset((".env.example", SENSITIVE_SCENARIO_PATH))
 _SAFE_TEXT_SUFFIXES: Final = frozenset(
     (".bash", ".html", ".json", ".lock", ".md", ".py", ".sh", ".toml", ".yaml", ".yml")
 )
@@ -142,7 +143,9 @@ def _forbidden_path(relative: str) -> bool:
         return True
     if any("backup" in part for part in lowered):
         return True
-    if path.as_posix().casefold() == SENSITIVE_SCENARIO_PATH.casefold():
+    if path.as_posix().casefold() in {
+        item.casefold() for item in BASELINE_ONLY_PATHS
+    }:
         return True
     if name.endswith((".db", ".sqlite", ".sqlite3", ".log", ".pem", ".key")):
         return True
@@ -156,7 +159,7 @@ def _remove_from_baseline(relative: str) -> bool:
 
     return _forbidden_path(relative) and (
         PurePosixPath(relative).as_posix().casefold()
-        != SENSITIVE_SCENARIO_PATH.casefold()
+        not in {item.casefold() for item in BASELINE_ONLY_PATHS}
     )
 
 
@@ -240,6 +243,16 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     for value in values_for_key("name"):
         if value in personal_full_names:
             literal_map[value] = "Synthetic Lead"
+
+    for key in ("id", "subscriber_id", "contact_id"):
+        for value in values_for_key(key):
+            if not value:
+                continue
+            literal_map[value] = (
+                _synthetic_digits(value)
+                if value.isdigit()
+                else "synthetic-" + hashlib.sha256(value.encode()).hexdigest()[:12]
+            )
 
     for key in (
         "phone",
@@ -325,12 +338,6 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     for token, value in protected.items():
         text = text.replace(value, token)
 
-    def replace_digits(match: re.Match[str]) -> str:
-        nonlocal count
-        count += 1
-        return _synthetic_digits(match.group(0))
-
-    text = _LONG_DIGITS_RE.sub(replace_digits, text)
     def replace_phone(match: re.Match[str]) -> str:
         nonlocal count
         count += 1
