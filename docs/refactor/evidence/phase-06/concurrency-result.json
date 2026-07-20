@@ -29,12 +29,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:4d3c5224695fc6625306e396944b3389903b8083c24aefd687279177c8571d35"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 0,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:4d3c5224695fc6625306e396944b3389903b8083c24aefd687279177c8571d35"
+      ],
       "winning_tokens": [
         1
       ]
@@ -43,12 +55,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 0,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -57,12 +81,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF6926B"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 0,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF6926B"
+      ],
       "winning_tokens": [
         1
       ]
@@ -71,12 +107,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 0,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -85,12 +133,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:cebbe2b05466555e851fdd990baf7fc42e1fd883a14fbfbbb8a045e9f76eef67"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 1,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:cebbe2b05466555e851fdd990baf7fc42e1fd883a14fbfbbb8a045e9f76eef67"
+      ],
       "winning_tokens": [
         1
       ]
@@ -99,12 +159,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 1,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -113,12 +185,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF0C1F8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 1,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF0C1F8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -127,12 +211,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 1,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -141,12 +237,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:799134431cc3bc89b590bb66ae4578dd2944c32bf7ca7125f8f79cbc528a2c2c"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 2,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:799134431cc3bc89b590bb66ae4578dd2944c32bf7ca7125f8f79cbc528a2c2c"
+      ],
       "winning_tokens": [
         1
       ]
@@ -155,12 +263,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 2,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -169,12 +289,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF2D8F1"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 2,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF2D8F1"
+      ],
       "winning_tokens": [
         1
       ]
@@ -183,12 +315,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 2,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -197,12 +341,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:acd3db7457fa64b771ca5e19b907860393623f3f91802a0a2195fa0535b6ba7a"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 3,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:acd3db7457fa64b771ca5e19b907860393623f3f91802a0a2195fa0535b6ba7a"
+      ],
       "winning_tokens": [
         1
       ]
@@ -211,12 +367,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 3,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -225,12 +393,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF9401B"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 3,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF9401B"
+      ],
       "winning_tokens": [
         1
       ]
@@ -239,12 +419,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 3,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -253,12 +445,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:10cc9637ff29719d24e8e4905dd278b3d79eba6e0f73c991a6a0c5ccc1e1416e"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 4,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:10cc9637ff29719d24e8e4905dd278b3d79eba6e0f73c991a6a0c5ccc1e1416e"
+      ],
       "winning_tokens": [
         1
       ]
@@ -267,12 +471,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 4,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -281,12 +497,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF85A96"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 4,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF85A96"
+      ],
       "winning_tokens": [
         1
       ]
@@ -295,12 +523,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 4,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -309,12 +549,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:8ae791983c1b47e0e34cacea372a784a776e86c7951d44f2b20b61fee5efc58f"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 5,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:8ae791983c1b47e0e34cacea372a784a776e86c7951d44f2b20b61fee5efc58f"
+      ],
       "winning_tokens": [
         1
       ]
@@ -323,12 +575,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 5,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -337,12 +601,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF3AE95"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 5,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF3AE95"
+      ],
       "winning_tokens": [
         1
       ]
@@ -351,12 +627,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 5,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -365,12 +653,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:14d6a8d55de661c85c0d783c905cf292766fec0d3fdcb1194e39409f7a58a236"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 6,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:14d6a8d55de661c85c0d783c905cf292766fec0d3fdcb1194e39409f7a58a236"
+      ],
       "winning_tokens": [
         1
       ]
@@ -379,12 +679,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 6,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -393,12 +705,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF888AE"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 6,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF888AE"
+      ],
       "winning_tokens": [
         1
       ]
@@ -407,12 +731,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 6,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -421,12 +757,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:bc9abc794d98f18a15b29300137813afc1ec92d2c02d31fe69dbe69ecc8ed6ef"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 7,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:bc9abc794d98f18a15b29300137813afc1ec92d2c02d31fe69dbe69ecc8ed6ef"
+      ],
       "winning_tokens": [
         1
       ]
@@ -435,12 +783,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 7,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -449,12 +809,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF3177B"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 7,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF3177B"
+      ],
       "winning_tokens": [
         1
       ]
@@ -463,12 +835,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 7,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -477,12 +861,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:bb56113d7912093d32fdac1b955496c84afb0781f3bb36d8c091710b3deff1e4"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 8,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:bb56113d7912093d32fdac1b955496c84afb0781f3bb36d8c091710b3deff1e4"
+      ],
       "winning_tokens": [
         1
       ]
@@ -491,12 +887,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 8,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -505,12 +913,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF12DFF"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 8,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF12DFF"
+      ],
       "winning_tokens": [
         1
       ]
@@ -519,12 +939,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 8,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -533,12 +965,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:c7ae5d4b53b67ae16840dd21087464489b9ea675de368e2af409fa0fc41c5701"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 9,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:c7ae5d4b53b67ae16840dd21087464489b9ea675de368e2af409fa0fc41c5701"
+      ],
       "winning_tokens": [
         1
       ]
@@ -547,12 +991,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 9,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -561,12 +1017,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF9CEC1"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 9,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF9CEC1"
+      ],
       "winning_tokens": [
         1
       ]
@@ -575,12 +1043,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 9,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -589,12 +1069,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:17ba35da51d48e7d1dc117f296642c409bbd543536769bb48b522725e695cdfd"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 10,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:17ba35da51d48e7d1dc117f296642c409bbd543536769bb48b522725e695cdfd"
+      ],
       "winning_tokens": [
         1
       ]
@@ -603,12 +1095,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 10,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -617,12 +1121,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFAFB66"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 10,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFAFB66"
+      ],
       "winning_tokens": [
         1
       ]
@@ -631,12 +1147,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 10,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -645,12 +1173,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:a42e9d69724b7ec6f96323e9229256e591cf03cd191e0e0a174892894a76ffbf"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 11,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:a42e9d69724b7ec6f96323e9229256e591cf03cd191e0e0a174892894a76ffbf"
+      ],
       "winning_tokens": [
         1
       ]
@@ -659,12 +1199,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 11,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -673,12 +1225,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFBBC41"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 11,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFBBC41"
+      ],
       "winning_tokens": [
         1
       ]
@@ -687,12 +1251,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 11,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -701,12 +1277,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:51a32a45aaefca2e8b5c274b2e58a466483ca9f036fcea23d5d9865962e14709"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 12,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:51a32a45aaefca2e8b5c274b2e58a466483ca9f036fcea23d5d9865962e14709"
+      ],
       "winning_tokens": [
         1
       ]
@@ -715,12 +1303,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 12,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -729,12 +1329,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF3971D"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 12,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF3971D"
+      ],
       "winning_tokens": [
         1
       ]
@@ -743,12 +1355,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 12,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -757,12 +1381,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:2eb7d54f5aa3cba5847ce8e21a4fa1e97461e333a76714da0b4842e4cb9be05a"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 13,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:2eb7d54f5aa3cba5847ce8e21a4fa1e97461e333a76714da0b4842e4cb9be05a"
+      ],
       "winning_tokens": [
         1
       ]
@@ -771,12 +1407,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 13,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -785,12 +1433,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFBF13D"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 13,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFBF13D"
+      ],
       "winning_tokens": [
         1
       ]
@@ -799,12 +1459,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 13,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -813,12 +1485,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:89b29d5cf55c2e4f6816f20d824362cac1523ff358200c6b056f01bb4775ea97"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 14,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:89b29d5cf55c2e4f6816f20d824362cac1523ff358200c6b056f01bb4775ea97"
+      ],
       "winning_tokens": [
         1
       ]
@@ -827,12 +1511,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 14,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -841,12 +1537,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFBA6B7"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 14,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFBA6B7"
+      ],
       "winning_tokens": [
         1
       ]
@@ -855,12 +1563,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 14,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -869,12 +1589,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:e14bf65d7a4242c83f97cc100ad563a07137906f2d651716c05db1fd524ea858"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 15,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:e14bf65d7a4242c83f97cc100ad563a07137906f2d651716c05db1fd524ea858"
+      ],
       "winning_tokens": [
         1
       ]
@@ -883,12 +1615,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 15,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -897,12 +1641,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFC7FD9"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 15,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFC7FD9"
+      ],
       "winning_tokens": [
         1
       ]
@@ -911,12 +1667,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 15,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -925,12 +1693,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:784ae2eb139c341d273dcd0ad539f0371b562eee9ee596043b83661dab2435c7"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 16,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:784ae2eb139c341d273dcd0ad539f0371b562eee9ee596043b83661dab2435c7"
+      ],
       "winning_tokens": [
         1
       ]
@@ -939,12 +1719,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 16,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -953,12 +1745,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF774F4"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 16,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF774F4"
+      ],
       "winning_tokens": [
         1
       ]
@@ -967,12 +1771,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 16,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -981,12 +1797,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:605999006beae5c02baad98d098c04ed6893b96c2f3e54d5a58dd53b1e66c6fd"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 17,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:605999006beae5c02baad98d098c04ed6893b96c2f3e54d5a58dd53b1e66c6fd"
+      ],
       "winning_tokens": [
         1
       ]
@@ -995,12 +1823,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 17,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1009,12 +1849,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF748F4"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 17,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF748F4"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1023,12 +1875,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 17,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1037,12 +1901,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:cacae84af8d654d468b5b9d08bb1b6c17a2f9be8278a9405ab046afc25f750e0"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 18,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:cacae84af8d654d468b5b9d08bb1b6c17a2f9be8278a9405ab046afc25f750e0"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1051,12 +1927,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 18,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1065,12 +1953,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF4DDEC"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 18,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF4DDEC"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1079,12 +1979,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 18,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1093,12 +2005,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:3e70c238efc76a3bea0318b00dc0a566e95411be1c7b99f2208de0245d8e2a65"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 19,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:3e70c238efc76a3bea0318b00dc0a566e95411be1c7b99f2208de0245d8e2a65"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1107,12 +2031,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 19,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1121,12 +2057,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF0A2E6"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 19,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF0A2E6"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1135,12 +2083,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 19,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1149,12 +2109,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:2186f7ed07f3e8d4857a73b117fcf989d55176531270d3aed22a7eef85680745"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 20,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:2186f7ed07f3e8d4857a73b117fcf989d55176531270d3aed22a7eef85680745"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1163,12 +2135,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 20,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1177,12 +2161,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFB28D8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 20,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFB28D8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1191,12 +2187,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 20,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1205,12 +2213,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:068fbc344dda594a22c6dcae4bb859b04fd965cd96625baf4eb0a815c4c1ecc3"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 21,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:068fbc344dda594a22c6dcae4bb859b04fd965cd96625baf4eb0a815c4c1ecc3"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1219,12 +2239,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 21,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1233,12 +2265,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF999C5"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 21,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF999C5"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1247,12 +2291,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 21,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1261,12 +2317,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:0d90ed9a578d0d7bc41caf1fe41d851a906cb12179e83aa0a4305e91fa7ec1c4"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 22,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:0d90ed9a578d0d7bc41caf1fe41d851a906cb12179e83aa0a4305e91fa7ec1c4"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1275,12 +2343,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 22,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1289,12 +2369,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFC7DB8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 22,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFC7DB8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1303,12 +2395,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 22,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1317,12 +2421,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:9eb186c12bb1bb431dfca846432d279e58ecd6fe0a1f2582d3afab25fa813fb0"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 23,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:9eb186c12bb1bb431dfca846432d279e58ecd6fe0a1f2582d3afab25fa813fb0"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1331,12 +2447,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 23,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1345,12 +2473,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF0EBE5"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 23,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF0EBE5"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1359,12 +2499,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 23,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1373,12 +2525,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:a71b590d7275045490570a02940ade66f0b04b1b78ec6fc617fe614d6c983073"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 24,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:a71b590d7275045490570a02940ade66f0b04b1b78ec6fc617fe614d6c983073"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1387,12 +2551,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 24,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1401,12 +2577,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF564C2"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 24,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF564C2"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1415,12 +2603,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 24,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1429,12 +2629,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:717659b15a0b06e903e9ab0bb73d5fe6ad1e24b9ed032b87b1b7365f167c34a0"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 25,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:717659b15a0b06e903e9ab0bb73d5fe6ad1e24b9ed032b87b1b7365f167c34a0"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1443,12 +2655,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 25,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1457,12 +2681,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFC34B8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 25,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFC34B8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1471,12 +2707,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 25,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1485,12 +2733,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:dde8e8144dd49d70850da392f6136122a3466a12706d489574b89d4c9e672aa6"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 26,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:dde8e8144dd49d70850da392f6136122a3466a12706d489574b89d4c9e672aa6"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1499,12 +2759,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 26,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1513,12 +2785,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF5BE35"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 26,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF5BE35"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1527,12 +2811,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 26,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1541,12 +2837,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:4732d6340f6c696a87ef2730659cf0806788e2e06d32f2f2108b2c115b883f57"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 27,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:4732d6340f6c696a87ef2730659cf0806788e2e06d32f2f2108b2c115b883f57"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1555,12 +2863,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 27,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1569,12 +2889,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF360D3"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 27,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF360D3"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1583,12 +2915,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 27,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1597,12 +2941,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:da4bfef9c74819484aab071d4854dd99bb70374470535a46dd161fb2b07f2805"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 28,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:da4bfef9c74819484aab071d4854dd99bb70374470535a46dd161fb2b07f2805"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1611,12 +2967,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 28,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1625,12 +2993,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF7DFF3"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 28,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF7DFF3"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1639,12 +3019,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 28,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1653,12 +3045,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:ff810f28ab2be877f838d1671291d426a0b57829ed82ba97c628461d8bef51ab"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 29,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:ff810f28ab2be877f838d1671291d426a0b57829ed82ba97c628461d8bef51ab"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1667,12 +3071,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 29,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1681,12 +3097,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF06DF8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 29,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF06DF8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1695,12 +3123,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 29,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1709,12 +3149,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:d0ee9f9fda08751ccbf23841918ec602a83ca208deedb42d6d1bbc1eb6fbf0a6"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 30,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:d0ee9f9fda08751ccbf23841918ec602a83ca208deedb42d6d1bbc1eb6fbf0a6"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1723,12 +3175,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 30,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1737,12 +3201,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFA2324"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 30,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFA2324"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1751,12 +3227,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 30,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1765,12 +3253,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:c43e7fd303e036c9304569ea190678a092c9bd6ce291ff9f507980c1bd987ca5"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 31,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:c43e7fd303e036c9304569ea190678a092c9bd6ce291ff9f507980c1bd987ca5"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1779,12 +3279,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 31,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1793,12 +3305,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFE20C3"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 31,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFE20C3"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1807,12 +3331,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 31,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1821,12 +3357,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:991d98b820f5d0c25e8b12d4fa3ee03d8e8d2f87df1722ca3fbf826b6fa34a9b"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 32,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:991d98b820f5d0c25e8b12d4fa3ee03d8e8d2f87df1722ca3fbf826b6fa34a9b"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1835,12 +3383,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 32,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1849,12 +3409,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF47A4C"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 32,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF47A4C"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1863,12 +3435,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 32,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1877,12 +3461,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:95ca80271154f8e52b7b5d2b18fd52e22eb79f4585c88f27ab18e1f567601c0d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 33,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:95ca80271154f8e52b7b5d2b18fd52e22eb79f4585c88f27ab18e1f567601c0d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1891,12 +3487,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 33,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1905,12 +3513,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFE8F74"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 33,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFE8F74"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1919,12 +3539,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 33,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1933,12 +3565,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:7789b547cb9517631bff9206dfeeba34b0f78f6a79ab4970700ef9361c5169a0"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 34,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:7789b547cb9517631bff9206dfeeba34b0f78f6a79ab4970700ef9361c5169a0"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1947,12 +3591,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 34,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1961,12 +3617,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF5E4DF"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 34,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF5E4DF"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1975,12 +3643,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 34,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -1989,12 +3669,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:557c884fd193ca2ce6cab64a260c87c4a7dccc4f4acdff917c1d48321394951e"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 35,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:557c884fd193ca2ce6cab64a260c87c4a7dccc4f4acdff917c1d48321394951e"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2003,12 +3695,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 35,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2017,12 +3721,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFDFB51"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 35,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFDFB51"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2031,12 +3747,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 35,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2045,12 +3773,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:1edc1cc7ae67754010bc6f755242238304fae4781d74239b5e3a40182169989f"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 36,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:1edc1cc7ae67754010bc6f755242238304fae4781d74239b5e3a40182169989f"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2059,12 +3799,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 36,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2073,12 +3825,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF96CFA"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 36,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF96CFA"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2087,12 +3851,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 36,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2101,12 +3877,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:407f891af5ba96f5696449b1d17a939ce76594cf721c7932e4a1946837300c20"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 37,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:407f891af5ba96f5696449b1d17a939ce76594cf721c7932e4a1946837300c20"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2115,12 +3903,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 37,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2129,12 +3929,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF8E028"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 37,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF8E028"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2143,12 +3955,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 37,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2157,12 +3981,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:8ef1f443d7b77bfd0517dbf821bd74dcd802824345cf223f013b2be1439ac5c4"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 38,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:8ef1f443d7b77bfd0517dbf821bd74dcd802824345cf223f013b2be1439ac5c4"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2171,12 +4007,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 38,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2185,12 +4033,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF064BD"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 38,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF064BD"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2199,12 +4059,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 38,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2213,12 +4085,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:d4055b9215abbb330cb4a19473cfcf860ce59ab9bce55cd31b8b376c907f654f"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 39,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:d4055b9215abbb330cb4a19473cfcf860ce59ab9bce55cd31b8b376c907f654f"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2227,12 +4111,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 39,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2241,12 +4137,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF20637"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 39,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF20637"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2255,12 +4163,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 39,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2269,12 +4189,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:eed09e1dd07ec239401c6218da7e8a660a9ac19229b890eae6040b951953004d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 40,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:eed09e1dd07ec239401c6218da7e8a660a9ac19229b890eae6040b951953004d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2283,12 +4215,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 40,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2297,12 +4241,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFBBF38"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 40,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFBBF38"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2311,12 +4267,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 40,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2325,12 +4293,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:2ce70759db63635b8bf66b992865cd3268d0cfdb3b01091c1d79c5ffa79965d8"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 41,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:2ce70759db63635b8bf66b992865cd3268d0cfdb3b01091c1d79c5ffa79965d8"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2339,12 +4319,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 41,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2353,12 +4345,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF544A1"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 41,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF544A1"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2367,12 +4371,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 41,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2381,12 +4397,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:057fe2579f0af9b604528533eac48f976636fe07c8330bf57e479f15f78af4f6"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 42,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:057fe2579f0af9b604528533eac48f976636fe07c8330bf57e479f15f78af4f6"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2395,12 +4423,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 42,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2409,12 +4449,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF5A787"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 42,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF5A787"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2423,12 +4475,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 42,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2437,12 +4501,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:002f20bc9600bae6868dcaa7a66e7e71407c6b7fd4502c9ca3d00fb53d37c92c"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 43,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:002f20bc9600bae6868dcaa7a66e7e71407c6b7fd4502c9ca3d00fb53d37c92c"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2451,12 +4527,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 43,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2465,12 +4553,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFE0015"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 43,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFE0015"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2479,12 +4579,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 43,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2493,12 +4605,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:46f65e118efea645956ba30dfb0595b8c04ea64151aa33c963dab3515ad9d27a"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 44,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:46f65e118efea645956ba30dfb0595b8c04ea64151aa33c963dab3515ad9d27a"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2507,12 +4631,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 44,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2521,12 +4657,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFE5D92"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 44,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFE5D92"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2535,12 +4683,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 44,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2549,12 +4709,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:e559e68ef24aa9eaf9adc91d2da3bc90a30a93a14af11f57c4283530bf4e72c2"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 45,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:e559e68ef24aa9eaf9adc91d2da3bc90a30a93a14af11f57c4283530bf4e72c2"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2563,12 +4735,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 45,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2577,12 +4761,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF925EA"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 45,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF925EA"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2591,12 +4787,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 45,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2605,12 +4813,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:48e15892b0216e6866943d847e3d4b26618f396b70559e9548ad412ea8be1c22"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 46,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:48e15892b0216e6866943d847e3d4b26618f396b70559e9548ad412ea8be1c22"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2619,12 +4839,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 46,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2633,12 +4865,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEFBA6FE"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 46,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEFBA6FE"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2647,12 +4891,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 46,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2661,12 +4917,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:c22348e845f1f728aead1b51cdf7fcca06750b1c7660269694dd3aeac9235d08"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 47,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:c22348e845f1f728aead1b51cdf7fcca06750b1c7660269694dd3aeac9235d08"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2675,12 +4943,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 47,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2689,12 +4969,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF89B28"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 47,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF89B28"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2703,12 +4995,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 47,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2717,12 +5021,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:e4ca49beae73324148043189c108c807ce50a0326e1bc37ee505a1b628837431"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 48,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:e4ca49beae73324148043189c108c807ce50a0326e1bc37ee505a1b628837431"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2731,12 +5047,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 48,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2745,12 +5073,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF3C832"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 48,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF3C832"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2759,12 +5099,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 48,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2773,12 +5125,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "handoff_incident",
+      "durable_owners": [
+        "contended-incident:b36ab36e30c0ac42fa9738a3de309fb1463ec2ba07354a677162467f2d037b33"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 49,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "contended-incident:b36ab36e30c0ac42fa9738a3de309fb1463ec2ba07354a677162467f2d037b33"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2787,12 +5151,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_command",
+      "durable_owners": [
+        "settlement:contender"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 49,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "settlement:contender"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2801,12 +5177,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "global_evidence_claim",
+      "durable_owners": [
+        "pix:E1234567820290101ABCDEF1F6BC"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 0,
+      "provider_calls_final": 0,
       "provider_delta": 0,
       "round": 49,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "pix:E1234567820290101ABCDEF1F6BC"
+      ],
       "winning_tokens": [
         1
       ]
@@ -2815,12 +5203,24 @@
       "child_error_types": [],
       "child_errors": 0,
       "domain": "payment_outbox",
+      "durable_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
+      "durable_tokens": [
+        1
+      ],
+      "durable_winners": 1,
       "nonzero_child_exits": 0,
       "partial_transactions": 0,
+      "provider_calls_baseline": 1,
+      "provider_calls_final": 1,
       "provider_delta": 0,
       "round": 49,
       "violations": [],
       "winners": 1,
+      "winning_owners": [
+        "payment-claim:dfaf4c35eb49c452a34b2b4c9a6a8147af04d3116b58dcd8f391177ca0646e5d"
+      ],
       "winning_tokens": [
         1
       ]

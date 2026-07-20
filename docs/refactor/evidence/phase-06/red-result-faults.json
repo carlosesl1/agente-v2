@@ -15,17 +15,44 @@
     "statement": "Only local temporary SQLite files, stdlib multiprocessing, synthetic in-memory/file logging ports, and unittest were used; no network, live provider, delivery, PostgreSQL, Docker, queue, or deployment capability was invoked.",
     "urls": 0
   },
+  "boundary_after_review": {
+    "anchor_commit": "2698773b516826ccac55ac9f0dc12d82aeadfaaf",
+    "bytes_scanned": 208512,
+    "capabilities_used": [],
+    "emails": 0,
+    "files_scanned": 3,
+    "forbidden_imports": [],
+    "private_keys": 0,
+    "statement": "No live/network/PostgreSQL/Docker capability; local SQLite and stdlib multiprocessing only.",
+    "urls": 0
+  },
+  "correction": {
+    "commit": "2698773b516826ccac55ac9f0dc12d82aeadfaaf",
+    "parent": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
+    "scope": [
+      "SQLite BUSY/LOCKED classification",
+      "closed exact contention row oracle",
+      "bilateral durable owner/token/count evidence",
+      "provider baseline/final counters",
+      "review provenance recovery"
+    ],
+    "tree": "ea237e5dcf20568c4e2786e4b155fe9c4d3adc22"
+  },
   "corrective_oracle_red": {
-    "command": "python3 -m unittest <fault matrix exact semantics + permissive-oracle tests> -v",
+    "command": "python3 -m unittest tests.test_phase6_fault_injection.Phase6FaultInjectionTests.test_fault_matrix_uses_real_rollback_or_child_crash_and_closes_invariants tests.test_phase6_fault_injection.Phase6FaultInjectionTests.test_fault_oracle_rejects_permissive_false_greens -v",
     "errors": 16,
     "exit_code": 1,
+    "note": "Historical output bytes are authentic, but the intermediate dirty runner bytes were not content-addressed. This entry is not claimed as immutable TDD RED; the mutation reproduction below closes behavior-level reproducibility.",
     "output": {
       "bytes": 16957,
       "path": "/tmp/phase6-task12-oracle-red.out",
       "sha256": "630a8c930f5cd0f9e0e5f479511001f1963a3d0c3709f6c87ce7ea37c5a9bb10"
     },
     "reason": "pre-correction rows lacked rollback fingerprints and exact recovered statuses",
-    "tests": 2
+    "source_provenance": "Cannot verify",
+    "tests": 2,
+    "unfixed_base_commit": null,
+    "unfixed_tree": null
   },
   "focused_green": {
     "command": "python3 -m unittest tests.test_phase6_fault_injection tests.test_phase6_concurrency -v",
@@ -40,12 +67,87 @@
     },
     "tests": 10
   },
+  "focused_green_after_review": {
+    "anchor_commit": "2698773b516826ccac55ac9f0dc12d82aeadfaaf",
+    "compileall": {
+      "exit_code": 0
+    },
+    "concurrency": {
+      "command": "python3 -B -m unittest tests.test_phase6_concurrency -v",
+      "elapsed_seconds": 9.07,
+      "exit_code": 0,
+      "output": {
+        "bytes": 1234,
+        "path": "/tmp/phase6-task12-concurrency-corrected.out",
+        "sha256": "07544c284eaca85f684edaa7f44e0abb1eeb5db1575e18a0a8c72a65a599ea15"
+      },
+      "tests": 6
+    },
+    "diff_check": {
+      "exit_code": 0
+    },
+    "store_blast_radius": {
+      "command": "python3 -B -m unittest <four SQLite availability/stale-revision tests> -v",
+      "elapsed_seconds": 0.16,
+      "exit_code": 0,
+      "output": {
+        "bytes": 804,
+        "path": "/tmp/phase6-task12-store-lock-regression.out",
+        "sha256": "131496a23eeb489d2bdad4f0bca5e4db4fc63b3f13b9ab9bc0b097fc557b6628"
+      },
+      "tests": 4
+    }
+  },
   "functional": {
     "commit": "86d5b0dfc496651652b1bdbdeb5cf67c25970ff5",
     "parent": "fb90832fed73c821028c7ce3bb3973ebf33169f6",
     "tree": "27e9f850e19c87aec933c2dd8cb24c1c368c01ab"
   },
-  "generated_at": "2026-07-20T13:19:18Z",
+  "generated_at": "2026-07-20T13:49:24Z",
+  "historical_integral": {
+    "anchor_commit": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
+    "command": "python3 scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 <three write targets>",
+    "contention": {
+      "bytes": 61496,
+      "domains": [
+        "handoff_incident",
+        "payment_command",
+        "global_evidence_claim",
+        "payment_outbox"
+      ],
+      "path": "docs/refactor/evidence/phase-06/concurrency-result.json",
+      "rounds_per_domain": 50,
+      "rows": 200,
+      "sha256": "1f55f45d475f8bd01711c0533f0d0c1c0975a8ffec408d6a263566fdd3a769d4",
+      "winners_per_domain": 50
+    },
+    "elapsed_seconds": 778.7575621269643,
+    "exit_code": 0,
+    "fault_matrix": {
+      "bytes": 25264,
+      "fault_points": 27,
+      "path": "docs/refactor/evidence/phase-06/fault-matrix.json",
+      "real_process_crashes": 12,
+      "sha256": "ce5f339385015929dd64926b4f23e3cdeca6342f554c1279cd278d53be786403",
+      "transaction_rollbacks": 15
+    },
+    "maxrss_kb": 47048,
+    "restart": {
+      "bytes": 1774249,
+      "minimum_point_coverage": 166,
+      "path": "docs/refactor/evidence/phase-06/restart-result.json",
+      "schedules": 2000,
+      "sha256": "0504622ca4409e053cf6c8fed55b8389c0d268c35c097d33b9d11ab0a1061378"
+    },
+    "seed": 2026071906,
+    "status": "superseded for contention rows only; fault matrix and restart artifacts remain applicable",
+    "stdout": {
+      "bytes": 0,
+      "path": "/tmp/phase6-task12-integral.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "violations": 0
+  },
   "independent_artifact_validation": {
     "checks": [
       "closed fault catalog",
@@ -85,54 +187,91 @@
     "violations": 0
   },
   "independent_review": {
+    "prior_batch": "deleg_2aa4e8aa",
+    "prior_batch_approvals": 0,
     "required_approvals": 3,
     "same_sha_tree_required": true,
-    "status": "pending",
+    "status": "terminal_regate_pending",
     "timeout_or_missing_summary_counts_as_approval": false
   },
-  "integral": {
-    "command": "python3 scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 <three write targets>",
-    "contention": {
-      "bytes": 61496,
-      "domains": [
-        "handoff_incident",
-        "payment_command",
-        "global_evidence_claim",
-        "payment_outbox"
-      ],
-      "path": "docs/refactor/evidence/phase-06/concurrency-result.json",
-      "rounds_per_domain": 50,
-      "rows": 200,
-      "sha256": "1f55f45d475f8bd01711c0533f0d0c1c0975a8ffec408d6a263566fdd3a769d4",
-      "winners_per_domain": 50
+  "initial_review": {
+    "approvals": 0,
+    "batch": "deleg_2aa4e8aa",
+    "findings": {
+      "critical": 0,
+      "important": 3,
+      "minor": 0
     },
-    "elapsed_seconds": 778.7575621269643,
-    "exit_code": 0,
-    "fault_matrix": {
-      "bytes": 25264,
-      "fault_points": 27,
-      "path": "docs/refactor/evidence/phase-06/fault-matrix.json",
-      "real_process_crashes": 12,
-      "sha256": "ce5f339385015929dd64926b4f23e3cdeca6342f554c1279cd278d53be786403",
-      "transaction_rollbacks": 15
+    "needs_fixes_lanes": 2,
+    "supersedes_prior_approvals": true,
+    "timeout_lanes": 1
+  },
+  "oracle_mutation_reproduction": {
+    "base": {
+      "commit": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
+      "tree": "d099ec5ab2cd9cdf7315228ef2416575f9f7a6ab"
     },
-    "maxrss_kb": 47048,
-    "restart": {
-      "bytes": 1774249,
-      "minimum_point_coverage": 166,
-      "path": "docs/refactor/evidence/phase-06/restart-result.json",
-      "schedules": 2000,
-      "sha256": "0504622ca4409e053cf6c8fed55b8389c0d268c35c097d33b9d11ab0a1061378"
+    "causal_change": "removes rollback_verified and recovered handoff/payment outbox status fields only",
+    "command": "python3 -m unittest tests.test_phase6_fault_injection.Phase6FaultInjectionTests.test_fault_matrix_uses_real_rollback_or_child_crash_and_closes_invariants -v",
+    "errors": 0,
+    "exit_code": 1,
+    "failures": 1,
+    "kind": "reverse mutation reproduction, not original historical RED",
+    "output": {
+      "bytes": 1005,
+      "path": "/tmp/phase6-task12-oracle-mutation-red.out",
+      "sha256": "8259075e33974855b13026804de2003bd73a2c574f4237efe8521350fb75d987"
     },
-    "seed": 2026071906,
-    "stdout": {
-      "bytes": 0,
-      "path": "/tmp/phase6-task12-integral.stdout",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    "patch": {
+      "apply_mode": "git apply --unidiff-zero",
+      "bytes": 415,
+      "mutant_tree": "76d7958f555fe1a397229d087a6dceeabafdba1c",
+      "path": "docs/refactor/evidence/phase-06/task12-oracle-mutation.patch",
+      "sha256": "4d6ddaada172a9146b227e923f753854de878b9374836abe2880bd5a83abbd88"
     },
-    "violations": 0
+    "tests": 1
   },
   "phase": "phase-06-handoff-and-payments",
+  "proportional_integral_after_review": {
+    "anchor_commit": "2698773b516826ccac55ac9f0dc12d82aeadfaaf",
+    "contention": {
+      "bytes": 129596,
+      "durable_mismatches": 0,
+      "elapsed_seconds": 63.62287840619683,
+      "exit_code": 0,
+      "maxrss_kb": 28552,
+      "path": "docs/refactor/evidence/phase-06/concurrency-result.json",
+      "provider_deltas": 0,
+      "rounds_per_domain": 50,
+      "rows": 200,
+      "seed": 2026071906,
+      "sha256": "aefe3994ab51556687fcc6b0b49858eb3d40a4ebb2c415fba349af050ab3a44e",
+      "status": "fresh",
+      "validation": {
+        "bytes": 452,
+        "path": "/tmp/phase6-task12-contention-corrected-validation.json",
+        "sha256": "217f3fc90bdf8c49758835bcfadca349815423b6cbd1f6ca9716712d8e7d0c1e"
+      },
+      "violations": 0
+    },
+    "fault_matrix": {
+      "bytes": 25264,
+      "path": "docs/refactor/evidence/phase-06/fault-matrix.json",
+      "reason": "correction does not change fault catalog, transaction triggers, crash paths, restart worker, or fault oracle",
+      "sha256": "ce5f339385015929dd64926b4f23e3cdeca6342f554c1279cd278d53be786403",
+      "status": "reused"
+    },
+    "overall_violations": 0,
+    "policy": "rerun only the gate reached by the correction diff; immutable unrelated artifacts are hash-authenticated and reused",
+    "restart": {
+      "bytes": 1774249,
+      "path": "docs/refactor/evidence/phase-06/restart-result.json",
+      "reason": "correction does not change restart scheduling or process-crash recovery; BUSY/LOCKED is not reached by sequential restart cases",
+      "schedules": 2000,
+      "sha256": "0504622ca4409e053cf6c8fed55b8389c0d268c35c097d33b9d11ab0a1061378",
+      "status": "reused"
+    }
+  },
   "red": {
     "command": "python3 -m unittest tests.test_phase6_fault_injection tests.test_phase6_concurrency -v",
     "errors": 2,
@@ -154,6 +293,7 @@
     "tests": 2
   },
   "regression": {
+    "anchor_commit": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
     "characterization": {
       "command": "python3 -m unittest tests.test_characterization_harness -v",
       "elapsed_seconds": 0.036,
@@ -187,10 +327,38 @@
         "sha256": "fa58676c75ad336c554c8d28a919df4ea5779fac7b68967e4eb42a750fa800a5"
       },
       "tests": 28
-    }
+    },
+    "status": "historical authenticated; not rerun after the narrow review correction under the proportional verification policy; Task 14 owns the next full-suite closeout"
+  },
+  "review_red": {
+    "base": {
+      "commit": "f89a07eabd916e43d5baf7be55f294ca6658a6e9",
+      "tree": "d099ec5ab2cd9cdf7315228ef2416575f9f7a6ab"
+    },
+    "command": "python3 -m unittest tests.test_phase6_concurrency.Phase6ConcurrencyTests.test_sqlite_lock_is_retryable_unavailability_not_domain_conflict tests.test_phase6_concurrency.Phase6ConcurrencyTests.test_contention_oracle_rejects_false_winner_token_provider_and_child_claims tests.test_phase6_concurrency.Phase6ConcurrencyTests.test_contention_rows_close_schema_round_identity_and_durable_winner -v",
+    "errors": 0,
+    "exit_code": 1,
+    "failures": 6,
+    "findings": [
+      "BUSY/LOCKED misclassified as domain conflict",
+      "permissive row schema/types",
+      "missing bilateral durable winner/owner/token and provider baseline/final"
+    ],
+    "output": {
+      "bytes": 6850,
+      "path": "/tmp/phase6-task12-review-red-final.out",
+      "sha256": "82b09105074c9513ded0ab8396c0150d0c2ef25380bf6daf35f0e5ec9b897c07"
+    },
+    "patch": {
+      "bytes": 6936,
+      "path": "docs/refactor/evidence/phase-06/task12-review-red.patch",
+      "reconstructed_tree": "61ac7a366a077bba71bb5de4fb1d2d42beb452ac",
+      "sha256": "cf48f2f69af30ace6214b76c4f8f2eec291d484689b526c1873239147ea928f6"
+    },
+    "tests": 3
   },
   "rollout": "NO-GO",
   "schema_version": 1,
-  "status": "implementation_verified_independent_review_pending",
+  "status": "review_findings_corrected_terminal_regate_pending",
   "task": 12
 }
