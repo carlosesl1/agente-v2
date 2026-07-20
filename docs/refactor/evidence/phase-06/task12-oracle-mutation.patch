@@ -1,0 +1,11 @@
+--- a/scripts/run_phase6_faults.py
++++ b/scripts/run_phase6_faults.py
+@@ -455 +454,0 @@
+-        "rollback_verified": rollback_verified,
+@@ -457,6 +455,0 @@
+-        "final_handoff_outbox_status": (
+-            None if handoff_outbox_row is None else handoff_outbox_row[0]
+-        ),
+-        "final_payment_outbox_status": (
+-            None if payment_outbox_row is None else payment_outbox_row[0]
+-        ),

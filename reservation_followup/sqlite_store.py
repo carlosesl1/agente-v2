@@ -276,7 +276,7 @@ def _sqlite_error(exc: sqlite3.Error, operation: str) -> StoreError:
     code = getattr(exc, "sqlite_errorcode", None)
     primary_code = code & 0xFF if type(code) is int else None
     if primary_code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
-        return ConcurrencyConflict(f"{operation} could not acquire the SQLite lock")
+        return StoreUnavailable(f"{operation} could not acquire the SQLite lock")
     if isinstance(exc, sqlite3.IntegrityError) or primary_code in (
         sqlite3.SQLITE_CORRUPT,
         sqlite3.SQLITE_NOTADB,

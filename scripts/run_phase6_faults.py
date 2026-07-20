@@ -26,7 +26,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from reservation_followup.handoff import HandoffReasonCode, HandoffRequested
-from reservation_followup.payment import PaymentEvidenceRecorded, SettlementOutcome
+from reservation_followup.payment import (
+    PaymentEvidenceRecorded,
+    SettlementOutcome,
+    validate_evidence,
+)
 from reservation_followup.properties import (
     _BASE_TIME,
     _LEASE_TTL,
@@ -45,6 +49,7 @@ from reservation_followup.sqlite_store import (
     SQLiteFollowupUnitOfWork,
     StoreError,
     StoreUnavailable,
+    _payment_claim_owner,
 )
 from reservation_followup.types import (
     EffectRequirement,
@@ -105,6 +110,25 @@ CONTENTION_DOMAINS = (
     "payment_command",
     "global_evidence_claim",
     "payment_outbox",
+)
+_CONTENTION_ROW_KEYS = frozenset(
+    {
+        "child_error_types",
+        "child_errors",
+        "domain",
+        "durable_owners",
+        "durable_tokens",
+        "durable_winners",
+        "nonzero_child_exits",
+        "partial_transactions",
+        "provider_calls_baseline",
+        "provider_calls_final",
+        "provider_delta",
+        "round",
+        "winners",
+        "winning_owners",
+        "winning_tokens",
+    }
 )
 _TRANSACTION_POINTS = frozenset(
     {
@@ -981,6 +1005,7 @@ def _contention_child(
         barrier.wait(timeout=15)
         winner = 0
         token = None
+        owner = None
         if domain == "handoff_incident":
             incident = payload
             request = _handoff_request(
@@ -998,12 +1023,13 @@ def _contention_child(
                 )
                 winner = 1
                 token = 1
+                owner = incident
             except (IdentityConflict, ConcurrencyConflict):
                 pass
         elif domain == "payment_command":
             claim = _retry_locked(
                 lambda: store.claim_settlement(
-                    worker_id=f"settlement:contender:{side}",
+                    worker_id="settlement:contender",
                     now=AT,
                     lease_ttl=_LEASE_TTL,
                 )
@@ -1011,6 +1037,7 @@ def _contention_child(
             if claim is not None:
                 winner = 1
                 token = claim.lease.fencing_token
+                owner = claim.lease.owner
         elif domain == "global_evidence_claim":
             state, event, revision = payload[side]
             try:
@@ -1023,12 +1050,17 @@ def _contention_child(
                 )
                 winner = 1
                 token = 1
+                owner = validate_evidence(
+                    state.subject,
+                    event.evidence,
+                    event.trust,
+                ).claim_key
             except (IdentityConflict, ConcurrencyConflict):
                 pass
         elif domain == "payment_outbox":
             claim = _retry_locked(
                 lambda: store.claim_payment_outbox(
-                    worker_id=f"payment-effect:contender:{side}",
+                    worker_id="payment-effect:contender",
                     delivery_id="payment-delivery:contention",
                     delivery_version=1,
                     now=AT + timedelta(minutes=2),
@@ -1038,13 +1070,25 @@ def _contention_child(
             if claim is not None:
                 winner = 1
                 token = claim.fencing_token
+                owner = _payment_claim_owner(
+                    claim.worker_id,
+                    claim.delivery_id,
+                    claim.delivery_version,
+                )
         else:
             raise ValueError("unknown contention domain")
-        result_queue.put({"winner": winner, "token": token, "error": None})
+        result_queue.put(
+            {"winner": winner, "token": token, "owner": owner, "error": None}
+        )
         store.close()
     except BaseException as exc:
         result_queue.put(
-            {"winner": 0, "token": None, "error": type(exc).__name__}
+            {
+                "winner": 0,
+                "token": None,
+                "owner": None,
+                "error": type(exc).__name__,
+            }
         )
 
 
@@ -1064,29 +1108,126 @@ def _collect_process_results(processes, result_queue) -> tuple[list[dict], list[
         try:
             results.append(result_queue.get(timeout=5))
         except queue.Empty:
-            results.append({"winner": 0, "token": None, "error": "missing_result"})
+            results.append(
+                {
+                    "winner": 0,
+                    "token": None,
+                    "owner": None,
+                    "error": "missing_result",
+                }
+            )
     result_queue.close()
     result_queue.join_thread()
     return results, exits
 
 
-def _contention_violations(row: dict[str, object]) -> tuple[str, ...]:
+def _durable_contention_snapshot(
+    store: SQLiteFollowupUnitOfWork,
+    *,
+    domain: str,
+    payload,
+) -> tuple[int, list[int], list[str]]:
+    connection = store._connection
+    if domain == "handoff_incident":
+        rows = connection.execute(
+            "SELECT incident_key, revision FROM handoff_workflows WHERE incident_key=?",
+            (payload,),
+        ).fetchall()
+    elif domain == "payment_command":
+        rows = connection.execute(
+            "SELECT claim_owner, fencing_token FROM payment_ledger WHERE status='leased'"
+        ).fetchall()
+    elif domain == "global_evidence_claim":
+        rows = connection.execute(
+            "SELECT claim_key, payment_version FROM payment_evidence_claims"
+        ).fetchall()
+    elif domain == "payment_outbox":
+        rows = connection.execute(
+            "SELECT claim_owner, fencing_token FROM payment_outbox WHERE status='leased'"
+        ).fetchall()
+    else:
+        raise ValueError("unknown contention domain")
+    return (
+        len(rows),
+        sorted(row[1] for row in rows),
+        sorted(row[0] for row in rows),
+    )
+
+
+def _contention_violations(
+    row: dict[str, object],
+    *,
+    expected_domain: str | None = None,
+    expected_round: int | None = None,
+) -> tuple[str, ...]:
     violations = []
-    if row.get("domain") not in CONTENTION_DOMAINS:
+    if type(row) is not dict or set(row) != _CONTENTION_ROW_KEYS:
+        violations.append("row_schema")
+    domain = row.get("domain")
+    if type(domain) is not str or domain not in CONTENTION_DOMAINS:
         violations.append("unknown_domain")
-    if row.get("winners") != 1:
+    if expected_domain is not None and domain != expected_domain:
+        violations.append("domain_identity")
+    round_index = row.get("round")
+    if type(round_index) is not int or round_index < 0:
+        violations.append("round_type")
+    if expected_round is not None and round_index != expected_round:
+        violations.append("round_identity")
+    winners = row.get("winners")
+    if type(winners) is not int or winners != 1:
         violations.append("winner_count")
-    if row.get("winning_tokens") != [1]:
+    winning_tokens = row.get("winning_tokens")
+    if (
+        type(winning_tokens) is not list
+        or winning_tokens != [1]
+        or any(type(token) is not int for token in winning_tokens)
+    ):
         violations.append("winner_token")
-    if row.get("provider_delta") != 0:
+    winning_owners = row.get("winning_owners")
+    if (
+        type(winning_owners) is not list
+        or len(winning_owners) != 1
+        or any(type(owner) is not str or not owner for owner in winning_owners)
+    ):
+        violations.append("winner_owner")
+    durable_winners = row.get("durable_winners")
+    durable_tokens = row.get("durable_tokens")
+    durable_owners = row.get("durable_owners")
+    if type(durable_winners) is not int or durable_winners != winners:
+        violations.append("durable_winner_count")
+    if (
+        type(durable_tokens) is not list
+        or durable_tokens != winning_tokens
+        or any(type(token) is not int for token in durable_tokens)
+    ):
+        violations.append("durable_winner_token")
+    if (
+        type(durable_owners) is not list
+        or durable_owners != winning_owners
+        or any(type(owner) is not str or not owner for owner in durable_owners)
+    ):
+        violations.append("durable_winner_owner")
+    baseline = row.get("provider_calls_baseline")
+    final = row.get("provider_calls_final")
+    delta = row.get("provider_delta")
+    if not all(type(value) is int and value >= 0 for value in (baseline, final, delta)):
+        violations.append("provider_counter_type")
+    elif final - baseline != delta or delta != 0:
         violations.append("provider_delta")
-    if row.get("partial_transactions") != 0:
-        violations.append("partial_transaction")
-    if row.get("child_errors") != 0:
-        violations.append("child_error")
-    if row.get("nonzero_child_exits") != 0:
-        violations.append("child_exit")
-    return tuple(violations)
+    for field, violation in (
+        ("partial_transactions", "partial_transaction"),
+        ("child_errors", "child_error"),
+        ("nonzero_child_exits", "child_exit"),
+    ):
+        value = row.get(field)
+        if type(value) is not int or value != 0:
+            violations.append(violation)
+    error_types = row.get("child_error_types")
+    if type(error_types) is not list or error_types or any(
+        type(value) is not str for value in error_types
+    ):
+        violations.append("child_error_types")
+    return tuple(dict.fromkeys(violations))
 
 
 def _contention_round(
@@ -1161,8 +1302,14 @@ def _contention_round(
     reopened = SQLiteFollowupUnitOfWork.open(db_path)
     try:
         partial = _partial_transaction_count(reopened)
+        durable_winners, durable_tokens, durable_owners = _durable_contention_snapshot(
+            reopened,
+            domain=domain,
+            payload=payload,
+        )
     finally:
         reopened.close()
+    provider_final = _line_count(provider_log)
     return {
         "domain": domain,
         "round": round_index,
@@ -1170,7 +1317,15 @@ def _contention_round(
         "winning_tokens": sorted(
             result["token"] for result in results if result["winner"]
         ),
-        "provider_delta": _line_count(provider_log) - provider_baseline,
+        "winning_owners": sorted(
+            result["owner"] for result in results if result["winner"]
+        ),
+        "durable_winners": durable_winners,
+        "durable_tokens": durable_tokens,
+        "durable_owners": durable_owners,
+        "provider_calls_baseline": provider_baseline,
+        "provider_calls_final": provider_final,
+        "provider_delta": provider_final - provider_baseline,
         "partial_transactions": partial,
         "child_errors": sum(result["error"] is not None for result in results),
         "child_error_types": sorted(
@@ -1196,7 +1351,13 @@ def run_contention(*, seed: int, rounds: int, workdir: Path) -> dict[str, object
                 round_index=round_index,
                 workdir=workdir,
             )
-            row["violations"] = list(_contention_violations(row))
+            row["violations"] = list(
+                _contention_violations(
+                    row,
+                    expected_domain=domain,
+                    expected_round=round_index,
+                )
+            )
             rows.append(row)
     violations = sum(len(row["violations"]) for row in rows)
     return {
