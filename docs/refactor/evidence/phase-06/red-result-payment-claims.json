@@ -2,11 +2,11 @@
   "phase": 6,
   "task": 8,
   "title": "Global payment evidence claims and permanently fenced settlement ledger",
-  "recorded_at_utc": "2026-07-20T05:37:46Z",
+  "recorded_at_utc": "2026-07-20T05:55:41Z",
   "base_sha": "bc6fd086b2e6c23f330f6103c59714ed280c6fdb",
   "base_tree_sha": "57d665115789418a5d28b398bd5e60687840d170",
-  "functional_commit": "de4f34687f08b198f8ea420216f858fb4d56410d",
-  "functional_tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577",
+  "functional_commit": "cedd8f1bf1839884cf29e3b2ea742a23c9e6a6b7",
+  "functional_tree": "d78cf41a34e3fb023542647577b8165aeaa7ffee",
   "rollout": "NO-GO",
   "postgresql_executed": false,
   "network_used": false,
@@ -107,58 +107,40 @@
       },
       "functional_commit": "de4f34687f08b198f8ea420216f858fb4d56410d",
       "functional_tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577"
+    },
+    "final_review_correction": {
+      "base_sha": "04cddbedf088de2ab0076bb4ac984af441b55144",
+      "base_tree_sha": "b2b7cac8e8a018ec66dd9adc6e248d7b3503a69c",
+      "command": "python3 -m unittest tests.test_phase6_payment_claims.Phase6SettlementLeaseAndFenceTests.test_first_post_fence_outcome_at_exact_expiry_is_stale_and_atomic tests.test_phase6_payment_claims.Phase6SettlementLeaseAndFenceTests.test_mutated_permit_dispatch_slot_is_rejected_without_mutation tests.test_phase6_payment_claims.Phase6PaymentIntegrityTests.test_dispatch_request_hash_tamper_fails_loader_before_outcome -v",
+      "red": {
+        "exit_code": 1,
+        "tests": 3,
+        "failures": 3,
+        "errors": 0,
+        "patch_path": "docs/refactor/evidence/phase-06/task8-final-review-findings-red.patch",
+        "patch_format": "git diff --binary --full-index -U0",
+        "patch_sha256": "8aebdc53025f8634d68955705d0ebc4515ec3cc46546b0c61da3f2dc82ce05c3",
+        "patch_bytes": 3383,
+        "staged_tree_sha": "f45f1f09d8ac49335de6ea089d24508fcb88a58a",
+        "reconstructed_tree_sha": "f45f1f09d8ac49335de6ea089d24508fcb88a58a",
+        "output_sha256": "97ce2d188a8b61a1b1fcd4fbc1c90202d583b3ea82981919ca7729d549021d9e",
+        "output_bytes": 2700,
+        "raw_output_path": "/tmp/phase6-task8-final-review-findings-red.out",
+        "raw_output_versioned": false
+      },
+      "green": {
+        "tests": 3,
+        "result": "OK",
+        "output_sha256": "77aa652868485a7c6ae477cae793a575bd859f9eb543c15281f7112579477114"
+      },
+      "corrections": [
+        "loader binds dispatch_request_hash to sha256(command.canonical_payload)",
+        "first outcome rejects now >= lease expiry and CAS requires lease_expires_at > now",
+        "record_settlement_outcome reconstructs and compares canonical claim and permit DTOs"
+      ],
+      "functional_commit": "cedd8f1bf1839884cf29e3b2ea742a23c9e6a6b7",
+      "functional_tree": "d78cf41a34e3fb023542647577b8165aeaa7ffee"
     }
-  },
-  "worktree_green": {
-    "focused": {
-      "command": "python3 -m unittest tests.test_phase6_payment_claims -v",
-      "tests": 18,
-      "result": "OK",
-      "output_sha256": "4ba57e75cb6d5c2288d8675566525b6efa894a10f5bc479191842383ca46aa45"
-    },
-    "sqlite_store": {
-      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v",
-      "tests": 29,
-      "result": "OK",
-      "output_sha256": "7717938ddbe17e4615da196753e41a3488527337366bd9c5c64df15c60f5dd82"
-    },
-    "contracts_and_payment_reducer": {
-      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_payment tests.test_phase6_payment_reducer -v",
-      "tests": 70,
-      "result": "OK",
-      "output_sha256": "74d65db2b284247d90431d14dd816b3de29e9fbddfab46d903ac6b372ce5d5fc"
-    },
-    "schema_and_handoff_siblings": {
-      "command": "python3 -m unittest tests.test_phase6_schema tests.test_phase6_handoff_worker -v",
-      "tests": 54,
-      "result": "OK",
-      "output_sha256": "7cf4d398c36b8931c67b10b4ca631880af1c79464988d2bbb8d3663be9d2b18b"
-    },
-    "full_suite": {
-      "command": "python3 -m unittest discover -s tests -v",
-      "tests": 553,
-      "result": "OK",
-      "output_sha256": "afdb5ddfb6ea477c33d002a4ef1b2eeb7abaeb9fd66566a705fef3782e9fbfaa"
-    },
-    "characterization": {
-      "command": "python3 -m characterization.harness",
-      "status": "ok",
-      "scenario_count": 30,
-      "incident_count": 22,
-      "violation_count": 37,
-      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
-    },
-    "schema": {
-      "drift": 0,
-      "table_count": 11,
-      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
-      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
-      "quick_check": "ok",
-      "foreign_key_check": [],
-      "foreign_keys_enabled": true,
-      "postgresql_executed": false
-    },
-    "compile_diff_and_capability_scans": "passed"
   },
   "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only",
   "task9_boundary": {
@@ -172,10 +154,11 @@
     "payment_receipt_rows_created": 0
   },
   "independent_review": {
-    "status": "pending re-gate after de4f346",
-    "critical": null,
-    "important": null,
-    "minor": null
+    "status": "corrections complete; terminal re-gate pending after cedd8f1",
+    "critical": 0,
+    "important": 0,
+    "minor": 0,
+    "note": "counts describe unresolved findings after controller corrections, not an independent approval"
   },
   "initial_functional_commit": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
   "initial_functional_tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
@@ -255,7 +238,62 @@
       "state_mutated": false
     }
   },
-  "final_detached_gate": {
+  "pre_final_review_functional_commit": "de4f34687f08b198f8ea420216f858fb4d56410d",
+  "pre_final_review_functional_tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577",
+  "pre_final_review_evidence_commit": "04cddbedf088de2ab0076bb4ac984af441b55144",
+  "pre_final_review_evidence_tree": "b2b7cac8e8a018ec66dd9adc6e248d7b3503a69c",
+  "initial_worktree_green": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_payment_claims -v",
+      "tests": 18,
+      "result": "OK",
+      "output_sha256": "4ba57e75cb6d5c2288d8675566525b6efa894a10f5bc479191842383ca46aa45"
+    },
+    "sqlite_store": {
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v",
+      "tests": 29,
+      "result": "OK",
+      "output_sha256": "7717938ddbe17e4615da196753e41a3488527337366bd9c5c64df15c60f5dd82"
+    },
+    "contracts_and_payment_reducer": {
+      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_payment tests.test_phase6_payment_reducer -v",
+      "tests": 70,
+      "result": "OK",
+      "output_sha256": "74d65db2b284247d90431d14dd816b3de29e9fbddfab46d903ac6b372ce5d5fc"
+    },
+    "schema_and_handoff_siblings": {
+      "command": "python3 -m unittest tests.test_phase6_schema tests.test_phase6_handoff_worker -v",
+      "tests": 54,
+      "result": "OK",
+      "output_sha256": "7cf4d398c36b8931c67b10b4ca631880af1c79464988d2bbb8d3663be9d2b18b"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 553,
+      "result": "OK",
+      "output_sha256": "afdb5ddfb6ea477c33d002a4ef1b2eeb7abaeb9fd66566a705fef3782e9fbfaa"
+    },
+    "characterization": {
+      "command": "python3 -m characterization.harness",
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_and_capability_scans": "passed"
+  },
+  "budget_detached_gate": {
     "worktree": "/tmp/phase6-task8-budget-gate",
     "head": "de4f34687f08b198f8ea420216f858fb4d56410d",
     "tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577",
@@ -274,6 +312,86 @@
       "tests": 555,
       "result": "OK",
       "output_sha256": "2b4d8d8af17cd07fb3240167a0452ed8c5fb21785df516bd32b2467584247e8e"
+    },
+    "characterization": {
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_capability_scans": "passed"
+  },
+  "independent_review_batch_deleg_d3439a1c": {
+    "audited_evidence_commit": "04cddbedf088de2ab0076bb4ac984af441b55144",
+    "audited_evidence_tree": "b2b7cac8e8a018ec66dd9adc6e248d7b3503a69c",
+    "lane_a": {
+      "verdict": "Needs fixes",
+      "tests": 5,
+      "result": "OK",
+      "critical": 0,
+      "important": "loader accepted a valid but divergent dispatch_request_hash and a coherently forged permit/outcome could persist it",
+      "minor": "record_settlement_outcome accepted an object-mutated dispatch_slot"
+    },
+    "lane_b": {
+      "verdict": "Needs fixes",
+      "tests": 7,
+      "result": "OK",
+      "critical": 0,
+      "important": "first post-fence outcome remained writable at or after lease expiry",
+      "minor": 0,
+      "exact_terminal_replay_with_different_owner": "acceptable non-mutating no-op; no new outcome is written"
+    },
+    "lane_c": {
+      "verdict": "Needs fixes",
+      "critical": 0,
+      "important": "same dispatch request hash loader gap independently confirmed",
+      "minor": "historical worktree_green evidence was ambiguously named without its own anchor",
+      "authenticated": [
+        "base, functional and evidence commits/trees",
+        "frozen review package",
+        "initial RED patch/tree/output",
+        "budget RED patch/tree/output",
+        "schema drift, 11 tables, quick/fk checks, structural scans"
+      ],
+      "not_reexecuted": [
+        "49/49",
+        "352/352",
+        "555/555",
+        "characterization 30/30"
+      ]
+    },
+    "terminal_classification": "Needs fixes; 0 Critical, 2 distinct Important, 2 Minor (one semantic DTO canonicality, one evidence wording)"
+  },
+  "final_detached_gate": {
+    "worktree": "/tmp/phase6-task8-final-review-gate",
+    "head": "cedd8f1bf1839884cf29e3b2ea742a23c9e6a6b7",
+    "tree": "d78cf41a34e3fb023542647577b8165aeaa7ffee",
+    "clean": true,
+    "focused_and_store": {
+      "tests": 52,
+      "result": "OK",
+      "output_sha256": "89ebdff60c811706a72e841a71bf508702051a3ae5ca9f0d9f28b7c5920ba2a1"
+    },
+    "phase5_phase6_regressions": {
+      "tests": 355,
+      "result": "OK",
+      "output_sha256": "2f92b459423abb03aa2e6d47a3f364728066b1f8e2e62d9f7bbdf465bde74cc9"
+    },
+    "full_suite": {
+      "tests": 558,
+      "result": "OK",
+      "output_sha256": "84107de06f771e9de4349a539574f08425d6a126c075844727d81c1d6efec34c"
     },
     "characterization": {
       "status": "ok",
