@@ -2,11 +2,11 @@
   "phase": 6,
   "task": 8,
   "title": "Global payment evidence claims and permanently fenced settlement ledger",
-  "recorded_at_utc": "2026-07-20T05:12:32Z",
+  "recorded_at_utc": "2026-07-20T05:37:46Z",
   "base_sha": "bc6fd086b2e6c23f330f6103c59714ed280c6fdb",
   "base_tree_sha": "57d665115789418a5d28b398bd5e60687840d170",
-  "functional_commit": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
-  "functional_tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
+  "functional_commit": "de4f34687f08b198f8ea420216f858fb4d56410d",
+  "functional_tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577",
   "rollout": "NO-GO",
   "postgresql_executed": false,
   "network_used": false,
@@ -79,6 +79,34 @@
       "raw_output_path": "/tmp/phase6-task8-red-final.out",
       "raw_output_versioned": false,
       "classification": "honest absent-contract RED on the immutable base; no production bytes were present"
+    },
+    "expired_reclaim_budget_correction": {
+      "base_sha": "08535de49e400cfae043497089531111dc43f92b",
+      "base_tree_sha": "6a11605272f722a2c9d6facaa3f71cd7d14aac08",
+      "command": "python3 -m unittest tests.test_phase6_payment_claims.Phase6SettlementLeaseAndFenceTests.test_expired_reclaims_cannot_exceed_finite_pre_fence_budget tests.test_phase6_payment_claims.Phase6PaymentIntegrityTests.test_claim_count_above_pre_fence_budget_is_corruption -v",
+      "red": {
+        "exit_code": 1,
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "patch_path": "docs/refactor/evidence/phase-06/task8-expired-reclaim-budget-red.patch",
+        "patch_format": "git diff --binary --full-index -U0",
+        "patch_sha256": "8ea6a9eef7697be11e25649417e0d5b8776d376524db963e110eb979df315c60",
+        "patch_bytes": 2125,
+        "staged_tree_sha": "bb2e44a700eeb97b3aa9a45c38f1432eeb1bd35f",
+        "reconstructed_tree_sha": "bb2e44a700eeb97b3aa9a45c38f1432eeb1bd35f",
+        "output_sha256": "9ed1671fcaea5cbb775c537cd84de28b2d7fc0ce2f7cf569d75ab406f88314d4",
+        "output_bytes": 3022,
+        "raw_output_path": "/tmp/phase6-task8-expired-reclaim-budget-red.out",
+        "raw_output_versioned": false
+      },
+      "green": {
+        "tests": 2,
+        "result": "OK",
+        "output_sha256": "b775fa310e6399bb55cd6068267b4b610c3f1506b883e5160b3319e0383afb2f"
+      },
+      "functional_commit": "de4f34687f08b198f8ea420216f858fb4d56410d",
+      "functional_tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577"
     }
   },
   "worktree_green": {
@@ -144,12 +172,16 @@
     "payment_receipt_rows_created": 0
   },
   "independent_review": {
-    "status": "pending",
+    "status": "pending re-gate after de4f346",
     "critical": null,
     "important": null,
     "minor": null
   },
-  "detached_gate": {
+  "initial_functional_commit": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
+  "initial_functional_tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
+  "pre_correction_evidence_commit": "08535de49e400cfae043497089531111dc43f92b",
+  "pre_correction_evidence_tree": "6a11605272f722a2c9d6facaa3f71cd7d14aac08",
+  "initial_detached_gate": {
     "worktree": "/tmp/phase6-task8-gate",
     "head": "f45759a6d5ee6418bfbfaabda2fc16377bd0b7de",
     "tree": "ce2790860fe70ad6b2b989ad9b8d068b297c876a",
@@ -194,5 +226,72 @@
     "capability_symbols": [],
     "urls": [],
     "forbidden_task9_apis": []
+  },
+  "inconclusive_review_batch": {
+    "delegation_id": "deleg_4f43abd1",
+    "lane_a": "provider_safety_filter_no_verdict",
+    "lane_b": "timeout_no_summary",
+    "lane_c": "timeout_no_summary",
+    "approvals": 0,
+    "reports_found": 0,
+    "worktree_mutations": 0,
+    "classification": "not a terminal independent review"
+  },
+  "controller_review": {
+    "verdict": "Needs fixes before independent re-gate",
+    "critical": 0,
+    "important": 1,
+    "minor": 0,
+    "finding": {
+      "severity": "Important",
+      "title": "Expired pre-fence leases bypassed the finite preparation budget",
+      "root_cause": "claim_settlement reclaimed every expired leased row without checking the maximum pre-dispatch claim count, while the loader accepted claim_count values above that maximum",
+      "reproduction": "six exact-expiry reclaims returned tokens/counts 1 through 6 and left the row leased at count 6",
+      "correction": "skip claim candidates at the finite budget and reject ledger history above the budget in the bilateral loader"
+    },
+    "terminal_replay_observation": {
+      "scenario": "an exact terminal replay with a consistently forged owner DTO returns a no-op; a divergent outcome is rejected",
+      "classification": "not treated as a write-authority violation because the exact path performs no mutation; retained for independent reviewer scrutiny",
+      "state_mutated": false
+    }
+  },
+  "final_detached_gate": {
+    "worktree": "/tmp/phase6-task8-budget-gate",
+    "head": "de4f34687f08b198f8ea420216f858fb4d56410d",
+    "tree": "b0bb8805a15be8cb4bd84e54a8ec40c179a85577",
+    "clean": true,
+    "focused_and_store": {
+      "tests": 49,
+      "result": "OK",
+      "output_sha256": "d8d9fb31f77da6b88c8ac1fd1abde5553ed6f9e9d9a9682b0d0fa24e731d0509"
+    },
+    "phase5_phase6_regressions": {
+      "tests": 352,
+      "result": "OK",
+      "output_sha256": "6060058c6547c322aedc956d1e42e4ea856c27e693f4cdf3141d2f0327f38ca2"
+    },
+    "full_suite": {
+      "tests": 555,
+      "result": "OK",
+      "output_sha256": "2b4d8d8af17cd07fb3240167a0452ed8c5fb21785df516bd32b2467584247e8e"
+    },
+    "characterization": {
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_capability_scans": "passed"
   }
 }
