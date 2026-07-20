@@ -554,6 +554,37 @@ class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
         self.assertEqual(evidence_claim.status.value, "completed")
         self.assertIsNotNone(evidence_claim.consumed_at)
 
+    def test_expired_reclaims_cannot_exceed_finite_pre_fence_budget(self) -> None:
+        claims = []
+        current_now = NOW
+        for attempt in range(3):
+            claim = self.claim(
+                worker_id=f"worker:settlement:expired-budget:{attempt}",
+                now=current_now,
+            )
+            self.assertIsNotNone(claim)
+            claims.append(claim)
+            current_now = claim.lease.expires_at
+        before = payment_fingerprint(self.store._connection)
+        self.assertIsNone(
+            self.claim(
+                worker_id="worker:settlement:expired-budget:blocked",
+                now=current_now,
+            )
+        )
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
+        self.assertEqual(
+            [claim.claim_count for claim in claims],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT status, claim_owner, fencing_token, claim_count, "
+                "dispatch_slots_consumed FROM main.payment_ledger"
+            ).fetchone(),
+            ("leased", "worker:settlement:expired-budget:2", 3, 3, 0),
+        )
+
     def test_fence_consumes_exactly_slot_one_permanently_without_dispatching(self) -> None:
         claim = self.claim()
         permit = self.store.fence_settlement(
@@ -846,6 +877,15 @@ class Phase6PaymentIntegrityTests(PaymentClaimStoreCase):
                 with self.assertRaises(DataCorruption):
                     self.claim(worker_id=f"worker:settlement:status-token:{index}")
                 self.assertEqual(payment_fingerprint(self.store._connection), before)
+
+    def test_claim_count_above_pre_fence_budget_is_corruption(self) -> None:
+        self.store._connection.execute(
+            "UPDATE main.payment_ledger SET fencing_token=4, claim_count=4"
+        )
+        before = payment_fingerprint(self.store._connection)
+        with self.assertRaises(DataCorruption):
+            self.store.load_payment(self.transition.state.subject.payment_id)
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
 
     def test_tampered_live_owner_token_and_expiry_fail_before_fence(self) -> None:
         claim = self.claim(worker_id="worker:settlement:integrity")

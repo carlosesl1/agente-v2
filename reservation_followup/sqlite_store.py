@@ -1540,6 +1540,7 @@ class SQLiteFollowupUnitOfWork:
             or type(row[10]) is not int
             or row[6] < 0
             or row[9] < 0
+            or row[9] > _MAX_PRE_DISPATCH_CLAIMS
             or row[6] != row[9]
             or row[10] not in (0, 1)
         ):
@@ -2196,6 +2197,8 @@ class SQLiteFollowupUnitOfWork:
                 claim_record, command, ledger = records
                 if command.settlement_command_id != command_id:
                     raise DataCorruption("claimable ledger command selection is divergent")
+                if ledger["claim_count"] >= _MAX_PRE_DISPATCH_CLAIMS:
+                    continue
                 lease = ledger["lease"]
                 if ledger["status"] == "queued" or (
                     ledger["status"] == "leased"

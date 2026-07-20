@@ -1,0 +1,46 @@
+diff --git a/tests/test_phase6_payment_claims.py b/tests/test_phase6_payment_claims.py
+index 62e1376bbded627f28d7a2086e33f4d737cf6911..76148b4706209422437f538f17a30534bc877467 100644
+--- a/tests/test_phase6_payment_claims.py
++++ b/tests/test_phase6_payment_claims.py
+@@ -556,0 +557,31 @@ class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
++    def test_expired_reclaims_cannot_exceed_finite_pre_fence_budget(self) -> None:
++        claims = []
++        current_now = NOW
++        for attempt in range(3):
++            claim = self.claim(
++                worker_id=f"worker:settlement:expired-budget:{attempt}",
++                now=current_now,
++            )
++            self.assertIsNotNone(claim)
++            claims.append(claim)
++            current_now = claim.lease.expires_at
++        before = payment_fingerprint(self.store._connection)
++        self.assertIsNone(
++            self.claim(
++                worker_id="worker:settlement:expired-budget:blocked",
++                now=current_now,
++            )
++        )
++        self.assertEqual(payment_fingerprint(self.store._connection), before)
++        self.assertEqual(
++            [claim.claim_count for claim in claims],
++            [1, 2, 3],
++        )
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT status, claim_owner, fencing_token, claim_count, "
++                "dispatch_slots_consumed FROM main.payment_ledger"
++            ).fetchone(),
++            ("leased", "worker:settlement:expired-budget:2", 3, 3, 0),
++        )
++
+@@ -849,0 +881,9 @@ class Phase6PaymentIntegrityTests(PaymentClaimStoreCase):
++    def test_claim_count_above_pre_fence_budget_is_corruption(self) -> None:
++        self.store._connection.execute(
++            "UPDATE main.payment_ledger SET fencing_token=4, claim_count=4"
++        )
++        before = payment_fingerprint(self.store._connection)
++        with self.assertRaises(DataCorruption):
++            self.store.load_payment(self.transition.state.subject.payment_id)
++        self.assertEqual(payment_fingerprint(self.store._connection), before)
++
