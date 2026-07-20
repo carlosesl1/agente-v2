@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": 6,
   "task": 7,
-  "generated_at_utc": "2026-07-20T02:16:22Z",
+  "generated_at_utc": "2026-07-20T02:51:00Z",
   "base_commit": "26a60b3d4aff8f5bca62bb0411bb9a9e8a359c54",
   "base_tree": "a26ed9885f05892bd2a0e06b94f256e54f725da7",
   "tdd": {
@@ -45,16 +45,51 @@
       "raw_output_versioned": false,
       "green_output_path": "/tmp/phase6-task7-selfreview-green.out",
       "green_output_sha256": "b0bf96d107441d21e474a4aab0c16b71b6c6557554287c1ba4f20c2eb740b188"
+    },
+    "review_red": {
+      "description": "Review oracles applied to rejected Task 7 implementation; valid worker substitution with bilateral receipt/outbox rehash remained accepted",
+      "base_commit": "66eb77de9b4d5ec9f5eb7ffff7018bc0d4aa62d7",
+      "base_tree": "3bd5e93c737f7072780808247a992d3e51fe9da6",
+      "patch_path": "docs/refactor/evidence/phase-06/task7-review-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task7-review-red.patch",
+      "patch_sha256": "a0889e5d5dd05dd6e3818fc3bccc2b411bc58fa0bee0ace5a6b5d213741a2c62",
+      "staged_tree": "6e94669220956bdaec8bc1c1154c87bdb115fae2",
+      "apply_check": "passed_against_clean_base",
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
+      "exit_code": 1,
+      "tests_run": 21,
+      "failures": 1,
+      "errors": 0,
+      "failing_test": "test_valid_worker_substitution_with_bilateral_rehash_is_corruption",
+      "raw_output_path": "/tmp/phase6-task7-review-immutable-red.out",
+      "raw_output_sha256": "f76dfe56e84b5425ecade2092ea23f5c563271873659b7bfe998ebe7ff6a6a47",
+      "raw_output_versioned": false
+    },
+    "one_shot_mutation_red": {
+      "description": "Mutant drains a second pending handoff message before returning; two-message oracle must kill it",
+      "base_commit": "66eb77de9b4d5ec9f5eb7ffff7018bc0d4aa62d7",
+      "mutation_patch_path": "docs/refactor/evidence/phase-06/task7-one-shot-mutant.patch",
+      "mutation_patch_sha256": "798592371cd0e6ad9e17e092179439e584eab99cb608946c99b6ffda001b9d0d",
+      "test": "test_worker_delivers_at_most_one_when_two_messages_are_pending",
+      "exit_code": 1,
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "raw_output_path": "/tmp/phase6-task7-one-shot-mutation-red.out",
+      "raw_output_sha256": "6a6a225832aa07f34f003b766f0b0642c764479c0360f11ea9e339323b3a5a0f",
+      "raw_output_versioned": false
     }
   },
   "gates": {
     "focused": {
       "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
-      "tests": 17,
+      "tests": 21,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-focused-final.out",
-      "output_sha256": "63cc19f108f910efc18b0a46be23b5fe0025c6faf2773264c731a253db0a597c"
+      "output_path": "/tmp/phase6-task7-review-focused-final.out",
+      "output_sha256": "7291a49d085cdfcb8cda6ce0197d486a5332ec20f66b66922d659f6e729d99c7",
+      "duration_seconds": 1.671
     },
     "regressions": {
       "modules": [
@@ -68,16 +103,18 @@
       "tests": 173,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-regressions-final.out",
-      "output_sha256": "83905b37a7545ea652b1b18f23193b6a206803e51b95c440b6544577be371cfe"
+      "output_path": "/tmp/phase6-task7-review-regressions-final.out",
+      "output_sha256": "1898b8c0c3c6b3b5458c5d73869865e0a310680664f1ad91f89d2b97dcfc7009",
+      "duration_seconds": 9.027
     },
     "full_suite": {
       "command": "python3 -m unittest discover -s tests -v",
-      "tests": 524,
+      "tests": 528,
       "failures": 0,
       "errors": 0,
-      "output_path": "/tmp/phase6-task7-full-suite-final.out",
-      "output_sha256": "4a89a396bb94fdc3511ad5d62bb9b85122af0a316f04da10bd637aa3052e5e98"
+      "output_path": "/tmp/phase6-task7-review-full-suite-final.out",
+      "output_sha256": "52fc8c7d4d4952de278d254ab2e9c11ebd538ea34728b4e68f0e3bfc7bd92aa9",
+      "duration_seconds": 68.98
     },
     "characterization": {
       "command": "python3 -m characterization.harness",
@@ -85,7 +122,7 @@
       "scenario_count": 30,
       "incident_count": 22,
       "violation_count": 37,
-      "output_path": "/tmp/phase6-task7-characterization-final.out",
+      "output_path": "/tmp/phase6-task7-review-characterization-final.out",
       "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
     },
     "schema": {
@@ -110,5 +147,24 @@
   "provider_used": false,
   "database_scope": "SQLite local temporary files and :memory: only",
   "postgresql_executed": false,
-  "rollout": "NO-GO"
+  "rollout": "NO-GO",
+  "implementation_commit": "66eb77de9b4d5ec9f5eb7ffff7018bc0d4aa62d7",
+  "implementation_tree": "3bd5e93c737f7072780808247a992d3e51fe9da6",
+  "review_correction_commit": "1ce1827fbe94ca664030d3e0f2a0827d594c8b9b",
+  "review_correction_tree": "103deebbeea860521bbbe04dffeefc3cd4ba9266",
+  "gates_bound_to_commit": "1ce1827fbe94ca664030d3e0f2a0827d594c8b9b",
+  "gates_bound_to_tree": "103deebbeea860521bbbe04dffeefc3cd4ba9266",
+  "semantic_review_decisions": {
+    "logical_now": {
+      "decision": "no production change",
+      "basis": "approved Task 7 plan explicitly passes the same run_once(now) value to claim, release, and complete; now is the authoritative logical invocation time",
+      "plan_lines": "docs/superpowers/plans/2026-07-19-phase-6-handoff-payments.md:613-630"
+    },
+    "delivery_exception": {
+      "decision": "no production change",
+      "basis": "approved Task 7 plan classifies every ordinary delivery Exception as release plus retryable_failure; DISPATCHED_UNKNOWN is reserved for settlement after permanent fencing in Task 9",
+      "task7_plan_lines": "docs/superpowers/plans/2026-07-19-phase-6-handoff-payments.md:623-629",
+      "task9_plan_lines": "docs/superpowers/plans/2026-07-19-phase-6-handoff-payments.md:716-750"
+    }
+  }
 }
