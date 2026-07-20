@@ -77,6 +77,17 @@
       "tests_failed": 5,
       "tests_in_error": 0,
       "tests_run": 14
+    },
+    {
+      "causal_failure": "ModuleNotFoundError: reservation_boundary.schema and sqlite_store",
+      "command": "python3 -B -m unittest tests.test_phase7_schema tests.test_phase7_sqlite_store -v",
+      "exit_code": 1,
+      "output_bytes": 1733,
+      "output_sha256": "768355628098465586de36bb8268637973dda1f092a8628f85c7bc9121c63f04",
+      "task": 7,
+      "tests_failed": 0,
+      "tests_in_error": 2,
+      "tests_run": 2
     }
   ],
   "phase": 7,
