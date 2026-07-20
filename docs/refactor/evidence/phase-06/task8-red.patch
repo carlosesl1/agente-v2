@@ -1,0 +1,908 @@
+diff --git a/tests/test_phase6_payment_claims.py b/tests/test_phase6_payment_claims.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..62e1376bbded627f28d7a2086e33f4d737cf6911
+--- /dev/null
++++ b/tests/test_phase6_payment_claims.py
+@@ -0,0 +1,902 @@
++from __future__ import annotations
++
++from concurrent.futures import ThreadPoolExecutor
++from dataclasses import replace
++from datetime import timedelta
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import sqlite3
++import tempfile
++from threading import Barrier
++import unittest
++
++from reservation_followup import (
++    BusinessUnit,
++    FinancialConfirmationReceived,
++    FinancialSummaryRecorded,
++    PaymentEvidenceRecorded,
++    PaymentMethod,
++    PaymentMethodSelected,
++    PaymentStatus,
++    SettlementCertainty,
++    financial_summary_hash,
++)
++from reservation_followup import workers as followup_workers
++from reservation_followup.payment import (
++    StripeEventType,
++    VerifiedStripeEvent,
++    VerifiedWiseCredit,
++    stripe_target_fingerprint,
++    wise_target_fingerprint,
++)
++from reservation_followup.sqlite_store import (
++    DataCorruption,
++    IdentityConflict,
++    SQLiteFollowupUnitOfWork,
++    StaleLease,
++    StoreError,
++)
++from tests.phase6_helpers import (
++    T0,
++    confirmed_anchor,
++    payment_effect_policy,
++    payment_evidence_trust,
++    pix_visual_evidence,
++)
++from tests.test_phase6_payment import stripe_event, wise_credit
++from tests.test_phase6_payment_reducer import outcome
++
++NOW = T0 + timedelta(seconds=5)
++LEASE_TTL = timedelta(seconds=30)
++PAYMENT_TABLES = (
++    "payment_workflows",
++    "payment_events",
++    "payment_evidence_claims",
++    "payment_commands",
++    "payment_ledger",
++    "payment_outbox",
++    "payment_receipts",
++)
++
++
++def payment_fingerprint(connection: sqlite3.Connection) -> tuple[tuple[object, ...], ...]:
++    return tuple(
++        tuple(connection.execute(f"SELECT * FROM main.{table} ORDER BY 1"))
++        for table in PAYMENT_TABLES
++    )
++
++
++def task8_counts(connection: sqlite3.Connection) -> tuple[int, int, int]:
++    return tuple(
++        connection.execute(f"SELECT COUNT(*) FROM main.{table}").fetchone()[0]
++        for table in (
++            "payment_evidence_claims",
++            "payment_commands",
++            "payment_ledger",
++        )
++    )
++
++
++def prepare_payment(
++    store: SQLiteFollowupUnitOfWork,
++    *,
++    suffix: str,
++    method: PaymentMethod,
++    evidence,
++    anchor=None,
++):
++    opened = store.open_payment(anchor or confirmed_anchor(), payment_effect_policy())
++    payment_id = opened.state.subject.payment_id
++    selected = store.apply_payment(
++        payment_id,
++        0,
++        PaymentMethodSelected(
++            event_id=f"payment:event:claims:{suffix}:method",
++            payment_id=payment_id,
++            method=method,
++            selected_at=T0 + timedelta(seconds=1),
++        ),
++    )
++    summarized = store.apply_payment(
++        payment_id,
++        1,
++        FinancialSummaryRecorded(
++            event_id=f"payment:event:claims:{suffix}:summary",
++            subject=selected.state.subject,
++            summary_hash=financial_summary_hash(selected.state.subject),
++            recorded_at=T0 + timedelta(seconds=2),
++        ),
++    )
++    confirmed = store.apply_payment(
++        payment_id,
++        2,
++        FinancialConfirmationReceived(
++            event_id=f"payment:event:claims:{suffix}:confirmation",
++            payment_id=payment_id,
++            payment_version=summarized.state.subject.payment_version,
++            economic_signature=summarized.state.subject.economic_signature,
++            summary_hash=summarized.state.summary.summary_hash,
++            confirmation_id=f"payment:confirmation:claims:{suffix}",
++            confirmed_at=T0 + timedelta(seconds=3),
++        ),
++    )
++    event = PaymentEvidenceRecorded(
++        event_id=f"payment:event:claims:{suffix}:evidence",
++        payment_id=payment_id,
++        payment_version=confirmed.state.subject.payment_version,
++        economic_signature=confirmed.state.subject.economic_signature,
++        evidence=evidence,
++        trust=payment_evidence_trust(),
++        recorded_at=T0 + timedelta(seconds=4),
++    )
++    return confirmed.state, event
++
++
++def alternate_anchor(suffix: str, **changes: object):
++    values: dict[str, object] = {
++        "reservation_workflow_id": f"workflow:reservation:claims:{suffix}",
++        "payment_target_id": f"target:reservation:claims:{suffix}",
++    }
++    values.update(changes)
++    return confirmed_anchor(**values)
++
++
++def evidence_for(method: PaymentMethod, *, target: str, identity: str = "shared"):
++    if method is PaymentMethod.PIX:
++        return pix_visual_evidence()
++    if method is PaymentMethod.WISE:
++        baseline = wise_credit(
++            transaction_fingerprint=hashlib.sha256(
++                f"wise-credit:{identity}".encode("utf-8")
++            ).hexdigest(),
++            reference_fingerprint=wise_target_fingerprint(target),
++        )
++        return baseline
++    if method is PaymentMethod.STRIPE:
++        return stripe_event(
++            event_id="evt_7YGh3Kp9Qm2Vx8Nz4T",
++            payment_intent_fingerprint=stripe_target_fingerprint(target),
++        )
++    raise AssertionError("closed test method")
++
++
++class PaymentClaimStoreCase(unittest.TestCase):
++    def setUp(self) -> None:
++        self.temporary = tempfile.TemporaryDirectory(prefix="phase6-task8-")
++        self.addCleanup(self.temporary.cleanup)
++        self.path = Path(self.temporary.name) / "followup.db"
++        self.store = SQLiteFollowupUnitOfWork.open(self.path)
++        self.addCleanup(self.store.close)
++
++    def ready(self, *, suffix="one", method=PaymentMethod.PIX, evidence=None, anchor=None):
++        selected_anchor = anchor or confirmed_anchor()
++        selected_evidence = evidence or evidence_for(
++            method,
++            target=selected_anchor.payment_target_id,
++            identity=suffix,
++        )
++        return prepare_payment(
++            self.store,
++            suffix=suffix,
++            method=method,
++            evidence=selected_evidence,
++            anchor=selected_anchor,
++        )
++
++    def accept(self, *, suffix="one", method=PaymentMethod.PIX, evidence=None, anchor=None):
++        state, event = self.ready(
++            suffix=suffix,
++            method=method,
++            evidence=evidence,
++            anchor=anchor,
++        )
++        transition = self.store.claim_payment_evidence(
++            state.subject.payment_id,
++            3,
++            event,
++        )
++        return transition, event
++
++    def claim(self, *, worker_id="worker:settlement:one", now=NOW):
++        return self.store.claim_settlement(
++            worker_id=worker_id,
++            now=now,
++            lease_ttl=LEASE_TTL,
++        )
++
++
++class Phase6PaymentClaimTests(PaymentClaimStoreCase):
++    def test_pix_claim_is_global_across_target_business_unit_and_caller_keys(self) -> None:
++        shared = pix_visual_evidence()
++        first, _ = self.accept(suffix="pix-first", evidence=shared)
++        self.assertIs(first.state.status, PaymentStatus.SETTLEMENT_QUEUED)
++        before = task8_counts(self.store._connection)
++        candidates = (
++            alternate_anchor("pix-target"),
++            alternate_anchor("pix-unit", business_unit=BusinessUnit.AGENCY),
++        )
++        for index, anchor in enumerate(candidates):
++            state, event = self.ready(
++                suffix=f"pix-conflict-{index}",
++                evidence=shared,
++                anchor=anchor,
++            )
++            with self.subTest(anchor=anchor.payment_target_id), self.assertRaises(
++                IdentityConflict
++            ):
++                self.store.claim_payment_evidence(state.subject.payment_id, 3, event)
++            self.assertEqual(task8_counts(self.store._connection), before)
++            self.assertIs(
++                self.store.load_payment(state.subject.payment_id).status,
++                PaymentStatus.AWAITING_EVIDENCE,
++            )
++
++    def test_wise_fingerprint_and_stripe_account_event_are_global(self) -> None:
++        for method in (PaymentMethod.WISE, PaymentMethod.STRIPE):
++            with self.subTest(method=method):
++                path = Path(self.temporary.name) / f"{method.value}.db"
++                store = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    first_anchor = alternate_anchor(f"{method.value}-first")
++                    second_anchor = alternate_anchor(f"{method.value}-second")
++                    first_evidence = evidence_for(
++                        method,
++                        target=first_anchor.payment_target_id,
++                    )
++                    second_evidence = evidence_for(
++                        method,
++                        target=second_anchor.payment_target_id,
++                    )
++                    first_state, first_event = prepare_payment(
++                        store,
++                        suffix=f"{method.value}-first",
++                        method=method,
++                        evidence=first_evidence,
++                        anchor=first_anchor,
++                    )
++                    store.claim_payment_evidence(
++                        first_state.subject.payment_id,
++                        3,
++                        first_event,
++                    )
++                    second_state, second_event = prepare_payment(
++                        store,
++                        suffix=f"{method.value}-second",
++                        method=method,
++                        evidence=second_evidence,
++                        anchor=second_anchor,
++                    )
++                    with self.assertRaises(IdentityConflict):
++                        store.claim_payment_evidence(
++                            second_state.subject.payment_id,
++                            3,
++                            second_event,
++                        )
++                    self.assertEqual(task8_counts(store._connection), (1, 1, 1))
++                finally:
++                    store.close()
++
++    def test_identical_claim_and_record_command_replays_are_noops(self) -> None:
++        state, event = self.ready()
++        first = self.store.record_payment_command(
++            state.subject.payment_id,
++            3,
++            event,
++        )
++        before = payment_fingerprint(self.store._connection)
++        exact = self.store.claim_payment_evidence(
++            state.subject.payment_id,
++            3,
++            event,
++        )
++        renamed = self.store.record_payment_command(
++            state.subject.payment_id,
++            4,
++            replace(event, event_id="payment:event:claims:one:evidence:replayed"),
++        )
++        self.assertEqual(exact.commands, ())
++        self.assertEqual(renamed.commands, ())
++        self.assertEqual(exact.state, first.state)
++        self.assertEqual(renamed.state, first.state)
++        self.assertEqual(payment_fingerprint(self.store._connection), before)
++
++    def test_same_event_or_command_identity_with_divergent_payload_fails_closed(self) -> None:
++        transition, event = self.accept()
++        command = transition.state.settlement_command
++        self.assertIsNotNone(command)
++        divergent_evidence = pix_visual_evidence(proof_status=event.evidence.proof_status.COMPLETED)
++        divergent = replace(event, evidence=divergent_evidence)
++        before = payment_fingerprint(self.store._connection)
++        for candidate in (
++            divergent,
++            replace(
++                divergent,
++                event_id="payment:event:claims:one:evidence:divergent-command",
++            ),
++        ):
++            with self.subTest(event_id=candidate.event_id), self.assertRaises(
++                IdentityConflict
++            ):
++                self.store.record_payment_command(
++                    transition.state.subject.payment_id,
++                    4,
++                    candidate,
++                )
++            self.assertEqual(payment_fingerprint(self.store._connection), before)
++        self.assertEqual(task8_counts(self.store._connection), (1, 1, 1))
++
++    def test_load_evidence_claim_preserves_exact_global_binding(self) -> None:
++        transition, _ = self.accept()
++        verified = transition.state.verified_evidence
++        claim = self.store.load_evidence_claim(verified.claim_key)
++        self.assertEqual(claim.verified_evidence, verified)
++        self.assertEqual(claim.status.value, "in_progress")
++        self.assertEqual(claim.claimed_at, T0 + timedelta(seconds=4))
++        self.assertIsNone(claim.consumed_at)
++
++
++class Phase6PaymentAtomicityAndContentionTests(PaymentClaimStoreCase):
++    def test_claim_command_ledger_and_workflow_event_are_one_transaction(self) -> None:
++        fault_targets = (
++            ("payment_evidence_claims", "INSERT", ""),
++            ("payment_commands", "INSERT", ""),
++            ("payment_ledger", "INSERT", ""),
++            ("payment_events", "INSERT", " WHEN NEW.event_type='PaymentEvidenceRecorded'"),
++            ("payment_workflows", "UPDATE", ""),
++        )
++        for index, (table, operation, when) in enumerate(fault_targets):
++            with self.subTest(table=table):
++                path = Path(self.temporary.name) / f"atomic-{index}.db"
++                store = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    state, event = prepare_payment(
++                        store,
++                        suffix=f"atomic-{index}",
++                        method=PaymentMethod.PIX,
++                        evidence=pix_visual_evidence(),
++                    )
++                    before = payment_fingerprint(store._connection)
++                    store._connection.execute(
++                        f"CREATE TEMP TRIGGER task8_fault_{index} BEFORE {operation} "
++                        f"ON main.{table}{when} BEGIN SELECT RAISE(ABORT, 'task8:{index}'); END"
++                    )
++                    with self.assertRaises(StoreError):
++                        store.claim_payment_evidence(
++                            state.subject.payment_id,
++                            3,
++                            event,
++                        )
++                    self.assertEqual(payment_fingerprint(store._connection), before)
++                    self.assertEqual(task8_counts(store._connection), (0, 0, 0))
++                finally:
++                    store.close()
++                reopened = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    self.assertEqual(task8_counts(reopened._connection), (0, 0, 0))
++                    self.assertIs(
++                        reopened.load_payment(state.subject.payment_id).status,
++                        PaymentStatus.AWAITING_EVIDENCE,
++                    )
++                    self.assertEqual(reopened._connection.execute("PRAGMA quick_check").fetchone(), ("ok",))
++                    self.assertEqual(reopened._connection.execute("PRAGMA foreign_key_check").fetchall(), [])
++                finally:
++                    reopened.close()
++
++    def test_real_two_connection_contention_has_one_global_winner(self) -> None:
++        for round_index in range(10):
++            with self.subTest(round=round_index):
++                path = Path(self.temporary.name) / f"contention-{round_index}.db"
++                setup = SQLiteFollowupUnitOfWork.open(path)
++                shared = pix_visual_evidence()
++                first_anchor = alternate_anchor(f"contention-{round_index}-a")
++                second_anchor = alternate_anchor(f"contention-{round_index}-b")
++                first_state, first_event = prepare_payment(
++                    setup,
++                    suffix=f"contention-{round_index}-a",
++                    method=PaymentMethod.PIX,
++                    evidence=shared,
++                    anchor=first_anchor,
++                )
++                second_state, second_event = prepare_payment(
++                    setup,
++                    suffix=f"contention-{round_index}-b",
++                    method=PaymentMethod.PIX,
++                    evidence=shared,
++                    anchor=second_anchor,
++                )
++                setup.close()
++                barrier = Barrier(2)
++
++                def contender(payment_id, event):
++                    store = SQLiteFollowupUnitOfWork.open(path)
++                    try:
++                        barrier.wait(timeout=5)
++                        store.claim_payment_evidence(payment_id, 3, event)
++                        return "won"
++                    except IdentityConflict:
++                        return "conflict"
++                    finally:
++                        store.close()
++
++                with ThreadPoolExecutor(max_workers=2) as executor:
++                    results = tuple(
++                        executor.map(
++                            lambda args: contender(*args),
++                            (
++                                (first_state.subject.payment_id, first_event),
++                                (second_state.subject.payment_id, second_event),
++                            ),
++                        )
++                    )
++                self.assertEqual(sorted(results), ["conflict", "won"])
++                check = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    self.assertEqual(task8_counts(check._connection), (1, 1, 1))
++                    self.assertEqual(check._connection.execute("PRAGMA quick_check").fetchone(), ("ok",))
++                    self.assertEqual(check._connection.execute("PRAGMA foreign_key_check").fetchall(), [])
++                finally:
++                    check.close()
++
++
++class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
++    def setUp(self) -> None:
++        super().setUp()
++        self.accept()
++
++    def test_exact_expiry_is_reclaimable_only_before_fence(self) -> None:
++        first = self.claim(worker_id="worker:settlement:first")
++        self.assertIsNone(
++            self.claim(
++                worker_id="worker:settlement:early",
++                now=NOW + timedelta(seconds=29),
++            )
++        )
++        second = self.claim(
++            worker_id="worker:settlement:second",
++            now=first.lease.expires_at,
++        )
++        self.assertEqual(second.command, first.command)
++        self.assertEqual(second.lease.fencing_token, first.lease.fencing_token + 1)
++        self.assertEqual(second.claim_count, first.claim_count + 1)
++        with self.assertRaises(StaleLease):
++            self.store.release_pre_dispatch_settlement(
++                first,
++                retryable=True,
++                now=first.lease.expires_at,
++            )
++        with self.assertRaises(StaleLease):
++            self.store.fence_settlement(
++                first,
++                first.command.canonical_payload,
++                now=first.lease.expires_at,
++            )
++
++    def test_stale_owner_token_count_and_expiry_cannot_release_or_fence(self) -> None:
++        claim = self.claim()
++        forged = (
++            replace(claim, lease=replace(claim.lease, owner="worker:settlement:forged")),
++            replace(
++                claim,
++                lease=replace(
++                    claim.lease,
++                    fencing_token=claim.lease.fencing_token + 1,
++                ),
++                claim_count=claim.claim_count + 1,
++            ),
++        )
++        before = payment_fingerprint(self.store._connection)
++        for candidate in forged:
++            with self.subTest(candidate=candidate), self.assertRaises(StaleLease):
++                self.store.release_pre_dispatch_settlement(
++                    candidate,
++                    retryable=True,
++                    now=NOW + timedelta(seconds=1),
++                )
++            with self.assertRaises(StaleLease):
++                self.store.fence_settlement(
++                    candidate,
++                    candidate.command.canonical_payload,
++                    now=NOW + timedelta(seconds=1),
++                )
++            self.assertEqual(payment_fingerprint(self.store._connection), before)
++        with self.assertRaises(StaleLease):
++            self.store.release_pre_dispatch_settlement(
++                claim,
++                retryable=True,
++                now=claim.lease.expires_at,
++            )
++
++    def test_pre_fence_retry_budget_is_finite_and_tokens_never_regress(self) -> None:
++        claims = []
++        dispositions = []
++        evidence_statuses = []
++        current_now = NOW
++        for attempt in range(3):
++            claim = self.claim(
++                worker_id=f"worker:settlement:retry:{attempt}",
++                now=current_now,
++            )
++            claims.append(claim)
++            disposition = self.store.release_pre_dispatch_settlement(
++                claim,
++                retryable=True,
++                now=current_now + timedelta(seconds=1),
++            )
++            dispositions.append(disposition.value)
++            evidence_statuses.append(
++                self.store.load_evidence_claim(
++                    claim.command.evidence_claim_key
++                ).status.value
++            )
++            current_now += timedelta(seconds=2)
++        self.assertEqual(
++            [claim.lease.fencing_token for claim in claims],
++            [1, 2, 3],
++        )
++        self.assertEqual([claim.claim_count for claim in claims], [1, 2, 3])
++        self.assertEqual(
++            dispositions,
++            ["requeued", "requeued", "terminal_not_dispatched"],
++        )
++        self.assertEqual(
++            evidence_statuses,
++            ["retryable", "retryable", "completed"],
++        )
++        self.assertIsNone(self.claim(now=current_now))
++        row = self.store._connection.execute(
++            "SELECT status, fencing_token, claim_count, dispatch_slots_consumed, "
++            "outcome_certainty FROM main.payment_ledger"
++        ).fetchone()
++        self.assertEqual(row, ("outcome_recorded", 3, 3, 0, "not_dispatched"))
++        evidence_claim = self.store.load_evidence_claim(claims[-1].command.evidence_claim_key)
++        self.assertEqual(evidence_claim.status.value, "completed")
++        self.assertIsNotNone(evidence_claim.consumed_at)
++
++    def test_fence_consumes_exactly_slot_one_permanently_without_dispatching(self) -> None:
++        claim = self.claim()
++        permit = self.store.fence_settlement(
++            claim,
++            claim.command.canonical_payload,
++            now=NOW + timedelta(seconds=1),
++        )
++        self.assertEqual(permit.dispatch_slot, 1)
++        self.assertEqual(permit.command, claim.command)
++        self.assertEqual(
++            permit.request_hash,
++            hashlib.sha256(claim.command.canonical_payload.encode("utf-8")).hexdigest(),
++        )
++        row = self.store._connection.execute(
++            "SELECT status, dispatch_slots_consumed, dispatch_request_hash, "
++            "dispatch_fenced_at FROM main.payment_ledger"
++        ).fetchone()
++        self.assertEqual(row[0:2], ("dispatch_fenced", 1))
++        self.assertEqual(row[2], permit.request_hash)
++        self.assertEqual(row[3], permit.fenced_at.isoformat())
++        with self.assertRaises(StoreError):
++            self.store.fence_settlement(
++                claim,
++                claim.command.canonical_payload,
++                now=NOW + timedelta(seconds=2),
++            )
++        with self.assertRaises(StaleLease):
++            self.store.release_pre_dispatch_settlement(
++                claim,
++                retryable=True,
++                now=NOW + timedelta(seconds=2),
++            )
++        self.assertIsNone(
++            self.claim(
++                worker_id="worker:settlement:post-fence",
++                now=claim.lease.expires_at,
++            )
++        )
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT dispatch_slots_consumed FROM main.payment_ledger"
++            ).fetchone(),
++            (1,),
++        )
++        self.assertEqual(
++            tuple(
++                self.store._connection.execute(
++                    f"SELECT COUNT(*) FROM main.{table}"
++                ).fetchone()[0]
++                for table in ("payment_outbox", "payment_receipts")
++            ),
++            (0, 0),
++        )
++
++    def test_post_fence_outcome_is_permanent_replay_safe_and_never_retryable(self) -> None:
++        claim = self.claim()
++        permit = self.store.fence_settlement(
++            claim,
++            claim.command.canonical_payload,
++            now=NOW + timedelta(seconds=1),
++        )
++        settled = outcome(
++            SettlementCertainty.SETTLED,
++            claim_evidence=(permit.request_hash,),
++        )
++        completed = self.store.record_settlement_outcome(
++            claim,
++            permit,
++            settled,
++            now=NOW + timedelta(seconds=2),
++        )
++        self.assertIs(completed.state.status, PaymentStatus.PAID)
++        evidence = self.store.load_evidence_claim(claim.command.evidence_claim_key)
++        self.assertEqual(evidence.status.value, "completed")
++        before = payment_fingerprint(self.store._connection)
++        replay = self.store.record_settlement_outcome(
++            claim,
++            permit,
++            settled,
++            now=claim.lease.expires_at + timedelta(seconds=1),
++        )
++        self.assertEqual(replay.state, completed.state)
++        self.assertEqual(payment_fingerprint(self.store._connection), before)
++        with self.assertRaises(IdentityConflict):
++            self.store.record_settlement_outcome(
++                claim,
++                permit,
++                outcome(
++                    SettlementCertainty.DISPATCHED_UNKNOWN,
++                    claim_evidence=(permit.request_hash,),
++                ),
++                now=claim.lease.expires_at + timedelta(seconds=2),
++            )
++        self.assertIsNone(self.claim(now=claim.lease.expires_at + timedelta(days=1)))
++        row = self.store._connection.execute(
++            "SELECT status, dispatch_slots_consumed, outcome_certainty FROM main.payment_ledger"
++        ).fetchone()
++        self.assertEqual(row, ("outcome_recorded", 1, "settled"))
++        self.assertEqual(
++            tuple(
++                self.store._connection.execute(
++                    f"SELECT COUNT(*) FROM main.{table}"
++                ).fetchone()[0]
++                for table in ("payment_outbox", "payment_receipts")
++            ),
++            (0, 0),
++        )
++
++    def test_uncertain_or_partial_outcome_is_manual_review_and_not_dispatched_is_rejected(self) -> None:
++        for certainty in (
++            SettlementCertainty.DISPATCHED_NO_EFFECT,
++            SettlementCertainty.PARTIAL_SETTLEMENT,
++            SettlementCertainty.DISPATCHED_UNKNOWN,
++        ):
++            with self.subTest(certainty=certainty):
++                path = Path(self.temporary.name) / f"outcome-{certainty.value}.db"
++                store = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    state, event = prepare_payment(
++                        store,
++                        suffix=certainty.value,
++                        method=PaymentMethod.PIX,
++                        evidence=pix_visual_evidence(),
++                    )
++                    store.claim_payment_evidence(state.subject.payment_id, 3, event)
++                    claim = store.claim_settlement(
++                        worker_id=f"worker:settlement:{certainty.value}",
++                        now=NOW,
++                        lease_ttl=LEASE_TTL,
++                    )
++                    permit = store.fence_settlement(
++                        claim,
++                        claim.command.canonical_payload,
++                        now=NOW + timedelta(seconds=1),
++                    )
++                    before = payment_fingerprint(store._connection)
++                    with self.assertRaises(ValueError):
++                        store.record_settlement_outcome(
++                            claim,
++                            permit,
++                            outcome(SettlementCertainty.NOT_DISPATCHED),
++                            now=NOW + timedelta(seconds=2),
++                        )
++                    self.assertEqual(payment_fingerprint(store._connection), before)
++                    result = outcome(
++                        certainty,
++                        claim_evidence=(permit.request_hash,),
++                    )
++                    completed = store.record_settlement_outcome(
++                        claim,
++                        permit,
++                        result,
++                        now=NOW + timedelta(seconds=2),
++                    )
++                    self.assertIs(completed.state.status, PaymentStatus.MANUAL_REVIEW)
++                    self.assertEqual(
++                        store.load_evidence_claim(
++                            claim.command.evidence_claim_key
++                        ).status.value,
++                        "manual_review",
++                    )
++                    self.assertEqual(
++                        store._connection.execute(
++                            "SELECT status, dispatch_slots_consumed FROM main.payment_ledger"
++                        ).fetchone(),
++                        ("manual_review", 1),
++                    )
++                    self.assertEqual(
++                        tuple(
++                            store._connection.execute(
++                                f"SELECT COUNT(*) FROM main.{table}"
++                            ).fetchone()[0]
++                            for table in ("payment_outbox", "payment_receipts")
++                        ),
++                        (0, 0),
++                    )
++                finally:
++                    store.close()
++
++
++class Phase6PaymentIntegrityTests(PaymentClaimStoreCase):
++    def setUp(self) -> None:
++        super().setUp()
++        self.transition, self.event = self.accept()
++
++    def assert_claim_blocked_after_tamper(self, mutate) -> None:
++        mutate(self.store._connection)
++        before = payment_fingerprint(self.store._connection)
++        with self.assertRaises(DataCorruption):
++            self.claim(worker_id="worker:settlement:tamper")
++        self.assertEqual(payment_fingerprint(self.store._connection), before)
++
++    def test_claim_key_and_target_economic_binding_tamper_fail_before_claim(self) -> None:
++        for index, mutate in enumerate(
++            (
++                lambda connection: connection.execute(
++                    "UPDATE main.payment_evidence_claims SET claim_key=?",
++                    ("pix:E8765432120270201ZYXWVU98765",),
++                ),
++                lambda connection: connection.execute(
++                    "UPDATE main.payment_evidence_claims SET economic_signature=?",
++                    ("f" * 64,),
++                ),
++                lambda connection: connection.execute(
++                    "UPDATE main.payment_commands SET economic_signature=?",
++                    ("e" * 64,),
++                ),
++            )
++        ):
++            with self.subTest(index=index):
++                path = Path(self.temporary.name) / f"binding-tamper-{index}.db"
++                self.store.close()
++                self.store = SQLiteFollowupUnitOfWork.open(path)
++                self.transition, self.event = self.accept(suffix=f"binding-{index}")
++                self.store._connection.execute("PRAGMA foreign_keys=OFF")
++                mutate(self.store._connection)
++                self.store._connection.execute("PRAGMA foreign_keys=ON")
++                before = payment_fingerprint(self.store._connection)
++                with self.assertRaises(DataCorruption):
++                    self.claim(worker_id=f"worker:settlement:binding:{index}")
++                self.assertEqual(payment_fingerprint(self.store._connection), before)
++
++    def test_command_payload_and_hash_tamper_fail_before_claim(self) -> None:
++        def tamper_closed_target(connection: sqlite3.Connection) -> None:
++            raw = connection.execute(
++                "SELECT command_json FROM main.payment_commands"
++            ).fetchone()[0]
++            payload = json.loads(raw)
++            payload["data"]["canonical_payload"] = json.dumps(
++                {
++                    **json.loads(payload["data"]["canonical_payload"]),
++                    "payment_target_id": "target:reservation:claims:tampered",
++                },
++                ensure_ascii=False,
++                sort_keys=True,
++                separators=(",", ":"),
++                allow_nan=False,
++            )
++            tampered = json.dumps(
++                payload,
++                ensure_ascii=False,
++                sort_keys=True,
++                separators=(",", ":"),
++                allow_nan=False,
++            )
++            connection.execute(
++                "UPDATE main.payment_commands SET command_json=?, command_hash=?",
++                (tampered, hashlib.sha256(tampered.encode("utf-8")).hexdigest()),
++            )
++
++        mutations = (
++            lambda connection: connection.execute(
++                "UPDATE main.payment_commands SET command_json='{}', "
++                "command_hash='0' || substr(command_hash, 2)"
++            ),
++            lambda connection: connection.execute(
++                "UPDATE main.payment_commands SET command_hash="
++                "CASE substr(command_hash, 1, 1) WHEN 'f' THEN 'e' ELSE 'f' END "
++                "|| substr(command_hash, 2)"
++            ),
++            tamper_closed_target,
++        )
++        for index, mutate in enumerate(mutations):
++            with self.subTest(index=index):
++                path = Path(self.temporary.name) / f"command-tamper-{index}.db"
++                self.store.close()
++                self.store = SQLiteFollowupUnitOfWork.open(path)
++                self.transition, self.event = self.accept(suffix=f"command-{index}")
++                mutate(self.store._connection)
++                before = payment_fingerprint(self.store._connection)
++                with self.assertRaises(DataCorruption):
++                    self.claim(worker_id=f"worker:settlement:command:{index}")
++                self.assertEqual(payment_fingerprint(self.store._connection), before)
++
++    def test_claim_status_and_ledger_token_tamper_fail_before_claim_or_fence(self) -> None:
++        cases = (
++            "UPDATE main.payment_evidence_claims SET status='completed'",
++            "UPDATE main.payment_ledger SET fencing_token=1",
++        )
++        for index, sql in enumerate(cases):
++            with self.subTest(index=index):
++                path = Path(self.temporary.name) / f"status-token-{index}.db"
++                self.store.close()
++                self.store = SQLiteFollowupUnitOfWork.open(path)
++                self.transition, self.event = self.accept(suffix=f"status-token-{index}")
++                self.store._connection.execute("PRAGMA ignore_check_constraints=ON")
++                self.store._connection.execute(sql)
++                self.store._connection.execute("PRAGMA ignore_check_constraints=OFF")
++                before = payment_fingerprint(self.store._connection)
++                with self.assertRaises(DataCorruption):
++                    self.claim(worker_id=f"worker:settlement:status-token:{index}")
++                self.assertEqual(payment_fingerprint(self.store._connection), before)
++
++    def test_tampered_live_owner_token_and_expiry_fail_before_fence(self) -> None:
++        claim = self.claim(worker_id="worker:settlement:integrity")
++        for index, sql in enumerate(
++            (
++                "UPDATE main.payment_ledger SET claim_owner='worker:settlement:other'",
++                "UPDATE main.payment_ledger SET fencing_token=fencing_token+1, claim_count=claim_count+1",
++                "UPDATE main.payment_ledger SET lease_expires_at=lease_acquired_at",
++            )
++        ):
++            with self.subTest(index=index):
++                path = Path(self.temporary.name) / f"live-tamper-{index}.db"
++                store = SQLiteFollowupUnitOfWork.open(path)
++                try:
++                    state, event = prepare_payment(
++                        store,
++                        suffix=f"live-{index}",
++                        method=PaymentMethod.PIX,
++                        evidence=pix_visual_evidence(),
++                    )
++                    store.claim_payment_evidence(state.subject.payment_id, 3, event)
++                    candidate = store.claim_settlement(
++                        worker_id="worker:settlement:integrity",
++                        now=NOW,
++                        lease_ttl=LEASE_TTL,
++                    )
++                    store._connection.execute("PRAGMA ignore_check_constraints=ON")
++                    store._connection.execute(sql)
++                    store._connection.execute("PRAGMA ignore_check_constraints=OFF")
++                    before = payment_fingerprint(store._connection)
++                    with self.assertRaises((DataCorruption, StaleLease)):
++                        store.fence_settlement(
++                            candidate,
++                            candidate.command.canonical_payload,
++                            now=NOW + timedelta(seconds=1),
++                        )
++                    self.assertEqual(payment_fingerprint(store._connection), before)
++                finally:
++                    store.close()
++
++
++class Phase6Task9BoundaryTests(unittest.TestCase):
++    def test_task8_defines_no_settlement_port_worker_reconciler_or_external_effect(self) -> None:
++        self.assertFalse(hasattr(followup_workers, "SettlementPort"))
++        self.assertFalse(hasattr(followup_workers, "PaymentSettlementWorker"))
++        self.assertIsNone(importlib.util.find_spec("reservation_followup.reconciliation"))
++        source = Path(SQLiteFollowupUnitOfWork.__module__.replace(".", "/") + ".py")
++        self.assertFalse(hasattr(SQLiteFollowupUnitOfWork, "dispatch_settlement"))
++        self.assertFalse(hasattr(SQLiteFollowupUnitOfWork, "reconcile_settlement"))
++        self.assertFalse(source.is_absolute())
++
++
++if __name__ == "__main__":
++    unittest.main()

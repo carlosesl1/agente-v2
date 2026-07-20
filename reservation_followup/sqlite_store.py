@@ -1,8 +1,9 @@
 """Atomic SQLite persistence for the independent Phase 6 follow-up workflows.
 
-This module owns only workflow/event persistence and handoff bootstrap outboxes.
-Claims, ledgers, receipts, workers, ports, providers, and delivery belong to later
-Phase 6 tasks and are deliberately absent here.
+This module owns workflow/event persistence, handoff delivery bookkeeping, and
+Task 8 payment evidence claims plus the permanently fenced settlement ledger.
+It contains no provider, transport, worker loop, reconciliation adapter, or live
+capability.
 """
 
 from __future__ import annotations
@@ -39,14 +40,18 @@ from .payment import (
     PaymentEvidenceRecorded,
     PaymentExpired,
     PaymentMethodSelected,
+    PaymentSettlementCommand,
     PaymentTransition,
     PaymentTransitionReason,
     PaymentTransitionStatus,
     PaymentWorkflow,
     SettlementFinished,
+    SettlementOutcome,
     SettlementStarted,
+    VerifiedPaymentEvidence,
     new_payment,
     reduce_payment,
+    validate_evidence,
 )
 from .schema import render_sqlite, schema_contract
 from .serialization import from_wire_json, semantic_hash, to_wire_json
@@ -57,6 +62,14 @@ from .types import (
     HandoffOutboxClaim,
     HandoffReceipt,
     PaymentEffectPolicy,
+    PaymentEvidenceClaim,
+    PaymentEvidenceClaimStatus,
+    PaymentStatus,
+    PreDispatchReleaseDisposition,
+    SettlementCertainty,
+    SettlementClaim,
+    SettlementLease,
+    SettlementPermit,
 )
 
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
@@ -88,6 +101,7 @@ _OPERATIONAL_PAYMENT_EVENTS = (
     SettlementStarted,
     SettlementFinished,
 )
+_MAX_PRE_DISPATCH_CLAIMS = 3
 
 
 class StoreError(RuntimeError):
@@ -111,7 +125,7 @@ class IdentityConflict(StoreError):
 
 
 class StaleLease(StoreError):
-    """A handoff outbox lease is expired, superseded, or divergent."""
+    """A handoff or settlement lease is expired, superseded, or divergent."""
 
 
 class UnsupportedEffect(StoreError):
@@ -128,6 +142,22 @@ class PaymentNotFound(StoreError):
 
 def _digest(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _is_digest(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _settlement_event_id(kind: str, settlement_command_id: str) -> str:
+    material = f"{kind}\x00{settlement_command_id}"
+    return (
+        f"settlement-{kind}:"
+        f"{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
+    )
 
 
 def _require_id(value: str, field_name: str) -> str:
@@ -1411,6 +1441,322 @@ class SQLiteFollowupUnitOfWork:
             )
             return transition
 
+    def _decode_payment_evidence_claim(
+        self,
+        row: tuple[object, ...],
+        state: PaymentWorkflow,
+    ) -> PaymentEvidenceClaim:
+        if len(row) != 10:
+            raise DataCorruption("payment evidence claim row has wrong arity")
+        try:
+            event = from_wire_json(row[5], PaymentEvidenceRecorded)
+            if to_wire_json(event) != row[5]:
+                raise ValueError("noncanonical evidence record JSON")
+            verified = validate_evidence(
+                state.subject,
+                event.evidence,
+                event.trust,
+            )
+            status = PaymentEvidenceClaimStatus(row[7])
+            claimed_at = _canonical_time(row[8], "payment evidence claimed_at")
+            consumed_at = (
+                None
+                if row[9] is None
+                else _canonical_time(row[9], "payment evidence consumed_at")
+            )
+            claim = PaymentEvidenceClaim(
+                verified_evidence=verified,
+                status=status,
+                claimed_at=claimed_at,
+                consumed_at=consumed_at,
+            )
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("payment evidence claim is not canonical") from exc
+        if (
+            type(row[0]) is not str
+            or row[0] != verified.claim_key
+            or row[1] != state.subject.payment_id
+            or type(row[2]) is not int
+            or row[2] != state.subject.payment_version
+            or row[3] != state.subject.economic_signature
+            or row[4] != verified.method.value
+            or row[6] != verified.evidence_hash
+            or event != state.evidence_record
+            or verified != state.verified_evidence
+            or claimed_at != event.recorded_at
+        ):
+            raise DataCorruption("payment evidence claim binding is divergent")
+        return claim
+
+    def _decode_payment_command(
+        self,
+        row: tuple[object, ...],
+        state: PaymentWorkflow,
+    ) -> PaymentSettlementCommand:
+        if len(row) != 10:
+            raise DataCorruption("payment command row has wrong arity")
+        try:
+            command = self._decode_canonical(
+                row[7],
+                row[8],
+                PaymentSettlementCommand,
+                "payment command",
+            )
+            created_at = _canonical_time(row[9], "payment command created_at")
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("payment command is not canonical") from exc
+        if (
+            command != state.settlement_command
+            or row[0] != command.settlement_command_id
+            or row[1] != command.idempotency_key
+            or row[2] != command.payment_id
+            or type(row[3]) is not int
+            or row[3] != command.payment_version
+            or row[4] != command.economic_signature
+            or row[5] != command.evidence_claim_key
+            or row[6] != command.operation.value
+            or state.evidence_record is None
+            or created_at != state.evidence_record.recorded_at
+        ):
+            raise DataCorruption("payment command binding is divergent")
+        return command
+
+    def _decode_payment_ledger(
+        self,
+        row: tuple[object, ...],
+        command: PaymentSettlementCommand,
+    ) -> dict[str, object]:
+        if len(row) != 18:
+            raise DataCorruption("payment ledger row has wrong arity")
+        if (
+            row[0] != command.settlement_command_id
+            or row[1] != command.payment_id
+            or type(row[2]) is not int
+            or row[2] != command.payment_version
+            or row[3] != command.economic_signature
+            or type(row[4]) is not str
+            or type(row[6]) is not int
+            or type(row[9]) is not int
+            or type(row[10]) is not int
+            or row[6] < 0
+            or row[9] < 0
+            or row[6] != row[9]
+            or row[10] not in (0, 1)
+        ):
+            raise DataCorruption("payment ledger identity or counters are divergent")
+        status = row[4]
+        if status not in (
+            "queued",
+            "leased",
+            "dispatch_fenced",
+            "outcome_recorded",
+            "manual_review",
+        ):
+            raise DataCorruption("payment ledger status is outside the closed universe")
+        owner = row[5]
+        acquired_at = (
+            None
+            if row[7] is None
+            else _canonical_time(row[7], "payment ledger lease_acquired_at")
+        )
+        expires_at = (
+            None
+            if row[8] is None
+            else _canonical_time(row[8], "payment ledger lease_expires_at")
+        )
+        lease = None
+        if owner is None:
+            if acquired_at is not None or expires_at is not None:
+                raise DataCorruption("payment ledger has a partial lease")
+        else:
+            try:
+                lease = SettlementLease(
+                    owner=owner,
+                    fencing_token=row[6],
+                    acquired_at=acquired_at,
+                    expires_at=expires_at,
+                )
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption("payment ledger lease is not canonical") from exc
+        request_hash = row[11]
+        fenced_at = (
+            None
+            if row[12] is None
+            else _canonical_time(row[12], "payment ledger dispatch_fenced_at")
+        )
+        if row[10] == 0:
+            if request_hash is not None or fenced_at is not None:
+                raise DataCorruption("unfenced payment ledger has dispatch evidence")
+        elif not _is_digest(request_hash) or fenced_at is None:
+            raise DataCorruption("fenced payment ledger lacks canonical dispatch evidence")
+        elif lease is not None and not lease.acquired_at <= fenced_at < lease.expires_at:
+            raise DataCorruption("payment ledger fence falls outside its lease")
+        outcome = None
+        outcome_recorded_at = (
+            None
+            if row[16] is None
+            else _canonical_time(row[16], "payment ledger outcome_recorded_at")
+        )
+        if row[13] is None:
+            if row[14] is not None or row[15] is not None or outcome_recorded_at is not None:
+                raise DataCorruption("payment ledger has a partial outcome")
+        else:
+            try:
+                outcome = self._decode_canonical(
+                    row[14],
+                    row[15],
+                    SettlementOutcome,
+                    "settlement outcome",
+                )
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption("settlement outcome is not canonical") from exc
+            if row[13] != outcome.certainty.value or outcome_recorded_at is None:
+                raise DataCorruption("settlement outcome metadata is divergent")
+        updated_at = _canonical_time(row[17], "payment ledger updated_at")
+        return {
+            "status": status,
+            "lease": lease,
+            "fencing_token": row[6],
+            "claim_count": row[9],
+            "dispatch_slots": row[10],
+            "request_hash": request_hash,
+            "fenced_at": fenced_at,
+            "outcome": outcome,
+            "outcome_recorded_at": outcome_recorded_at,
+            "updated_at": updated_at,
+        }
+
+    def _payment_financial_records(
+        self,
+        state: PaymentWorkflow,
+    ) -> tuple[
+        PaymentEvidenceClaim,
+        PaymentSettlementCommand,
+        dict[str, object],
+    ] | None:
+        payment_id = state.subject.payment_id
+        counts = tuple(
+            self._connection.execute(
+                f"SELECT COUNT(*) FROM main.{table} WHERE payment_id=?",
+                (payment_id,),
+            ).fetchone()[0]
+            for table in (
+                "payment_evidence_claims",
+                "payment_commands",
+                "payment_ledger",
+            )
+        )
+        command = state.settlement_command
+        if command is None:
+            if counts != (0, 0, 0):
+                raise DataCorruption("pre-evidence payment owns financial rows")
+            return None
+        if counts != (1, 1, 1):
+            raise DataCorruption("post-evidence payment lacks one closed financial tuple")
+        claim_row = self._connection.execute(
+            "SELECT claim_key, payment_id, payment_version, economic_signature, method, "
+            "evidence_json, evidence_hash, status, claimed_at, consumed_at "
+            "FROM main.payment_evidence_claims WHERE claim_key=?",
+            (command.evidence_claim_key,),
+        ).fetchone()
+        command_row = self._connection.execute(
+            "SELECT settlement_command_id, idempotency_key, payment_id, payment_version, "
+            "economic_signature, evidence_claim_key, operation, command_json, command_hash, "
+            "created_at FROM main.payment_commands WHERE settlement_command_id=?",
+            (command.settlement_command_id,),
+        ).fetchone()
+        ledger_row = self._connection.execute(
+            "SELECT settlement_command_id, payment_id, payment_version, economic_signature, "
+            "status, claim_owner, fencing_token, lease_acquired_at, lease_expires_at, "
+            "claim_count, dispatch_slots_consumed, dispatch_request_hash, dispatch_fenced_at, "
+            "outcome_certainty, outcome_json, outcome_hash, outcome_recorded_at, updated_at "
+            "FROM main.payment_ledger WHERE settlement_command_id=?",
+            (command.settlement_command_id,),
+        ).fetchone()
+        if claim_row is None or command_row is None or ledger_row is None:
+            raise DataCorruption("payment financial tuple is incomplete")
+        claim = self._decode_payment_evidence_claim(claim_row, state)
+        persisted_command = self._decode_payment_command(command_row, state)
+        ledger = self._decode_payment_ledger(ledger_row, persisted_command)
+        status = ledger["status"]
+        outcome = ledger["outcome"]
+        if status == "queued":
+            valid = (
+                ledger["lease"] is None
+                and ledger["dispatch_slots"] == 0
+                and outcome is None
+                and state.status is PaymentStatus.SETTLEMENT_QUEUED
+                and state.settlement_start is None
+                and state.settlement_finish is None
+                and claim.status
+                in (
+                    PaymentEvidenceClaimStatus.IN_PROGRESS,
+                    PaymentEvidenceClaimStatus.RETRYABLE,
+                )
+            )
+        elif status == "leased":
+            valid = (
+                ledger["lease"] is not None
+                and ledger["dispatch_slots"] == 0
+                and outcome is None
+                and state.status is PaymentStatus.SETTLEMENT_QUEUED
+                and state.settlement_start is None
+                and state.settlement_finish is None
+                and claim.status is PaymentEvidenceClaimStatus.IN_PROGRESS
+            )
+        elif status == "dispatch_fenced":
+            valid = (
+                ledger["lease"] is not None
+                and ledger["dispatch_slots"] == 1
+                and outcome is None
+                and state.status is PaymentStatus.SETTLING
+                and state.settlement_start is not None
+                and state.settlement_finish is None
+                and state.settlement_start.started_at == ledger["fenced_at"]
+                and claim.status is PaymentEvidenceClaimStatus.IN_PROGRESS
+            )
+        elif status == "outcome_recorded":
+            valid = (
+                ledger["lease"] is None
+                and outcome is not None
+                and state.settlement_finish is not None
+                and state.settlement_finish.outcome == outcome
+                and state.settlement_finish.finished_at == ledger["outcome_recorded_at"]
+                and claim.status is PaymentEvidenceClaimStatus.COMPLETED
+                and (
+                    (
+                        outcome.certainty is SettlementCertainty.NOT_DISPATCHED
+                        and ledger["dispatch_slots"] == 0
+                        and state.status is PaymentStatus.RETRYABLE
+                    )
+                    or (
+                        outcome.certainty is SettlementCertainty.SETTLED
+                        and ledger["dispatch_slots"] == 1
+                        and state.status is PaymentStatus.PAID
+                    )
+                )
+            )
+        else:
+            valid = (
+                ledger["lease"] is None
+                and ledger["dispatch_slots"] == 1
+                and outcome is not None
+                and outcome.certainty
+                in (
+                    SettlementCertainty.DISPATCHED_NO_EFFECT,
+                    SettlementCertainty.PARTIAL_SETTLEMENT,
+                    SettlementCertainty.DISPATCHED_UNKNOWN,
+                )
+                and state.status is PaymentStatus.MANUAL_REVIEW
+                and state.settlement_finish is not None
+                and state.settlement_finish.outcome == outcome
+                and state.settlement_finish.finished_at == ledger["outcome_recorded_at"]
+                and claim.status is PaymentEvidenceClaimStatus.MANUAL_REVIEW
+            )
+        if not valid:
+            raise DataCorruption("payment workflow and financial ledger disagree")
+        return claim, persisted_command, ledger
+
     def _load_payment(self, payment_id: str) -> tuple[PaymentWorkflow, int]:
         row = self._payment_workflow_row(payment_id)
         if row is None:
@@ -1449,8 +1795,12 @@ class SQLiteFollowupUnitOfWork:
                 raise DataCorruption("payment history cannot be replayed") from exc
             if transition.status is not PaymentTransitionStatus.APPLIED:
                 raise DataCorruption("payment history contains a reducer no-op")
-            if transition.commands:
-                raise DataCorruption("Task 6 payment history contains an operational command")
+            if transition.commands and (
+                type(event) is not PaymentEvidenceRecorded
+                or len(transition.commands) != 1
+                or transition.commands[0] != transition.state.settlement_command
+            ):
+                raise DataCorruption("payment history emitted an unexpected command")
             replayed = transition.state
             if (
                 event_row[0] != event.event_id
@@ -1480,6 +1830,7 @@ class SQLiteFollowupUnitOfWork:
             or row[8] != updated_at.isoformat()
         ):
             raise DataCorruption("payment workflow row disagrees with full replay")
+        self._payment_financial_records(state)
         return state, revision
 
     def load_payment(self, payment_id: str) -> PaymentWorkflow:
@@ -1622,6 +1973,618 @@ class SQLiteFollowupUnitOfWork:
                 raise ConcurrencyConflict("payment optimistic revision was lost")
             self._insert_payment_event(payment_id, next_revision, event, transition.state)
         return transition
+
+    def _persist_operational_payment_transition(
+        self,
+        current: PaymentWorkflow,
+        revision: int,
+        event: PaymentEvent,
+        transition: PaymentTransition,
+    ) -> None:
+        if (
+            transition.status is not PaymentTransitionStatus.APPLIED
+            or transition.events != (event,)
+        ):
+            raise DataCorruption("operational payment transition is not persistable")
+        next_revision = revision + 1
+        raw = to_wire_json(transition.state)
+        updated_at = _payment_event_time(event).isoformat()
+        updated = self._connection.execute(
+            "UPDATE main.payment_workflows SET revision=?, payment_version=?, "
+            "economic_signature=?, status=?, state_json=?, state_hash=?, updated_at=? "
+            "WHERE payment_id=? AND revision=?",
+            (
+                next_revision,
+                transition.state.subject.payment_version,
+                transition.state.subject.economic_signature,
+                transition.state.status.value,
+                raw,
+                semantic_hash(transition.state),
+                updated_at,
+                current.subject.payment_id,
+                revision,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise ConcurrencyConflict("payment optimistic revision was lost")
+        self._insert_payment_event(
+            current.subject.payment_id,
+            next_revision,
+            event,
+            transition.state,
+        )
+
+    def claim_payment_evidence(
+        self,
+        payment_id: str,
+        expected_revision: int,
+        event: PaymentEvidenceRecorded,
+    ) -> PaymentTransition:
+        payment_id = _require_id(payment_id, "payment_id")
+        expected_revision = _require_revision(expected_revision)
+        if type(event) is not PaymentEvidenceRecorded:
+            raise TypeError("event must be exact PaymentEvidenceRecorded")
+        with self._transaction("claim_payment_evidence"):
+            current, revision = self._load_payment(payment_id)
+            existing_event = self._connection.execute(
+                "SELECT payment_id, event_type, event_json, event_hash "
+                "FROM main.payment_events WHERE event_id=?",
+                (event.event_id,),
+            ).fetchone()
+            if existing_event is not None:
+                if (
+                    existing_event[0] == payment_id
+                    and existing_event[1] == type(event).__name__
+                    and existing_event[2] == to_wire_json(event)
+                    and existing_event[3] == semantic_hash(event)
+                ):
+                    return _payment_noop(current)
+                raise IdentityConflict("payment event identity has divergent data")
+            if current.evidence_record is not None:
+                try:
+                    replay = reduce_payment(current, event)
+                except (TypeError, ValueError) as exc:
+                    raise IdentityConflict(
+                        "payment evidence replay has divergent identity or payload"
+                    ) from exc
+                if replay.status is PaymentTransitionStatus.NOOP:
+                    return replay
+                raise IdentityConflict("payment already owns a different evidence claim")
+            if revision != expected_revision:
+                raise ConcurrencyConflict(
+                    f"stale payment revision: expected={expected_revision}, current={revision}"
+                )
+            transition = reduce_payment(current, event)
+            if transition.status is not PaymentTransitionStatus.APPLIED:
+                return transition
+            if (
+                len(transition.commands) != 1
+                or transition.state.settlement_command is None
+                or transition.commands[0] != transition.state.settlement_command
+                or transition.state.verified_evidence is None
+            ):
+                raise DataCorruption("payment evidence did not derive one canonical command")
+            command = transition.commands[0]
+            verified = transition.state.verified_evidence
+            existing_claim = self._connection.execute(
+                "SELECT payment_id, payment_version, economic_signature, evidence_json, "
+                "evidence_hash FROM main.payment_evidence_claims WHERE claim_key=?",
+                (verified.claim_key,),
+            ).fetchone()
+            if existing_claim is not None:
+                raise IdentityConflict(
+                    "global payment evidence already belongs to another financial subject"
+                )
+            existing_command = self._connection.execute(
+                "SELECT settlement_command_id FROM main.payment_commands "
+                "WHERE settlement_command_id=? OR idempotency_key=?",
+                (command.settlement_command_id, command.idempotency_key),
+            ).fetchone()
+            if existing_command is not None:
+                raise IdentityConflict("payment command identity already exists")
+            timestamp = event.recorded_at.isoformat()
+            evidence_raw = to_wire_json(event)
+            command_raw = to_wire_json(command)
+            self._connection.execute(
+                "INSERT INTO main.payment_evidence_claims "
+                "(claim_key, payment_id, payment_version, economic_signature, method, "
+                "evidence_json, evidence_hash, status, claimed_at, consumed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?, NULL)",
+                (
+                    verified.claim_key,
+                    command.payment_id,
+                    command.payment_version,
+                    command.economic_signature,
+                    verified.method.value,
+                    evidence_raw,
+                    verified.evidence_hash,
+                    timestamp,
+                ),
+            )
+            self._connection.execute(
+                "INSERT INTO main.payment_commands "
+                "(settlement_command_id, idempotency_key, payment_id, payment_version, "
+                "economic_signature, evidence_claim_key, operation, command_json, "
+                "command_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    command.settlement_command_id,
+                    command.idempotency_key,
+                    command.payment_id,
+                    command.payment_version,
+                    command.economic_signature,
+                    command.evidence_claim_key,
+                    command.operation.value,
+                    command_raw,
+                    semantic_hash(command),
+                    timestamp,
+                ),
+            )
+            self._connection.execute(
+                "INSERT INTO main.payment_ledger "
+                "(settlement_command_id, payment_id, payment_version, economic_signature, "
+                "status, claim_owner, fencing_token, lease_acquired_at, lease_expires_at, "
+                "claim_count, dispatch_slots_consumed, dispatch_request_hash, "
+                "dispatch_fenced_at, outcome_certainty, outcome_json, outcome_hash, "
+                "outcome_recorded_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'queued', NULL, 0, NULL, NULL, 0, 0, NULL, NULL, "
+                "NULL, NULL, NULL, NULL, ?)",
+                (
+                    command.settlement_command_id,
+                    command.payment_id,
+                    command.payment_version,
+                    command.economic_signature,
+                    timestamp,
+                ),
+            )
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return transition
+
+    def record_payment_command(
+        self,
+        payment_id: str,
+        expected_revision: int,
+        event: PaymentEvidenceRecorded,
+    ) -> PaymentTransition:
+        return self.claim_payment_evidence(payment_id, expected_revision, event)
+
+    def load_evidence_claim(self, claim_key: str) -> PaymentEvidenceClaim:
+        self._ensure_open()
+        claim_key = _require_id(claim_key, "claim_key")
+        try:
+            row = self._connection.execute(
+                "SELECT claim_key, payment_id, payment_version, economic_signature, method, "
+                "evidence_json, evidence_hash, status, claimed_at, consumed_at "
+                "FROM main.payment_evidence_claims WHERE claim_key=?",
+                (claim_key,),
+            ).fetchone()
+            if row is None:
+                raise PaymentNotFound(f"payment evidence claim not found: {claim_key}")
+            state = self._load_payment(row[1])[0]
+            return self._decode_payment_evidence_claim(row, state)
+        except sqlite3.Error as exc:
+            raise _sqlite_error(exc, "load_evidence_claim") from exc
+
+    def claim_settlement(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> SettlementClaim | None:
+        worker_id = _require_id(worker_id, "worker_id")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        with self._transaction("claim_settlement"):
+            candidates = tuple(
+                self._connection.execute(
+                    "SELECT settlement_command_id, payment_id FROM main.payment_ledger "
+                    "WHERE status IN ('queued', 'leased') AND dispatch_slots_consumed=0 "
+                    "AND outcome_json IS NULL ORDER BY updated_at, settlement_command_id"
+                )
+            )
+            selected = None
+            for command_id, payment_id in candidates:
+                state, _ = self._load_payment(payment_id)
+                records = self._payment_financial_records(state)
+                if records is None:
+                    raise DataCorruption("claimable ledger lacks financial records")
+                claim_record, command, ledger = records
+                if command.settlement_command_id != command_id:
+                    raise DataCorruption("claimable ledger command selection is divergent")
+                lease = ledger["lease"]
+                if ledger["status"] == "queued" or (
+                    ledger["status"] == "leased"
+                    and lease is not None
+                    and now >= lease.expires_at
+                ):
+                    selected = (claim_record, command, ledger)
+                    break
+            if selected is None:
+                return None
+            claim_record, command, ledger = selected
+            previous_lease = ledger["lease"]
+            next_count = ledger["claim_count"] + 1
+            expires_at = now + lease_ttl
+            if ledger["status"] == "queued":
+                updated = self._connection.execute(
+                    "UPDATE main.payment_ledger SET status='leased', claim_owner=?, "
+                    "fencing_token=?, lease_acquired_at=?, lease_expires_at=?, "
+                    "claim_count=?, updated_at=? WHERE settlement_command_id=? "
+                    "AND status='queued' AND claim_owner IS NULL AND fencing_token=? "
+                    "AND claim_count=? AND dispatch_slots_consumed=0",
+                    (
+                        worker_id,
+                        next_count,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        next_count,
+                        now.isoformat(),
+                        command.settlement_command_id,
+                        ledger["fencing_token"],
+                        ledger["claim_count"],
+                    ),
+                )
+            else:
+                updated = self._connection.execute(
+                    "UPDATE main.payment_ledger SET status='leased', claim_owner=?, "
+                    "fencing_token=?, lease_acquired_at=?, lease_expires_at=?, "
+                    "claim_count=?, updated_at=? WHERE settlement_command_id=? "
+                    "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                    "AND claim_count=? AND lease_expires_at=? AND dispatch_slots_consumed=0",
+                    (
+                        worker_id,
+                        next_count,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        next_count,
+                        now.isoformat(),
+                        command.settlement_command_id,
+                        previous_lease.owner,
+                        ledger["fencing_token"],
+                        ledger["claim_count"],
+                        previous_lease.expires_at.isoformat(),
+                    ),
+                )
+            if updated.rowcount != 1:
+                raise ConcurrencyConflict("settlement claim lost its compare-and-swap")
+            claim_status = self._connection.execute(
+                "UPDATE main.payment_evidence_claims SET status='in_progress' "
+                "WHERE claim_key=? AND status IN ('in_progress', 'retryable') "
+                "AND consumed_at IS NULL",
+                (command.evidence_claim_key,),
+            )
+            if claim_status.rowcount != 1:
+                raise DataCorruption("settlement claim evidence lifecycle is divergent")
+            return SettlementClaim(
+                command=command,
+                lease=SettlementLease(
+                    owner=worker_id,
+                    fencing_token=next_count,
+                    acquired_at=now,
+                    expires_at=expires_at,
+                ),
+                claim_count=next_count,
+            )
+
+    def _assert_live_settlement_claim(
+        self,
+        claim: SettlementClaim,
+        now: datetime,
+        records: tuple[
+            PaymentEvidenceClaim,
+            PaymentSettlementCommand,
+            dict[str, object],
+        ],
+    ) -> dict[str, object]:
+        if type(claim) is not SettlementClaim:
+            raise TypeError("claim must be exact SettlementClaim")
+        claim_record, command, ledger = records
+        if (
+            command != claim.command
+            or ledger["status"] != "leased"
+            or ledger["lease"] != claim.lease
+            or ledger["fencing_token"] != claim.lease.fencing_token
+            or ledger["claim_count"] != claim.claim_count
+            or ledger["dispatch_slots"] != 0
+            or ledger["outcome"] is not None
+            or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+            or now >= claim.lease.expires_at
+        ):
+            raise StaleLease("settlement claim is expired, superseded, or divergent")
+        return ledger
+
+    def release_pre_dispatch_settlement(
+        self,
+        claim: SettlementClaim,
+        *,
+        retryable: bool,
+        now: datetime,
+    ) -> PreDispatchReleaseDisposition:
+        if type(claim) is not SettlementClaim:
+            raise TypeError("claim must be exact SettlementClaim")
+        if type(retryable) is not bool:
+            raise TypeError("retryable must be an exact bool")
+        now = _require_utc_input(now, "now")
+        with self._transaction("release_pre_dispatch_settlement"):
+            current, revision = self._load_payment(claim.command.payment_id)
+            records = self._payment_financial_records(current)
+            if records is None:
+                raise DataCorruption("settlement release lacks financial records")
+            self._assert_live_settlement_claim(claim, now, records)
+            if retryable and claim.claim_count < _MAX_PRE_DISPATCH_CLAIMS:
+                updated = self._connection.execute(
+                    "UPDATE main.payment_ledger SET status='queued', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                    "WHERE settlement_command_id=? AND status='leased' "
+                    "AND claim_owner=? AND fencing_token=? AND claim_count=? "
+                    "AND dispatch_slots_consumed=0",
+                    (
+                        now.isoformat(),
+                        claim.command.settlement_command_id,
+                        claim.lease.owner,
+                        claim.lease.fencing_token,
+                        claim.claim_count,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise StaleLease("settlement release lost its live lease")
+                evidence = self._connection.execute(
+                    "UPDATE main.payment_evidence_claims SET status='retryable' "
+                    "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                    (claim.command.evidence_claim_key,),
+                )
+                if evidence.rowcount != 1:
+                    raise DataCorruption("settlement release evidence lifecycle is divergent")
+                return PreDispatchReleaseDisposition.REQUEUED
+            outcome = SettlementOutcome(
+                certainty=SettlementCertainty.NOT_DISPATCHED,
+                payment_registered=False,
+                reservation_target_confirmed=False,
+                provider_reference_fingerprint=None,
+                requires_reconciliation=False,
+                claim_evidence=(),
+            )
+            event = SettlementFinished(
+                event_id=_settlement_event_id(
+                    "finish",
+                    claim.command.settlement_command_id,
+                ),
+                payment_id=claim.command.payment_id,
+                payment_version=claim.command.payment_version,
+                economic_signature=claim.command.economic_signature,
+                settlement_command_id=claim.command.settlement_command_id,
+                outcome=outcome,
+                finished_at=now,
+            )
+            transition = reduce_payment(current, event)
+            outcome_raw = to_wire_json(outcome)
+            updated = self._connection.execute(
+                "UPDATE main.payment_ledger SET status='outcome_recorded', "
+                "claim_owner=NULL, lease_acquired_at=NULL, lease_expires_at=NULL, "
+                "outcome_certainty=?, outcome_json=?, outcome_hash=?, "
+                "outcome_recorded_at=?, updated_at=? WHERE settlement_command_id=? "
+                "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                "AND claim_count=? AND dispatch_slots_consumed=0",
+                (
+                    outcome.certainty.value,
+                    outcome_raw,
+                    semantic_hash(outcome),
+                    now.isoformat(),
+                    now.isoformat(),
+                    claim.command.settlement_command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.claim_count,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StaleLease("terminal settlement release lost its live lease")
+            evidence = self._connection.execute(
+                "UPDATE main.payment_evidence_claims SET status='completed', consumed_at=? "
+                "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                (now.isoformat(), claim.command.evidence_claim_key),
+            )
+            if evidence.rowcount != 1:
+                raise DataCorruption("terminal settlement evidence lifecycle is divergent")
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return PreDispatchReleaseDisposition.TERMINAL_NOT_DISPATCHED
+
+    def fence_settlement(
+        self,
+        claim: SettlementClaim,
+        request: str,
+        *,
+        now: datetime,
+    ) -> SettlementPermit:
+        if type(claim) is not SettlementClaim:
+            raise TypeError("claim must be exact SettlementClaim")
+        if type(request) is not str or request != claim.command.canonical_payload:
+            raise ValueError("settlement fence request must equal the canonical command payload")
+        now = _require_utc_input(now, "now")
+        with self._transaction("fence_settlement"):
+            current, revision = self._load_payment(claim.command.payment_id)
+            records = self._payment_financial_records(current)
+            if records is None:
+                raise DataCorruption("settlement fence lacks financial records")
+            self._assert_live_settlement_claim(claim, now, records)
+            request_hash = _digest(request)
+            event = SettlementStarted(
+                event_id=_settlement_event_id(
+                    "start",
+                    claim.command.settlement_command_id,
+                ),
+                payment_id=claim.command.payment_id,
+                payment_version=claim.command.payment_version,
+                economic_signature=claim.command.economic_signature,
+                settlement_command_id=claim.command.settlement_command_id,
+                idempotency_key=claim.command.idempotency_key,
+                started_at=now,
+            )
+            transition = reduce_payment(current, event)
+            updated = self._connection.execute(
+                "UPDATE main.payment_ledger SET status='dispatch_fenced', "
+                "dispatch_slots_consumed=1, dispatch_request_hash=?, "
+                "dispatch_fenced_at=?, updated_at=? WHERE settlement_command_id=? "
+                "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                "AND claim_count=? AND dispatch_slots_consumed=0",
+                (
+                    request_hash,
+                    now.isoformat(),
+                    now.isoformat(),
+                    claim.command.settlement_command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.claim_count,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StaleLease("settlement fence lost its live lease")
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return SettlementPermit(
+                command=claim.command,
+                lease=claim.lease,
+                claim_count=claim.claim_count,
+                dispatch_slot=1,
+                request_hash=request_hash,
+                fenced_at=now,
+            )
+
+    def record_settlement_outcome(
+        self,
+        claim: SettlementClaim,
+        permit: SettlementPermit,
+        outcome: SettlementOutcome,
+        *,
+        now: datetime,
+    ) -> PaymentTransition:
+        if type(claim) is not SettlementClaim:
+            raise TypeError("claim must be exact SettlementClaim")
+        if type(permit) is not SettlementPermit:
+            raise TypeError("permit must be exact SettlementPermit")
+        if type(outcome) is not SettlementOutcome:
+            raise TypeError("outcome must be exact SettlementOutcome")
+        if (
+            permit.command != claim.command
+            or permit.lease != claim.lease
+            or permit.claim_count != claim.claim_count
+        ):
+            raise StaleLease("settlement permit does not bind the claim")
+        if outcome.certainty is SettlementCertainty.NOT_DISPATCHED:
+            raise ValueError("not_dispatched is valid only before the permanent fence")
+        if permit.request_hash not in outcome.claim_evidence:
+            raise ValueError("settlement outcome does not cite the fenced request")
+        now = _require_utc_input(now, "now")
+        outcome_raw = to_wire_json(outcome)
+        with self._transaction("record_settlement_outcome"):
+            current, revision = self._load_payment(claim.command.payment_id)
+            records = self._payment_financial_records(current)
+            if records is None:
+                raise DataCorruption("settlement outcome lacks financial records")
+            claim_record, command, ledger = records
+            if ledger["outcome"] is not None:
+                if (
+                    ledger["outcome"] == outcome
+                    and command == claim.command
+                    and ledger["fencing_token"] == claim.lease.fencing_token
+                    and ledger["claim_count"] == claim.claim_count
+                    and ledger["dispatch_slots"] == 1
+                    and ledger["request_hash"] == permit.request_hash
+                    and ledger["fenced_at"] == permit.fenced_at
+                ):
+                    return _payment_noop(current)
+                raise IdentityConflict("settlement outcome replay is divergent")
+            if (
+                ledger["status"] != "dispatch_fenced"
+                or ledger["lease"] != claim.lease
+                or ledger["fencing_token"] != claim.lease.fencing_token
+                or ledger["claim_count"] != claim.claim_count
+                or ledger["dispatch_slots"] != 1
+                or ledger["request_hash"] != permit.request_hash
+                or ledger["fenced_at"] != permit.fenced_at
+                or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+            ):
+                raise StaleLease("settlement outcome lost its permanent fence")
+            event = SettlementFinished(
+                event_id=_settlement_event_id(
+                    "finish",
+                    claim.command.settlement_command_id,
+                ),
+                payment_id=claim.command.payment_id,
+                payment_version=claim.command.payment_version,
+                economic_signature=claim.command.economic_signature,
+                settlement_command_id=claim.command.settlement_command_id,
+                outcome=outcome,
+                finished_at=now,
+            )
+            transition = reduce_payment(current, event)
+            ledger_status = (
+                "outcome_recorded"
+                if outcome.certainty is SettlementCertainty.SETTLED
+                else "manual_review"
+            )
+            claim_status = (
+                PaymentEvidenceClaimStatus.COMPLETED
+                if outcome.certainty is SettlementCertainty.SETTLED
+                else PaymentEvidenceClaimStatus.MANUAL_REVIEW
+            )
+            updated = self._connection.execute(
+                "UPDATE main.payment_ledger SET status=?, claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, outcome_certainty=?, "
+                "outcome_json=?, outcome_hash=?, outcome_recorded_at=?, updated_at=? "
+                "WHERE settlement_command_id=? AND status='dispatch_fenced' "
+                "AND claim_owner=? AND fencing_token=? AND claim_count=? "
+                "AND dispatch_slots_consumed=1 AND dispatch_request_hash=? "
+                "AND dispatch_fenced_at=?",
+                (
+                    ledger_status,
+                    outcome.certainty.value,
+                    outcome_raw,
+                    semantic_hash(outcome),
+                    now.isoformat(),
+                    now.isoformat(),
+                    claim.command.settlement_command_id,
+                    claim.lease.owner,
+                    claim.lease.fencing_token,
+                    claim.claim_count,
+                    permit.request_hash,
+                    permit.fenced_at.isoformat(),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StaleLease("settlement outcome lost its permanent fence")
+            evidence = self._connection.execute(
+                "UPDATE main.payment_evidence_claims SET status=?, consumed_at=? "
+                "WHERE claim_key=? AND status='in_progress' AND consumed_at IS NULL",
+                (
+                    claim_status.value,
+                    now.isoformat(),
+                    claim.command.evidence_claim_key,
+                ),
+            )
+            if evidence.rowcount != 1:
+                raise DataCorruption("settlement outcome evidence lifecycle is divergent")
+            self._persist_operational_payment_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return transition
 
 
 __all__ = [

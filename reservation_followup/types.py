@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .handoff import HandoffEffectJob
+    from .payment import PaymentSettlementCommand, VerifiedPaymentEvidence
 
 from reservation_domain import (
     ExecutionCertainty,
@@ -142,6 +143,18 @@ class SettlementCertainty(str, Enum):
     DISPATCHED_UNKNOWN = "dispatched_unknown"
 
 
+class PaymentEvidenceClaimStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    RETRYABLE = "retryable"
+    MANUAL_REVIEW = "manual_review"
+
+
+class PreDispatchReleaseDisposition(str, Enum):
+    REQUEUED = "requeued"
+    TERMINAL_NOT_DISPATCHED = "terminal_not_dispatched"
+
+
 @dataclass(frozen=True, slots=True)
 class HandoffOutboxClaim:
     message: HandoffEffectJob
@@ -258,6 +271,137 @@ class HandoffReceipt:
             delivery_version=delivery_version,
             delivered_at=delivered_at,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentEvidenceClaim:
+    verified_evidence: VerifiedPaymentEvidence
+    status: PaymentEvidenceClaimStatus
+    claimed_at: datetime
+    consumed_at: datetime | None
+
+    def __post_init__(self) -> None:
+        from .payment import VerifiedPaymentEvidence
+
+        if type(self.verified_evidence) is not VerifiedPaymentEvidence:
+            raise ValueError("payment evidence claim requires exact verified evidence")
+        clean = VerifiedPaymentEvidence(
+            **{
+                field.name: getattr(self.verified_evidence, field.name)
+                for field in fields(VerifiedPaymentEvidence)
+            }
+        )
+        if clean != self.verified_evidence:
+            raise ValueError("payment evidence claim contains noncanonical evidence")
+        _require_enum(
+            self.status,
+            PaymentEvidenceClaimStatus,
+            "payment_evidence_claim.status",
+        )
+        claimed_at = _require_utc(
+            self.claimed_at,
+            "payment_evidence_claim.claimed_at",
+        )
+        consumed_at = (
+            None
+            if self.consumed_at is None
+            else _require_utc(
+                self.consumed_at,
+                "payment_evidence_claim.consumed_at",
+            )
+        )
+        if self.status in (
+            PaymentEvidenceClaimStatus.IN_PROGRESS,
+            PaymentEvidenceClaimStatus.RETRYABLE,
+        ):
+            if consumed_at is not None:
+                raise ValueError("active evidence claim cannot be consumed")
+        elif consumed_at is None or consumed_at < claimed_at:
+            raise ValueError("terminal evidence claim requires a causal consumed_at")
+        object.__setattr__(self, "claimed_at", claimed_at)
+        object.__setattr__(self, "consumed_at", consumed_at)
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementLease:
+    owner: str
+    fencing_token: int
+    acquired_at: datetime
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "owner",
+            _require_id(self.owner, "settlement_lease.owner"),
+        )
+        _require_positive_int(
+            self.fencing_token,
+            "settlement_lease.fencing_token",
+        )
+        acquired_at = _require_utc(
+            self.acquired_at,
+            "settlement_lease.acquired_at",
+        )
+        expires_at = _require_utc(
+            self.expires_at,
+            "settlement_lease.expires_at",
+        )
+        if expires_at <= acquired_at:
+            raise ValueError("settlement lease must expire after acquisition")
+        object.__setattr__(self, "acquired_at", acquired_at)
+        object.__setattr__(self, "expires_at", expires_at)
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementClaim:
+    command: PaymentSettlementCommand
+    lease: SettlementLease
+    claim_count: int
+
+    def __post_init__(self) -> None:
+        from .payment import PaymentSettlementCommand
+
+        if type(self.command) is not PaymentSettlementCommand:
+            raise ValueError("settlement claim requires exact payment command")
+        clean = PaymentSettlementCommand(
+            **{
+                field.name: getattr(self.command, field.name)
+                for field in fields(PaymentSettlementCommand)
+            }
+        )
+        if clean != self.command:
+            raise ValueError("settlement claim contains noncanonical command")
+        if type(self.lease) is not SettlementLease:
+            raise ValueError("settlement claim requires exact lease")
+        _require_positive_int(self.claim_count, "settlement_claim.claim_count")
+        if self.claim_count != self.lease.fencing_token:
+            raise ValueError("settlement claim token must equal claim count")
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementPermit:
+    command: PaymentSettlementCommand
+    lease: SettlementLease
+    claim_count: int
+    dispatch_slot: int
+    request_hash: str
+    fenced_at: datetime
+
+    def __post_init__(self) -> None:
+        claim = SettlementClaim(
+            command=self.command,
+            lease=self.lease,
+            claim_count=self.claim_count,
+        )
+        object.__setattr__(self, "command", claim.command)
+        if type(self.dispatch_slot) is not int or self.dispatch_slot != 1:
+            raise ValueError("settlement permit dispatch slot must be exact integer 1")
+        _require_hash(self.request_hash, "settlement_permit.request_hash")
+        fenced_at = _require_utc(self.fenced_at, "settlement_permit.fenced_at")
+        if not self.lease.acquired_at <= fenced_at < self.lease.expires_at:
+            raise ValueError("settlement permit must be fenced during its live lease")
+        object.__setattr__(self, "fenced_at", fenced_at)
 
 
 @dataclass(frozen=True, slots=True)
@@ -608,8 +752,14 @@ __all__ = [
     "HandoffStatus",
     "PaymentStatus",
     "SettlementCertainty",
+    "PaymentEvidenceClaimStatus",
+    "PreDispatchReleaseDisposition",
     "HandoffOutboxClaim",
     "HandoffReceipt",
+    "PaymentEvidenceClaim",
+    "SettlementLease",
+    "SettlementClaim",
+    "SettlementPermit",
     "ConfirmedReservationAnchor",
     "HandoffEffectPolicy",
     "PaymentEffectPolicy",

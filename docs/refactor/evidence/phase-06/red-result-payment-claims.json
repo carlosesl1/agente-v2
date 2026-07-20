@@ -1,0 +1,152 @@
+{
+  "phase": 6,
+  "task": 8,
+  "title": "Global payment evidence claims and permanently fenced settlement ledger",
+  "recorded_at_utc": "2026-07-20T05:07:08Z",
+  "base_sha": "bc6fd086b2e6c23f330f6103c59714ed280c6fdb",
+  "base_tree_sha": "57d665115789418a5d28b398bd5e60687840d170",
+  "functional_commit": null,
+  "functional_tree": null,
+  "rollout": "NO-GO",
+  "postgresql_executed": false,
+  "network_used": false,
+  "provider_used": false,
+  "live_capabilities_executed": [],
+  "scope": {
+    "implemented": [
+      "atomic global evidence claim plus payment command plus settlement ledger",
+      "Pix E2E, Wise transaction fingerprint, and Stripe account/event global identities",
+      "pre-fence one-shot claim, lease, exact-expiry reclaim, stale fencing, and finite retry budget",
+      "permanent dispatch slot 1 fence",
+      "settlement outcome persistence and evidence-claim lifecycle",
+      "canonical loader integrity for evidence, command, ledger, lease, fence, and outcome"
+    ],
+    "pre_dispatch_claim_budget": 3,
+    "excluded": [
+      "SettlementPort",
+      "PaymentSettlementWorker",
+      "PaymentReconciler",
+      "provider dispatch",
+      "payment outbox projection or delivery",
+      "PostgreSQL execution",
+      "live capabilities"
+    ]
+  },
+  "tdd": {
+    "original_timeout_red": {
+      "source": "surviving artifacts from timed-out delegation deleg_13aaa977",
+      "command": "python3 -m unittest tests.test_phase6_payment_claims -v >/tmp/phase6-task8-red.out 2>&1",
+      "exit_code": 1,
+      "tests": 18,
+      "failures": 0,
+      "errors": 31,
+      "missing_methods": {
+        "claim_payment_evidence": 30,
+        "record_payment_command": 1
+      },
+      "import_errors": 0,
+      "fixture_type_errors": 0,
+      "output_sha256": "4c10c0023bd4e69180a9987a911624406527112bd25970dc8f383b130417e07f",
+      "output_bytes": 43935,
+      "raw_output_path": "/tmp/phase6-task8-red.out",
+      "raw_output_versioned": false,
+      "classification": "honest absent-contract RED; downstream invariants were not independently reached in this first run"
+    },
+    "final_controller_red": {
+      "reason": "re-anchored after correcting one DTO/fixture collision and hardening command-level divergence, valid-to-valid target tamper, and Task 10 outbox boundaries",
+      "command": "python3 -m unittest tests.test_phase6_payment_claims -v >/tmp/phase6-task8-red-final.out 2>&1",
+      "exit_code": 1,
+      "tests": 18,
+      "failures": 0,
+      "errors": 31,
+      "missing_methods": {
+        "claim_payment_evidence": 30,
+        "record_payment_command": 1
+      },
+      "import_errors": 0,
+      "fixture_type_errors": 0,
+      "assertion_failures": 0,
+      "patch_path": "docs/refactor/evidence/phase-06/task8-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_apply_command": "git apply --cached --unidiff-zero docs/refactor/evidence/phase-06/task8-red.patch",
+      "patch_sha256": "9ccda19e7df2df46599f982d77ece2fb6bfca032f8d104289ad5dd76a5ca0cdc",
+      "patch_bytes": 38819,
+      "staged_tree_sha": "0aaf181a7ad052de2afc911ed3a72f5d5ce553d5",
+      "reconstructed_tree_sha": "0aaf181a7ad052de2afc911ed3a72f5d5ce553d5",
+      "reconstruction_matches": true,
+      "output_sha256": "90223a01acad57d404df8ced51e3ae5b7bb7cc25a08685c01c5b188a715f85cd",
+      "output_bytes": 42015,
+      "raw_output_path": "/tmp/phase6-task8-red-final.out",
+      "raw_output_versioned": false,
+      "classification": "honest absent-contract RED on the immutable base; no production bytes were present"
+    }
+  },
+  "worktree_green": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_payment_claims -v",
+      "tests": 18,
+      "result": "OK",
+      "output_sha256": "4ba57e75cb6d5c2288d8675566525b6efa894a10f5bc479191842383ca46aa45"
+    },
+    "sqlite_store": {
+      "command": "python3 -m unittest tests.test_phase6_sqlite_store -v",
+      "tests": 29,
+      "result": "OK",
+      "output_sha256": "7717938ddbe17e4615da196753e41a3488527337366bd9c5c64df15c60f5dd82"
+    },
+    "contracts_and_payment_reducer": {
+      "command": "python3 -m unittest tests.test_phase6_types tests.test_phase6_payment tests.test_phase6_payment_reducer -v",
+      "tests": 70,
+      "result": "OK",
+      "output_sha256": "74d65db2b284247d90431d14dd816b3de29e9fbddfab46d903ac6b372ce5d5fc"
+    },
+    "schema_and_handoff_siblings": {
+      "command": "python3 -m unittest tests.test_phase6_schema tests.test_phase6_handoff_worker -v",
+      "tests": 54,
+      "result": "OK",
+      "output_sha256": "7cf4d398c36b8931c67b10b4ca631880af1c79464988d2bbb8d3663be9d2b18b"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 553,
+      "result": "OK",
+      "output_sha256": "afdb5ddfb6ea477c33d002a4ef1b2eeb7abaeb9fd66566a705fef3782e9fbfaa"
+    },
+    "characterization": {
+      "command": "python3 -m characterization.harness",
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
+      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_and_capability_scans": "passed"
+  },
+  "database_scope": "SQLite :memory: and TemporaryDirectory file-backed databases only",
+  "task9_boundary": {
+    "settlement_port_present": false,
+    "payment_settlement_worker_present": false,
+    "reconciler_present": false,
+    "provider_or_dispatch_executed": false
+  },
+  "task10_boundary": {
+    "payment_outbox_rows_created": 0,
+    "payment_receipt_rows_created": 0
+  },
+  "independent_review": {
+    "status": "pending",
+    "critical": null,
+    "important": null,
+    "minor": null
+  }
+}
