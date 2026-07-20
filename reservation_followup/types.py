@@ -310,6 +310,16 @@ class PaymentOutboxClaim:
                     f"payment_outbox_claim.{field_name}",
                 ),
             )
+        expected_message_id = (
+            "payment-effect:"
+            + hashlib.sha256(
+                f"{self.settlement_command_id}\x00{self.message.kind.value}".encode("utf-8")
+            ).hexdigest()[:32]
+        )
+        if self.message_id != expected_message_id:
+            raise ValueError(
+                "payment_outbox_claim.message_id is not bound to message kind and command"
+            )
         _require_positive_int(
             self.payment_version,
             "payment_outbox_claim.payment_version",
@@ -330,8 +340,8 @@ class PaymentOutboxClaim:
             self.delivery_attempts,
             "payment_outbox_claim.delivery_attempts",
         )
-        if self.fencing_token < self.delivery_attempts:
-            raise ValueError("payment outbox fencing token cannot trail attempts")
+        if self.fencing_token != self.delivery_attempts:
+            raise ValueError("payment outbox fencing token must equal delivery attempts")
         acquired_at = _require_utc(
             self.lease_acquired_at,
             "payment_outbox_claim.lease_acquired_at",
@@ -354,6 +364,7 @@ class PaymentReceipt:
     delivery_reference: str
     delivery_id: str
     delivery_version: int
+    claim_hash: str
     delivered_at: datetime
 
     def __post_init__(self) -> None:
@@ -376,6 +387,13 @@ class PaymentReceipt:
             self.delivery_version,
             "payment_receipt.delivery_version",
         )
+        if self.idempotency_key != self.message_id:
+            raise ValueError("payment receipt idempotency key must equal message id")
+        object.__setattr__(
+            self,
+            "claim_hash",
+            _require_hash(self.claim_hash, "payment_receipt.claim_hash"),
+        )
         object.__setattr__(
             self,
             "delivered_at",
@@ -393,6 +411,8 @@ class PaymentReceipt:
     ) -> PaymentReceipt:
         if type(claim) is not PaymentOutboxClaim:
             raise TypeError("claim must be exact PaymentOutboxClaim")
+        from .serialization import semantic_hash
+
         return cls(
             receipt_id=receipt_id,
             idempotency_key=claim.message_id,
@@ -400,6 +420,7 @@ class PaymentReceipt:
             delivery_reference=delivery_reference,
             delivery_id=claim.delivery_id,
             delivery_version=claim.delivery_version,
+            claim_hash=semantic_hash(claim),
             delivered_at=delivered_at,
         )
 
@@ -887,6 +908,8 @@ __all__ = [
     "PreDispatchReleaseDisposition",
     "HandoffOutboxClaim",
     "HandoffReceipt",
+    "PaymentOutboxClaim",
+    "PaymentReceipt",
     "PaymentEvidenceClaim",
     "SettlementLease",
     "SettlementClaim",

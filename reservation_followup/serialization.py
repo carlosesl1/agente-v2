@@ -58,6 +58,7 @@ from .types import (
     HandoffStatus,
     PaymentEffectPolicy,
     PaymentMethod,
+    PaymentOutboxClaim,
     PaymentReceipt,
     PaymentStatus,
     PaymentSubject,
@@ -94,6 +95,7 @@ _TYPE_TAGS = {
     SettlementOutcome: "settlement_outcome",
     PaymentWorkflow: "payment_workflow",
     PaymentEffectJob: "payment_effect_job",
+    PaymentOutboxClaim: "payment_outbox_claim",
     PaymentReceipt: "payment_receipt",
 }
 _NESTED_DATACLASSES = frozenset(
@@ -124,7 +126,8 @@ _ENUM_TYPES = frozenset(
 
 @lru_cache(maxsize=None)
 def _cached_type_hints(cls: type) -> types.MappingProxyType[str, Any]:
-    return types.MappingProxyType(get_type_hints(cls))
+    localns = {"PaymentEffectJob": PaymentEffectJob} if cls is PaymentOutboxClaim else None
+    return types.MappingProxyType(get_type_hints(cls, localns=localns))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

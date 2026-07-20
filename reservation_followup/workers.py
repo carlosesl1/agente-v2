@@ -195,15 +195,16 @@ class PaymentOutboxWorker:
         )
         if claim is None:
             return PaymentOutboxWorkerResult.idle()
+        receipt: object = None
+        delivery_failed = False
         try:
             receipt = self._delivery.deliver(claim)
             if type(receipt) is not PaymentReceipt:
                 raise TypeError("delivery must return exact PaymentReceipt")
         except Exception:
-            try:
-                self._store.release_payment_outbox(claim, now=now)
-            except Exception as release_error:
-                raise release_error from None
+            delivery_failed = True
+        if delivery_failed:
+            self._store.release_payment_outbox(claim, now=now)
             return PaymentOutboxWorkerResult(
                 PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE,
                 claim.message_id,
@@ -415,6 +416,10 @@ __all__ = [
     "HandoffWorkerDisposition",
     "HandoffWorkerResult",
     "HandoffOutboxWorker",
+    "PaymentEffectDeliveryPort",
+    "PaymentOutboxWorkerDisposition",
+    "PaymentOutboxWorkerResult",
+    "PaymentOutboxWorker",
     "SettlementPreparationError",
     "RetryableSettlementPreparationError",
     "TerminalSettlementPreparationError",

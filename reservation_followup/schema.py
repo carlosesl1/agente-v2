@@ -235,7 +235,7 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
             "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
         )
-        fencing_history = "(fencing_token >= delivery_attempts)"
+        fencing_history = "(fencing_token = delivery_attempts)"
     constraints = [
         f"CONSTRAINT pk_{table} PRIMARY KEY (message_id)",
         f"CONSTRAINT fk_{table}_workflow FOREIGN KEY ({workflow_id}) "

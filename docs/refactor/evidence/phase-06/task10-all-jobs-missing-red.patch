@@ -1,0 +1,13 @@
+diff --git a/reservation_followup/sqlite_store.py b/reservation_followup/sqlite_store.py
+index 69552914e6936e0a1ac1ab33ee8d08e53426540d..0cb2dae2fa7282eb53c7c51ce8c5cf8a040d557f 100644
+--- a/reservation_followup/sqlite_store.py
++++ b/reservation_followup/sqlite_store.py
+@@ -3219,8 +3218,0 @@ class SQLiteFollowupUnitOfWork:
+-            terminal_payments = tuple(
+-                self._connection.execute(
+-                    "SELECT payment_id FROM main.payment_ledger "
+-                    "WHERE outcome_json IS NOT NULL ORDER BY payment_id"
+-                )
+-            )
+-            for (payment_id,) in terminal_payments:
+-                self._load_payment(payment_id)

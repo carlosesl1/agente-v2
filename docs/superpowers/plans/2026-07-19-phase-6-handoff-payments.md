@@ -786,18 +786,24 @@ git commit -m "feat(phase-6): settle payments behind permanent fencing"
 - Verify/consume unchanged: `reservation_followup/projection.py`
 - Modify: `reservation_followup/types.py`
 - Modify: `reservation_followup/serialization.py`
+- Modify: `reservation_followup/schema.py`
 - Modify: `reservation_followup/sqlite_store.py`
 - Modify: `reservation_followup/workers.py`
 - Modify: `reservation_followup/__init__.py`
 - Modify: `tests/test_phase6_payment_claims.py` (test helper only)
+- Modify: `tests/test_phase6_schema.py`
 - Create: `tests/test_phase6_payment_outbox.py`
+- Modify: `schemas/phase6/sqlite.sql`
+- Modify: `schemas/phase6/postgresql.sql` (static contract only; never execute)
 - Create: `docs/refactor/evidence/phase-06/task10-red.patch`
 - Create: `docs/refactor/evidence/phase-06/task10-semantic-red.patch`
+- Create: `docs/refactor/evidence/phase-06/task10-all-jobs-missing-red.patch`
+- Create: `docs/refactor/evidence/phase-06/task10-review-findings-red.patch`
 - Create: `docs/refactor/evidence/phase-06/red-result-payment-outbox.json`
 
 **Interfaces:**
 - Consumes the immutable effect kinds/jobs and deterministic projection already persisted atomically by Task 9.
-- Produces: immutable `PaymentOutboxClaim`/`PaymentReceipt`, `PaymentEffectDeliveryPort.deliver(claim)`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
+- Produces: immutable self-bound `PaymentOutboxClaim`/claim-bound `PaymentReceipt`, exact `fencing_token == delivery_attempts`, `PaymentEffectDeliveryPort.deliver(claim)`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
 
 - [ ] **Step 1: Write RED for policy matrix and no settlement replay**
 

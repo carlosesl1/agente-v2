@@ -1,0 +1,116 @@
+diff --git a/tests/test_phase6_payment_outbox.py b/tests/test_phase6_payment_outbox.py
+index b3c9c4dbebe21a3815081a03d649a30593c737b4..c7bb623558c64cca81e271b6dd670925e468a5a3 100644
+--- a/tests/test_phase6_payment_outbox.py
++++ b/tests/test_phase6_payment_outbox.py
+@@ -7,0 +8 @@ from pathlib import Path
++import sqlite3
+@@ -25,0 +27 @@ from reservation_followup import (
++    semantic_hash,
+@@ -156,0 +159,16 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
++    def test_task10_public_contracts_are_exported_by_governing_modules(self) -> None:
++        import reservation_followup.types as shared_types
++        import reservation_followup.workers as worker_contracts
++
++        self.assertTrue(
++            {"PaymentOutboxClaim", "PaymentReceipt"}.issubset(shared_types.__all__)
++        )
++        self.assertTrue(
++            {
++                "PaymentEffectDeliveryPort",
++                "PaymentOutboxWorkerDisposition",
++                "PaymentOutboxWorkerResult",
++                "PaymentOutboxWorker",
++            }.issubset(worker_contracts.__all__)
++        )
++
+@@ -328,0 +347,6 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
++        with self.assertRaises(IdentityConflict):
++            self.store.complete_payment_outbox(
++                replace(claim, worker_id="worker:payment-effect:replay-forged"),
++                receipt,
++                now=NOW + timedelta(seconds=11),
++            )
+@@ -364,0 +389,22 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
++    def test_delivery_and_release_failure_drops_private_exception_chain(self) -> None:
++        self.settle("double-failure")
++        delivery = FakePaymentEffectDelivery("exception")
++
++        def fail_release(*args, **kwargs):
++            raise StaleLease("PUBLIC_PAYMENT_EFFECT_RELEASE_FAILURE")
++
++        self.store.release_payment_outbox = fail_release
++        with self.assertRaises(StaleLease) as caught:
++            self.worker(delivery).run_once(now=NOW + timedelta(seconds=3))
++        chain = []
++        current = caught.exception
++        while current is not None and current not in chain:
++            chain.append(current)
++            current = current.__cause__ or current.__context__
++        rendered = " ".join(
++            f"{type(item).__name__}:{item}" for item in chain
++        )
++        self.assertNotIn("PRIVATE", rendered)
++        self.assertNotIn("RuntimeError", rendered)
++        self.assertEqual(delivery.calls, 1)
++
+@@ -508,0 +555,60 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
++    def test_claim_and_receipt_close_all_self_bindings_before_serialization(self) -> None:
++        self.settle("self-binding")
++        claim = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:self-binding",
++            delivery_id="payment-effect-delivery:self-binding",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        with self.assertRaises(ValueError):
++            replace(claim, message_id="payment-effect:forged-link")
++        receipt = PaymentReceipt.for_claim(
++            claim,
++            receipt_id="payment:receipt:self-binding",
++            delivery_reference="payment:delivery:self-binding",
++            delivered_at=NOW + timedelta(seconds=3),
++        )
++        with self.assertRaises(ValueError):
++            replace(receipt, idempotency_key="payment-effect:forged-link")
++        object.__setattr__(receipt, "idempotency_key", "payment-effect:forged-link")
++        with self.assertRaises(ValueError):
++            semantic_hash(receipt)
++
++    def test_payment_outbox_fence_must_equal_delivery_attempts_everywhere(self) -> None:
++        payment_id = self.settle("fence-equality")
++        claim = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:fence-equality",
++            delivery_id="payment-effect-delivery:fence-equality",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        with self.assertRaises(ValueError):
++            replace(claim, fencing_token=claim.fencing_token + 1)
++        with self.assertRaises(sqlite3.IntegrityError):
++            self.store._connection.execute(
++                "UPDATE main.payment_outbox SET fencing_token=fencing_token+1 "
++                "WHERE payment_id=?",
++                (payment_id,),
++            )
++
++    def test_loader_rejects_coherently_forged_unequal_fence_and_attempts(self) -> None:
++        payment_id = self.settle("forged-fence")
++        claim = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:forged-fence",
++            delivery_id="payment-effect-delivery:forged-fence",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        self.store._connection.execute("PRAGMA ignore_check_constraints=ON")
++        self.store._connection.execute(
++            "UPDATE main.payment_outbox SET fencing_token=fencing_token+1 "
++            "WHERE message_id=?",
++            (claim.message_id,),
++        )
++        self.store._connection.execute("PRAGMA ignore_check_constraints=OFF")
++        with self.assertRaises(DataCorruption):
++            self.store.load_payment(payment_id)
++

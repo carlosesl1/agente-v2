@@ -196,7 +196,7 @@ CREATE TABLE payment_outbox (
     CONSTRAINT ck_payment_outbox_lease_tuple CHECK ((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_payment_outbox_active_lease CHECK (claim_owner IS NULL OR (fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_payment_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
-    CONSTRAINT ck_payment_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
+    CONSTRAINT ck_payment_outbox_fencing_history CHECK (fencing_token = delivery_attempts),
     CONSTRAINT ck_payment_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 ) STRICT;
 

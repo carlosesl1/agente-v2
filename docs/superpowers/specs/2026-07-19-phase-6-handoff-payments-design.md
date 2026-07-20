@@ -421,6 +421,12 @@ hash, lease/fencing e receipt. Falha de form/e-mail/mensagem/paid-state nunca
 repete settlement. Job obrigatório ausente ou divergente falha fechado; delivery
 ou redelivery nunca recria job nem repete settlement.
 
+No payment outbox, `fencing_token == delivery_attempts` em todo estado. Claim e
+receipt fecham os vínculos internos antes da serialização, e o receipt carrega o
+hash canônico do claim completo; apenas replay exatamente idêntico é no-op.
+Falha simultânea de delivery e release não pode reter detalhe privado na cadeia
+de exceções.
+
 A transição paid é monotônica: evento antigo não regressa `paid` para pending.
 Target ausente ou ambíguo vai para manual review.
 

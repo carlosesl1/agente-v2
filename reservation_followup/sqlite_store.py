@@ -1787,7 +1787,7 @@ class SQLiteFollowupUnitOfWork:
                 or type(row[11]) is not str
                 or type(row[13]) is not int
                 or type(row[16]) is not int
-                or row[13] < row[16]
+                or row[13] != row[16]
                 or row[13] < 0
                 or row[16] < 0
                 or created_at != ledger["outcome_recorded_at"]
@@ -3186,7 +3186,7 @@ class SQLiteFollowupUnitOfWork:
             or row[15] != clean.lease_expires_at.isoformat()
             or type(row[16]) is not int
             or row[16] != clean.delivery_attempts
-            or clean.fencing_token < clean.delivery_attempts
+            or clean.fencing_token != clean.delivery_attempts
             or now < clean.lease_acquired_at
             or now >= clean.lease_expires_at
             or row[17] is not None
@@ -3341,6 +3341,7 @@ class SQLiteFollowupUnitOfWork:
             delivery_reference=receipt.delivery_reference,
             delivery_id=receipt.delivery_id,
             delivery_version=receipt.delivery_version,
+            claim_hash=receipt.claim_hash,
             delivered_at=receipt.delivered_at,
         )
         if canonical_receipt != receipt:
@@ -3357,6 +3358,7 @@ class SQLiteFollowupUnitOfWork:
                 or canonical_receipt.idempotency_key != clean.message_id
                 or canonical_receipt.delivery_id != clean.delivery_id
                 or canonical_receipt.delivery_version != clean.delivery_version
+                or canonical_receipt.claim_hash != semantic_hash(clean)
             ):
                 raise IdentityConflict("payment receipt is not bound to its claim")
             existing = self._connection.execute(

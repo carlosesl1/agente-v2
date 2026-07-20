@@ -5,6 +5,7 @@ from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from pathlib import Path
+import sqlite3
 import tempfile
 from threading import Barrier
 import unittest
@@ -23,6 +24,7 @@ from reservation_followup import (
     PaymentStatus,
     SettlementCertainty,
     from_wire_json,
+    semantic_hash,
 )
 from reservation_followup.sqlite_store import (
     DataCorruption,
@@ -153,6 +155,22 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
             "WHERE payment_id=?",
             (payment_id,),
         ).fetchone()
+
+    def test_task10_public_contracts_are_exported_by_governing_modules(self) -> None:
+        import reservation_followup.types as shared_types
+        import reservation_followup.workers as worker_contracts
+
+        self.assertTrue(
+            {"PaymentOutboxClaim", "PaymentReceipt"}.issubset(shared_types.__all__)
+        )
+        self.assertTrue(
+            {
+                "PaymentEffectDeliveryPort",
+                "PaymentOutboxWorkerDisposition",
+                "PaymentOutboxWorkerResult",
+                "PaymentOutboxWorker",
+            }.issubset(worker_contracts.__all__)
+        )
 
     def test_persisted_policy_matrix_is_exact_and_required_jobs_precede_optional(self) -> None:
         payment_id = self.settle(
@@ -326,6 +344,12 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
                 receipt,
                 now=NOW + timedelta(seconds=11),
             )
+        with self.assertRaises(IdentityConflict):
+            self.store.complete_payment_outbox(
+                replace(claim, worker_id="worker:payment-effect:replay-forged"),
+                receipt,
+                now=NOW + timedelta(seconds=11),
+            )
         self.assertEqual(
             self.store._connection.execute(
                 "SELECT COUNT(*) FROM main.payment_receipts"
@@ -361,6 +385,28 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
             ).fetchone(),
             ("pending", None, 1, 1),
         )
+
+    def test_delivery_and_release_failure_drops_private_exception_chain(self) -> None:
+        self.settle("double-failure")
+        delivery = FakePaymentEffectDelivery("exception")
+
+        def fail_release(*args, **kwargs):
+            raise StaleLease("PUBLIC_PAYMENT_EFFECT_RELEASE_FAILURE")
+
+        self.store.release_payment_outbox = fail_release
+        with self.assertRaises(StaleLease) as caught:
+            self.worker(delivery).run_once(now=NOW + timedelta(seconds=3))
+        chain = []
+        current = caught.exception
+        while current is not None and current not in chain:
+            chain.append(current)
+            current = current.__cause__ or current.__context__
+        rendered = " ".join(
+            f"{type(item).__name__}:{item}" for item in chain
+        )
+        self.assertNotIn("PRIVATE", rendered)
+        self.assertNotIn("RuntimeError", rendered)
+        self.assertEqual(delivery.calls, 1)
 
     def test_invalid_delivery_return_is_retryable_and_sanitized(self) -> None:
         payment_id = self.settle("invalid-return")
@@ -505,6 +551,66 @@ class Phase6PaymentOutboxTests(unittest.TestCase):
                 now=NOW + timedelta(seconds=4),
             )
         self.assertEqual(tuple(self.store._connection.iterdump()), before)
+
+    def test_claim_and_receipt_close_all_self_bindings_before_serialization(self) -> None:
+        self.settle("self-binding")
+        claim = self.store.claim_payment_outbox(
+            worker_id="worker:payment-effect:self-binding",
+            delivery_id="payment-effect-delivery:self-binding",
+            delivery_version=1,
+            now=NOW + timedelta(seconds=3),
+            lease_ttl=LEASE_TTL,
+        )
+        with self.assertRaises(ValueError):
+            replace(claim, message_id="payment-effect:forged-link")
+        receipt = PaymentReceipt.for_claim(
+            claim,
+            receipt_id="payment:receipt:self-binding",
+            delivery_reference="payment:delivery:self-binding",
+            delivered_at=NOW + timedelta(seconds=3),
+        )
+        with self.assertRaises(ValueError):
+            replace(receipt, idempotency_key="payment-effect:forged-link")
+        object.__setattr__(receipt, "idempotency_key", "payment-effect:forged-link")
+        with self.assertRaises(ValueError):
+            semantic_hash(receipt)
+
+    def test_payment_outbox_fence_must_equal_delivery_attempts_everywhere(self) -> None:
+        payment_id = self.settle("fence-equality")
+        claim = self.store.claim_payment_outbox(
+            worker_id="worker:payment-effect:fence-equality",
+            delivery_id="payment-effect-delivery:fence-equality",
+            delivery_version=1,
+            now=NOW + timedelta(seconds=3),
+            lease_ttl=LEASE_TTL,
+        )
+        with self.assertRaises(ValueError):
+            replace(claim, fencing_token=claim.fencing_token + 1)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store._connection.execute(
+                "UPDATE main.payment_outbox SET fencing_token=fencing_token+1 "
+                "WHERE payment_id=?",
+                (payment_id,),
+            )
+
+    def test_loader_rejects_coherently_forged_unequal_fence_and_attempts(self) -> None:
+        payment_id = self.settle("forged-fence")
+        claim = self.store.claim_payment_outbox(
+            worker_id="worker:payment-effect:forged-fence",
+            delivery_id="payment-effect-delivery:forged-fence",
+            delivery_version=1,
+            now=NOW + timedelta(seconds=3),
+            lease_ttl=LEASE_TTL,
+        )
+        self.store._connection.execute("PRAGMA ignore_check_constraints=ON")
+        self.store._connection.execute(
+            "UPDATE main.payment_outbox SET fencing_token=fencing_token+1 "
+            "WHERE message_id=?",
+            (claim.message_id,),
+        )
+        self.store._connection.execute("PRAGMA ignore_check_constraints=OFF")
+        with self.assertRaises(DataCorruption):
+            self.store.load_payment(payment_id)
 
     def test_receipt_insert_failure_rolls_back_delivery_atomically(self) -> None:
         self.settle("receipt-rollback")
