@@ -196,9 +196,8 @@ class Phase6PaymentEvidenceTests(unittest.TestCase):
         for certainty in ExecutionCertainty:
             if certainty is ExecutionCertainty.EFFECT_CONFIRMED:
                 continue
-            anchor = confirmed_anchor()
-            object.__setattr__(anchor.reservation_outcome, "certainty", certainty)
             with self.subTest(certainty=certainty), self.assertRaises(ValueError):
+                anchor = confirmed_anchor(outcome=outcome(certainty=certainty))
                 PaymentSubject.from_anchor(
                     anchor,
                     payment_id="payment:synthetic:1",
