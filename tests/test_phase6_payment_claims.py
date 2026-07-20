@@ -690,7 +690,7 @@ class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
                 ).fetchone()[0]
                 for table in ("payment_outbox", "payment_receipts")
             ),
-            (0, 0),
+            (2, 0),
         )
 
     def test_first_post_fence_outcome_at_exact_expiry_is_stale_and_atomic(self) -> None:
@@ -801,7 +801,7 @@ class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
                             ).fetchone()[0]
                             for table in ("payment_outbox", "payment_receipts")
                         ),
-                        (0, 0),
+                        (1, 0),
                     )
                 finally:
                     store.close()

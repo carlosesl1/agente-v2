@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from reservation_followup.payment import PaymentSettlementCommand, SettlementOutcome
-from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork, StaleLease
+from reservation_followup.sqlite_store import DataCorruption, SQLiteFollowupUnitOfWork, StaleLease
 from reservation_followup.types import PaymentMethod, PaymentStatus, SettlementCertainty
 from reservation_followup.workers import (
     PaymentSettlementWorker,
@@ -63,6 +63,13 @@ class FakeSettlementPort:
             raise DispatchCrash("synthetic crash")
         if self.mode == "invalid_return":
             return object()
+        if self.mode == "malformed_outcome":
+            malformed = outcome(
+                SettlementCertainty.SETTLED,
+                claim_evidence=(permit.request_hash,),
+            )
+            object.__delattr__(malformed, "payment_registered")
+            return malformed
         if self.mode == "not_dispatched":
             return outcome(SettlementCertainty.NOT_DISPATCHED)
         if self.mode == "partial":
@@ -117,6 +124,46 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
             "FROM main.payment_ledger WHERE payment_id=?",
             (self.payment_id,),
         ).fetchone()
+
+    def test_required_effect_projection_is_closed_and_wire_canonical(self) -> None:
+        from reservation_followup.projection import (
+            PaymentEffectJob,
+            PaymentEffectKind,
+            required_payment_effects,
+        )
+        from reservation_followup.serialization import from_wire_json, to_wire_json
+        from reservation_followup.types import EffectRequirement, PaymentEffectPolicy
+
+        policy = PaymentEffectPolicy(
+            paid_state_transition=EffectRequirement.REQUIRED,
+            customer_payment_confirmation=EffectRequirement.REQUIRED,
+            internal_payment_email=EffectRequirement.OPTIONAL,
+            booking_form=EffectRequirement.REQUIRED,
+        )
+        settled = outcome(SettlementCertainty.SETTLED, claim_evidence=("a" * 64,))
+        jobs = required_payment_effects(settled, policy)
+        self.assertEqual(
+            tuple((job.kind, job.required) for job in jobs),
+            (
+                (PaymentEffectKind.PAID_STATE_TRANSITION, True),
+                (PaymentEffectKind.CUSTOMER_PAYMENT_CONFIRMATION, True),
+                (PaymentEffectKind.INTERNAL_PAYMENT_EMAIL, False),
+                (PaymentEffectKind.BOOKING_FORM, True),
+            ),
+        )
+        for job in jobs:
+            self.assertEqual(from_wire_json(to_wire_json(job), PaymentEffectJob), job)
+        unknown = outcome(
+            SettlementCertainty.DISPATCHED_UNKNOWN,
+            claim_evidence=("b" * 64,),
+        )
+        self.assertEqual(
+            tuple(
+                (job.kind, job.required)
+                for job in required_payment_effects(unknown, policy)
+            ),
+            ((PaymentEffectKind.MANUAL_REVIEW, True),),
+        )
 
     def test_prepare_retryable_failure_requeues_before_fence_and_never_dispatches(self) -> None:
         port = FakeSettlementPort("prepare_retryable")
@@ -219,6 +266,14 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
                         ).fetchone(),
                         ("outcome_recorded", 0, "not_dispatched"),
                     )
+                    self.assertEqual(
+                        tuple(
+                            store._connection.execute(
+                                "SELECT kind, status FROM main.payment_outbox"
+                            )
+                        ),
+                        (("manual_review", "pending"),),
+                    )
                     self.assertIs(
                         PaymentSettlementWorker(
                             store=store,
@@ -245,6 +300,60 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
         self.assertIs(second.disposition, SettlementWorkerDisposition.IDLE)
         self.assertEqual(port.dispatch_calls, 1)
         self.assertEqual(payment_fingerprint(self.store._connection), before)
+
+    def test_malformed_exact_outcome_is_promoted_to_unknown_with_required_job(self) -> None:
+        port = FakeSettlementPort("malformed_outcome")
+        result = self._worker(port).run_once(now=NOW)
+        self.assertIs(result.disposition, SettlementWorkerDisposition.MANUAL_REVIEW)
+        self.assertEqual(port.dispatch_calls, 1)
+        self.assertEqual(self._ledger()[0:3], ("manual_review", 1, "dispatched_unknown"))
+        self.assertEqual(
+            tuple(
+                self.store._connection.execute(
+                    "SELECT kind, status FROM main.payment_outbox"
+                )
+            ),
+            (("manual_review", "pending"),),
+        )
+
+    def test_outbox_insert_failure_rolls_back_outcome_state_event_and_evidence(self) -> None:
+        claim = self.store.claim_settlement(
+            worker_id="worker:settlement:outbox-atomicity",
+            now=NOW,
+            lease_ttl=LEASE_TTL,
+        )
+        permit = self.store.fence_settlement(
+            claim,
+            claim.command.canonical_payload,
+            now=NOW + timedelta(seconds=1),
+        )
+        self.store._connection.execute(
+            "CREATE TRIGGER fail_payment_outbox BEFORE INSERT ON main.payment_outbox "
+            "BEGIN SELECT RAISE(ABORT, 'synthetic payment outbox fault'); END"
+        )
+        before = payment_fingerprint(self.store._connection)
+        with self.assertRaises(DataCorruption):
+            self.store.record_settlement_outcome(
+                claim,
+                permit,
+                outcome(
+                    SettlementCertainty.SETTLED,
+                    claim_evidence=(permit.request_hash,),
+                ),
+                now=NOW + timedelta(seconds=2),
+            )
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
+        self.assertEqual(self._ledger()[0:3], ("dispatch_fenced", 1, None))
+        self.assertIs(self.store.load_payment(self.payment_id).status, PaymentStatus.SETTLING)
+
+    def test_missing_required_outbox_job_fails_closed_on_load(self) -> None:
+        self._worker(FakeSettlementPort("dispatch_exception")).run_once(now=NOW)
+        self.store._connection.execute(
+            "DELETE FROM main.payment_outbox WHERE payment_id=?",
+            (self.payment_id,),
+        )
+        with self.assertRaises(DataCorruption):
+            self.store.load_payment(self.payment_id)
 
     def test_partial_no_effect_invalid_return_and_not_dispatched_are_manual_review(self) -> None:
         expected = {
@@ -299,10 +408,25 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
         )
         self.assertEqual(statuses.count(PaymentStatus.PAID.value), 1)
         self.assertEqual(statuses.count(PaymentStatus.SETTLEMENT_QUEUED.value), 1)
+        self.assertEqual(
+            tuple(
+                row[0]
+                for row in self.store._connection.execute(
+                    "SELECT kind FROM main.payment_outbox ORDER BY kind"
+                )
+            ),
+            ("customer_payment_confirmation", "paid_state_transition"),
+        )
         second = worker.run_once(now=NOW + timedelta(seconds=1))
         self.assertIs(second.disposition, SettlementWorkerDisposition.SETTLED)
         self.assertEqual(port.dispatch_calls, 2)
         self.assertIs(self.store.load_payment(second_payment_id).status, PaymentStatus.PAID)
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM main.payment_outbox"
+            ).fetchone(),
+            (4,),
+        )
 
     def test_base_exception_after_fence_propagates_and_leaves_one_fenced_slot(self) -> None:
         port = FakeSettlementPort("dispatch_base_exception")

@@ -173,7 +173,7 @@ CREATE TABLE payment_outbox (
     payment_version INTEGER NOT NULL CHECK (payment_version >= 1),
     economic_signature TEXT NOT NULL CHECK (length(economic_signature) = 64 AND economic_signature = lower(economic_signature) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(economic_signature, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0) CHECK (instr(economic_signature, char(0)) = 0),
     settlement_command_id TEXT NOT NULL CHECK (length(settlement_command_id) >= 1) CHECK (instr(settlement_command_id, char(0)) = 0),
-    kind TEXT NOT NULL CHECK (kind IN ('customer_payment_confirmation', 'internal_payment_email', 'booking_form')) CHECK (instr(kind, char(0)) = 0),
+    kind TEXT NOT NULL CHECK (kind IN ('paid_state_transition', 'customer_payment_confirmation', 'internal_payment_email', 'booking_form', 'manual_review')) CHECK (instr(kind, char(0)) = 0),
     template_id TEXT NOT NULL CHECK (length(template_id) >= 1) CHECK (instr(template_id, char(0)) = 0),
     payload_json TEXT NOT NULL CHECK (length(payload_json) >= 1) CHECK (instr(payload_json, char(0)) = 0),
     payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64 AND payload_hash = lower(payload_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(payload_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0) CHECK (instr(payload_hash, char(0)) = 0),

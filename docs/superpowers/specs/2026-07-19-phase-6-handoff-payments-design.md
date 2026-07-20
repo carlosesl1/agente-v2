@@ -401,6 +401,11 @@ Invariantes:
 Settlement e efeitos posteriores são transações logicamente separadas, mas o
 commit do outcome deve persistir duravelmente os jobs exigidos.
 
+Ownership entre tasks: a Task 9 define somente o envelope/projeção imutável e
+insere os jobs `pending` no mesmo commit do outcome. A Task 10 possui claim,
+lease, delivery, receipts e `PaymentOutboxWorker`; ela não cria nem repete
+settlement para reparar um job ausente.
+
 `PaymentEffectPolicy` classifica explicitamente, por
 `business_unit × service × method`:
 

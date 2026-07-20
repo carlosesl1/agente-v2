@@ -36,7 +36,12 @@ from .payment import (
     validate_evidence,
     wise_target_fingerprint,
 )
-from .projection import project_settlement_outcome
+from .projection import (
+    PaymentEffectJob,
+    PaymentEffectKind,
+    project_settlement_outcome,
+    required_payment_effects,
+)
 from .handoff import (
     HandoffAcknowledged,
     HandoffCancellationCode,
@@ -149,6 +154,9 @@ __all__ = [
     "financial_summary_hash",
     "payment_transition_matrix",
     "project_settlement_outcome",
+    "PaymentEffectKind",
+    "PaymentEffectJob",
+    "required_payment_effects",
     "new_payment",
     "reduce_payment",
     "HandoffReasonCode",

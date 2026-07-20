@@ -170,7 +170,8 @@ def _outbox_columns(prefix: str) -> tuple[ColumnContract, ...]:
     kind_check = (
         "kind IN ('customer_acknowledgement', 'internal_email')"
         if prefix == "handoff"
-        else "kind IN ('customer_payment_confirmation', 'internal_payment_email', 'booking_form')"
+        else "kind IN ('paid_state_transition', 'customer_payment_confirmation', "
+        "'internal_payment_email', 'booking_form', 'manual_review')"
     )
     base.extend(
         (

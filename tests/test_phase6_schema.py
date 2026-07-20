@@ -14,6 +14,7 @@ import unittest
 
 from reservation_followup.handoff import HandoffEffectKind
 from reservation_followup.payment import SettlementOperation
+from reservation_followup.projection import PaymentEffectKind
 from reservation_followup.schema import (
     SCHEMA_VERSION,
     ColumnContract,
@@ -413,7 +414,7 @@ INTEGER_COLUMNS = {
 }
 
 EXPECTED_POSTGRESQL_DDL_SHA256 = (
-    "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30"
+    "761ad4e6121b48ec9833b8b77b0bea4c762cf392102bee9b639106af40869273"
 )
 
 EXPECTED_POSTGRESQL_BLOCK_SHA256 = {
@@ -426,7 +427,7 @@ EXPECTED_POSTGRESQL_BLOCK_SHA256 = {
     "payment_evidence_claims": "7fc64fa56d374f27e2b68c415aabf2ebaf86d5a7fabf9a453c5e9b0d0d590b13",
     "payment_commands": "4b64d1eccc930ac67a01465796ca8c12714a4e9e64d763858d454582ed7edcbe",
     "payment_ledger": "d6ab8fbfad492d0990745f6308c074a9283ba7245c65127048be3cc7671c6bd8",
-    "payment_outbox": "ace68e509242a572e2586815d4cf1a4cab0d504b26c3f5b66a3c81970983836a",
+    "payment_outbox": "0d4be1b283692f7714cf12a448567930170603350bc2498601f62bda140fafdf",
     "payment_receipts": "53407389f3c21e5aee00d4466fcc28533bcc8f96282a87de00318fcf8918f53d",
 }
 
@@ -1507,9 +1508,7 @@ class Phase6SchemaTests(unittest.TestCase):
                 item.value for item in SettlementCertainty
             },
             ("payment_outbox", "kind"): {
-                "customer_payment_confirmation",
-                "internal_payment_email",
-                "booking_form",
+                item.value for item in PaymentEffectKind
             },
             ("payment_outbox", "status"): {"pending", "leased", "delivered"},
         }
@@ -1564,11 +1563,13 @@ class Phase6SchemaTests(unittest.TestCase):
         payment_id, _, command_id = self.create_payment_command_graph(
             connection, "payment-kinds"
         )
-        for index, kind in enumerate(
-            ("customer_payment_confirmation", "internal_payment_email", "booking_form")
-        ):
+        for index, kind in enumerate(PaymentEffectKind):
             self.insert_payment_outbox(
-                connection, payment_id, command_id, f"payment-kind-{index}", kind=kind
+                connection,
+                payment_id,
+                command_id,
+                f"payment-kind-{index}",
+                kind=kind.value,
             )
 
     def test_claim_lifecycle_is_closed(self) -> None:

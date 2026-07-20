@@ -53,6 +53,11 @@ from .payment import (
     reduce_payment,
     validate_evidence,
 )
+from .projection import (
+    PaymentEffectJob,
+    PaymentEffectKind,
+    required_payment_effects,
+)
 from .schema import render_sqlite, schema_contract
 from .serialization import from_wire_json, semantic_hash, to_wire_json
 from .types import (
@@ -158,6 +163,14 @@ def _settlement_event_id(kind: str, settlement_command_id: str) -> str:
         f"settlement-{kind}:"
         f"{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
     )
+
+
+def _payment_effect_id(
+    settlement_command_id: str,
+    kind: PaymentEffectKind,
+) -> str:
+    material = f"{settlement_command_id}\x00{kind.value}"
+    return f"payment-effect:{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
 
 
 def _require_id(value: str, field_name: str) -> str:
@@ -981,6 +994,43 @@ class SQLiteFollowupUnitOfWork:
                 ),
             )
 
+    def _insert_payment_jobs(
+        self,
+        command: PaymentSettlementCommand,
+        policy: PaymentEffectPolicy,
+        outcome: SettlementOutcome,
+        *,
+        created_at: datetime,
+    ) -> None:
+        for job in required_payment_effects(outcome, policy):
+            effect_id = _payment_effect_id(command.settlement_command_id, job.kind)
+            raw = to_wire_json(job)
+            timestamp = created_at.isoformat()
+            self._connection.execute(
+                "INSERT INTO main.payment_outbox "
+                "(message_id, idempotency_key, effect_id, payment_id, payment_version, "
+                "economic_signature, settlement_command_id, kind, template_id, payload_json, "
+                "payload_hash, status, claim_owner, fencing_token, lease_acquired_at, "
+                "lease_expires_at, delivery_attempts, delivered_at, receipt_hash, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "'pending', NULL, 0, NULL, NULL, 0, NULL, NULL, ?, ?)",
+                (
+                    effect_id,
+                    effect_id,
+                    effect_id,
+                    command.payment_id,
+                    command.payment_version,
+                    command.economic_signature,
+                    command.settlement_command_id,
+                    job.kind.value,
+                    job.kind.value,
+                    raw,
+                    semantic_hash(job),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+
     def open_handoff(
         self,
         request: HandoffRequested,
@@ -1629,6 +1679,69 @@ class SQLiteFollowupUnitOfWork:
             "updated_at": updated_at,
         }
 
+    def _validate_payment_jobs(
+        self,
+        state: PaymentWorkflow,
+        command: PaymentSettlementCommand,
+        ledger: dict[str, object],
+    ) -> None:
+        rows = tuple(
+            self._connection.execute(
+                "SELECT message_id, idempotency_key, effect_id, payment_id, payment_version, "
+                "economic_signature, settlement_command_id, kind, template_id, payload_json, "
+                "payload_hash, status, claim_owner, fencing_token, lease_acquired_at, "
+                "lease_expires_at, delivery_attempts, delivered_at, receipt_hash, "
+                "created_at, updated_at FROM main.payment_outbox WHERE payment_id=? "
+                "ORDER BY kind",
+                (command.payment_id,),
+            )
+        )
+        outcome = ledger["outcome"]
+        expected = () if outcome is None else required_payment_effects(outcome, state.policy)
+        expected_by_kind = {job.kind: job for job in expected}
+        if len(rows) != len(expected) or len(expected_by_kind) != len(expected):
+            raise DataCorruption("payment outbox does not match required outcome effects")
+        seen: set[PaymentEffectKind] = set()
+        for row in rows:
+            if len(row) != 21:
+                raise DataCorruption("payment outbox row has wrong arity")
+            try:
+                kind = PaymentEffectKind(row[7])
+                job = from_wire_json(row[9], PaymentEffectJob)
+                created_at = _canonical_time(row[19], "payment outbox created_at")
+                updated_at = _canonical_time(row[20], "payment outbox updated_at")
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption("payment outbox row is not canonical") from exc
+            effect_id = _payment_effect_id(command.settlement_command_id, kind)
+            if (
+                kind in seen
+                or expected_by_kind.get(kind) != job
+                or row[0] != effect_id
+                or row[1] != effect_id
+                or row[2] != effect_id
+                or row[3] != command.payment_id
+                or type(row[4]) is not int
+                or row[4] != command.payment_version
+                or row[5] != command.economic_signature
+                or row[6] != command.settlement_command_id
+                or row[8] != kind.value
+                or row[10] != semantic_hash(job)
+                or row[11] != "pending"
+                or row[12] is not None
+                or type(row[13]) is not int
+                or row[13] != 0
+                or row[14] is not None
+                or row[15] is not None
+                or type(row[16]) is not int
+                or row[16] != 0
+                or row[17] is not None
+                or row[18] is not None
+                or created_at != ledger["outcome_recorded_at"]
+                or updated_at != created_at
+            ):
+                raise DataCorruption("payment outbox binding is divergent")
+            seen.add(kind)
+
     def _payment_financial_records(
         self,
         state: PaymentWorkflow,
@@ -1681,6 +1794,7 @@ class SQLiteFollowupUnitOfWork:
         claim = self._decode_payment_evidence_claim(claim_row, state)
         persisted_command = self._decode_payment_command(command_row, state)
         ledger = self._decode_payment_ledger(ledger_row, persisted_command)
+        self._validate_payment_jobs(state, persisted_command, ledger)
         status = ledger["status"]
         outcome = ledger["outcome"]
         if status == "queued":
@@ -2396,6 +2510,12 @@ class SQLiteFollowupUnitOfWork:
             )
             if evidence.rowcount != 1:
                 raise DataCorruption("terminal settlement evidence lifecycle is divergent")
+            self._insert_payment_jobs(
+                claim.command,
+                current.policy,
+                outcome,
+                created_at=now,
+            )
             self._persist_operational_payment_transition(
                 current,
                 revision,
@@ -2612,6 +2732,12 @@ class SQLiteFollowupUnitOfWork:
             )
             if evidence.rowcount != 1:
                 raise DataCorruption("settlement outcome evidence lifecycle is divergent")
+            self._insert_payment_jobs(
+                command,
+                current.policy,
+                outcome,
+                created_at=now,
+            )
             self._persist_operational_payment_transition(
                 current,
                 revision,
@@ -2733,6 +2859,12 @@ class SQLiteFollowupUnitOfWork:
             )
             if evidence.rowcount != 1:
                 raise DataCorruption("terminal pre-fence evidence lifecycle is divergent")
+            self._insert_payment_jobs(
+                command,
+                current.policy,
+                outcome,
+                created_at=now,
+            )
             self._persist_operational_payment_transition(
                 current,
                 revision,
@@ -2829,6 +2961,12 @@ class SQLiteFollowupUnitOfWork:
             )
             if evidence.rowcount != 1:
                 raise DataCorruption("fenced recovery evidence lifecycle is divergent")
+            self._insert_payment_jobs(
+                command,
+                current.policy,
+                outcome,
+                created_at=now,
+            )
             self._persist_operational_payment_transition(
                 current,
                 revision,

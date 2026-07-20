@@ -171,7 +171,7 @@ CREATE TABLE payment_outbox (
     payment_version bigint NOT NULL CHECK (payment_version >= 1),
     economic_signature text NOT NULL CHECK (length(economic_signature) = 64 AND economic_signature = lower(economic_signature) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(economic_signature, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0),
     settlement_command_id text NOT NULL CHECK (length(settlement_command_id) >= 1),
-    kind text NOT NULL CHECK (kind IN ('customer_payment_confirmation', 'internal_payment_email', 'booking_form')),
+    kind text NOT NULL CHECK (kind IN ('paid_state_transition', 'customer_payment_confirmation', 'internal_payment_email', 'booking_form', 'manual_review')),
     template_id text NOT NULL CHECK (length(template_id) >= 1),
     payload_json text NOT NULL CHECK (length(payload_json) >= 1),
     payload_hash text NOT NULL CHECK (length(payload_hash) = 64 AND payload_hash = lower(payload_hash) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(payload_hash, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0),

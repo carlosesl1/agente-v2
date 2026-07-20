@@ -705,13 +705,24 @@ git commit -m "feat(phase-6): claim payment evidence globally"
 
 **Files:**
 - Modify: `reservation_followup/workers.py`
+- Modify: `reservation_followup/projection.py`
+- Modify: `reservation_followup/sqlite_store.py`
+- Modify: `reservation_followup/schema.py`
+- Modify: `reservation_followup/serialization.py`
+- Modify: `reservation_followup/__init__.py`
 - Create: `reservation_followup/reconciliation.py`
 - Create: `tests/test_phase6_payment_worker.py`
 - Create: `tests/test_phase6_reconciliation.py`
+- Modify: `tests/test_phase6_payment_claims.py`
+- Modify: `tests/test_phase6_schema.py`
+- Modify: `schemas/phase6/sqlite.sql`
+- Modify: `schemas/phase6/postgresql.sql`
 
 **Interfaces:**
 - Produces: `SettlementPort.prepare(request)`, `SettlementPort.dispatch(permit)`, `PaymentSettlementWorker.run_once(now)`, `PaymentReconciler.run_once(now)`.
+- Produces the immutable `PaymentEffectKind`/`PaymentEffectJob` envelope and `required_payment_effects(outcome, policy)` so outcome + required pending jobs can share one commit.
 - Reconciler receives store only, never settlement port.
+- Claim, delivery, receipts and `PaymentOutboxWorker` remain exclusively Task 10.
 
 - [ ] **Step 1: Write RED for dispatch certainty matrix**
 
@@ -751,7 +762,7 @@ Any invalid post-fence return is unknown. `NOT_DISPATCHED` is accepted only from
 
 - [ ] **Step 4: Implement restart recovery without port**
 
-Expired pre-fence claims may return to retryable/queued. Expired post-fence ledgers atomically become manual review with unknown outcome and required outbox jobs; never dispatch.
+Expired pre-fence claims may return to retryable/queued. Every terminal outcome atomically persists its required pending jobs. Expired post-fence ledgers become manual review with unknown outcome plus a required manual-review job; never dispatch.
 
 - [ ] **Step 5: Run GREEN and repeated-worker proof**
 
@@ -763,7 +774,7 @@ python3 -m unittest tests.test_phase5_worker tests.test_phase5_reconciliation -v
 - [ ] **Step 6: Commit and review**
 
 ```bash
-git add reservation_followup tests/test_phase6_payment_worker.py tests/test_phase6_reconciliation.py docs/refactor/evidence/phase-06/red-result-settlement-worker.json
+git add reservation_followup schemas/phase6 tests/test_phase6_payment_worker.py tests/test_phase6_reconciliation.py tests/test_phase6_payment_claims.py tests/test_phase6_schema.py docs/refactor/evidence/phase-06/red-result-settlement-worker.json
 git commit -m "feat(phase-6): settle payments behind permanent fencing"
 ```
 
@@ -778,17 +789,18 @@ git commit -m "feat(phase-6): settle payments behind permanent fencing"
 - Create: `tests/test_phase6_payment_outbox.py`
 
 **Interfaces:**
-- Produces: `PaymentEffectKind`, `PaymentEffectJob`, `PaymentEffectDeliveryPort`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
+- Consumes the immutable effect kinds/jobs and deterministic projection already persisted atomically by Task 9.
+- Produces: `PaymentEffectDeliveryPort`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
 
 - [ ] **Step 1: Write RED for policy matrix and no settlement replay**
 
 Tests prove:
 
-- settled outcome atomically persists required paid-state + customer confirmation jobs;
+- settled outcome retains the atomically persisted required paid-state + customer confirmation jobs;
 - booking form follows exact required/optional/disabled policy;
 - internal e-mail optional failure leaves payment paid;
 - delivery failure changes no payment ledger/provider count;
-- provider settled + enqueue fault can be replayed to create missing jobs without new settlement command;
+- missing/divergent required jobs fail closed and delivery replay never creates a settlement command;
 - old event cannot regress paid state;
 - target missing/ambiguous goes to manual review.
 

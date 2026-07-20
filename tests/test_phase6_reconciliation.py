@@ -148,6 +148,14 @@ class Phase6PaymentReconciliationTests(unittest.TestCase):
             ).fetchone(),
             ("manual_review",),
         )
+        self.assertEqual(
+            tuple(
+                self.store._connection.execute(
+                    "SELECT kind, status FROM main.payment_outbox"
+                )
+            ),
+            (("manual_review", "pending"),),
+        )
 
     def test_post_fence_recovery_is_one_shot_and_never_changes_slot_or_calls_port(self) -> None:
         payment_ids = (self._queue("post-one"), self._queue("post-two"))

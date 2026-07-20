@@ -197,7 +197,7 @@ def _canonical_dispatch_outcome(
         clean = SettlementOutcome(
             **{field.name: getattr(candidate, field.name) for field in fields(SettlementOutcome)}
         )
-    except (TypeError, ValueError):
+    except Exception:
         return _dispatched_unknown(request_hash)
     if clean != candidate or clean.certainty is SettlementCertainty.NOT_DISPATCHED:
         return _dispatched_unknown(request_hash)

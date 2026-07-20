@@ -48,6 +48,7 @@ from .handoff import (
     PublicHandoffProjection,
     PublicNextAction,
 )
+from .projection import PaymentEffectJob, PaymentEffectKind
 from .types import (
     BusinessUnit,
     ConfirmedReservationAnchor,
@@ -91,6 +92,7 @@ _TYPE_TAGS = {
     PaymentSettlementCommand: "payment_settlement_command",
     SettlementOutcome: "settlement_outcome",
     PaymentWorkflow: "payment_workflow",
+    PaymentEffectJob: "payment_effect_job",
 }
 _NESTED_DATACLASSES = frozenset(
     (*_TYPE_TAGS, ExecutionOutcome, PaymentEvidenceTrust, VerifiedPaymentEvidence)
@@ -113,6 +115,7 @@ _ENUM_TYPES = frozenset(
         PublicNextAction,
         PixProofStatus,
         StripeEventType,
+        PaymentEffectKind,
     )
 )
 
