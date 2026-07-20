@@ -2,11 +2,11 @@
   "phase": 6,
   "task": 9,
   "title": "Settlement worker and conservative reconciliation",
-  "recorded_at_utc": "2026-07-20T06:28:49Z",
+  "recorded_at_utc": "2026-07-20T07:12:38Z",
   "base_sha": "3e4b0a890816a8e2546a68db4304f45abba57be3",
   "base_tree_sha": "eeff918d51f63c7d6334b3e973ade5844b848a3e",
-  "functional_commit": "9a7de45a7bf762b7fec855ff3926f52f1c9170dd",
-  "functional_tree": "75aec625b99ba636f9be20e003fa607a981fa60f",
+  "functional_commit": "90d3d86b74207b7d4d4dfe8cdaab29495ae1a15c",
+  "functional_tree": "ad9e7e7d8d4639a5424e3e04014aa93779c3c3e8",
   "rollout": "NO-GO",
   "postgresql_executed": false,
   "network_used": false,
@@ -21,12 +21,17 @@
       "one-shot store-only PaymentReconciler",
       "exact-expiry pre-fence requeue or terminal NOT_DISPATCHED",
       "exact-expiry post-fence DISPATCHED_UNKNOWN manual review without port",
-      "sanitized ordinary exception paths and BaseException propagation"
+      "sanitized ordinary exception paths and BaseException propagation",
+      "immutable payment effect kind/job projection at the outcome boundary",
+      "atomic outcome plus required pending payment outbox jobs",
+      "bilateral required-job validation on payment load",
+      "malformed exact post-fence outcome promotion to DISPATCHED_UNKNOWN"
     ],
     "excluded": [
       "default or live SettlementPort adapter",
       "network, provider SDK, credentials, environment or subprocess",
-      "PaymentEffectJob and payment outbox projection/delivery from Task 10",
+      "payment outbox claim, delivery, release, completion and receipts from Task 10",
+      "PaymentEffectDeliveryPort and PaymentOutboxWorker from Task 10",
       "PostgreSQL execution",
       "Docker, Supabase, Redis, deploy or rollout"
     ]
@@ -80,7 +85,32 @@
       "raw prepare exception absent from release-failure chain",
       "raw dispatch exception absent from outcome-write-failure chain",
       "public Task 9 boundary replaces the intentional Task 8 absence oracle"
-    ]
+    ],
+    "review_findings_red": {
+      "base_sha": "e99e50d4a4796c6adbf1f4617f6b6d77ef53ad60",
+      "base_tree_sha": "d89a3b5c7e078f10c928c6bd8d109a3df82f4eb5",
+      "command": "python3 -m unittest <7 named Task 9 correction tests> -v",
+      "exit_code": 1,
+      "tests": 7,
+      "failures": 6,
+      "errors": 2,
+      "classification": "one post-fence AttributeError, one absent projection contract, and missing required-job/atomicity assertions; the terminal-prepare subtests contribute one extra failure",
+      "patch_path": "docs/refactor/evidence/phase-06/task9-review-findings-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_sha256": "14c2b30912d4e22b8a875a06faeb7a40a03ef53e4a9520ce61bafea42f223131",
+      "patch_bytes": 6960,
+      "staged_tree_sha": "73641f7b30996ea30bd7a1acc23f92bd17ce05d0",
+      "reconstructed_tree_sha": "73641f7b30996ea30bd7a1acc23f92bd17ce05d0",
+      "output_sha256": "26084035a4379c58d4a43099994aa1c747d0e4ed779748c3e628ad03df27048b",
+      "output_bytes": 8486,
+      "raw_output_path": "/tmp/phase6-task9-review-red.out",
+      "raw_output_versioned": false
+    },
+    "review_findings_green": {
+      "tests": 7,
+      "result": "OK",
+      "output_sha256": "fd3739fb1a1136bb418c3e8a94dc5e2b00deca1c13734f61cd19c5c21c794832"
+    }
   },
   "precommit_gates": {
     "focused": {
@@ -133,38 +163,48 @@
     "exact_expiry_pre_fence_recoverable": true,
     "exact_expiry_post_fence_manual_review": true,
     "second_dispatch_after_unknown_or_partial": false,
-    "recovery_cross_ledger_writes": []
+    "recovery_cross_ledger_writes": [],
+    "malformed_exact_post_fence_return_promoted_unknown": true,
+    "terminal_outcome_and_required_jobs_atomic": true,
+    "missing_required_job_fails_loader": true,
+    "outbox_insert_failure_rolls_back_outcome_state_event_and_evidence": true
   },
   "task10_boundary": {
-    "payment_effect_types_present": false,
+    "payment_effect_types_present": true,
+    "required_effect_projection_present": true,
+    "required_pending_jobs_persisted_by_task9": true,
     "payment_outbox_worker_present": false,
-    "interpretation": "Task 9 persists settlement/manual-review truth; Task 10 owns deterministic payment effect job types, projection and delivery. No incompatible placeholder outbox row is created."
+    "payment_effect_delivery_port_present": false,
+    "claim_release_complete_receipt_methods_present": false,
+    "interpretation": "Task 9 owns only immutable projection and atomic pending-job insertion. Task 10 owns claim, lease, delivery, release, completion, receipts and PaymentOutboxWorker."
   },
   "independent_review": {
-    "status": "pending",
-    "critical": null,
-    "important": null,
-    "minor": null
+    "status": "corrections_complete_re_gate_pending",
+    "previous_batch": "deleg_fd4a60f3",
+    "critical": 0,
+    "distinct_important_fixed": 2,
+    "minor_fixed": 1,
+    "terminal_approvals": 0
   },
   "detached_gate": {
-    "commit": "9a7de45a7bf762b7fec855ff3926f52f1c9170dd",
-    "tree": "75aec625b99ba636f9be20e003fa607a981fa60f",
-    "worktree": "/tmp/phase6-task9-clean-gate",
+    "commit": "90d3d86b74207b7d4d4dfe8cdaab29495ae1a15c",
+    "tree": "ad9e7e7d8d4639a5424e3e04014aa93779c3c3e8",
+    "worktree": "/tmp/phase6-task9-review-clean-gate",
     "worktree_clean": true,
     "focused": {
-      "tests": 14,
+      "tests": 18,
       "result": "OK",
-      "output_sha256": "c77c26d59ea5a96875df5b8e3f0a1f2f88efd4bead239e4443607f13b7a57804"
+      "output_sha256": "97ce8520b4102e3c400e18680eb8e82b85bb53eee976ab51c09619f0e0b0c623"
     },
     "targeted_regressions": {
-      "tests": 110,
+      "tests": 138,
       "result": "OK",
-      "output_sha256": "498ab4d15acd3f10366639144be50af23348414f65184796d151d7666716a4b6"
+      "output_sha256": "7a8f9634455acb59ea14260451d1c178e4e8e31a904fe2dfeb20656530d42285"
     },
     "full_suite": {
-      "tests": 572,
+      "tests": 576,
       "result": "OK",
-      "output_sha256": "1061dfd93c7135ed0323830d34cd07538b067de3152d6c1fc4a94617c8e102cf"
+      "output_sha256": "ad0af050ea7e716626f50bcc77e514d32324c5dbb82db0ca6b7af244e52a7e51"
     },
     "characterization": {
       "scenarios": 30,
@@ -174,13 +214,84 @@
     "schema": {
       "drift": 0,
       "table_count": 11,
-      "sqlite_sha256": "933ff09c1c58feeb8cec2637e095806993f0a97b9b303ac2fa02f971dcf22428",
-      "postgresql_sha256": "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30",
+      "sqlite_sha256": "038c02de48612504ef848f8303a0e5b34aaa7cb80643fea26c4f38220d4423e0",
+      "postgresql_sha256": "761ad4e6121b48ec9833b8b77b0bea4c762cf392102bee9b639106af40869273",
       "quick_check": "ok",
       "foreign_key_check": [],
       "foreign_keys_enabled": true,
       "postgresql_executed": false
     },
-    "compile_diff_capability_reconciler_port_cross_ledger_scans": "passed"
+    "compile_diff_capability_reconciler_port_task10_boundary_scans": "passed"
+  },
+  "review_batch_deleg_fd4a60f3": {
+    "status": "needs_fixes",
+    "counts_as_approvals": 0,
+    "critical": 0,
+    "distinct_important": 2,
+    "minor": 1,
+    "lanes": [
+      {
+        "lane": "worker-certainty",
+        "status": "completed",
+        "verdict": "Needs fixes",
+        "important": 1,
+        "finding": "malformed exact outcome could raise AttributeError after the permanent fence"
+      },
+      {
+        "lane": "recovery-fencing",
+        "status": "timeout",
+        "verdict": null,
+        "counts_as_approval": false
+      },
+      {
+        "lane": "provenance-boundary",
+        "status": "completed",
+        "verdict": "Needs fixes",
+        "important": 1,
+        "minor": 1,
+        "finding": "Task 9 omitted required atomic payment outbox jobs and its file inventory was incomplete"
+      }
+    ]
+  },
+  "precommit_review_correction_gates": {
+    "focused": {
+      "tests": 18,
+      "result": "OK",
+      "output_sha256": "00da579ce96d8ca9feb6a10935af0d178b7b33d7b36ba2851a1c64b2c2703424"
+    },
+    "targeted_regressions": {
+      "tests": 138,
+      "result": "OK",
+      "output_sha256": "7147ddb83cf13054b0cafd9aebbe0b9d6e3d24872625d5ae7474f4867b44352b"
+    },
+    "full_suite": {
+      "tests": 576,
+      "result": "OK",
+      "output_sha256": "0befcdad592ab3bdfdab721aae51380408fc9507e79f7b93331ca42ff4ce89c7"
+    },
+    "characterization": {
+      "scenarios": 30,
+      "result": "ok",
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    }
+  },
+  "controller_recovery_race_probe": {
+    "connections": 2,
+    "results": [
+      "post_fence_manual_review",
+      "idle"
+    ],
+    "final_ledger": [
+      "manual_review",
+      1,
+      "dispatched_unknown"
+    ],
+    "final_jobs": [
+      [
+        "manual_review",
+        "pending"
+      ]
+    ],
+    "external_port_present": false
   }
 }
