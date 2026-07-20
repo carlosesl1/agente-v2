@@ -1,0 +1,277 @@
+"""Safe local runtime capture and sanitized contract manifests."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+from scripts.capture_phase7_runtime import (
+    CaptureRejected,
+    build_runtime_contract_manifest,
+    capture_runtime,
+    source_fingerprint,
+)
+
+
+def run_git(path: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=path,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+
+
+def synthetic_runtime(root: Path) -> tuple[Path, str]:
+    source = root / "source"
+    source.mkdir()
+    run_git(source, "init", "-q", "-b", "main")
+    run_git(source, "config", "user.email", "phase7@example.invalid")
+    run_git(source, "config", "user.name", "Phase 7 Test")
+    files = {
+        "app.py": "def _process_event(event):\n    return event\n",
+        "domain/chapada_native_tools.py": (
+            "CHAPADA_COMMIT_STATE_TOOL = 'chapada_commit_state'\n"
+            "V2_ONLY_NATIVE_EXECUTABLE_TOOL_NAMES = ('read_tool', 'write_tool')\n"
+            "V2_ONLY_NATIVE_TOOL_NAMES = (*V2_ONLY_NATIVE_EXECUTABLE_TOOL_NAMES, CHAPADA_COMMIT_STATE_TOOL)\n"
+            "MAYA_VISIBLE_READONLY_NATIVE_TOOL_NAMES = ('read_tool',)\n"
+            "MAYA_VISIBLE_WRITE_TOOL_NAMES = ('write_tool',)\n"
+            "_NATIVE_TOOL_SCHEMAS = (\n"
+            "  {'name': 'read_tool', 'description': 'read', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string', 'description': 'copy-only detail', 'default': 'example'}}}},\n"
+            "  {'name': 'write_tool', 'description': 'write', 'parameters': {'type': 'object', 'properties': {}}},\n"
+            "  {'name': CHAPADA_COMMIT_STATE_TOOL, 'description': 'state', 'parameters': {'type': 'object', 'properties': {}}},\n"
+            ")\n"
+        ),
+        "domain/tool_executor.py": (
+            "CONTACT_SCHEMA = {\n"
+            "  'contact_phone': {'format': 'E.164 completo; exemplo +5511000000000'},\n"
+            "}\n"
+        ),
+        ".env.example": "API_KEY=placeholder\n",
+        ".dockerignore": "__pycache__\n",
+        "README.md": "synthetic runtime\n",
+        "uv.lock": "version = 1\n",
+        "tests/test_app_llm_central_webhook.py": (
+            "LEAD = {\n"
+            "  'id': '1873018537',\n"
+            "  'first_name': 'Carlos',\n"
+            "  'last_name': 'Eduardo',\n"
+            "  'name': 'Carlos Eduardo',\n"
+            "  'whatsapp_phone': '+5575999992939',\n"
+            "}\n"
+        ),
+        "tests/test_bokun_v2_tools.py": (
+            "CONTACT = {'whatsapp_phone': '+5511888887777'}\n"
+        ),
+        "qa/maya_test_lab/scenarios/real_world_v1.json": (
+            "{\"contact_phone\":\"+5511998765432\"}\n"
+        ),
+    }
+    for relative, content in files.items():
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    run_git(source, "add", ".")
+    run_git(source, "commit", "-q", "-m", "baseline")
+    head = run_git(source, "rev-parse", "HEAD")
+    (source / "app.py").write_text(
+        "def _process_event(event):\n"
+        "    api_key = normalize_runtime_key(event.get('API_KEY', ''))\n"
+        "    return {'ok': event, 'configured': bool(api_key)}\n"
+    )
+    (source / ".env.example").write_text("API_KEY=real-looking-but-excluded\n")
+    (source / ".dockerignore").write_text("__pycache__\n*.tmp\n")
+    (source / "uv.lock").write_text("version = 2\n")
+    (source / "domain/tool_executor.py").write_text(
+        "CONTACT_SCHEMA = {\n"
+        "  'contact_phone': {'format': 'E.164 completo; exemplo +5522000000000'},\n"
+        "}\n"
+    )
+    (source / "qa/maya_test_lab/scenarios/real_world_v1.json").write_text(
+        "{\"contact_phone\":\"+5522998765432\"}\n"
+    )
+    (source / "tests/test_app_llm_central_webhook.py").write_text(
+        "LEAD = {\n"
+        "  'id': '1873018537',\n"
+        "  'first_name': 'Carlos',\n"
+        "  'last_name': 'Eduardo',\n"
+        "  'name': 'Carlos Eduardo',\n"
+        "  'whatsapp_phone': '+5575999992939',\n"
+        "  'changed': True,\n"
+        "}\n"
+    )
+    (source / "tests/test_bokun_v2_tools.py").write_text(
+        "CONTACT = {'whatsapp_phone': '+5522777776666', 'changed': True}\n"
+    )
+    untracked = source / "tests/new_test.py"
+    untracked.parent.mkdir(parents=True, exist_ok=True)
+    untracked.write_text("def test_new_boundary():\n    assert True\n")
+    return source, head
+
+
+class Phase7RuntimeCaptureTests(unittest.TestCase):
+    def test_capture_reconstructs_safe_dirty_state_without_source_drift(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase7-capture-test-") as directory:
+            root = Path(directory)
+            source, head = synthetic_runtime(root)
+            output = root / "replica"
+            manifest = root / "runtime-source-manifest.json"
+            contract = root / "runtime-contract-manifest.json"
+            before = source_fingerprint(source)
+            result = capture_runtime(
+                source=source,
+                output=output,
+                manifest_path=manifest,
+                contract_manifest_path=contract,
+                expected_head=head,
+                untracked_allowlist=("tests/new_test.py",),
+            )
+            self.assertEqual(source_fingerprint(source), before)
+            self.assertEqual(
+                (output / "app.py").read_text(),
+                "def _process_event(event):\n"
+                "    api_key = normalize_runtime_key(event.get('API_KEY', ''))\n"
+                "    return {'ok': event, 'configured': bool(api_key)}\n",
+            )
+            self.assertTrue((output / "tests/new_test.py").is_file())
+            self.assertFalse((output / ".env.example").exists())
+            self.assertFalse(
+                (output / "qa/maya_test_lab/scenarios/real_world_v1.json").exists()
+            )
+            redacted = (output / "tests/test_app_llm_central_webhook.py").read_text()
+            self.assertNotIn("1873018537", redacted)
+            self.assertNotIn("Carlos", redacted)
+            self.assertNotIn("Eduardo", redacted)
+            self.assertNotIn("+5575999992939", redacted)
+            self.assertIn("Synthetic Lead", redacted)
+            self.assertIn("+5500000000000", redacted)
+            provider_test = (output / "tests/test_bokun_v2_tools.py").read_text()
+            self.assertIn("+5500000000000", provider_test)
+            self.assertNotIn("+5522777776666", provider_test)
+            self.assertEqual(run_git(output, "status", "--porcelain"), "")
+            self.assertEqual(result.source_head, head)
+            self.assertEqual(
+                result.excluded_paths,
+                (
+                    ".env.example",
+                    "qa/maya_test_lab/scenarios/real_world_v1.json",
+                ),
+            )
+            source_doc = json.loads(manifest.read_text())
+            contract_doc = json.loads(contract.read_text())
+            self.assertTrue(source_doc["source_unchanged"])
+            self.assertEqual(
+                [row["path"] for row in source_doc["redacted_paths"]],
+                [
+                    "tests/test_app_llm_central_webhook.py",
+                    "tests/test_bokun_v2_tools.py",
+                ],
+            )
+            self.assertEqual(source_doc["synthetic_baseline_commit"], run_git(output, "rev-parse", "HEAD"))
+            self.assertEqual(contract_doc["counts"], {"active": 3, "read": 1, "state_commit": 1, "write": 1})
+            self.assertEqual(
+                [tool["name"] for tool in contract_doc["tools"]],
+                ["chapada_commit_state", "read_tool", "write_tool"],
+            )
+            self.assertNotIn("description", json.dumps(contract_doc))
+
+    def test_contract_manifest_is_deterministic_and_contains_only_schema_hashes_and_shapes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase7-contract-test-") as directory:
+            source, _ = synthetic_runtime(Path(directory))
+            first = build_runtime_contract_manifest(source)
+            second = build_runtime_contract_manifest(source)
+            self.assertEqual(first, second)
+            serialized = json.dumps(first, sort_keys=True)
+            for forbidden in ("description", "default", "example", "examples", "title", "$comment"):
+                self.assertNotIn(f'"{forbidden}"', serialized)
+            for tool in first["tools"]:
+                self.assertEqual(set(tool), {"category", "name", "parameters", "schema_hash"})
+                self.assertEqual(
+                    hashlib.sha256(
+                        json.dumps(
+                            tool["parameters"],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest(),
+                    tool["schema_hash"],
+                )
+
+    def test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed(self) -> None:
+        cases = (
+            ("secret", "TOKEN='ghp_abcdefghijklmnopqrstuvwxyz123456'\n", False),
+            ("phone", "CONTACT='+5511998765432'\n", False),
+            ("unallowlisted", "safe = True\n", False),
+            ("symlink", "", True),
+        )
+        for name, content, symlink in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(
+                prefix=f"phase7-hostile-{name}-"
+            ) as directory:
+                root = Path(directory)
+                source, head = synthetic_runtime(root)
+                hostile = source / "tests/hostile.py"
+                if symlink:
+                    hostile.symlink_to(source / "app.py")
+                else:
+                    hostile.write_text(content)
+                allowlist = (
+                    "tests/new_test.py",
+                    "tests/hostile.py",
+                ) if name != "unallowlisted" else ("tests/new_test.py",)
+                before = source_fingerprint(source)
+                with self.assertRaises(CaptureRejected):
+                    capture_runtime(
+                        source=source,
+                        output=root / "replica",
+                        manifest_path=root / "source.json",
+                        contract_manifest_path=root / "contract.json",
+                        expected_head=head,
+                        untracked_allowlist=allowlist,
+                    )
+                self.assertFalse((root / "replica").exists())
+                self.assertEqual(source_fingerprint(source), before)
+
+        with tempfile.TemporaryDirectory(prefix="phase7-hostile-paths-") as directory:
+            root = Path(directory)
+            source, head = synthetic_runtime(root)
+            (source / "runtime.db").write_bytes(b"SQLite format 3\x00")
+            before = source_fingerprint(source)
+            with self.assertRaises(CaptureRejected):
+                capture_runtime(
+                    source=source,
+                    output=root / "replica",
+                    manifest_path=root / "source.json",
+                    contract_manifest_path=root / "contract.json",
+                    expected_head=head,
+                    untracked_allowlist=("tests/new_test.py", "runtime.db"),
+                )
+            self.assertEqual(source_fingerprint(source), before)
+
+    def test_existing_output_is_never_removed_or_reused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase7-existing-output-") as directory:
+            root = Path(directory)
+            source, head = synthetic_runtime(root)
+            output = root / "replica"
+            output.mkdir()
+            marker = output / "keep.txt"
+            marker.write_text("keep")
+            with self.assertRaises(CaptureRejected):
+                capture_runtime(
+                    source=source,
+                    output=output,
+                    manifest_path=root / "source.json",
+                    contract_manifest_path=root / "contract.json",
+                    expected_head=head,
+                    untracked_allowlist=("tests/new_test.py",),
+                )
+            self.assertEqual(marker.read_text(), "keep")
+
+
+if __name__ == "__main__":
+    unittest.main()

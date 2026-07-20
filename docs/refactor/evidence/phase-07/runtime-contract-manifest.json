@@ -1,0 +1,594 @@
+{
+  "counts": {
+    "active": 13,
+    "read": 5,
+    "state_commit": 1,
+    "write": 7
+  },
+  "function_signatures": [
+    {
+      "async": false,
+      "file": "app.py",
+      "kwonly": [
+        "settings",
+        "lead_repository",
+        "shadow_log",
+        "manychat_client",
+        "email_notifier",
+        "agent_config",
+        "planner",
+        "public_message_outbox",
+        "source_idempotency_keys"
+      ],
+      "name": "_process_event",
+      "positional": [
+        "event"
+      ],
+      "vararg": null
+    },
+    {
+      "async": false,
+      "file": "app.py",
+      "kwonly": [
+        "event",
+        "state",
+        "config"
+      ],
+      "name": "plan",
+      "positional": [
+        "self"
+      ],
+      "vararg": null
+    },
+    {
+      "async": false,
+      "file": "domain/chapada_native_tools.py",
+      "kwonly": [
+        "registry"
+      ],
+      "name": "execute_hermes_native_tool",
+      "positional": [
+        "tool_name",
+        "arguments"
+      ],
+      "vararg": null
+    },
+    {
+      "async": false,
+      "file": "domain/chapada_native_tools.py",
+      "kwonly": [],
+      "name": "native_tool_schemas",
+      "positional": [],
+      "vararg": null
+    },
+    {
+      "async": false,
+      "file": "domain/hermes_native_runner.py",
+      "kwonly": [
+        "event",
+        "state",
+        "config"
+      ],
+      "name": "plan",
+      "positional": [
+        "self"
+      ],
+      "vararg": null
+    }
+  ],
+  "schema_version": 1,
+  "source_hashes": {
+    ".hermes/plugins/chapada_leads_tools/__init__.py": "91a6a1b9f883bc25f5e491243f249b81cd23ce142358be9eb48f117408855f6a",
+    "app.py": "a9c28307ed1e1669ed998eb17673a2a65c9924d6e1839ccc7e5b7053c342fd92",
+    "domain/chapada_native_tools.py": "fa865cd7aca62a6369b94f7b89d8ae0ead1b8198544be28913cc4cea087942d4",
+    "domain/hermes_native_runner.py": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
+    "domain/tool_executor.py": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88"
+  },
+  "tools": [
+    {
+      "category": "write",
+      "name": "bokun_agendar_passeio_v2",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field_id": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "field_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "option": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "option",
+          "answers"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "c861fdad68e7705fbfeccd30020c849cc0369d2a11af91f198657df9d863c81c"
+    },
+    {
+      "category": "read",
+      "name": "bokun_consultar_descricao",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "d1bab5707bca1c5299238b9baf7387ca9f7af421ee435cc314f9e89fc3ae26ec"
+    },
+    {
+      "category": "read",
+      "name": "bokun_consultar_passeio_v2",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "adults": {
+            "type": "integer"
+          },
+          "children": {
+            "type": "integer"
+          },
+          "date_end": {
+            "type": "string"
+          },
+          "date_start": {
+            "type": "string"
+          },
+          "infants": {
+            "type": "integer"
+          },
+          "seniors": {
+            "type": "integer"
+          },
+          "tour_product_id": {
+            "type": "string"
+          },
+          "youth": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tour_product_id",
+          "date_start",
+          "adults"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "94c2b0e491ad97c50c6396c2b59c05c2afcb9b95dc3a79232dd15742ac8f4ae7"
+    },
+    {
+      "category": "write",
+      "name": "bokun_gerar_link_pagamento_stripe",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "bookingCode": {
+            "type": "string"
+          },
+          "confirmation_by_lead": {
+            "type": "boolean"
+          },
+          "contact_phone": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "descricao_reserva": {
+            "type": "string"
+          },
+          "porcentagem": {
+            "type": "number"
+          },
+          "quantidade": {
+            "type": "integer"
+          },
+          "reserva": {
+            "type": "string"
+          },
+          "subscriber_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_by_lead"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "c0f2770945d86482db5104dd78e7f5b8b465e91e8e25a7e378e010f3e74d9122"
+    },
+    {
+      "category": "write",
+      "name": "bokun_lancar_pagamento_confirmar_reserva",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "confirmation_by_lead": {
+            "type": "boolean"
+          },
+          "confirmation_code": {
+            "type": "string"
+          },
+          "contact_phone": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "payment_method": {
+            "enum": [
+              "pix"
+            ],
+            "type": "string"
+          },
+          "payment_proof_received": {
+            "type": "boolean"
+          },
+          "proof_amount": {
+            "type": "string"
+          },
+          "proof_payment_status": {
+            "type": "string"
+          },
+          "proof_receiver_name": {
+            "type": "string"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "tour_name": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_by_lead",
+          "payment_proof_received",
+          "payment_method"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "0d0c81968d9865ccfd3d962378c909fed61dcfd1dddb4d78dc0bba7ffc5d4018"
+    },
+    {
+      "category": "read",
+      "name": "cerebro_consultar",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "717c386a2bf61fcbdec80bd60eed006e82df07929bd8a49d9c4deb06c9b34871"
+    },
+    {
+      "category": "state_commit",
+      "name": "chapada_commit_state",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "collected_slots": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "decision_reason": {
+            "type": "string"
+          },
+          "desired_services": {
+            "items": {
+              "enum": [
+                "hostel",
+                "agency"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "missing_slots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "route_confidence": {
+            "type": "number"
+          },
+          "stage": {
+            "enum": [
+              "new",
+              "recepcionista",
+              "hostel",
+              "agencia",
+              "fechamento",
+              "handoff",
+              "no_reply"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "schema_hash": "75f1d3509999a3943151b9b8baf719e602b4065ffdcfc18bfac70ba522287b1e"
+    },
+    {
+      "category": "read",
+      "name": "cloudbeds_consultar_hospedagem_v2",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "adults": {
+            "type": "integer"
+          },
+          "check_in": {
+            "type": "string"
+          },
+          "check_out": {
+            "type": "string"
+          },
+          "children": {
+            "type": "integer"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field_id": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "field_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "check_in",
+          "check_out",
+          "adults"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "cdc4248b65fc70151dcea6c59953be2c61ac145a95bd27135ef9614468de0f7f"
+    },
+    {
+      "category": "write",
+      "name": "cloudbeds_criar_reserva_v2",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field_id": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "field_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "option": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "option",
+          "answers"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "e89b5345df2de7419b98842fde15d9e3702c3014a376370cb4a65fbc58a0564e"
+    },
+    {
+      "category": "read",
+      "name": "cloudbeds_descrever_quartos",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "room_type_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "schema_hash": "d74f880cbbe7763458f8a9c0363caa27bc58276381006731d23a1ca0993e7020"
+    },
+    {
+      "category": "write",
+      "name": "cloudbeds_gerar_link_pagamento_stripe",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cb_reservationid": {
+            "type": "string"
+          },
+          "confirmation_by_lead": {
+            "type": "boolean"
+          },
+          "contact_phone": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "descricao_reserva": {
+            "type": "string"
+          },
+          "porcentagem": {
+            "type": "number"
+          },
+          "quantidade": {
+            "type": "integer"
+          },
+          "reserva": {
+            "type": "string"
+          },
+          "subscriber_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_by_lead"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "7eb88dbbee53a3fb7185c9649c15cdd7b29c504d91ca4af5187b9209936a8dc3"
+    },
+    {
+      "category": "write",
+      "name": "cloudbeds_lancar_pagamento_confirmar_reserva",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "confirmation_by_lead": {
+            "type": "boolean"
+          },
+          "contact_phone": {
+            "type": "string"
+          },
+          "payment_method": {
+            "enum": [
+              "pix"
+            ],
+            "type": "string"
+          },
+          "payment_proof_received": {
+            "type": "boolean"
+          },
+          "proof_amount": {
+            "type": "string"
+          },
+          "proof_payment_status": {
+            "type": "string"
+          },
+          "proof_receiver_name": {
+            "type": "string"
+          },
+          "reservation_id": {
+            "type": "string"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_by_lead",
+          "payment_proof_received"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "97fcd64f4fa79bf2247647d028e5e6e52dd01c5f4d47a378051cc679b18cea36"
+    },
+    {
+      "category": "write",
+      "name": "wise_verificar_pagamento",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "payment_proof_received": {
+            "type": "boolean"
+          },
+          "proof_amount": {
+            "type": "string"
+          },
+          "proof_currency": {
+            "enum": [
+              "USD",
+              "EUR",
+              "BRL"
+            ],
+            "type": "string"
+          },
+          "proof_paid_at": {
+            "type": "string"
+          },
+          "proof_reference": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_proof_received",
+          "proof_amount",
+          "proof_currency",
+          "proof_paid_at"
+        ],
+        "type": "object"
+      },
+      "schema_hash": "210ab9a830f4a764aa537aeca0f916ab6aa822648161c4e46485eab2e2d33939"
+    }
+  ]
+}
