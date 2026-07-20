@@ -16,6 +16,16 @@ from typing import Any
 PHASE = "phase-06-handoff-and-payments"
 ROOT = Path(__file__).resolve().parents[1]
 _TEST_RESULT_PREFIX = "__PHASE6_TEST_RESULT__"
+_NON_KILLING_ERROR_TYPES = frozenset(
+    {
+        "builtins.ImportError",
+        "builtins.IndentationError",
+        "builtins.ModuleNotFoundError",
+        "builtins.SyntaxError",
+        "builtins.TabError",
+        "unittest.loader_error",
+    }
+)
 MUTANT_CLASSES = (
     "handoff_policy",
     "handoff_precedence",
@@ -87,6 +97,26 @@ import json
 import sys
 import unittest
 
+class TypedTextTestResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.error_types = []
+
+    def addError(self, test, err):
+        error_type = err[0]
+        self.error_types.append(
+            f"{error_type.__module__}.{error_type.__qualname__}"
+        )
+        super().addError(test, err)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None and not issubclass(err[0], test.failureException):
+            error_type = err[0]
+            self.error_types.append(
+                f"{error_type.__module__}.{error_type.__qualname__}"
+            )
+        super().addSubTest(test, subtest, err)
+
 name = sys.argv[1]
 loader = unittest.TestLoader()
 suite = loader.loadTestsFromName(name)
@@ -99,13 +129,18 @@ if loader.errors:
                 "tests_run": 0,
                 "failures": 0,
                 "errors": len(loader.errors),
+                "error_types": ["unittest.loader_error"] * len(loader.errors),
                 "successful": False,
             },
             sort_keys=True,
         )
     )
     raise SystemExit(1)
-result = unittest.TextTestRunner(stream=sys.stderr, verbosity=2).run(suite)
+result = unittest.TextTestRunner(
+    stream=sys.stderr,
+    verbosity=2,
+    resultclass=TypedTextTestResult,
+).run(suite)
 print(
     "__PHASE6_TEST_RESULT__"
     + json.dumps(
@@ -114,6 +149,7 @@ print(
             "tests_run": result.testsRun,
             "failures": len(result.failures),
             "errors": len(result.errors),
+            "error_types": result.error_types,
             "successful": result.wasSuccessful(),
         },
         sort_keys=True,
@@ -329,6 +365,19 @@ MUTANTS = (
 )
 
 
+class _DuplicateJsonKey(ValueError):
+    pass
+
+
+def _json_object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKey(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _classify_test_run(
     process: _ProcessResult,
     *,
@@ -354,12 +403,26 @@ def _classify_test_run(
             "test result protocol must appear exactly once",
         )
     try:
-        payload = json.loads(protocol[0])
+        payload = json.loads(
+            protocol[0],
+            object_pairs_hook=_json_object_without_duplicates,
+        )
+    except _DuplicateJsonKey as exc:
+        return _ClassifiedRun(
+            "invalid_protocol", False, False, 0, 0, 0, str(exc)
+        )
     except json.JSONDecodeError:
         return _ClassifiedRun(
             "invalid_protocol", False, False, 0, 0, 0, "test result protocol is invalid JSON"
         )
-    expected = {"loader_error", "tests_run", "failures", "errors", "successful"}
+    expected = {
+        "loader_error",
+        "tests_run",
+        "failures",
+        "errors",
+        "error_types",
+        "successful",
+    }
     if type(payload) is not dict or set(payload) != expected:
         return _ClassifiedRun(
             "invalid_protocol", False, False, 0, 0, 0, "test result schema is invalid"
@@ -369,10 +432,14 @@ def _classify_test_run(
     tests_run = payload["tests_run"]
     failures = payload["failures"]
     errors = payload["errors"]
+    error_types = payload["error_types"]
     if (
         type(loader_error) is not bool
         or type(successful) is not bool
         or any(type(value) is not int or value < 0 for value in (tests_run, failures, errors))
+        or type(error_types) is not list
+        or any(type(value) is not str or not value for value in error_types)
+        or len(error_types) != errors
     ):
         return _ClassifiedRun(
             "invalid_protocol", False, False, 0, 0, 0, "test result types are invalid"
@@ -380,6 +447,22 @@ def _classify_test_run(
     if loader_error:
         return _ClassifiedRun(
             "loader_error", False, True, tests_run, failures, errors, "test failed to load"
+        )
+    infrastructure_errors = tuple(
+        error_type
+        for error_type in error_types
+        if error_type in _NON_KILLING_ERROR_TYPES
+    )
+    if infrastructure_errors:
+        return _ClassifiedRun(
+            "infrastructure_error",
+            False,
+            False,
+            tests_run,
+            failures,
+            errors,
+            "test raised non-killing infrastructure errors: "
+            + ", ".join(infrastructure_errors),
         )
     if baseline:
         if process.exit_code == 0 and successful and tests_run > 0 and failures == errors == 0:
