@@ -1,0 +1,47 @@
+{
+  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "local_runtime_full": {
+    "duration_seconds": 33,
+    "passed": true,
+    "tests": 963
+  },
+  "phase": 7,
+  "phase8_started": false,
+  "remote_jobs": {
+    "full-suite": {
+      "completed_at": "2026-07-20T23:32:19Z",
+      "job_id": 88501797049,
+      "started_at": "2026-07-20T23:30:00Z"
+    },
+    "gate": {
+      "completed_at": "2026-07-20T23:32:26Z",
+      "job_id": 88502167792,
+      "started_at": "2026-07-20T23:32:22Z"
+    },
+    "phase7-faults": {
+      "completed_at": "2026-07-20T23:30:13Z",
+      "job_id": 88501797008,
+      "started_at": "2026-07-20T23:30:00Z"
+    },
+    "phase7-mutations": {
+      "completed_at": "2026-07-20T23:30:06Z",
+      "job_id": 88501797018,
+      "started_at": "2026-07-20T23:30:00Z"
+    },
+    "phase7-properties": {
+      "completed_at": "2026-07-20T23:30:11Z",
+      "job_id": 88501797025,
+      "started_at": "2026-07-20T23:30:00Z"
+    },
+    "static": {
+      "completed_at": "2026-07-20T23:30:08Z",
+      "job_id": 88501797031,
+      "started_at": "2026-07-20T23:30:00Z"
+    }
+  },
+  "remote_run_id": 29787387850,
+  "remote_run_started_at": "2026-07-20T23:29:57Z",
+  "remote_run_updated_at": "2026-07-20T23:32:27Z",
+  "rollout": "NO-GO",
+  "schema_version": 1
+}

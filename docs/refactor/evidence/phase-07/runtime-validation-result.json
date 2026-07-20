@@ -1,0 +1,28 @@
+{
+  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "focused_sanitized_surface": {
+    "output_bytes": 932,
+    "output_sha256": "c45f086f483173d08aa8522bb9dc33ff34f24be21e6d89ea0534ec9260f5409a",
+    "passed": true,
+    "tests": 421
+  },
+  "live_capabilities_executed": [],
+  "patch_apply_reverse": {
+    "baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
+    "integration_tree": "8dc9aed8092661b701104bd89dedf865cd4d94b6",
+    "passed": true,
+    "patch_sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0"
+  },
+  "phase": 7,
+  "phase8_started": false,
+  "rollout": "NO-GO",
+  "runtime_full": {
+    "duration_seconds": 33,
+    "output_bytes": 1572,
+    "output_sha256": "f42594f77a2f16191a02508b5a01956a90e75edf783ae9cb204e9c0cb93a9395",
+    "passed": true,
+    "tests": 963
+  },
+  "source_unchanged": true,
+  "wheel_sha256": "663734180622f53d4ec89305ac91209a5e301e27308dc9e410b1a52b6351f177"
+}

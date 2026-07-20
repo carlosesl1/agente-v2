@@ -127,7 +127,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase8_started"])
 
-    def test_pre_freeze_validator_passes_but_terminal_gate_is_closed(self) -> None:
+    def test_evidence_validator_passes_with_only_review_gate_open(self) -> None:
         pre = validate_phase7(terminal=False)
         self.assertEqual(pre["result"], "passed")
         self.assertFalse(pre["terminal_ready"])
@@ -136,8 +136,9 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         terminal = validate_phase7(terminal=True)
         self.assertEqual(terminal["result"], "failed")
         self.assertFalse(terminal["terminal_ready"])
-        self.assertIn("candidate.json", terminal["missing_terminal_artifacts"])
-        self.assertIn("ci-result.json", terminal["missing_terminal_artifacts"])
+        self.assertEqual(
+            terminal["missing_terminal_artifacts"], ["review-result.json"]
+        )
 
     def test_runtime_patch_and_contracts_are_bound_to_integration_tree(self) -> None:
         manifest = read_json(
@@ -159,7 +160,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         evidence = read("docs/refactor/evidence/phase-07/README.md")
         self.assertIn("phase8_started=false", phase)
         self.assertIn("rollout=NO-GO", phase)
-        self.assertIn("candidato ainda não congelado", evidence)
+        self.assertIn("revisão terminal pendente", evidence)
         self.assertNotIn("rollout autorizado", (phase + evidence).lower())
 
     def test_duplicate_json_keys_are_rejected(self) -> None:

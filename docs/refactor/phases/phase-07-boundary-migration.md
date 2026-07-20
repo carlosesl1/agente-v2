@@ -2,7 +2,7 @@
 
 ## Estado
 
-- Status: **implementação Tasks 1–14 concluída; preparando candidato pre-freeze**.
+- Status: **candidato congelado; validações local/remota verdes; revisão terminal pendente**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
@@ -12,19 +12,22 @@
 - `rollout=NO-GO`.
 - `phase8_started=false`.
 
-## Implementação pre-freeze
+## Candidato congelado
 
 - `agente-v2`: `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`.
+- Candidato: `ef5dd46c27ccb72e977b333f526521a5f6b0225c`.
+- Tree: `ceced389dfc73ebd41ac499fa20660890dc86035`.
 - Réplica runtime corrigida: `e2e1570757c2afe3d0b1d25a1ef94cd2c709d674`.
 - Tree da réplica corrigida: `8dc9aed8092661b701104bd89dedf865cd4d94b6`.
 - Patch autenticado: SHA-256
   `f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0`.
-- Focused runtime: 68/68 e 239/239 nas Tasks 13/14 originais; 36/36 na
-  reconstrução corrigida.
+- Focused runtime: 421/421 no blast radius sanitizado e 103/103 no pre-freeze.
+- Runtime integral local instalado do wheel: 963/963 em 33 s.
+- CI remoto: run `29787387850`, 6/6 jobs `completed/success` no SHA candidato.
 - Runtime original: o pre-flight registrou 80 entradas; a captura posterior
   observou 86. Desde a captura, HEAD/tree/status/diff permanecem idênticos ao
   manifesto autenticado; nenhuma alteração nessa source foi feita pela Fase 7.
-- Candidato ainda não congelado; validação integral ainda não executada.
+- Revisão terminal em três lanes não sobrepostas ainda pendente.
 
 O primeiro candidato pre-freeze (`4eb0495a2296ac76d4b2ab25038b6a822f19ec18`)
 foi invalidado por dois erros de collection: a captura removia o package

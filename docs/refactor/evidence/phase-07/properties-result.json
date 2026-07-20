@@ -1,0 +1,24 @@
+{
+  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "candidate_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
+  "completed_at": "2026-07-20T23:30:11Z",
+  "evidence_basis": "successful GitHub job on exact head SHA plus versioned command and closed runner constants; raw /tmp report was not uploaded",
+  "job_id": 88501797025,
+  "job_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29787387850/job/88501797025",
+  "live_capabilities_executed": [],
+  "passed": true,
+  "phase": 7,
+  "phase8_started": false,
+  "report_artifact_uploaded": false,
+  "rollout": "NO-GO",
+  "run_id": 29787387850,
+  "scenario_counts": {
+    "blocked_dispatch": 5000,
+    "importer": 5000,
+    "shadow": 5000,
+    "wire": 5000
+  },
+  "seed": 2026072007,
+  "started_at": "2026-07-20T23:30:00Z",
+  "total": 20000
+}

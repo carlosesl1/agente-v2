@@ -1,0 +1,57 @@
+{
+  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "candidate_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
+  "completed_at": "2026-07-20T23:30:13Z",
+  "contention_domains": [
+    "genesis",
+    "event",
+    "command",
+    "outbox"
+  ],
+  "contention_rows": 200,
+  "evidence_basis": "successful GitHub job on exact head SHA plus versioned command and closed runner constants; raw /tmp report was not uploaded",
+  "faults": [
+    {
+      "detail_hash": "cef0cebcb4699293dd7d20369c2a3020dea44d6690ae842752655a58749f7c13",
+      "name": "after_state_update",
+      "passed": true
+    },
+    {
+      "detail_hash": "95a4a90899d342d10e9824a24fc21b2f4a835cb743f6b9e76a6f6b1103e767e9",
+      "name": "after_event_insert",
+      "passed": true
+    },
+    {
+      "detail_hash": "aad4a785df4a5ea0c5f5e326d3b48b82358ea6a6f64a1287e0257960dfdd3838",
+      "name": "stale_fence",
+      "passed": true
+    },
+    {
+      "detail_hash": "140daac4b2175248db954d3bded981c645026da2f26cfb287169f7ba0c301d54",
+      "name": "event_hash_conflict",
+      "passed": true
+    },
+    {
+      "detail_hash": "cbedf0f448a7986f781b2322051727c962c6cc51ed08967b73ea7844dee89bb9",
+      "name": "genesis_conflict",
+      "passed": true
+    },
+    {
+      "detail_hash": "37bc897467209f771be96a5dcf80042f15279a4e65c23cb5f78b3000bbd2d061",
+      "name": "state_hash_tamper",
+      "passed": true
+    }
+  ],
+  "job_id": 88501797008,
+  "job_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29787387850/job/88501797008",
+  "live_capabilities_executed": [],
+  "passed": true,
+  "phase": 7,
+  "phase8_started": false,
+  "report_artifact_uploaded": false,
+  "restart_schedules": 2000,
+  "restarts_passed": true,
+  "rollout": "NO-GO",
+  "run_id": 29787387850,
+  "started_at": "2026-07-20T23:30:00Z"
+}

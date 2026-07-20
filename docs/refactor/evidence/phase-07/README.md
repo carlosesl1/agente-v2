@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **implementação focused concluída; candidato ainda não congelado**.
+Status: **candidato congelado; local e remoto verdes; revisão terminal pendente**.
 
 ## Entrada
 
@@ -44,10 +44,22 @@ Não entram neste diretório: credenciais, PII, mensagens, payloads brutos,
 bancos, logs, comprovantes, screenshots, source snapshot operacional ou raw
 diffs da árvore suja.
 
-`ci-result.json` não existe até um run remoto real do candidato congelado.
+## Candidato e validação terminal
 
-Também não existem antes do freeze: `candidate.json`, resultados integrais,
-`review-result.json` e `local-integration-result.json`.
+- `candidate.json`: commit/tree/wheel/patch do candidato congelado;
+- `local-integration-result.json`: 963/963 na réplica instalada do wheel;
+- `runtime-validation-result.json`: patch apply/reverse, source e runtime;
+- `properties-result.json`: job remoto 20.000/20.000;
+- `faults-result.json`: seis faults, 2.000 restarts e contention 200;
+- `mutation-result.json`: 12/12;
+- `ci-result.json`: run real `29787387850`, 6/6 jobs verdes;
+- `performance-result.json`: tempos local e remoto.
+
+O workflow não publicou os JSONs de `/tmp` como artifacts. Os resumos remotos
+são vinculados ao job real `success`, ao SHA exato, ao comando versionado e às
+constantes fechadas dos runners; não houve rerun local substituto.
+
+`review-result.json` permanece ausente até a revisão terminal real.
 
 O candidato `4eb0495a2296ac76d4b2ab25038b6a822f19ec18` foi invalidado
 após uma única tentativa local terminar em collection exit 2. A causa e a saída

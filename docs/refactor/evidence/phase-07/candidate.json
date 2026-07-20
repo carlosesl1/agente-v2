@@ -1,0 +1,52 @@
+{
+  "base_commit": "4169c6149f76e8bf4f30a26ee9d0bfbc43a58984",
+  "branch": "phase7-boundary-migration",
+  "candidate_diff_bytes": 614094,
+  "candidate_diff_path": "/tmp/phase7-candidate4.diff",
+  "candidate_diff_sha256": "aac1e529da91295320230b455e852a4ba1816c12e75170bd3c0d58db06dde3f9",
+  "commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "focused_sanitized_surface_passed": 421,
+  "focused_tests_passed": 103,
+  "frozen": true,
+  "frozen_at": "2026-07-20T23:27:54Z",
+  "index_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
+  "invalidated_predecessors": [
+    {
+      "commit": "4eb0495a2296ac76d4b2ab25038b6a822f19ec18",
+      "failure_class": "runtime_full_collection_error",
+      "output_bytes": 2305,
+      "output_sha256": "f3c5a0dc580c9efd4a54de4ee041953938f675dc8d6107c6dc0257834b71b1cf",
+      "reexecuted": false,
+      "tree": "a2ef360c72fca9c579467b25689062796a04a19b"
+    },
+    {
+      "commit": "76f56f07d9e2a8a9ee49a12b65b918ac5b4b0591",
+      "failure_class": "runtime_capture_fidelity_failures",
+      "output_bytes": 9235,
+      "output_sha256": "cb2770efac0603efd26378ae741bd6a4eb871f82fbf5b9f7383bb7f8d2b3f8a0",
+      "reexecuted": false,
+      "tree": "1db402ff11cbc20ee018f26cdc1f1cebf393b4d8"
+    },
+    {
+      "commit": "d710ff6908b811270c6f60cbf27312a77d3ade1f",
+      "failure_class": "runtime_sanitized_oracle_relationship_failures",
+      "output_bytes": 6947,
+      "output_sha256": "96368328293be12b8b75a8f66bfcb7dc694e7f4edb37e110fffe1fa80665c85f",
+      "reexecuted": false,
+      "tree": "c1529d5cb8ffa4db524123e3b5ebdabd76c3ed26"
+    }
+  ],
+  "live_capabilities_executed": [],
+  "manifest_sha256": "6b306839e4f1a37cfb913b9e3aebfea4be38ce73e56959349ff5ce861b17119a",
+  "package_version": "0.7.0",
+  "phase": 7,
+  "phase8_started": false,
+  "rollout": "NO-GO",
+  "runtime_integration_commit": "e2e1570757c2afe3d0b1d25a1ef94cd2c709d674",
+  "runtime_integration_patch_sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0",
+  "runtime_integration_tree": "8dc9aed8092661b701104bd89dedf865cd4d94b6",
+  "tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
+  "wheel_bytes": 210582,
+  "wheel_path": "/tmp/phase7-candidate4-frozen-wheel.YS1TzN/chapada_reservation_kernel-0.7.0-py3-none-any.whl",
+  "wheel_sha256": "663734180622f53d4ec89305ac91209a5e301e27308dc9e410b1a52b6351f177"
+}
