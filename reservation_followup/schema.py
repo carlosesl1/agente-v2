@@ -216,6 +216,7 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
             "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
         )
+        fencing_history = "(fencing_token = delivery_attempts)"
     else:
         lease_tuple = (
             "((claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) "
@@ -233,6 +234,7 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
             "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
         )
+        fencing_history = "(fencing_token >= delivery_attempts)"
     constraints = [
         f"CONSTRAINT pk_{table} PRIMARY KEY (message_id)",
         f"CONSTRAINT fk_{table}_workflow FOREIGN KEY ({workflow_id}) "
@@ -256,8 +258,7 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             f"CONSTRAINT ck_{table}_receipt_tuple CHECK "
             "((delivered_at IS NULL AND receipt_hash IS NULL) OR "
             "(delivered_at IS NOT NULL AND receipt_hash IS NOT NULL))",
-            f"CONSTRAINT ck_{table}_fencing_history CHECK "
-            "(fencing_token >= delivery_attempts)",
+            f"CONSTRAINT ck_{table}_fencing_history CHECK {fencing_history}",
             f"CONSTRAINT ck_{table}_status_matrix CHECK {status_matrix}",
         )
     )

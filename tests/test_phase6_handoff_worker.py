@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import timedelta
 import hashlib
 import json
@@ -234,7 +234,11 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
             replace(claim, worker_id="worker:handoff:other"),
             replace(claim, delivery_id="delivery:scripted:other"),
             replace(claim, delivery_version=claim.delivery_version + 1),
-            replace(claim, fencing_token=claim.fencing_token + 1),
+            replace(
+                claim,
+                fencing_token=claim.fencing_token + 1,
+                delivery_attempts=claim.delivery_attempts + 1,
+            ),
         )
         before = self.persistence_fingerprint()
         for forged in mutations:
@@ -260,6 +264,46 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
                 now=NOW,
                 lease_ttl=timedelta(0),
             )
+
+        with self.assertRaises(ValueError):
+            replace(
+                self.claim(worker_id="worker:handoff:equal-counters"),
+                fencing_token=2,
+            )
+
+    def test_loader_rejects_fencing_token_ahead_of_delivery_attempts(self) -> None:
+        request, _ = self.open_handoff(optional_email=False)
+        claim = self.claim(worker_id="worker:handoff:loader-counters")
+        self.store._connection.execute("PRAGMA ignore_check_constraints=ON")
+        try:
+            self.store._connection.execute(
+                "UPDATE main.handoff_outbox SET fencing_token=? WHERE message_id=?",
+                (claim.fencing_token + 1, claim.message.effect_id),
+            )
+        finally:
+            self.store._connection.execute("PRAGMA ignore_check_constraints=OFF")
+        with self.assertRaises(DataCorruption):
+            self.store.load_handoff(request.handoff_id)
+
+    def test_live_claim_rejects_equal_row_and_forged_unequal_counters(self) -> None:
+        self.open_handoff(optional_email=False)
+        claim = self.claim(worker_id="worker:handoff:forged-counters")
+        forged = object.__new__(type(claim))
+        for field in fields(claim):
+            object.__setattr__(forged, field.name, getattr(claim, field.name))
+        object.__setattr__(forged, "fencing_token", claim.fencing_token + 1)
+        self.store._connection.execute("PRAGMA ignore_check_constraints=ON")
+        try:
+            self.store._connection.execute(
+                "UPDATE main.handoff_outbox SET fencing_token=? WHERE message_id=?",
+                (forged.fencing_token, claim.message.effect_id),
+            )
+        finally:
+            self.store._connection.execute("PRAGMA ignore_check_constraints=OFF")
+        before = self.persistence_fingerprint()
+        with self.assertRaises(StaleLease):
+            self.store._assert_live_handoff_claim(forged, now=NOW)
+        self.assertEqual(self.persistence_fingerprint(), before)
 
     def test_success_receipt_acknowledges_atomically_and_is_idempotent(self) -> None:
         request, _ = self.open_handoff(optional_email=False)
@@ -540,25 +584,40 @@ class Phase6HandoffWorkerTests(unittest.TestCase):
         self.assertEqual(row[0], "leased")
         self.assertIsNotNone(row[1])
 
-    def test_release_failure_does_not_chain_raw_delivery_exception(self) -> None:
+    def test_release_failure_drops_raw_delivery_exception_from_entire_chain(self) -> None:
         self.open_handoff(optional_email=False)
-        delivery = ScriptedDelivery((RuntimeError("raw-provider-secret-sentinel"),))
+        secret = "raw-provider-secret-sentinel"
+        delivery = ScriptedDelivery((RuntimeError(secret),))
         worker = HandoffOutboxWorker(
             store=self.store,
             delivery=delivery,
             worker_id="worker:handoff:scripted",
             lease_ttl=TTL,
         )
-        self.store.release_handoff_outbox = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            StaleLease("synthetic stale")
-        )
+
+        def fail_release(*_args, **_kwargs):
+            raise StaleLease("synthetic stale")
+
+        self.store.release_handoff_outbox = fail_release
         with self.assertRaises(StaleLease) as caught:
             worker.run_once(now=NOW)
+        pending = [caught.exception]
+        seen: set[int] = set()
+        rendered: list[str] = []
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            rendered.extend(traceback.format_exception(current))
+            self.assertIsNot(type(current), RuntimeError)
+            self.assertNotIn(secret, str(current))
+            for linked in (current.__context__, current.__cause__):
+                if linked is not None:
+                    pending.append(linked)
         self.assertIsNone(caught.exception.__context__)
-        self.assertNotIn(
-            "raw-provider-secret-sentinel",
-            "".join(traceback.format_exception(caught.exception)),
-        )
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertNotIn(secret, "".join(rendered))
 
     def test_two_connections_have_exactly_one_winner_under_real_contention(self) -> None:
         for round_index in range(10):

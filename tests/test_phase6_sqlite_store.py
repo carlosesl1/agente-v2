@@ -937,10 +937,9 @@ class Phase6FollowupStoreTests(unittest.TestCase):
         reopened = self.open_store()
         self.assertEqual(reopened.load_payment(payment_id), confirmed.state)
 
-    def test_task6_loader_rejects_every_noninitial_handoff_outbox_state(self) -> None:
+    def test_loader_rejects_impossible_handoff_outbox_history(self) -> None:
         cases = (
             "pending_history",
-            "leased",
             "delivered_without_receipt",
             "delivered_with_receipt",
         )
@@ -963,17 +962,6 @@ class Phase6FollowupStoreTests(unittest.TestCase):
                         "UPDATE handoff_outbox SET fencing_token=1, "
                         "delivery_attempts=1, updated_at=?",
                         (changed_at,),
-                    )
-                elif case == "leased":
-                    store._connection.execute(
-                        "UPDATE handoff_outbox SET status='leased', "
-                        "claim_owner='worker:synthetic', fencing_token=1, "
-                        "lease_acquired_at=?, lease_expires_at=?, updated_at=?",
-                        (
-                            changed_at,
-                            (T0 + timedelta(seconds=2)).isoformat(),
-                            changed_at,
-                        ),
                     )
                 else:
                     receipt_hash = "f" * 64

@@ -413,13 +413,13 @@ INTEGER_COLUMNS = {
 }
 
 EXPECTED_POSTGRESQL_DDL_SHA256 = (
-    "b6c3906db01d8e2feeb7e7ba0dd2373fae33ab799d0f8929a2d9a5f25f8676ba"
+    "301565ecb04895c52977adec45df5debd2285989085d745427614c1c8e492f30"
 )
 
 EXPECTED_POSTGRESQL_BLOCK_SHA256 = {
     "handoff_workflows": "1806f243640f15e8d483a7112f2aeb0af4104213321fa7b8f251847575442ce3",
     "handoff_events": "04364593ac89ae6cc3a4343e235696d7d610752e80032f138926711341f8d8f9",
-    "handoff_outbox": "09d15c1d081465a335cea861ae05ad1d0f5488aa7f729ac6c7572e393bb95a51",
+    "handoff_outbox": "c19cb68a1fb65dba90874546158f87d6609939c866b0f587c1f6e65c3c65168f",
     "handoff_receipts": "e0f5d23ba80f667b6bd06c1644e9c5644e13e9aa38f95f789f793f7d0e0468b6",
     "payment_workflows": "f4c1f38bd6b7269cda779aa9f6f3aa1674345fda5b8c9b41c12e4a15f3282a66",
     "payment_events": "7945ae415cde0c8eb8e77499e93a0f9813380aff5fb817bea36e260126ab97c1",
@@ -1654,6 +1654,38 @@ class Phase6SchemaTests(unittest.TestCase):
                 receipt_hash=HASH_D,
             )
 
+    def test_handoff_fencing_token_cannot_advance_without_delivery_attempt(self) -> None:
+        connection = self.open_database()
+        handoff_id = self.insert_handoff_workflow(connection, "equal-counters")
+        invalid_rows = (
+            {
+                "status": "leased",
+                "claim_owner": "handoff-claim:" + "d" * 64,
+                "fencing_token": 2,
+                "lease_acquired_at": NOW,
+                "lease_expires_at": LATER,
+                "delivery_attempts": 1,
+            },
+            {
+                "status": "delivered",
+                "claim_owner": "handoff-claim:" + "e" * 64,
+                "fencing_token": 2,
+                "delivery_attempts": 1,
+                "delivered_at": LATER,
+                "receipt_hash": HASH_D,
+            },
+        )
+        for index, overrides in enumerate(invalid_rows):
+            with self.subTest(status=overrides["status"]), self.assertRaises(
+                sqlite3.IntegrityError
+            ):
+                self.insert_handoff_outbox(
+                    connection,
+                    handoff_id,
+                    f"unequal-counters-{index}",
+                    **overrides,
+                )
+
     def test_handoff_and_payment_outbox_lease_receipt_status_matrices(self) -> None:
         connection = self.open_database()
         handoff_id = self.insert_handoff_workflow(connection, "outbox-matrix")
@@ -1668,6 +1700,7 @@ class Phase6SchemaTests(unittest.TestCase):
                 "fencing_token": 1,
                 "lease_acquired_at": NOW,
                 "lease_expires_at": LATER,
+                "delivery_attempts": 1,
             },
             {
                 "status": "delivered",

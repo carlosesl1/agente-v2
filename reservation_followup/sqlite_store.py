@@ -597,7 +597,7 @@ class SQLiteFollowupUnitOfWork:
             type(data["delivery_attempts"]) is not int
             or data["delivery_attempts"] < 1
             or type(data["fencing_token"]) is not int
-            or data["fencing_token"] < data["delivery_attempts"]
+            or data["fencing_token"] != data["delivery_attempts"]
             or type(data["delivery_version"]) is not int
             or data["delivery_version"] < 1
             or type(data["delivery_id"]) is not str
@@ -670,7 +670,7 @@ class SQLiteFollowupUnitOfWork:
             if type(row[10]) is not int or type(row[13]) is not int:
                 raise DataCorruption("handoff outbox counters have wrong SQLite types")
             token, attempts = row[10], row[13]
-            if token < 0 or attempts < 0 or token < attempts:
+            if token < 0 or attempts < 0 or token != attempts:
                 raise DataCorruption("handoff outbox counters are impossible")
             created_at = _canonical_time(row[16], "handoff outbox created_at")
             updated_at = _canonical_time(row[17], "handoff outbox updated_at")
@@ -1131,7 +1131,7 @@ class SQLiteFollowupUnitOfWork:
             or row[12] != claim.lease_expires_at.isoformat()
             or type(row[13]) is not int
             or row[13] != claim.delivery_attempts
-            or claim.fencing_token < claim.delivery_attempts
+            or claim.fencing_token != claim.delivery_attempts
             or now < claim.lease_acquired_at
             or now >= claim.lease_expires_at
             or row[14] is not None

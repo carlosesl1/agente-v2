@@ -98,15 +98,17 @@ class HandoffOutboxWorker:
         try:
             receipt = self._delivery.deliver(claim.message)
         except Exception:
-            try:
-                self._store.release_handoff_outbox(claim, now=now)
-            except Exception as release_error:
-                raise release_error from None
-            return HandoffWorkerResult.retryable_failure(claim.message.effect_id)
-        if type(receipt) is not HandoffReceipt:
-            raise TypeError("delivery must return exact HandoffReceipt")
-        self._store.complete_handoff_outbox(claim, receipt, now=now)
-        return HandoffWorkerResult.delivered(claim.message.effect_id)
+            pass
+        else:
+            if type(receipt) is not HandoffReceipt:
+                raise TypeError("delivery must return exact HandoffReceipt")
+            self._store.complete_handoff_outbox(claim, receipt, now=now)
+            return HandoffWorkerResult.delivered(claim.message.effect_id)
+        try:
+            self._store.release_handoff_outbox(claim, now=now)
+        except Exception as release_error:
+            raise release_error from None
+        return HandoffWorkerResult.retryable_failure(claim.message.effect_id)
 
 
 __all__ = [

@@ -52,7 +52,7 @@ CREATE TABLE handoff_outbox (
     CONSTRAINT ck_handoff_outbox_lease_tuple CHECK ((status = 'pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL) OR (status = 'delivered' AND claim_owner IS NOT NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL)),
     CONSTRAINT ck_handoff_outbox_active_lease CHECK (status != 'leased' OR (claim_owner IS NOT NULL AND fencing_token >= 1 AND lease_expires_at > lease_acquired_at)),
     CONSTRAINT ck_handoff_outbox_receipt_tuple CHECK ((delivered_at IS NULL AND receipt_hash IS NULL) OR (delivered_at IS NOT NULL AND receipt_hash IS NOT NULL)),
-    CONSTRAINT ck_handoff_outbox_fencing_history CHECK (fencing_token >= delivery_attempts),
+    CONSTRAINT ck_handoff_outbox_fencing_history CHECK (fencing_token = delivery_attempts),
     CONSTRAINT ck_handoff_outbox_status_matrix CHECK ((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR (status = 'delivered' AND claim_owner IS NOT NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL AND fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))
 );
 

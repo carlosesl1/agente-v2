@@ -182,8 +182,8 @@ class HandoffOutboxClaim:
             self.delivery_attempts,
             "handoff_outbox_claim.delivery_attempts",
         )
-        if self.fencing_token < self.delivery_attempts:
-            raise ValueError("handoff outbox fencing token cannot trail attempts")
+        if self.fencing_token != self.delivery_attempts:
+            raise ValueError("handoff outbox fencing token must equal attempts")
         acquired_at = _require_utc(
             self.lease_acquired_at,
             "handoff_outbox_claim.lease_acquired_at",
