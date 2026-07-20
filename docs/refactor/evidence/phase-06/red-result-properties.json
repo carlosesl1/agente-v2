@@ -2,8 +2,8 @@
   "schema_version": 1,
   "phase": "phase-06-handoff-and-payments",
   "task": 11,
-  "status": "green_pending_independent_regate",
-  "generated_at": "2026-07-20T12:18:07Z",
+  "status": "complete_terminally_approved",
+  "generated_at": "2026-07-20T12:30:48Z",
   "base": {
     "commit": "32e9127fc92452a1ad95429bf479eb20bbcb3e7d",
     "tree": "6bec44edc72f211dec5e869820e03cfc1f9cc738",
@@ -146,6 +146,13 @@
       "private_keys": [],
       "api_keys": [],
       "live_capability_words": []
+    },
+    "terminal_close_focused": {
+      "command": "python3 -m unittest tests.test_phase6_properties -v",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "output_sha256": "7234a8842b8e568499a3c00187a720e915e0dcab44efbc352e72b641649b77fa"
     }
   },
   "constraints": {
@@ -157,7 +164,38 @@
     "commercial_rollout": "NO-GO"
   },
   "independent_review": {
-    "status": "pending_regate",
+    "status": "approved",
+    "batch": "deleg_0c34310b",
+    "reviewed_commit": "63b40c0ba5ef89c398d087ad14b8f5d362141759",
+    "reviewed_tree": "66b519e2a7c8d46adcbc7f19af223e6be2fb702b",
+    "package_sha256": "258b681a031c8064a45a701a347c88fd7156c2d427822b68b0b9512638d594c9",
+    "terminal_approvals": 3,
+    "lanes": [
+      {
+        "scope": "semantic_oracle_payment_diversity",
+        "verdict": "Approved",
+        "tests": "4/4",
+        "critical": 0,
+        "important": 0,
+        "minor": 0
+      },
+      {
+        "scope": "sharding_determinism_performance_integrity",
+        "verdict": "Approved",
+        "tests": "3/3",
+        "critical": 0,
+        "important": 0,
+        "minor": 0
+      },
+      {
+        "scope": "tdd_provenance_boundary",
+        "verdict": "Approved",
+        "tests": "14/14",
+        "critical": 0,
+        "important": 0,
+        "minor": 0
+      }
+    ],
     "prior_batch": "deleg_36881321",
     "prior_terminal_approvals": 0
   },
