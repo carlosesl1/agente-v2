@@ -1707,7 +1707,12 @@ class SQLiteFollowupUnitOfWork:
                 raise DataCorruption("payment outbox row has wrong arity")
             try:
                 kind = PaymentEffectKind(row[7])
-                job = from_wire_json(row[9], PaymentEffectJob)
+                job = self._decode_canonical(
+                    row[9],
+                    row[10],
+                    PaymentEffectJob,
+                    "payment outbox payload",
+                )
                 created_at = _canonical_time(row[19], "payment outbox created_at")
                 updated_at = _canonical_time(row[20], "payment outbox updated_at")
             except (TypeError, ValueError) as exc:

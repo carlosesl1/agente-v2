@@ -418,8 +418,8 @@ Configuração incompleta para uma combinação habilitada falha fechado.
 
 Cada job possui chave baseada em settlement + effect kind, payload imutável,
 hash, lease/fencing e receipt. Falha de form/e-mail/mensagem/paid-state nunca
-repete settlement. Se settlement foi confirmado mas os jobs não ficaram
-duráveis, redelivery recria apenas jobs faltantes sob o ledger financeiro.
+repete settlement. Job obrigatório ausente ou divergente falha fechado; delivery
+ou redelivery nunca recria job nem repete settlement.
 
 A transição paid é monotônica: evento antigo não regressa `paid` para pending.
 Target ausente ou ambíguo vai para manual review.

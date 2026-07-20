@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -351,6 +352,29 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
         self.store._connection.execute(
             "DELETE FROM main.payment_outbox WHERE payment_id=?",
             (self.payment_id,),
+        )
+        with self.assertRaises(DataCorruption):
+            self.store.load_payment(self.payment_id)
+
+    def test_noncanonical_payment_job_bytes_fail_closed_with_unchanged_hash(self) -> None:
+        self._worker(FakeSettlementPort("dispatch_exception")).run_once(now=NOW)
+        raw, digest = self.store._connection.execute(
+            "SELECT payload_json, payload_hash FROM main.payment_outbox "
+            "WHERE payment_id=?",
+            (self.payment_id,),
+        ).fetchone()
+        noncanonical = json.dumps(json.loads(raw), ensure_ascii=False, indent=1)
+        self.assertNotEqual(noncanonical, raw)
+        self.store._connection.execute(
+            "UPDATE main.payment_outbox SET payload_json=? WHERE payment_id=?",
+            (noncanonical, self.payment_id),
+        )
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT payload_hash FROM main.payment_outbox WHERE payment_id=?",
+                (self.payment_id,),
+            ).fetchone(),
+            (digest,),
         )
         with self.assertRaises(DataCorruption):
             self.store.load_payment(self.payment_id)

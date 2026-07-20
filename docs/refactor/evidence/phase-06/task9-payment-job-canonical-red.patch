@@ -1,0 +1,30 @@
+diff --git a/tests/test_phase6_payment_worker.py b/tests/test_phase6_payment_worker.py
+index ab1d8d0d592495ed8b5731bb7e8134c67ded6bea..e048dd5ed62e9556b73b2ce3d482917dcf2e203d 100644
+--- a/tests/test_phase6_payment_worker.py
++++ b/tests/test_phase6_payment_worker.py
+@@ -4,0 +5 @@ import hashlib
++import json
+@@ -357,0 +359,23 @@ class Phase6PaymentSettlementWorkerTests(unittest.TestCase):
++    def test_noncanonical_payment_job_bytes_fail_closed_with_unchanged_hash(self) -> None:
++        self._worker(FakeSettlementPort("dispatch_exception")).run_once(now=NOW)
++        raw, digest = self.store._connection.execute(
++            "SELECT payload_json, payload_hash FROM main.payment_outbox "
++            "WHERE payment_id=?",
++            (self.payment_id,),
++        ).fetchone()
++        noncanonical = json.dumps(json.loads(raw), ensure_ascii=False, indent=1)
++        self.assertNotEqual(noncanonical, raw)
++        self.store._connection.execute(
++            "UPDATE main.payment_outbox SET payload_json=? WHERE payment_id=?",
++            (noncanonical, self.payment_id),
++        )
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT payload_hash FROM main.payment_outbox WHERE payment_id=?",
++                (self.payment_id,),
++            ).fetchone(),
++            (digest,),
++        )
++        with self.assertRaises(DataCorruption):
++            self.store.load_payment(self.payment_id)
++
