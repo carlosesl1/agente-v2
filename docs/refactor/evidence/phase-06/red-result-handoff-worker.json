@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "phase": 6,
+  "task": 7,
+  "generated_at_utc": "2026-07-20T02:16:22Z",
+  "base_commit": "26a60b3d4aff8f5bca62bb0411bb9a9e8a359c54",
+  "base_tree": "a26ed9885f05892bd2a0e06b94f256e54f725da7",
+  "tdd": {
+    "initial_red": {
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
+      "exit_code": 1,
+      "failure_class": "ImportError: StaleLease and Task 7 contracts absent",
+      "raw_output_path": "/tmp/phase6-task7-red.out",
+      "raw_output_sha256": "372fd5e534ff41f7ced026cd58d31a583da232363c7d45158fb0e770f2215122",
+      "raw_output_versioned": false
+    },
+    "immutable_material_red": {
+      "description": "Task 7 DTO/worker scaffolding and all then-current tests applied over the approved Task 6 base while claim/release/complete remained absent",
+      "base_commit": "26a60b3d4aff8f5bca62bb0411bb9a9e8a359c54",
+      "patch_path": "docs/refactor/evidence/phase-06/task7-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_apply_command": "git apply --unidiff-zero docs/refactor/evidence/phase-06/task7-red.patch",
+      "patch_sha256": "979a907a286d15fa305c3171c514a862a4c64a5b15935740e531a3f5f56b02df",
+      "staged_tree": "c1ca5a744f2c1de6b3527f2549ba55638e9bd3a5",
+      "apply_check": "passed_against_clean_base",
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
+      "exit_code": 1,
+      "tests_run": 16,
+      "errors": 19,
+      "failures": 0,
+      "failure_class": "AttributeError: SQLiteFollowupUnitOfWork lacks claim_handoff_outbox/release_handoff_outbox/complete_handoff_outbox",
+      "raw_output_path": "/tmp/phase6-task7-immutable-red.out",
+      "raw_output_sha256": "e7b19d26716b91c39f7b53d3071869de22d129533d2118e4345e9a8eae7d8622",
+      "raw_output_versioned": false
+    },
+    "self_review_red": {
+      "description": "A bilateral hostile receipt envelope reached the loader and leaked ValueError instead of stable DataCorruption",
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker.Phase6HandoffWorkerTests.test_receipt_record_tamper_is_data_corruption_before_load -v",
+      "exit_code": 1,
+      "tests_run": 1,
+      "errors": 1,
+      "failures": 0,
+      "raw_output_path": "/tmp/phase6-task7-selfreview-red.out",
+      "raw_output_sha256": "928c867d841864301680478e12315488b0464daadfe6318a64745fc8dd434a92",
+      "raw_output_versioned": false,
+      "green_output_path": "/tmp/phase6-task7-selfreview-green.out",
+      "green_output_sha256": "b0bf96d107441d21e474a4aab0c16b71b6c6557554287c1ba4f20c2eb740b188"
+    }
+  },
+  "gates": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_phase6_handoff_worker -v",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "output_path": "/tmp/phase6-task7-focused-final.out",
+      "output_sha256": "63cc19f108f910efc18b0a46be23b5fe0025c6faf2773264c731a253db0a597c"
+    },
+    "regressions": {
+      "modules": [
+        "tests.test_phase6_sqlite_store",
+        "tests.test_phase6_handoff",
+        "tests.test_phase6_types",
+        "tests.test_phase6_schema",
+        "tests.test_phase5_outbox",
+        "tests.test_phase5_sqlite_store"
+      ],
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "output_path": "/tmp/phase6-task7-regressions-final.out",
+      "output_sha256": "83905b37a7545ea652b1b18f23193b6a206803e51b95c440b6544577be371cfe"
+    },
+    "full_suite": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "tests": 524,
+      "failures": 0,
+      "errors": 0,
+      "output_path": "/tmp/phase6-task7-full-suite-final.out",
+      "output_sha256": "4a89a396bb94fdc3511ad5d62bb9b85122af0a316f04da10bd637aa3052e5e98"
+    },
+    "characterization": {
+      "command": "python3 -m characterization.harness",
+      "status": "ok",
+      "scenario_count": 30,
+      "incident_count": 22,
+      "violation_count": 37,
+      "output_path": "/tmp/phase6-task7-characterization-final.out",
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": "zero",
+      "table_count": 11,
+      "schema_version": 1,
+      "sqlite_sha256": "7ceed5cface584d8c1164043676373669ecbbbabce32ab34ccc6a6d802e1acb9",
+      "postgresql_sha256": "27902ea74f3016da861e4a6f05000393e2abd98fad58c5b89bd0d7c959c1e5fe",
+      "sqlite_quick_check": "ok",
+      "sqlite_foreign_key_check": [],
+      "postgresql_executed": false
+    },
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "external_imports": [],
+    "capability_client_hits": [],
+    "anticipated_task8_9_methods": [],
+    "forbidden_artifacts": []
+  },
+  "capabilities_used": [],
+  "network_used": false,
+  "provider_used": false,
+  "database_scope": "SQLite local temporary files and :memory: only",
+  "postgresql_executed": false,
+  "rollout": "NO-GO"
+}

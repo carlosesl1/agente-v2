@@ -8,6 +8,10 @@ from enum import Enum
 import hashlib
 import json
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .handoff import HandoffEffectJob
 
 from reservation_domain import (
     ExecutionCertainty,
@@ -136,6 +140,124 @@ class SettlementCertainty(str, Enum):
     SETTLED = "settled"
     PARTIAL_SETTLEMENT = "partial_settlement"
     DISPATCHED_UNKNOWN = "dispatched_unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class HandoffOutboxClaim:
+    message: HandoffEffectJob
+    worker_id: str
+    delivery_id: str
+    delivery_version: int
+    fencing_token: int
+    lease_acquired_at: datetime
+    lease_expires_at: datetime
+    delivery_attempts: int
+
+    def __post_init__(self) -> None:
+        from .handoff import HandoffEffectJob
+
+        if type(self.message) is not HandoffEffectJob:
+            raise ValueError(
+                "handoff_outbox_claim.message must be exact HandoffEffectJob"
+            )
+        object.__setattr__(
+            self,
+            "worker_id",
+            _require_id(self.worker_id, "handoff_outbox_claim.worker_id"),
+        )
+        object.__setattr__(
+            self,
+            "delivery_id",
+            _require_id(self.delivery_id, "handoff_outbox_claim.delivery_id"),
+        )
+        _require_positive_int(
+            self.delivery_version,
+            "handoff_outbox_claim.delivery_version",
+        )
+        _require_positive_int(
+            self.fencing_token,
+            "handoff_outbox_claim.fencing_token",
+        )
+        _require_positive_int(
+            self.delivery_attempts,
+            "handoff_outbox_claim.delivery_attempts",
+        )
+        if self.fencing_token < self.delivery_attempts:
+            raise ValueError("handoff outbox fencing token cannot trail attempts")
+        acquired_at = _require_utc(
+            self.lease_acquired_at,
+            "handoff_outbox_claim.lease_acquired_at",
+        )
+        expires_at = _require_utc(
+            self.lease_expires_at,
+            "handoff_outbox_claim.lease_expires_at",
+        )
+        if expires_at <= acquired_at:
+            raise ValueError("handoff outbox lease must expire after acquisition")
+        object.__setattr__(self, "lease_acquired_at", acquired_at)
+        object.__setattr__(self, "lease_expires_at", expires_at)
+
+
+@dataclass(frozen=True, slots=True)
+class HandoffReceipt:
+    receipt_id: str
+    idempotency_key: str
+    message_id: str
+    delivery_reference: str
+    delivery_id: str
+    delivery_version: int
+    delivered_at: datetime
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "receipt_id",
+            "idempotency_key",
+            "message_id",
+            "delivery_reference",
+            "delivery_id",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _require_id(
+                    getattr(self, field_name),
+                    f"handoff_receipt.{field_name}",
+                ),
+            )
+        _require_positive_int(
+            self.delivery_version,
+            "handoff_receipt.delivery_version",
+        )
+        object.__setattr__(
+            self,
+            "delivered_at",
+            _require_utc(self.delivered_at, "handoff_receipt.delivered_at"),
+        )
+
+    @classmethod
+    def for_message(
+        cls,
+        message: object,
+        *,
+        receipt_id: str,
+        delivery_reference: str,
+        delivery_id: str,
+        delivery_version: int,
+        delivered_at: datetime,
+    ) -> HandoffReceipt:
+        from .handoff import HandoffEffectJob
+
+        if type(message) is not HandoffEffectJob:
+            raise TypeError("message must be exact HandoffEffectJob")
+        return cls(
+            receipt_id=receipt_id,
+            idempotency_key=message.effect_id,
+            message_id=message.effect_id,
+            delivery_reference=delivery_reference,
+            delivery_id=delivery_id,
+            delivery_version=delivery_version,
+            delivered_at=delivered_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,6 +608,8 @@ __all__ = [
     "HandoffStatus",
     "PaymentStatus",
     "SettlementCertainty",
+    "HandoffOutboxClaim",
+    "HandoffReceipt",
     "ConfirmedReservationAnchor",
     "HandoffEffectPolicy",
     "PaymentEffectPolicy",

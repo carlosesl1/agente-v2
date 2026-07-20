@@ -64,12 +64,20 @@ from .types import (
     ConfirmedReservationAnchor,
     EffectRequirement,
     HandoffEffectPolicy,
+    HandoffOutboxClaim,
+    HandoffReceipt,
     HandoffStatus,
     PaymentEffectPolicy,
     PaymentMethod,
     PaymentStatus,
     PaymentSubject,
     SettlementCertainty,
+)
+from .workers import (
+    HandoffDeliveryPort,
+    HandoffOutboxWorker,
+    HandoffWorkerDisposition,
+    HandoffWorkerResult,
 )
 
 __all__ = [
@@ -81,6 +89,8 @@ __all__ = [
     "SettlementCertainty",
     "ConfirmedReservationAnchor",
     "HandoffEffectPolicy",
+    "HandoffOutboxClaim",
+    "HandoffReceipt",
     "PaymentEffectPolicy",
     "PaymentSubject",
     "SettlementOperation",
@@ -140,4 +150,8 @@ __all__ = [
     "to_wire_json",
     "from_wire_json",
     "semantic_hash",
+    "HandoffDeliveryPort",
+    "HandoffOutboxWorker",
+    "HandoffWorkerDisposition",
+    "HandoffWorkerResult",
 ]

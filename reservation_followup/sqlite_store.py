@@ -8,8 +8,9 @@ Phase 6 tasks and are deliberately absent here.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 from typing import Iterator
@@ -18,7 +19,9 @@ from .handoff import (
     HandoffAcknowledged,
     HandoffCancelled,
     HandoffEffectFailed,
+    HandoffEffectFailureCode,
     HandoffEffectJob,
+    HandoffEffectKind,
     HandoffEvent,
     HandoffRequested,
     HandoffTransition,
@@ -51,6 +54,8 @@ from .types import (
     ConfirmedReservationAnchor,
     EffectRequirement,
     HandoffEffectPolicy,
+    HandoffOutboxClaim,
+    HandoffReceipt,
     PaymentEffectPolicy,
 )
 
@@ -105,6 +110,10 @@ class IdentityConflict(StoreError):
     """A durable identity exists with divergent content or ownership."""
 
 
+class StaleLease(StoreError):
+    """A handoff outbox lease is expired, superseded, or divergent."""
+
+
 class UnsupportedEffect(StoreError):
     """An event belongs to a later operational task."""
 
@@ -131,6 +140,55 @@ def _require_revision(value: int) -> int:
     if type(value) is not int or value < 0:
         raise ValueError("expected_revision must be an integer >= 0")
     return value
+
+
+def _require_utc_input(value: datetime, field_name: str) -> datetime:
+    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be a timezone-aware datetime")
+    return value.astimezone(timezone.utc)
+
+
+def _require_lease_ttl(value: timedelta) -> timedelta:
+    if type(value) is not timedelta or value <= timedelta(0):
+        raise ValueError("lease_ttl must be a positive timedelta")
+    return value
+
+
+def _handoff_claim_owner(
+    worker_id: str,
+    delivery_id: str,
+    delivery_version: int,
+) -> str:
+    material = "\x00".join((worker_id, delivery_id, str(delivery_version)))
+    return f"handoff-claim:{hashlib.sha256(material.encode('utf-8')).hexdigest()}"
+
+
+def _handoff_receipt_record(
+    claim: HandoffOutboxClaim,
+    receipt: HandoffReceipt,
+) -> str:
+    payload = {
+        "schema_version": 1,
+        "type": "handoff_receipt_record",
+        "data": {
+            "delivery_attempts": claim.delivery_attempts,
+            "delivery_id": claim.delivery_id,
+            "delivery_version": claim.delivery_version,
+            "fencing_token": claim.fencing_token,
+            "lease_acquired_at": claim.lease_acquired_at.isoformat(),
+            "lease_expires_at": claim.lease_expires_at.isoformat(),
+            "message_payload_hash": semantic_hash(claim.message),
+            "receipt_json": to_wire_json(receipt),
+            "worker_id": claim.worker_id,
+        },
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _canonical_time(raw: object, field_name: str) -> datetime:
@@ -488,6 +546,81 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption(f"{label} wire value is noncanonical")
         return value
 
+    @staticmethod
+    def _decode_handoff_receipt_record(
+        raw: object,
+        digest: object,
+    ) -> tuple[HandoffReceipt, dict[str, object]]:
+        if type(raw) is not str or type(digest) is not str or _digest(raw) != digest:
+            raise DataCorruption("handoff receipt record bytes/hash are divergent")
+        try:
+            payload = json.loads(raw)
+            canonical = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise DataCorruption("handoff receipt record is not valid JSON") from exc
+        expected_data = {
+            "delivery_attempts",
+            "delivery_id",
+            "delivery_version",
+            "fencing_token",
+            "lease_acquired_at",
+            "lease_expires_at",
+            "message_payload_hash",
+            "receipt_json",
+            "worker_id",
+        }
+        if (
+            type(payload) is not dict
+            or set(payload) != {"schema_version", "type", "data"}
+            or payload.get("schema_version") != 1
+            or type(payload.get("schema_version")) is not int
+            or payload.get("type") != "handoff_receipt_record"
+            or type(payload.get("data")) is not dict
+            or set(payload["data"]) != expected_data
+            or canonical != raw
+        ):
+            raise DataCorruption("handoff receipt record is noncanonical")
+        data = payload["data"]
+        if (
+            type(data["delivery_attempts"]) is not int
+            or data["delivery_attempts"] < 1
+            or type(data["fencing_token"]) is not int
+            or data["fencing_token"] < data["delivery_attempts"]
+            or type(data["delivery_version"]) is not int
+            or data["delivery_version"] < 1
+            or type(data["delivery_id"]) is not str
+            or type(data["worker_id"]) is not str
+            or type(data["message_payload_hash"]) is not str
+            or type(data["receipt_json"]) is not str
+        ):
+            raise DataCorruption("handoff receipt record fields have invalid types")
+        try:
+            _require_id(data["worker_id"], "handoff receipt worker_id")
+            _require_id(data["delivery_id"], "handoff receipt delivery_id")
+        except ValueError as exc:
+            raise DataCorruption("handoff receipt record IDs are invalid") from exc
+        acquired = _canonical_time(
+            data["lease_acquired_at"],
+            "handoff receipt lease_acquired_at",
+        )
+        expires = _canonical_time(
+            data["lease_expires_at"],
+            "handoff receipt lease_expires_at",
+        )
+        if expires <= acquired:
+            raise DataCorruption("handoff receipt record lease is impossible")
+        try:
+            receipt = from_wire_json(data["receipt_json"], HandoffReceipt)
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("handoff receipt payload is invalid") from exc
+        return receipt, data
+
     def _handoff_outbox_jobs(self, handoff_id: str) -> tuple[HandoffEffectJob, ...]:
         rows = tuple(
             self._connection.execute(
@@ -514,34 +647,107 @@ class SQLiteFollowupUnitOfWork:
                 to_wire_json(job),
                 semantic_hash(job),
             )
-            initial_operational_tuple = (
-                "pending",
-                None,
-                0,
-                None,
-                None,
-                0,
-                None,
-                None,
-                job.created_at.isoformat(),
-                job.created_at.isoformat(),
-            )
-            if row[:8] != immutable or row[8:] != initial_operational_tuple:
-                raise DataCorruption(
-                    "Task 6 handoff outbox row is not in its exact initial state"
-                )
+            if row[:8] != immutable:
+                raise DataCorruption("handoff outbox immutable binding is divergent")
             if type(row[10]) is not int or type(row[13]) is not int:
                 raise DataCorruption("handoff outbox counters have wrong SQLite types")
+            token, attempts = row[10], row[13]
+            if token < 0 or attempts < 0 or token < attempts:
+                raise DataCorruption("handoff outbox counters are impossible")
+            created_at = _canonical_time(row[16], "handoff outbox created_at")
+            updated_at = _canonical_time(row[17], "handoff outbox updated_at")
+            if created_at != job.created_at or updated_at < created_at:
+                raise DataCorruption("handoff outbox chronology is divergent")
+            status = row[8]
+            if status == "pending":
+                valid = (
+                    row[9] is None
+                    and row[11] is None
+                    and row[12] is None
+                    and row[14] is None
+                    and row[15] is None
+                )
+            elif status == "leased":
+                valid = (
+                    type(row[9]) is str
+                    and bool(row[9])
+                    and token >= 1
+                    and attempts >= 1
+                    and type(row[11]) is str
+                    and type(row[12]) is str
+                    and row[14] is None
+                    and row[15] is None
+                )
+                if valid:
+                    acquired = _canonical_time(
+                        row[11], "handoff outbox lease_acquired_at"
+                    )
+                    expires = _canonical_time(
+                        row[12], "handoff outbox lease_expires_at"
+                    )
+                    valid = created_at <= acquired < expires and updated_at == acquired
+            elif status == "delivered":
+                valid = (
+                    row[9] is None
+                    and token >= 1
+                    and row[11] is None
+                    and row[12] is None
+                    and attempts >= 1
+                    and type(row[14]) is str
+                    and type(row[15]) is str
+                )
+                if valid:
+                    delivered_at = _canonical_time(
+                        row[14], "handoff outbox delivered_at"
+                    )
+                    valid = created_at <= delivered_at <= updated_at
+            else:
+                valid = False
+            if not valid:
+                raise DataCorruption("handoff outbox operational state is impossible")
+
+            receipt_row = self._connection.execute(
+                "SELECT receipt_id, idempotency_key, message_id, receipt_json, "
+                "receipt_hash, delivered_at FROM main.handoff_receipts "
+                "WHERE message_id=?",
+                (job.effect_id,),
+            ).fetchone()
+            if status != "delivered":
+                if receipt_row is not None:
+                    raise DataCorruption("undelivered handoff outbox owns a receipt")
+            else:
+                if receipt_row is None:
+                    raise DataCorruption("delivered handoff outbox lacks its receipt")
+                receipt, claim_record = self._decode_handoff_receipt_record(
+                    receipt_row[3],
+                    receipt_row[4],
+                )
+                claim_acquired = _canonical_time(
+                    claim_record["lease_acquired_at"],
+                    "handoff receipt claim acquired_at",
+                )
+                claim_expires = _canonical_time(
+                    claim_record["lease_expires_at"],
+                    "handoff receipt claim expires_at",
+                )
+                if (
+                    receipt_row[0] != receipt.receipt_id
+                    or receipt_row[1] != receipt.idempotency_key
+                    or receipt_row[2] != receipt.message_id
+                    or receipt_row[5] != receipt.delivered_at.isoformat()
+                    or receipt.message_id != job.effect_id
+                    or receipt.idempotency_key != job.effect_id
+                    or receipt.delivered_at.isoformat() != row[14]
+                    or receipt_row[4] != row[15]
+                    or claim_record["message_payload_hash"] != row[7]
+                    or claim_record["delivery_id"] != receipt.delivery_id
+                    or claim_record["delivery_version"] != receipt.delivery_version
+                    or claim_record["fencing_token"] != token
+                    or claim_record["delivery_attempts"] != attempts
+                    or not claim_acquired <= receipt.delivered_at < claim_expires
+                ):
+                    raise DataCorruption("handoff receipt binding is divergent")
             jobs.append(job)
-        receipt = self._connection.execute(
-            "SELECT 1 FROM main.handoff_receipts AS receipt "
-            "JOIN main.handoff_outbox AS outbox "
-            "ON outbox.message_id=receipt.message_id "
-            "WHERE outbox.handoff_id=? LIMIT 1",
-            (handoff_id,),
-        ).fetchone()
-        if receipt is not None:
-            raise DataCorruption("Task 6 handoff workflow must not contain receipts")
         return tuple(jobs)
 
     @staticmethod
@@ -614,6 +820,25 @@ class SQLiteFollowupUnitOfWork:
             sorted(expected_jobs, key=lambda job: job.effect_id)
         ):
             raise DataCorruption("handoff outbox does not match reducer jobs")
+        failure_effect_ids = {failure.effect_id for failure in replayed.effect_failures}
+        for job in jobs:
+            operational = self._connection.execute(
+                "SELECT status, delivery_attempts FROM main.handoff_outbox "
+                "WHERE message_id=?",
+                (job.effect_id,),
+            ).fetchone()
+            if (
+                operational[0] == "pending"
+                and operational[1] > 0
+                and job.effect_id not in failure_effect_ids
+            ):
+                raise DataCorruption(
+                    "released handoff outbox lacks its effect-failure history"
+                )
+            if job.effect_id in failure_effect_ids and operational[1] == 0:
+                raise DataCorruption(
+                    "handoff effect-failure history lacks a delivery attempt"
+                )
         revision = len(events)
         if (
             replayed != state
@@ -800,6 +1025,351 @@ class SQLiteFollowupUnitOfWork:
             self._insert_handoff_event(handoff_id, next_revision, event)
             self._insert_handoff_jobs(transition.effect_jobs)
         return transition
+
+    @staticmethod
+    def _claim_job(claim: HandoffOutboxClaim) -> HandoffEffectJob:
+        if type(claim) is not HandoffOutboxClaim:
+            raise TypeError("claim must be exact HandoffOutboxClaim")
+        if type(claim.message) is not HandoffEffectJob:
+            raise TypeError("claim message must be exact HandoffEffectJob")
+        return claim.message
+
+    def _handoff_outbox_row(self, message_id: str):
+        return self._connection.execute(
+            "SELECT message_id, idempotency_key, effect_id, handoff_id, kind, "
+            "template_id, payload_json, payload_hash, status, claim_owner, "
+            "fencing_token, lease_acquired_at, lease_expires_at, "
+            "delivery_attempts, delivered_at, receipt_hash, created_at, updated_at "
+            "FROM main.handoff_outbox WHERE message_id=?",
+            (_require_id(message_id, "message_id"),),
+        ).fetchone()
+
+    def _assert_claim_message_binding(
+        self,
+        claim: HandoffOutboxClaim,
+        row,
+    ) -> HandoffEffectJob:
+        message = self._claim_job(claim)
+        if row is None:
+            raise StaleLease("handoff outbox message no longer exists")
+        persisted = self._decode_canonical(
+            row[6], row[7], HandoffEffectJob, "handoff outbox payload"
+        )
+        expected = (
+            message.effect_id,
+            message.effect_id,
+            message.effect_id,
+            message.handoff_id,
+            message.kind.value,
+            message.kind.value,
+            to_wire_json(message),
+            semantic_hash(message),
+        )
+        if persisted != message or row[:8] != expected:
+            raise IdentityConflict("handoff claim message binding is divergent")
+        return message
+
+    def _assert_live_handoff_claim(
+        self,
+        claim: HandoffOutboxClaim,
+        *,
+        now: datetime,
+    ) -> tuple[HandoffEffectJob, object]:
+        row = self._handoff_outbox_row(self._claim_job(claim).effect_id)
+        message = self._assert_claim_message_binding(claim, row)
+        owner = _handoff_claim_owner(
+            claim.worker_id,
+            claim.delivery_id,
+            claim.delivery_version,
+        )
+        if (
+            row[8] != "leased"
+            or row[9] != owner
+            or type(row[10]) is not int
+            or row[10] != claim.fencing_token
+            or row[11] != claim.lease_acquired_at.isoformat()
+            or row[12] != claim.lease_expires_at.isoformat()
+            or type(row[13]) is not int
+            or row[13] != claim.delivery_attempts
+            or claim.fencing_token < claim.delivery_attempts
+            or now < claim.lease_acquired_at
+            or now >= claim.lease_expires_at
+            or row[14] is not None
+            or row[15] is not None
+        ):
+            raise StaleLease("handoff outbox lease is stale, expired, or divergent")
+        return message, row
+
+    def _persist_operational_handoff_transition(
+        self,
+        current: HandoffWorkflow,
+        revision: int,
+        event: HandoffEvent,
+        transition: HandoffTransition,
+    ) -> None:
+        if (
+            transition.status is not HandoffTransitionStatus.APPLIED
+            or transition.events != (event,)
+            or transition.effect_jobs
+        ):
+            raise DataCorruption("operational handoff reducer transition is not exact")
+        next_revision = revision + 1
+        raw = to_wire_json(transition.state)
+        cursor = self._connection.execute(
+            "UPDATE main.handoff_workflows SET revision=?, status=?, state_json=?, "
+            "state_hash=?, updated_at=? WHERE handoff_id=? AND revision=?",
+            (
+                next_revision,
+                transition.state.status.value,
+                raw,
+                semantic_hash(transition.state),
+                _handoff_event_time(event).isoformat(),
+                current.request.handoff_id,
+                revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConcurrencyConflict("handoff operational revision was lost")
+        self._insert_handoff_event(
+            current.request.handoff_id,
+            next_revision,
+            event,
+        )
+
+    def claim_handoff_outbox(
+        self,
+        *,
+        worker_id: str,
+        delivery_id: str,
+        delivery_version: int,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> HandoffOutboxClaim | None:
+        worker_id = _require_id(worker_id, "worker_id")
+        delivery_id = _require_id(delivery_id, "delivery_id")
+        if type(delivery_version) is not int or delivery_version < 1:
+            raise ValueError("delivery_version must be an integer >= 1")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        try:
+            expires_at = now + lease_ttl
+        except OverflowError as exc:
+            raise ValueError("lease_ttl overflows datetime range") from exc
+        owner = _handoff_claim_owner(worker_id, delivery_id, delivery_version)
+        with self._transaction("claim_handoff_outbox"):
+            candidate = self._connection.execute(
+                "SELECT message_id, handoff_id FROM main.handoff_outbox "
+                "WHERE (status='pending' AND claim_owner IS NULL) "
+                "OR (status='leased' AND lease_expires_at<=?) "
+                "ORDER BY CASE kind WHEN 'customer_acknowledgement' THEN 0 ELSE 1 END, "
+                "created_at, message_id LIMIT 1",
+                (now.isoformat(),),
+            ).fetchone()
+            if candidate is None:
+                return None
+            self._load_handoff(candidate[1])
+            row = self._handoff_outbox_row(candidate[0])
+            message = self._decode_canonical(
+                row[6], row[7], HandoffEffectJob, "handoff outbox payload"
+            )
+            created_at = _canonical_time(row[16], "handoff outbox created_at")
+            updated_at = _canonical_time(row[17], "handoff outbox updated_at")
+            if now < created_at or now < updated_at:
+                raise ValueError("claim time cannot predate the handoff outbox state")
+            cursor = self._connection.execute(
+                "UPDATE main.handoff_outbox SET status='leased', claim_owner=?, "
+                "fencing_token=fencing_token+1, lease_acquired_at=?, "
+                "lease_expires_at=?, delivery_attempts=delivery_attempts+1, updated_at=? "
+                "WHERE message_id=? AND fencing_token=? AND delivery_attempts=? AND "
+                "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                "AND lease_expires_at IS NULL) OR "
+                "(status='leased' AND lease_expires_at<=?))",
+                (
+                    owner,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                    message.effect_id,
+                    row[10],
+                    row[13],
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrencyConflict("handoff outbox claim lost its compare-and-swap")
+            updated = self._handoff_outbox_row(message.effect_id)
+            return HandoffOutboxClaim(
+                message=message,
+                worker_id=worker_id,
+                delivery_id=delivery_id,
+                delivery_version=delivery_version,
+                fencing_token=updated[10],
+                lease_acquired_at=_canonical_time(
+                    updated[11], "handoff outbox lease_acquired_at"
+                ),
+                lease_expires_at=_canonical_time(
+                    updated[12], "handoff outbox lease_expires_at"
+                ),
+                delivery_attempts=updated[13],
+            )
+
+    def release_handoff_outbox(
+        self,
+        claim: HandoffOutboxClaim,
+        *,
+        now: datetime,
+    ) -> HandoffTransition:
+        self._claim_job(claim)
+        now = _require_utc_input(now, "now")
+        with self._transaction("release_handoff_outbox"):
+            current, revision = self._load_handoff(claim.message.handoff_id)
+            message, row = self._assert_live_handoff_claim(claim, now=now)
+            cursor = self._connection.execute(
+                "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                "WHERE message_id=? AND status='leased' AND claim_owner=? "
+                "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
+                "AND delivery_attempts=?",
+                (
+                    now.isoformat(),
+                    message.effect_id,
+                    row[9],
+                    claim.fencing_token,
+                    claim.lease_acquired_at.isoformat(),
+                    claim.lease_expires_at.isoformat(),
+                    claim.delivery_attempts,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("handoff outbox release lost its live lease")
+            existing = next(
+                (
+                    failure
+                    for failure in current.effect_failures
+                    if failure.effect_id == message.effect_id
+                ),
+                None,
+            )
+            if existing is not None:
+                return _handoff_noop(current)
+            event = HandoffEffectFailed(
+                handoff_id=message.handoff_id,
+                incident_key=message.incident_key,
+                effect_id=message.effect_id,
+                kind=message.kind,
+                failure_code=HandoffEffectFailureCode.EFFECT_UNAVAILABLE,
+                failed_at=now,
+            )
+            transition = reduce_handoff(current, event)
+            self._persist_operational_handoff_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return transition
+
+    def complete_handoff_outbox(
+        self,
+        claim: HandoffOutboxClaim,
+        receipt: HandoffReceipt,
+        *,
+        now: datetime,
+    ) -> HandoffTransition:
+        self._claim_job(claim)
+        if type(receipt) is not HandoffReceipt:
+            raise TypeError("receipt must be exact HandoffReceipt")
+        now = _require_utc_input(now, "now")
+        with self._transaction("complete_handoff_outbox"):
+            current, revision = self._load_handoff(claim.message.handoff_id)
+            row = self._handoff_outbox_row(claim.message.effect_id)
+            message = self._assert_claim_message_binding(claim, row)
+            receipt_raw = _handoff_receipt_record(claim, receipt)
+            receipt_hash = _digest(receipt_raw)
+            existing = self._connection.execute(
+                "SELECT receipt_id, idempotency_key, message_id, receipt_json, "
+                "receipt_hash, delivered_at FROM main.handoff_receipts "
+                "WHERE receipt_id=? OR idempotency_key=? OR message_id=?",
+                (receipt.receipt_id, receipt.idempotency_key, receipt.message_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing[0] == receipt.receipt_id
+                    and existing[1] == receipt.idempotency_key
+                    and existing[2] == receipt.message_id
+                    and existing[3] == receipt_raw
+                    and existing[4] == receipt_hash
+                    and existing[5] == receipt.delivered_at.isoformat()
+                    and row[8] == "delivered"
+                    and row[14] == receipt.delivered_at.isoformat()
+                    and row[15] == receipt_hash
+                ):
+                    return _handoff_noop(current)
+                raise IdentityConflict("handoff receipt identity has divergent data")
+            message, row = self._assert_live_handoff_claim(claim, now=now)
+            if (
+                receipt.message_id != message.effect_id
+                or receipt.idempotency_key != message.effect_id
+                or receipt.delivery_id != claim.delivery_id
+                or receipt.delivery_version != claim.delivery_version
+            ):
+                raise IdentityConflict("handoff receipt is not bound to its live claim")
+            if (
+                receipt.delivered_at < message.created_at
+                or receipt.delivered_at < claim.lease_acquired_at
+                or receipt.delivered_at > now
+            ):
+                raise ValueError("handoff receipt chronology is invalid")
+            cursor = self._connection.execute(
+                "UPDATE main.handoff_outbox SET status='delivered', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, delivered_at=?, "
+                "receipt_hash=?, updated_at=? WHERE message_id=? AND status='leased' "
+                "AND claim_owner=? AND fencing_token=? AND lease_acquired_at=? "
+                "AND lease_expires_at=? AND delivery_attempts=?",
+                (
+                    receipt.delivered_at.isoformat(),
+                    receipt_hash,
+                    now.isoformat(),
+                    message.effect_id,
+                    row[9],
+                    claim.fencing_token,
+                    claim.lease_acquired_at.isoformat(),
+                    claim.lease_expires_at.isoformat(),
+                    claim.delivery_attempts,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("handoff outbox completion lost its live lease")
+            self._connection.execute(
+                "INSERT INTO main.handoff_receipts "
+                "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
+                "delivered_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    receipt.receipt_id,
+                    receipt.idempotency_key,
+                    receipt.message_id,
+                    receipt_raw,
+                    receipt_hash,
+                    receipt.delivered_at.isoformat(),
+                ),
+            )
+            if message.kind is HandoffEffectKind.INTERNAL_EMAIL:
+                return _handoff_noop(current)
+            event = HandoffAcknowledged(
+                handoff_id=message.handoff_id,
+                incident_key=message.incident_key,
+                effect_id=message.effect_id,
+                receipt_id=receipt.receipt_id,
+                acknowledged_at=receipt.delivered_at,
+            )
+            transition = reduce_handoff(current, event)
+            self._persist_operational_handoff_transition(
+                current,
+                revision,
+                event,
+                transition,
+            )
+            return transition
 
     def _load_payment(self, payment_id: str) -> tuple[PaymentWorkflow, int]:
         row = self._payment_workflow_row(payment_id)
@@ -1020,6 +1590,7 @@ __all__ = [
     "DataCorruption",
     "ConcurrencyConflict",
     "IdentityConflict",
+    "StaleLease",
     "UnsupportedEffect",
     "HandoffNotFound",
     "PaymentNotFound",
