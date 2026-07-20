@@ -693,6 +693,48 @@ class Phase6SettlementLeaseAndFenceTests(PaymentClaimStoreCase):
             (0, 0),
         )
 
+    def test_first_post_fence_outcome_at_exact_expiry_is_stale_and_atomic(self) -> None:
+        claim = self.claim(worker_id="worker:settlement:exact-expiry-outcome")
+        permit = self.store.fence_settlement(
+            claim,
+            claim.command.canonical_payload,
+            now=NOW + timedelta(seconds=1),
+        )
+        settled = outcome(
+            SettlementCertainty.SETTLED,
+            claim_evidence=(permit.request_hash,),
+        )
+        before = payment_fingerprint(self.store._connection)
+        with self.assertRaises(StaleLease):
+            self.store.record_settlement_outcome(
+                claim,
+                permit,
+                settled,
+                now=claim.lease.expires_at,
+            )
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
+
+    def test_mutated_permit_dispatch_slot_is_rejected_without_mutation(self) -> None:
+        claim = self.claim(worker_id="worker:settlement:mutated-permit")
+        permit = self.store.fence_settlement(
+            claim,
+            claim.command.canonical_payload,
+            now=NOW + timedelta(seconds=1),
+        )
+        object.__setattr__(permit, "dispatch_slot", 2)
+        before = payment_fingerprint(self.store._connection)
+        with self.assertRaises(ValueError):
+            self.store.record_settlement_outcome(
+                claim,
+                permit,
+                outcome(
+                    SettlementCertainty.SETTLED,
+                    claim_evidence=(permit.request_hash,),
+                ),
+                now=NOW + timedelta(seconds=2),
+            )
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
+
     def test_uncertain_or_partial_outcome_is_manual_review_and_not_dispatched_is_rejected(self) -> None:
         for certainty in (
             SettlementCertainty.DISPATCHED_NO_EFFECT,
@@ -858,6 +900,33 @@ class Phase6PaymentIntegrityTests(PaymentClaimStoreCase):
                 with self.assertRaises(DataCorruption):
                     self.claim(worker_id=f"worker:settlement:command:{index}")
                 self.assertEqual(payment_fingerprint(self.store._connection), before)
+
+    def test_dispatch_request_hash_tamper_fails_loader_before_outcome(self) -> None:
+        claim = self.claim(worker_id="worker:settlement:request-hash")
+        permit = self.store.fence_settlement(
+            claim,
+            claim.command.canonical_payload,
+            now=NOW + timedelta(seconds=1),
+        )
+        forged_hash = "f" * 64 if permit.request_hash != "f" * 64 else "e" * 64
+        self.store._connection.execute(
+            "UPDATE main.payment_ledger SET dispatch_request_hash=?",
+            (forged_hash,),
+        )
+        before = payment_fingerprint(self.store._connection)
+        with self.assertRaises(DataCorruption):
+            self.store.load_payment(claim.command.payment_id)
+        with self.assertRaises(DataCorruption):
+            self.store.record_settlement_outcome(
+                claim,
+                replace(permit, request_hash=forged_hash),
+                outcome(
+                    SettlementCertainty.SETTLED,
+                    claim_evidence=(forged_hash,),
+                ),
+                now=NOW + timedelta(seconds=2),
+            )
+        self.assertEqual(payment_fingerprint(self.store._connection), before)
 
     def test_claim_status_and_ledger_token_tamper_fail_before_claim_or_fence(self) -> None:
         cases = (

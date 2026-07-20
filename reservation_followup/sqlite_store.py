@@ -1590,6 +1590,8 @@ class SQLiteFollowupUnitOfWork:
                 raise DataCorruption("unfenced payment ledger has dispatch evidence")
         elif not _is_digest(request_hash) or fenced_at is None:
             raise DataCorruption("fenced payment ledger lacks canonical dispatch evidence")
+        elif request_hash != _digest(command.canonical_payload):
+            raise DataCorruption("payment ledger request hash is not bound to its command")
         elif lease is not None and not lease.acquired_at <= fenced_at < lease.expires_at:
             raise DataCorruption("payment ledger fence falls outside its lease")
         outcome = None
@@ -2481,6 +2483,33 @@ class SQLiteFollowupUnitOfWork:
             raise TypeError("permit must be exact SettlementPermit")
         if type(outcome) is not SettlementOutcome:
             raise TypeError("outcome must be exact SettlementOutcome")
+        claim_lease = SettlementLease(
+            owner=claim.lease.owner,
+            fencing_token=claim.lease.fencing_token,
+            acquired_at=claim.lease.acquired_at,
+            expires_at=claim.lease.expires_at,
+        )
+        clean_claim = SettlementClaim(
+            command=claim.command,
+            lease=claim_lease,
+            claim_count=claim.claim_count,
+        )
+        permit_lease = SettlementLease(
+            owner=permit.lease.owner,
+            fencing_token=permit.lease.fencing_token,
+            acquired_at=permit.lease.acquired_at,
+            expires_at=permit.lease.expires_at,
+        )
+        clean_permit = SettlementPermit(
+            command=permit.command,
+            lease=permit_lease,
+            claim_count=permit.claim_count,
+            dispatch_slot=permit.dispatch_slot,
+            request_hash=permit.request_hash,
+            fenced_at=permit.fenced_at,
+        )
+        if clean_claim != claim or clean_permit != permit:
+            raise ValueError("settlement outcome claim or permit is noncanonical")
         if (
             permit.command != claim.command
             or permit.lease != claim.lease
@@ -2520,6 +2549,7 @@ class SQLiteFollowupUnitOfWork:
                 or ledger["request_hash"] != permit.request_hash
                 or ledger["fenced_at"] != permit.fenced_at
                 or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+                or now >= claim.lease.expires_at
             ):
                 raise StaleLease("settlement outcome lost its permanent fence")
             event = SettlementFinished(
@@ -2552,7 +2582,7 @@ class SQLiteFollowupUnitOfWork:
                 "WHERE settlement_command_id=? AND status='dispatch_fenced' "
                 "AND claim_owner=? AND fencing_token=? AND claim_count=? "
                 "AND dispatch_slots_consumed=1 AND dispatch_request_hash=? "
-                "AND dispatch_fenced_at=?",
+                "AND dispatch_fenced_at=? AND lease_expires_at>?",
                 (
                     ledger_status,
                     outcome.certainty.value,
@@ -2566,6 +2596,7 @@ class SQLiteFollowupUnitOfWork:
                     claim.claim_count,
                     permit.request_hash,
                     permit.fenced_at.isoformat(),
+                    now.isoformat(),
                 ),
             )
             if updated.rowcount != 1:
