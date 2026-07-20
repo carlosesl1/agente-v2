@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "task": 10,
+  "recorded_at_utc": "2026-07-20T08:17:35Z",
+  "status": "implementation_complete_review_pending",
+  "base_commit": "54d0a3177c5694123d63b2046717551ed9f1f012",
+  "base_tree": "da27307e36f4e23b3433d81ed95570ca1e222589",
+  "functional_commit": "a5d2a3cb7bde378bcbc14eb52c77f97e53890ac0",
+  "functional_tree": "05994d85d1bbd334569e960089d288ddf9cdc003",
+  "scope": {
+    "implemented": [
+      "immutable payment outbox claim and receipt contracts",
+      "canonical payment receipt wire serialization",
+      "one-shot caller-supplied payment effect delivery port and worker",
+      "atomic payment outbox claim, release, completion, and receipt persistence",
+      "exact-expiry reclaim with monotonic fencing token and delivery attempts",
+      "required-before-optional deterministic claim ordering",
+      "paid and manual-review state monotonicity during effect delivery",
+      "global fail-closed consistency scan for every settlement outcome with missing jobs",
+      "receipt and outbox canonicality, binding, replay, and rollback checks"
+    ],
+    "excluded": [
+      "settlement dispatch or replay",
+      "live delivery adapter",
+      "continuous worker loop",
+      "network, provider SDK, Docker, Redis, Supabase, or PostgreSQL execution",
+      "Task 11 property runner",
+      "Task 12 multiprocess fault matrix"
+    ]
+  },
+  "tdd": {
+    "contract_red": {
+      "base_commit": "54d0a3177c5694123d63b2046717551ed9f1f012",
+      "patch_path": "docs/refactor/evidence/phase-06/task10-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_sha256": "2a0495038f88ff89397b21fcbc84ea8147441f76b9b0d6524af798689561fe63",
+      "patch_bytes": 17109,
+      "reconstructed_tree": "099b1d43f349a17493e81c1348c152bbe87f63c3",
+      "command": "python3 -m unittest tests.test_phase6_payment_outbox -v",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "failure_mode": "public Task 10 contracts absent",
+      "output_sha256": "9b02ca44c2329ea03c8c9b6b137eb220ac8c8283e00e19efb046ddd66768f64b",
+      "output_bytes": 1011,
+      "raw_output_path": "/tmp/phase6-task10-red.out",
+      "raw_output_versioned": false
+    },
+    "semantic_red": {
+      "base_commit": "54d0a3177c5694123d63b2046717551ed9f1f012",
+      "patch_path": "docs/refactor/evidence/phase-06/task10-semantic-red.patch",
+      "patch_format": "git diff --binary --full-index -U0",
+      "patch_sha256": "cb53e177e608e6c5a5911f8b932d532f48ad20713a7238e6cef3d9b17986f012",
+      "patch_bytes": 26535,
+      "reconstructed_tree": "a5392209c296a3bbd171e0b5008758eeb662a1d5",
+      "command": "python3 -m unittest tests.test_phase6_payment_outbox -v",
+      "exit_code": 1,
+      "tests": 9,
+      "failures": 0,
+      "errors": 9,
+      "failure_mode": "claim_payment_outbox, release_payment_outbox, and complete_payment_outbox absent",
+      "output_sha256": "ca0105c0e5efe5d8837e4e13a894304cf46569e7f1c3ffe454e26c69a4306e64",
+      "output_bytes": 10109,
+      "raw_output_path": "/tmp/phase6-task10-semantic-red.out",
+      "raw_output_versioned": false
+    },
+    "all_jobs_missing_red": {
+      "command": "python3 -m unittest tests.test_phase6_payment_outbox.Phase6PaymentOutboxTests.test_missing_required_job_fails_closed_without_recreating_it -v",
+      "exit_code": 1,
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "failure_mode": "a payment with every required job deleted was mistaken for an empty global queue",
+      "output_sha256": "04c6bf6a8677e53c984df9356ab53de895caf6fc18d266ba1eff394476ecffb8",
+      "output_bytes": 978,
+      "raw_output_path": "/tmp/phase6-task10-all-jobs-missing-red.out",
+      "raw_output_versioned": false
+    },
+    "green": {
+      "tests": 15,
+      "result": "OK",
+      "output_sha256": "9adb05bfc97b73891a3a505132fbb75236cf4b59f8a3220c4521b397c0cf6b7d"
+    }
+  },
+  "detached_gate": {
+    "worktree": "/tmp/phase6-task10-clean-gate",
+    "commit": "a5d2a3cb7bde378bcbc14eb52c77f97e53890ac0",
+    "tree": "05994d85d1bbd334569e960089d288ddf9cdc003",
+    "worktree_clean": true,
+    "focused": {
+      "tests": 15,
+      "result": "OK",
+      "output_sha256": "dd676c29f150e65a28ef5527cb9e52c7c8a8552ed72e14ad97491423b0c09f97"
+    },
+    "targeted_regressions": {
+      "tests": 146,
+      "result": "OK",
+      "output_sha256": "65957b2dce597f6bb84221e7b9f46b7feb8addae77c09313d888bc24ab03c27f"
+    },
+    "full_suite": {
+      "tests": 592,
+      "result": "OK",
+      "output_sha256": "da463c8017213121b8227ec579e5a8f1d0c985e5797be11fb32bc8d1845500cb"
+    },
+    "characterization": {
+      "scenarios": 30,
+      "result": "ok",
+      "output_sha256": "d95cbc4b05e453af45c7588747f2186b895661b303e0c1a1ca95a34f29290ff4"
+    },
+    "schema": {
+      "drift": 0,
+      "table_count": 11,
+      "sqlite_sha256": "038c02de48612504ef848f8303a0e5b34aaa7cb80643fea26c4f38220d4423e0",
+      "postgresql_sha256": "761ad4e6121b48ec9833b8b77b0bea4c762cf392102bee9b639106af40869273",
+      "quick_check": "ok",
+      "foreign_key_check": [],
+      "foreign_keys_enabled": true,
+      "postgresql_executed": false
+    },
+    "compile_diff_import_capability_financial_write_scans": "passed"
+  },
+  "invariants": {
+    "one_job_per_run": true,
+    "claim_exact_expiry_is_stale": true,
+    "fencing_token_never_trails_attempts": true,
+    "stale_claim_cannot_release_or_complete": true,
+    "receipt_and_delivery_commit_atomically": true,
+    "required_jobs_precede_optional_jobs": true,
+    "missing_or_divergent_jobs_fail_closed": true,
+    "all_jobs_missing_fails_closed": true,
+    "outbox_failure_does_not_change_payment_ledger": true,
+    "outbox_failure_does_not_change_payment_commands": true,
+    "outbox_failure_does_not_change_payment_events": true,
+    "old_event_cannot_regress_paid": true,
+    "delivery_replay_cannot_create_settlement_command": true,
+    "base_exception_leaves_lease_for_expiry_recovery": true,
+    "two_connection_single_job_claim_winners": 1
+  },
+  "financial_writes_from_outbox_methods": [],
+  "financial_consistency_reads": [
+    "claim_payment_outbox SELECT payment_id FROM payment_ledger WHERE outcome_json IS NOT NULL"
+  ],
+  "live_capabilities_executed": [],
+  "postgresql_executed": false,
+  "independent_review": {
+    "status": "pending",
+    "terminal_approvals": 0
+  },
+  "rollout": "NO-GO"
+}
