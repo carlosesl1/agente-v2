@@ -15,8 +15,8 @@
 ## Implementação pre-freeze
 
 - `agente-v2`: `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`.
-- Réplica runtime corrigida: `0724c2c9170af42a8c26b674ee76c6311bfbc0de`.
-- Tree da réplica corrigida: `207a71c07688a63ad60d572e9b7b0c150dc585a0`.
+- Réplica runtime corrigida: `e2e1570757c2afe3d0b1d25a1ef94cd2c709d674`.
+- Tree da réplica corrigida: `8dc9aed8092661b701104bd89dedf865cd4d94b6`.
 - Patch autenticado: SHA-256
   `f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0`.
 - Focused runtime: 68/68 e 239/239 nas Tasks 13/14 originais; 36/36 na
@@ -36,6 +36,11 @@ O sucessor `76f56f07d9e2a8a9ee49a12b65b918ac5b4b0591` também foi
 invalidado sem rerun: cinco testes mostraram que a captura removia o baseline
 seguro de `.env.example` e reescrevia IDs operacionais. A terceira reconstrução
 mantém baselines seguros e limita a sanitização a campos explícitos de contato.
+
+O terceiro candidato `d710ff6908b811270c6f60cbf27312a77d3ade1f` foi invalidado
+sem rerun por duas relações de oracle ainda não alinhadas: ID de contato inteiro
+e hash derivado de `message_id`. A quarta reconstrução usa fronteiras de token e
+passou 421 testes focused sobre todas as superfícies sanitizadas e consumidores.
 
 ## Objetivo
 

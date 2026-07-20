@@ -377,14 +377,14 @@
     },
     {
       "path": "tests/test_app_llm_central_webhook.py",
-      "redaction_count": 13,
-      "replica_sha256": "e13af9dfaaba3b287481eccd929cf9d97da9120986424bbd7aca2bb05dd52f55",
+      "redaction_count": 15,
+      "replica_sha256": "3d192259cfcf668c27d7e9931aab1d11d1344bb82fc699c9546afb70e604729a",
       "source_sha256": "c5336db3efe1480fd311a7f5288351ed5c32f822a9f7ba437de625c297f07e85"
     },
     {
       "path": "tests/test_app_shadow_webhook.py",
-      "redaction_count": 109,
-      "replica_sha256": "275594d9c8e922a28c46a50d67bfd58cb1b65dfe55e745d1fdb96831123a6e9b",
+      "redaction_count": 115,
+      "replica_sha256": "d0a560c349060175c4d9f010113b64676521a62b11f5a598e5b9ed27155334d0",
       "source_sha256": "46ba38459d1af6ea5a5e5d4894e0a116d37db40401c71885b31805f6127da770"
     },
     {
@@ -396,7 +396,7 @@
     {
       "path": "tests/test_chapada_native_tools.py",
       "redaction_count": 44,
-      "replica_sha256": "a0448cd452b8e5f395ae30df9695481e9d70558c62866e58bef2d276d682c2d5",
+      "replica_sha256": "71585b9643616fd0cc6408ecba30f19a06b12481c505d10e068c90de4035d529",
       "source_sha256": "3954ce97e9b6e8df0dfb3d229e340b59b9cd0bd3b6ea397979ad89dddc527c30"
     },
     {
@@ -407,7 +407,7 @@
     },
     {
       "path": "tests/test_hermes_native_runner.py",
-      "redaction_count": 109,
+      "redaction_count": 111,
       "replica_sha256": "497b92272db05e927a0a876941f09e84cb40f713de3971d3f34521ffc4b16f2b",
       "source_sha256": "f2cf8d67bd73cd043c5a62c2c1af7ebd419974e72c6f7d25d2499292d924e5ff"
     },
@@ -461,8 +461,8 @@
     },
     {
       "path": "tests/test_tool_executor.py",
-      "redaction_count": 128,
-      "replica_sha256": "cbd245823d3abad708770c965289bfe25ce4bb4afa4c31099a9268b6da3e9151",
+      "redaction_count": 146,
+      "replica_sha256": "5221458d3d81a95b4d64e810c0e3b67ebc69936eb7171ee3a34a71c34c1628db",
       "source_sha256": "8ab9fd9eab79431dd7a132bda9c5e646f65cc3c7d24abce02556c6d3fa6f33b1"
     }
   ],
@@ -474,8 +474,8 @@
   "source_tracked_diff_hash": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
   "source_tree": "67b5fe18d4685281778e41cd61cd584dd063ea60",
   "source_unchanged": true,
-  "synthetic_baseline_commit": "318ba9f6ec970b53f25989e9dc8a33d39cfaa7c0",
-  "synthetic_baseline_tree": "c2a2d5c3cf11ac606625553162ba433dd6dfa159",
+  "synthetic_baseline_commit": "3da1f41103fd25bc0c1c0242a7e05cf9da22ad82",
+  "synthetic_baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
   "untracked_paths": [
     {
       "kind": "file",

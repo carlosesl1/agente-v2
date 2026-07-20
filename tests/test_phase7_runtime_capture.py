@@ -142,6 +142,40 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
         self.assertEqual(sanitized, source)
         self.assertEqual(redactions, 0)
 
+    def test_sanitizer_aligns_string_and_integer_contact_ids(self) -> None:
+        original = "\x31\x38\x37\x33\x30\x31\x38\x35\x33\x37"
+        source = (
+            f"EVENT = {{'id': '{original}'}}\n"
+            f"EXPECTED = {{'subscriber_id': {original}}}\n"
+        )
+        sanitized, _ = _sanitize_allowlisted_test(source)
+        string_id = re.search(r"'id': '(\d+)'", sanitized)
+        integer_id = re.search(r"'subscriber_id': (\d+)", sanitized)
+        self.assertIsNotNone(string_id)
+        self.assertIsNotNone(integer_id)
+        self.assertNotEqual(string_id.group(1), original)
+        self.assertEqual(string_id.group(1), integer_id.group(1))
+
+    def test_sanitizer_aligns_message_id_with_derived_oracle(self) -> None:
+        source = (
+            "MESSAGE = {'id': 'audio-1'}\n"
+            "EXPECTED = 'sha256:audio-1'\n"
+        )
+        sanitized, _ = _sanitize_allowlisted_test(source)
+        message_id = re.search(r"'id': '([^']+)'", sanitized)
+        self.assertIsNotNone(message_id)
+        self.assertNotEqual(message_id.group(1), "audio-1")
+        self.assertIn(f"sha256:{message_id.group(1)}", sanitized)
+
+    def test_sanitizer_does_not_rewrite_short_id_inside_python_identifier(self) -> None:
+        source = (
+            "EVENT = {'id': 'sub'}\n"
+            "reservation_confirmation_subject_signature = 'safe'\n"
+        )
+        sanitized, _ = _sanitize_allowlisted_test(source)
+        self.assertIn("reservation_confirmation_subject_signature", sanitized)
+        compile(sanitized, "<sanitized>", "exec")
+
     def test_capture_reconstructs_safe_dirty_state_without_source_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase7-capture-test-") as directory:
             root = Path(directory)

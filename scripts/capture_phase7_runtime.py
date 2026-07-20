@@ -216,6 +216,7 @@ def _synthetic_phone(value: str) -> str:
 def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     count = 0
     literal_map: dict[str, str] = {}
+    embedded_literal_map: dict[str, str] = {}
     phone_replacements: set[str] = set()
 
     def values_for_key(key: str) -> tuple[str, ...]:
@@ -248,11 +249,13 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
         for value in values_for_key(key):
             if not value:
                 continue
-            literal_map[value] = (
+            replacement = (
                 _synthetic_digits(value)
                 if value.isdigit()
                 else "synthetic-" + hashlib.sha256(value.encode()).hexdigest()[:12]
             )
+            literal_map[value] = replacement
+            embedded_literal_map[value] = replacement
 
     for key in (
         "phone",
@@ -271,6 +274,7 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
             if value:
                 replacement = _synthetic_phone(value)
                 literal_map[value] = replacement
+                embedded_literal_map[value] = replacement
                 phone_replacements.add(replacement)
 
     for original, replacement in sorted(literal_map.items(), key=lambda row: (-len(row[0]), row[0])):
@@ -280,6 +284,18 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
             if occurrences:
                 text = text.replace(needle, quote + replacement + quote)
                 count += occurrences
+
+    for original, replacement in sorted(
+        embedded_literal_map.items(), key=lambda row: (-len(row[0]), row[0])
+    ):
+        if original.isdigit():
+            pattern = re.compile(rf"(?<!\d){re.escape(original)}(?!\d)")
+        else:
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9_-]){re.escape(original)}(?![A-Za-z0-9_-])"
+            )
+        text, occurrences = pattern.subn(replacement, text)
+        count += occurrences
 
     function_pattern = re.compile(
         r"(?ms)^def\s+[A-Za-z_][A-Za-z0-9_]*\([^\n]*\):.*?(?=^(?:def|class)\s|\Z)"

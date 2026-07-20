@@ -1,5 +1,5 @@
 {
-  "aggregate_sha256": "4c274df36075032685a711da8730e1a803c58a1d90b87cd5c9e50ee56719c5cd",
+  "aggregate_sha256": "75e5580940526941e4dcfd70cd5ff351595107af0a38e10ae5210b3b0ca3245d",
   "file_count": 54,
   "files": [
     {
@@ -9,7 +9,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "2df24ca8ad2b4d19929e0d56aa0323ecd6b16e667b4257aaa1d720627b5a3a72",
+      "sha256": "3b53f1309528b44af2a10780e3de0972c1a1265be541550483ed336dbb26723b",
       "size": 5120
     },
     {
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "558245be1e5bf08bbf9b8c6a61d5d5008fefd96896f2d30bf901206652cfd41a",
-      "size": 2404
+      "sha256": "f16a231416d933d963c61dc1345b658d38bbeb8960a99cab2ef0a0b465606b24",
+      "size": 2681
     },
     {
       "path": "docs/refactor/evidence/phase-07/entry-baseline.json",
@@ -54,8 +54,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration-manifest.json",
-      "sha256": "625d81dfd5cc2edf05e34deb5d22a9289d53f593805141ad8c6fd73d528efb31",
-      "size": 1980
+      "sha256": "18dddf10e16f71eccc88a9e5a275cccd330f521f38f66d21acc3f67ae8d9577a",
+      "size": 1990
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration.patch",
@@ -64,13 +64,13 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-source-manifest.json",
-      "sha256": "3893f1ab55f32ba916626e9d668daa45918008dc7268834fe336ef1fd9f65304",
+      "sha256": "995848fa283882fd95d7435693002f403b81349faa4392bbed759aeefdf2456e",
       "size": 19333
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
-      "sha256": "35fdb94d458fa348255744321624b33f9e9df833a37518c6b446517aa6601104",
-      "size": 4938
+      "sha256": "32b447f389967f31b6c69ae8ef4434d1d36f3eae34365d478928ea45e33f8164",
+      "size": 5267
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-phase-7-boundary-migration.md",
@@ -164,8 +164,8 @@
     },
     {
       "path": "scripts/capture_phase7_runtime.py",
-      "sha256": "ac9d74f44f7b2a955f863ce1310a1bf4b04715007f80496731cabfc01746fd2d",
-      "size": 32419
+      "sha256": "b9bb89405bbd0b21c3e030c964d03b4eae42e37e94ee6e365262e5ae52f6a590",
+      "size": 33073
     },
     {
       "path": "scripts/generate_phase7_manifest.py",
@@ -194,7 +194,7 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "76d300b65d4482af482e91686943bff2412f3587bfc0478a75ab6da30e49fc19",
+      "sha256": "7634e5a8b4a1dcf50a160c907a1b28c9a5341c97cbc237ec1306d2c51004c4a1",
       "size": 12727
     },
     {
@@ -204,7 +204,7 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "54405bc6191984a2381e8a3e8f483da79de93f716430a6525a4bbc992ba80e84",
+      "sha256": "0cf4fdfd2b9632fc254df5669dbe4ac8194f10f4b433c6fda61d9e49f287bbba",
       "size": 10085
     },
     {
@@ -244,8 +244,8 @@
     },
     {
       "path": "tests/test_phase7_runtime_capture.py",
-      "sha256": "5c575e590f7602209e2b75ea969e727f60afb967eefeb91ff6d40a14497e7237",
-      "size": 16570
+      "sha256": "98089ea135288cc5521633fdd3456468004334b2c76617287aa1d3750ba1d48e",
+      "size": 18130
     },
     {
       "path": "tests/test_phase7_schema.py",
