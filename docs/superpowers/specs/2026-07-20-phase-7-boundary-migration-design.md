@@ -238,7 +238,7 @@ class TurnEnvelope:
 @dataclass(frozen=True)
 class TurnPlan:
     state: BoundaryState
-    commands: tuple[ReservationCommand, ...]
+    commands: tuple[BoundaryCommand, ...]
     outbox: tuple[OutboxMessage, ...]
     dispatch_requests: tuple[ToolDispatchRequest, ...]
     handoff_required: bool
@@ -277,6 +277,13 @@ class TurnPlanReason(Enum):
     DEADLINE_EXPIRED = "deadline_expired"
     VERSION_CONFLICT = "version_conflict"
     INVALID_INTENT = "invalid_intent"
+
+class CommandMigrationDisposition(Enum):
+    RESERVATION = "reservation"
+    PAYMENT_SETTLEMENT = "payment_settlement"
+    BLOCKED_UNMIGRATED = "blocked_unmigrated"
+
+BoundaryCommand: TypeAlias = ReservationCommand | PaymentSettlementCommand
 
 @dataclass(frozen=True)
 class ConversationIntent:
@@ -320,7 +327,7 @@ class ToolDispatchRequest:
 @dataclass(frozen=True)
 class KernelDecision:
     next_state: BoundaryState
-    commands: tuple[ReservationCommand, ...]
+    commands: tuple[BoundaryCommand, ...]
     outbox: tuple[OutboxMessage, ...]
     dispatch_requests: tuple[ToolDispatchRequest, ...]
     handoff_required: bool
@@ -345,7 +352,7 @@ class BoundaryCommit:
     fencing_token: int
     event_id: str
     next_state: BoundaryState
-    commands: tuple[ReservationCommand, ...]
+    commands: tuple[BoundaryCommand, ...]
     outbox: tuple[OutboxMessage, ...]
 ```
 
@@ -510,8 +517,9 @@ A Maya pode solicitar uma tool; apenas `ToolDispatch` classifica e traduz.
 
 - `READ`: converte para request de adapter read-only e retorna `LookupResult` ou
   FAQ tipada;
-- `COMMAND`: converte a intenção em evento/comando do kernel; não chama provider
-  no turno;
+- `COMMAND`: converte a intenção em `ReservationCommand` ou
+  `PaymentSettlementCommand`; quando não existe command durável publicado,
+  retorna `BLOCKED_UNMIGRATED` + manual review, sem chamar provider no turno;
 - `STATE_COMMIT`: converte commits conversacionais permitidos em
   `ConversationIntent`/facts; não escreve diretamente o store;
 - nome não catalogado: rejeição fechada;
@@ -530,6 +538,29 @@ possui:
 - claim evidence permitida;
 - política de cache apenas para reads;
 - requisito de revalidation antes de command.
+
+O catálogo v2 ativo observado é fechado em 13 nomes:
+
+| Tool | Kind | Resultado da Fase 7 |
+|---|---|---|
+| `cerebro_consultar` | READ | FAQ tipada |
+| `cloudbeds_consultar_hospedagem_v2` | READ | lookup hospedagem |
+| `cloudbeds_descrever_quartos` | READ | descrição factual |
+| `bokun_consultar_passeio_v2` | READ | lookup passeio |
+| `bokun_consultar_descricao` | READ | descrição factual |
+| `cloudbeds_criar_reserva_v2` | COMMAND | `ReservationCommand` |
+| `bokun_agendar_passeio_v2` | COMMAND | `ReservationCommand` |
+| `cloudbeds_lancar_pagamento_confirmar_reserva` | COMMAND | `PaymentSettlementCommand` |
+| `bokun_lancar_pagamento_confirmar_reserva` | COMMAND | `PaymentSettlementCommand` |
+| `wise_verificar_pagamento` | COMMAND | `BLOCKED_UNMIGRATED` |
+| `cloudbeds_gerar_link_pagamento_stripe` | COMMAND | `BLOCKED_UNMIGRATED` |
+| `bokun_gerar_link_pagamento_stripe` | COMMAND | `BLOCKED_UNMIGRATED` |
+| `chapada_commit_state` | STATE_COMMIT | facts/intenção tipada |
+
+Os dois settlements exigem `PaymentEvidenceRecorded`, resumo financeiro atual e
+`FinancialConfirmationReceived` coerentes antes de criar o command. Os três
+writes bloqueados não ganham command genérico, não alcançam o executor e exigem
+manual review. Essa lacuna permanece bloqueador explícito de rollout.
 
 ### 8.3 Proibições
 
@@ -838,7 +869,9 @@ A Fase 7 só pode fechar quando:
 9. plugin não contém regra comercial, budget, confirmação ou retry;
 10. runner não autoriza side effect;
 11. executor fica atrás dos ports tipados;
-12. commands Fases 5/6 continuam únicos e imutáveis;
+12. commands Fases 5/6 continuam únicos e imutáveis: duas tools criam
+    `ReservationCommand`, duas criam `PaymentSettlementCommand`, três ficam
+    `BLOCKED_UNMIGRATED` e as demais seis são read/state-commit;
 13. divergências críticas no corpus são exatamente zero;
 14. estado não migrável termina em manual review/handoff;
 15. wheel local instala e é consumido pela réplica;
@@ -922,6 +955,13 @@ manifest do wheel.
 
 **Mitigação:** registrar tree congelada e matriz de blast radius; rerun integral
 somente após mudança material vinculante.
+
+### P7-R10 — Tool ativa não possui command durável publicado
+
+**Mitigação:** `BLOCKED_UNMIGRATED`, manual review e zero chamada de executor para
+Wise verification e geração de links Stripe; rollout não pode mudar de `NO-GO`
+enquanto essas três superfícies não tiverem owner/command explicitamente
+desenhado e aprovado.
 
 ## 21. Decisão de avanço
 
