@@ -131,7 +131,7 @@ class Phase6PropertyTests(unittest.TestCase):
         self.assertTrue(report.passed)
 
     def test_passed_is_derived_and_hollow_or_divergent_rows_fail_closed(self) -> None:
-        report = run_followup_properties(cases=16, seed=SEED)
+        report = run_followup_properties(cases=160, seed=SEED)
         self.assertTrue(report.passed)
         method_switch_index = next(
             index
@@ -156,6 +156,20 @@ class Phase6PropertyTests(unittest.TestCase):
             violations=report.violations,
         )
         self.assertFalse(hollow_report.passed)
+        shifted_rows = list(report.rows)
+        shifted_rows[method_switch_index] = replace(
+            method_switch_row,
+            mode="payment_wise_method_selected_repeat",
+        )
+        shifted_report = FollowupPropertyReport(
+            start=report.start,
+            cases=report.cases,
+            seed=report.seed,
+            rows=tuple(shifted_rows),
+            audits=report.audits,
+            violations=report.violations,
+        )
+        self.assertFalse(shifted_report.passed)
         first = report.rows[0]
         unsafe = replace(
             first,
@@ -184,6 +198,39 @@ class Phase6PropertyTests(unittest.TestCase):
                 audits=report.audits,
                 violations=(),
             )
+
+    def test_every_payment_method_covers_both_reservation_dimensions(self) -> None:
+        report = run_followup_properties(cases=160, seed=SEED)
+        payment_rows = tuple(row for row in report.rows if row.case_kind == "payment")
+        self.assertEqual(
+            {
+                (row.payment_method, row.service, row.business_unit)
+                for row in payment_rows
+            },
+            {
+                (method, "lodging", "hostel")
+                for method in PAYMENT_METHOD_KEYS
+            }
+            | {
+                (method, "activity", "agency")
+                for method in PAYMENT_METHOD_KEYS
+            },
+        )
+        self.assertEqual(
+            {
+                service: sum(row.service == service for row in payment_rows)
+                for service in SERVICE_KEYS
+            },
+            {"lodging": 40, "activity": 40},
+        )
+        self.assertEqual(
+            {
+                unit: sum(row.business_unit == unit for row in payment_rows)
+                for unit in BUSINESS_UNIT_KEYS
+            },
+            {"hostel": 40, "agency": 40},
+        )
+        self.assertTrue(report.passed)
 
     def test_sharding_is_nonoverlapping_and_case_rows_match_direct_global_indexes(self) -> None:
         ranges = _partition_ranges(cases=20_000, shard_cases=250)

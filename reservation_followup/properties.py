@@ -119,6 +119,93 @@ FOLLOWUP_MODES = (
     "handoff_optional_email_failure_replay",
     "payment_wise_method_selected_repeat",
 )
+_MODE_POSITIVE_NONZERO = MappingProxyType(
+    {
+        "handoff_pre_email_disabled": {"handoff_cases": 1, "email_disabled_cases": 1},
+        "payment_pix_method_selected": {"payment_cases": 1, "pix_cases": 1},
+        "handoff_post_success": {
+            "handoff_cases": 1,
+            "email_disabled_cases": 1,
+            "required_effect_deliveries": 1,
+        },
+        "payment_wise_method_switch": {
+            "payment_cases": 1,
+            "method_switches": 1,
+            "wise_cases": 1,
+        },
+        "handoff_manual_review": {"handoff_cases": 1, "email_disabled_cases": 1},
+        "payment_stripe_economic_change": {
+            "payment_cases": 1,
+            "economic_version_changes": 1,
+            "stripe_cases": 1,
+        },
+        "handoff_optional_email_failure": {
+            "handoff_cases": 1,
+            "required_effect_deliveries": 1,
+            "optional_effect_failures": 1,
+        },
+        "payment_pix_evidence_conflict": {
+            "payment_cases": 1,
+            "pix_cases": 1,
+            "evidence_conflicts": 1,
+        },
+        "handoff_pre_email_disabled_replay": {
+            "handoff_cases": 1,
+            "email_disabled_cases": 1,
+        },
+        "payment_wise_pre_fence_recovery": {
+            "payment_cases": 1,
+            "wise_cases": 1,
+            "pre_fence_recoveries": 1,
+        },
+        "handoff_post_success_replay": {
+            "handoff_cases": 1,
+            "email_disabled_cases": 1,
+        },
+        "payment_stripe_post_fence_manual_review": {
+            "payment_cases": 1,
+            "stripe_cases": 1,
+            "post_fence_manual_reviews": 1,
+            "required_effect_deliveries": 1,
+        },
+        "handoff_manual_review_replay": {
+            "handoff_cases": 1,
+            "email_disabled_cases": 1,
+        },
+        "payment_pix_optional_effect_failure": {
+            "payment_cases": 1,
+            "pix_cases": 1,
+            "required_effect_deliveries": 2,
+            "optional_effect_failures": 1,
+        },
+        "handoff_optional_email_failure_replay": {
+            "handoff_cases": 1,
+            "required_effect_deliveries": 1,
+            "optional_effect_failures": 1,
+        },
+        "payment_wise_method_selected_repeat": {
+            "payment_cases": 1,
+            "wise_cases": 1,
+        },
+    }
+)
+_PAYMENT_DIMENSIONS = (
+    (ServiceKind.LODGING.value, BusinessUnit.HOSTEL.value),
+    (ServiceKind.ACTIVITY.value, BusinessUnit.AGENCY.value),
+)
+
+
+def _expected_positive(mode: str) -> Mapping[str, int]:
+    expected = {name: 0 for name in POSITIVE_COUNTERS}
+    expected.update(_MODE_POSITIVE_NONZERO[mode])
+    return MappingProxyType(expected)
+
+
+def _expected_payment_method(mode: str) -> str | None:
+    for method in PAYMENT_METHOD_KEYS:
+        if f"_{method}_" in mode:
+            return method
+    return None
 
 
 def _exact_nonnegative(value: object, field_name: str) -> int:
@@ -469,9 +556,49 @@ class FollowupPropertyReport:
         )
 
     @property
+    def payment_dimension_counts(self) -> Mapping[str, int]:
+        return MappingProxyType(
+            {
+                f"{method}|{service}|{unit}": sum(
+                    row.case_kind == "payment"
+                    and row.payment_method == method
+                    and row.service == service
+                    and row.business_unit == unit
+                    for row in self.rows
+                )
+                for method in PAYMENT_METHOD_KEYS
+                for service, unit in _PAYMENT_DIMENSIONS
+            }
+        )
+
+    def _rows_follow_closed_contract(self) -> bool:
+        return all(
+            row.mode == FOLLOWUP_MODES[row.index % len(FOLLOWUP_MODES)]
+            and row.positive == _expected_positive(row.mode)
+            and row.payment_method == _expected_payment_method(row.mode)
+            and (
+                row.case_kind != "payment"
+                or (row.service, row.business_unit) in _PAYMENT_DIMENSIONS
+            )
+            for row in self.rows
+        )
+
+    def _mode_cardinality_is_exact(self) -> bool:
+        return all(
+            self.mode_counts[mode]
+            == sum(
+                FOLLOWUP_MODES[index % len(FOLLOWUP_MODES)] == mode
+                for index in range(self.start, self.start + self.cases)
+            )
+            for mode in FOLLOWUP_MODES
+        )
+
+    @property
     def passed(self) -> bool:
         return bool(
             self.cases >= len(FOLLOWUP_MODES)
+            and self._rows_follow_closed_contract()
+            and self._mode_cardinality_is_exact()
             and self.handoff_cases + self.payment_cases == self.cases
             and self.handoff_cases == self.payment_cases
             and all(getattr(self, name) > 0 for name in POSITIVE_COUNTERS)
@@ -480,6 +607,7 @@ class FollowupPropertyReport:
             and all(value > 0 for value in self.business_unit_counts.values())
             and all(value > 0 for value in self.method_counts.values())
             and all(value > 0 for value in self.mode_counts.values())
+            and all(value > 0 for value in self.payment_dimension_counts.values())
             and all(audit.quick_check == "ok" for audit in self.audits)
             and all(audit.foreign_key_violations == 0 for audit in self.audits)
             and sum(audit.deep_audits for audit in self.audits) > 0
@@ -500,6 +628,7 @@ class FollowupPropertyReport:
             "business_unit_counts": dict(self.business_unit_counts),
             "method_counts": dict(self.method_counts),
             "mode_counts": dict(self.mode_counts),
+            "payment_dimension_counts": dict(self.payment_dimension_counts),
             "rows": [row.to_dict() for row in self.rows],
             "audits": [audit.to_dict() for audit in self.audits],
             "violations": list(self.violations),
@@ -519,6 +648,7 @@ class FollowupPropertyReport:
             "business_unit_counts",
             "method_counts",
             "mode_counts",
+            "payment_dimension_counts",
             "rows",
             "audits",
             "violations",
@@ -580,7 +710,7 @@ def _temporary_directory() -> tempfile.TemporaryDirectory[str]:
 def _confirmed_anchor(*, index: int, seed: int) -> ConfirmedReservationAnchor:
     provider = (
         ProviderKind.CLOUDBEDS
-        if (index + seed) % 2 == 0
+        if (index // 2 + seed) % 2 == 0
         else ProviderKind.BOKUN
     )
     script = _build_reservation_case(index=index, seed=seed, provider=provider)
