@@ -86,8 +86,12 @@ def prepare_payment(
     method: PaymentMethod,
     evidence,
     anchor=None,
+    policy=None,
 ):
-    opened = store.open_payment(anchor or confirmed_anchor(), payment_effect_policy())
+    opened = store.open_payment(
+        anchor or confirmed_anchor(),
+        policy or payment_effect_policy(),
+    )
     payment_id = opened.state.subject.payment_id
     selected = store.apply_payment(
         payment_id,

@@ -69,6 +69,8 @@ from .types import (
     PaymentEffectPolicy,
     PaymentEvidenceClaim,
     PaymentEvidenceClaimStatus,
+    PaymentOutboxClaim,
+    PaymentReceipt,
     PaymentStatus,
     PreDispatchReleaseDisposition,
     SettlementCertainty,
@@ -237,6 +239,20 @@ def _handoff_receipt_record(
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _payment_claim_owner(
+    worker_id: str,
+    delivery_id: str,
+    delivery_version: int,
+) -> str:
+    material = "\x00".join((worker_id, delivery_id, str(delivery_version)))
+    return f"payment-claim:{hashlib.sha256(material.encode('utf-8')).hexdigest()}"
+
+
+def _is_payment_claim_owner(value: object) -> bool:
+    prefix = "payment-claim:"
+    return type(value) is str and value.startswith(prefix) and _is_digest(value[len(prefix) :])
 
 
 def _canonical_time(raw: object, field_name: str) -> datetime:
@@ -1679,6 +1695,43 @@ class SQLiteFollowupUnitOfWork:
             "updated_at": updated_at,
         }
 
+    def _validate_payment_receipt_row(
+        self,
+        message_id: str,
+        *,
+        delivered_at: datetime,
+        receipt_hash: str,
+    ) -> PaymentReceipt:
+        row = self._connection.execute(
+            "SELECT receipt_id, idempotency_key, message_id, receipt_json, "
+            "receipt_hash, delivered_at FROM main.payment_receipts WHERE message_id=?",
+            (message_id,),
+        ).fetchone()
+        if row is None or len(row) != 6:
+            raise DataCorruption("delivered payment effect lacks one receipt")
+        try:
+            receipt = self._decode_canonical(
+                row[3],
+                row[4],
+                PaymentReceipt,
+                "payment receipt",
+            )
+            stored_at = _canonical_time(row[5], "payment receipt delivered_at")
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption("payment receipt is not canonical") from exc
+        if (
+            row[0] != receipt.receipt_id
+            or row[1] != receipt.idempotency_key
+            or row[2] != receipt.message_id
+            or receipt.idempotency_key != message_id
+            or receipt.message_id != message_id
+            or row[4] != receipt_hash
+            or stored_at != delivered_at
+            or receipt.delivered_at != delivered_at
+        ):
+            raise DataCorruption("payment receipt binding is divergent")
+        return receipt
+
     def _validate_payment_jobs(
         self,
         state: PaymentWorkflow,
@@ -1731,20 +1784,82 @@ class SQLiteFollowupUnitOfWork:
                 or row[6] != command.settlement_command_id
                 or row[8] != kind.value
                 or row[10] != semantic_hash(job)
-                or row[11] != "pending"
-                or row[12] is not None
+                or type(row[11]) is not str
                 or type(row[13]) is not int
-                or row[13] != 0
-                or row[14] is not None
-                or row[15] is not None
                 or type(row[16]) is not int
-                or row[16] != 0
-                or row[17] is not None
-                or row[18] is not None
+                or row[13] < row[16]
+                or row[13] < 0
+                or row[16] < 0
                 or created_at != ledger["outcome_recorded_at"]
-                or updated_at != created_at
+                or updated_at < created_at
             ):
                 raise DataCorruption("payment outbox binding is divergent")
+            if row[11] == "pending":
+                lifecycle_ok = (
+                    row[12] is None
+                    and row[14] is None
+                    and row[15] is None
+                    and row[17] is None
+                    and row[18] is None
+                )
+                receipt_count = self._connection.execute(
+                    "SELECT COUNT(*) FROM main.payment_receipts WHERE message_id=?",
+                    (effect_id,),
+                ).fetchone()[0]
+                lifecycle_ok = lifecycle_ok and receipt_count == 0
+            elif row[11] == "leased":
+                try:
+                    acquired_at = _canonical_time(
+                        row[14],
+                        "payment outbox lease_acquired_at",
+                    )
+                    expires_at = _canonical_time(
+                        row[15],
+                        "payment outbox lease_expires_at",
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise DataCorruption("payment outbox lease is not canonical") from exc
+                receipt_count = self._connection.execute(
+                    "SELECT COUNT(*) FROM main.payment_receipts WHERE message_id=?",
+                    (effect_id,),
+                ).fetchone()[0]
+                lifecycle_ok = (
+                    _is_payment_claim_owner(row[12])
+                    and row[13] >= 1
+                    and row[16] >= 1
+                    and expires_at > acquired_at
+                    and acquired_at == updated_at
+                    and row[17] is None
+                    and row[18] is None
+                    and receipt_count == 0
+                )
+            elif row[11] == "delivered":
+                try:
+                    delivered_at = _canonical_time(
+                        row[17],
+                        "payment outbox delivered_at",
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise DataCorruption("payment outbox delivery is not canonical") from exc
+                lifecycle_ok = (
+                    row[12] is None
+                    and row[14] is None
+                    and row[15] is None
+                    and row[13] >= 1
+                    and row[16] >= 1
+                    and _is_digest(row[18])
+                    and created_at <= delivered_at <= updated_at
+                )
+                if lifecycle_ok:
+                    self._validate_payment_receipt_row(
+                        effect_id,
+                        delivered_at=delivered_at,
+                        receipt_hash=row[18],
+                    )
+            else:
+                lifecycle_ok = False
+            if not lifecycle_ok:
+                raise DataCorruption("payment outbox lifecycle is divergent")
             seen.add(kind)
 
     def _payment_financial_records(
@@ -2979,6 +3094,340 @@ class SQLiteFollowupUnitOfWork:
                 transition,
             )
             return command_id
+
+    @staticmethod
+    def _claim_payment_job(claim: PaymentOutboxClaim) -> PaymentOutboxClaim:
+        if type(claim) is not PaymentOutboxClaim:
+            raise TypeError("claim must be exact PaymentOutboxClaim")
+        clean = PaymentOutboxClaim(
+            message=claim.message,
+            message_id=claim.message_id,
+            payment_id=claim.payment_id,
+            payment_version=claim.payment_version,
+            economic_signature=claim.economic_signature,
+            settlement_command_id=claim.settlement_command_id,
+            worker_id=claim.worker_id,
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
+            fencing_token=claim.fencing_token,
+            lease_acquired_at=claim.lease_acquired_at,
+            lease_expires_at=claim.lease_expires_at,
+            delivery_attempts=claim.delivery_attempts,
+        )
+        if clean != claim:
+            raise ValueError("payment outbox claim is noncanonical")
+        return clean
+
+    def _payment_outbox_row(self, message_id: str):
+        return self._connection.execute(
+            "SELECT message_id, idempotency_key, effect_id, payment_id, payment_version, "
+            "economic_signature, settlement_command_id, kind, template_id, payload_json, "
+            "payload_hash, status, claim_owner, fencing_token, lease_acquired_at, "
+            "lease_expires_at, delivery_attempts, delivered_at, receipt_hash, "
+            "created_at, updated_at FROM main.payment_outbox WHERE message_id=?",
+            (_require_id(message_id, "message_id"),),
+        ).fetchone()
+
+    def _assert_payment_claim_binding(
+        self,
+        claim: PaymentOutboxClaim,
+        row,
+    ) -> PaymentOutboxClaim:
+        clean = self._claim_payment_job(claim)
+        if row is None:
+            raise StaleLease("payment outbox message no longer exists")
+        message = self._decode_canonical(
+            row[9],
+            row[10],
+            PaymentEffectJob,
+            "payment outbox payload",
+        )
+        expected_id = _payment_effect_id(
+            clean.settlement_command_id,
+            message.kind,
+        )
+        if (
+            message != clean.message
+            or clean.message_id != expected_id
+            or row[0] != expected_id
+            or row[1] != expected_id
+            or row[2] != expected_id
+            or row[3] != clean.payment_id
+            or type(row[4]) is not int
+            or row[4] != clean.payment_version
+            or row[5] != clean.economic_signature
+            or row[6] != clean.settlement_command_id
+            or row[7] != message.kind.value
+            or row[8] != message.kind.value
+            or row[10] != semantic_hash(message)
+        ):
+            raise IdentityConflict("payment claim message binding is divergent")
+        return clean
+
+    def _assert_live_payment_claim(
+        self,
+        claim: PaymentOutboxClaim,
+        *,
+        now: datetime,
+    ) -> tuple[PaymentOutboxClaim, object]:
+        row = self._payment_outbox_row(claim.message_id)
+        clean = self._assert_payment_claim_binding(claim, row)
+        owner = _payment_claim_owner(
+            clean.worker_id,
+            clean.delivery_id,
+            clean.delivery_version,
+        )
+        if (
+            row[11] != "leased"
+            or row[12] != owner
+            or type(row[13]) is not int
+            or row[13] != clean.fencing_token
+            or row[14] != clean.lease_acquired_at.isoformat()
+            or row[15] != clean.lease_expires_at.isoformat()
+            or type(row[16]) is not int
+            or row[16] != clean.delivery_attempts
+            or clean.fencing_token < clean.delivery_attempts
+            or now < clean.lease_acquired_at
+            or now >= clean.lease_expires_at
+            or row[17] is not None
+            or row[18] is not None
+        ):
+            raise StaleLease("payment outbox lease is stale, expired, or divergent")
+        return clean, row
+
+    def claim_payment_outbox(
+        self,
+        *,
+        worker_id: str,
+        delivery_id: str,
+        delivery_version: int,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> PaymentOutboxClaim | None:
+        worker_id = _require_id(worker_id, "worker_id")
+        delivery_id = _require_id(delivery_id, "delivery_id")
+        if type(delivery_version) is not int or delivery_version < 1:
+            raise ValueError("delivery_version must be an integer >= 1")
+        now = _require_utc_input(now, "now")
+        lease_ttl = _require_lease_ttl(lease_ttl)
+        try:
+            expires_at = now + lease_ttl
+        except OverflowError as exc:
+            raise ValueError("lease_ttl overflows datetime range") from exc
+        owner = _payment_claim_owner(worker_id, delivery_id, delivery_version)
+        with self._transaction("claim_payment_outbox"):
+            terminal_payments = tuple(
+                self._connection.execute(
+                    "SELECT payment_id FROM main.payment_ledger "
+                    "WHERE outcome_json IS NOT NULL ORDER BY payment_id"
+                )
+            )
+            for (payment_id,) in terminal_payments:
+                self._load_payment(payment_id)
+            candidate = self._connection.execute(
+                "SELECT message_id, payment_id FROM main.payment_outbox WHERE "
+                "(status='pending' AND claim_owner IS NULL) OR "
+                "(status='leased' AND lease_expires_at<=?) "
+                "ORDER BY CASE kind "
+                "WHEN 'paid_state_transition' THEN 0 "
+                "WHEN 'customer_payment_confirmation' THEN 1 "
+                "WHEN 'manual_review' THEN 2 "
+                "WHEN 'booking_form' THEN 3 ELSE 4 END, created_at, message_id LIMIT 1",
+                (now.isoformat(),),
+            ).fetchone()
+            if candidate is None:
+                return None
+            self._load_payment(candidate[1])
+            row = self._payment_outbox_row(candidate[0])
+            message = self._decode_canonical(
+                row[9],
+                row[10],
+                PaymentEffectJob,
+                "payment outbox payload",
+            )
+            created_at = _canonical_time(row[19], "payment outbox created_at")
+            updated_at = _canonical_time(row[20], "payment outbox updated_at")
+            if now < created_at or now < updated_at:
+                raise ValueError("claim time cannot predate the payment outbox state")
+            cursor = self._connection.execute(
+                "UPDATE main.payment_outbox SET status='leased', claim_owner=?, "
+                "fencing_token=fencing_token+1, lease_acquired_at=?, lease_expires_at=?, "
+                "delivery_attempts=delivery_attempts+1, updated_at=? WHERE message_id=? "
+                "AND fencing_token=? AND delivery_attempts=? AND "
+                "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                "AND lease_expires_at IS NULL) OR "
+                "(status='leased' AND lease_expires_at<=?))",
+                (
+                    owner,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                    candidate[0],
+                    row[13],
+                    row[16],
+                    now.isoformat(),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrencyConflict("payment outbox claim lost its compare-and-swap")
+            updated = self._payment_outbox_row(candidate[0])
+            return PaymentOutboxClaim(
+                message=message,
+                message_id=updated[0],
+                payment_id=updated[3],
+                payment_version=updated[4],
+                economic_signature=updated[5],
+                settlement_command_id=updated[6],
+                worker_id=worker_id,
+                delivery_id=delivery_id,
+                delivery_version=delivery_version,
+                fencing_token=updated[13],
+                lease_acquired_at=_canonical_time(
+                    updated[14],
+                    "payment outbox lease_acquired_at",
+                ),
+                lease_expires_at=_canonical_time(
+                    updated[15],
+                    "payment outbox lease_expires_at",
+                ),
+                delivery_attempts=updated[16],
+            )
+
+    def release_payment_outbox(
+        self,
+        claim: PaymentOutboxClaim,
+        *,
+        now: datetime,
+    ) -> PaymentOutboxClaim:
+        clean = self._claim_payment_job(claim)
+        now = _require_utc_input(now, "now")
+        with self._transaction("release_payment_outbox"):
+            self._load_payment(clean.payment_id)
+            clean, row = self._assert_live_payment_claim(clean, now=now)
+            cursor = self._connection.execute(
+                "UPDATE main.payment_outbox SET status='pending', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                "WHERE message_id=? AND status='leased' AND claim_owner=? "
+                "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
+                "AND delivery_attempts=?",
+                (
+                    now.isoformat(),
+                    clean.message_id,
+                    row[12],
+                    clean.fencing_token,
+                    clean.lease_acquired_at.isoformat(),
+                    clean.lease_expires_at.isoformat(),
+                    clean.delivery_attempts,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("payment outbox release lost its live lease")
+            return clean
+
+    def complete_payment_outbox(
+        self,
+        claim: PaymentOutboxClaim,
+        receipt: PaymentReceipt,
+        *,
+        now: datetime,
+    ) -> PaymentOutboxClaim:
+        clean = self._claim_payment_job(claim)
+        if type(receipt) is not PaymentReceipt:
+            raise TypeError("receipt must be exact PaymentReceipt")
+        canonical_receipt = PaymentReceipt(
+            receipt_id=receipt.receipt_id,
+            idempotency_key=receipt.idempotency_key,
+            message_id=receipt.message_id,
+            delivery_reference=receipt.delivery_reference,
+            delivery_id=receipt.delivery_id,
+            delivery_version=receipt.delivery_version,
+            delivered_at=receipt.delivered_at,
+        )
+        if canonical_receipt != receipt:
+            raise ValueError("payment receipt is noncanonical")
+        now = _require_utc_input(now, "now")
+        with self._transaction("complete_payment_outbox"):
+            self._load_payment(clean.payment_id)
+            row = self._payment_outbox_row(clean.message_id)
+            clean = self._assert_payment_claim_binding(clean, row)
+            receipt_raw = to_wire_json(canonical_receipt)
+            receipt_hash = semantic_hash(canonical_receipt)
+            if (
+                canonical_receipt.message_id != clean.message_id
+                or canonical_receipt.idempotency_key != clean.message_id
+                or canonical_receipt.delivery_id != clean.delivery_id
+                or canonical_receipt.delivery_version != clean.delivery_version
+            ):
+                raise IdentityConflict("payment receipt is not bound to its claim")
+            existing = self._connection.execute(
+                "SELECT receipt_id, idempotency_key, message_id, receipt_json, "
+                "receipt_hash, delivered_at FROM main.payment_receipts "
+                "WHERE receipt_id=? OR idempotency_key=? OR message_id=?",
+                (
+                    canonical_receipt.receipt_id,
+                    canonical_receipt.idempotency_key,
+                    canonical_receipt.message_id,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing[0] == canonical_receipt.receipt_id
+                    and existing[1] == canonical_receipt.idempotency_key
+                    and existing[2] == canonical_receipt.message_id
+                    and existing[3] == receipt_raw
+                    and existing[4] == receipt_hash
+                    and existing[5] == canonical_receipt.delivered_at.isoformat()
+                    and row[11] == "delivered"
+                    and row[12] is None
+                    and row[14] is None
+                    and row[15] is None
+                    and row[17] == canonical_receipt.delivered_at.isoformat()
+                    and row[18] == receipt_hash
+                ):
+                    return clean
+                raise IdentityConflict("payment receipt identity has divergent data")
+            clean, row = self._assert_live_payment_claim(clean, now=now)
+            created_at = _canonical_time(row[19], "payment outbox created_at")
+            if (
+                canonical_receipt.delivered_at < created_at
+                or canonical_receipt.delivered_at < clean.lease_acquired_at
+                or canonical_receipt.delivered_at > now
+            ):
+                raise ValueError("payment receipt chronology is invalid")
+            cursor = self._connection.execute(
+                "UPDATE main.payment_outbox SET status='delivered', claim_owner=NULL, "
+                "lease_acquired_at=NULL, lease_expires_at=NULL, delivered_at=?, "
+                "receipt_hash=?, updated_at=? WHERE message_id=? AND status='leased' "
+                "AND claim_owner=? AND fencing_token=? AND lease_acquired_at=? "
+                "AND lease_expires_at=? AND delivery_attempts=?",
+                (
+                    canonical_receipt.delivered_at.isoformat(),
+                    receipt_hash,
+                    now.isoformat(),
+                    clean.message_id,
+                    row[12],
+                    clean.fencing_token,
+                    clean.lease_acquired_at.isoformat(),
+                    clean.lease_expires_at.isoformat(),
+                    clean.delivery_attempts,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StaleLease("payment outbox completion lost its live lease")
+            self._connection.execute(
+                "INSERT INTO main.payment_receipts "
+                "(receipt_id, idempotency_key, message_id, receipt_json, receipt_hash, "
+                "delivered_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    canonical_receipt.receipt_id,
+                    canonical_receipt.idempotency_key,
+                    canonical_receipt.message_id,
+                    receipt_raw,
+                    receipt_hash,
+                    canonical_receipt.delivered_at.isoformat(),
+                ),
+            )
+            return clean
 
 
 __all__ = [

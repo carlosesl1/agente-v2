@@ -783,14 +783,21 @@ git commit -m "feat(phase-6): settle payments behind permanent fencing"
 ### Task 10: Payment effect outbox e paid-state monotônico
 
 **Files:**
-- Modify: `reservation_followup/projection.py`
+- Verify/consume unchanged: `reservation_followup/projection.py`
+- Modify: `reservation_followup/types.py`
+- Modify: `reservation_followup/serialization.py`
 - Modify: `reservation_followup/sqlite_store.py`
 - Modify: `reservation_followup/workers.py`
+- Modify: `reservation_followup/__init__.py`
+- Modify: `tests/test_phase6_payment_claims.py` (test helper only)
 - Create: `tests/test_phase6_payment_outbox.py`
+- Create: `docs/refactor/evidence/phase-06/task10-red.patch`
+- Create: `docs/refactor/evidence/phase-06/task10-semantic-red.patch`
+- Create: `docs/refactor/evidence/phase-06/red-result-payment-outbox.json`
 
 **Interfaces:**
 - Consumes the immutable effect kinds/jobs and deterministic projection already persisted atomically by Task 9.
-- Produces: `PaymentEffectDeliveryPort`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
+- Produces: immutable `PaymentOutboxClaim`/`PaymentReceipt`, `PaymentEffectDeliveryPort.deliver(claim)`, `PaymentOutboxWorker.run_once(now)` and payment outbox claim/release/complete store methods.
 
 - [ ] **Step 1: Write RED for policy matrix and no settlement replay**
 

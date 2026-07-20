@@ -12,6 +12,8 @@ from .payment import PaymentSettlementCommand, SettlementOutcome
 from .sqlite_store import SQLiteFollowupUnitOfWork
 from .types import (
     HandoffReceipt,
+    PaymentOutboxClaim,
+    PaymentReceipt,
     PreDispatchReleaseDisposition,
     SettlementCertainty,
     SettlementPermit,
@@ -116,6 +118,101 @@ class HandoffOutboxWorker:
         except Exception as release_error:
             raise release_error from None
         return HandoffWorkerResult.retryable_failure(claim.message.effect_id)
+
+
+@runtime_checkable
+class PaymentEffectDeliveryPort(Protocol):
+    delivery_id: str
+    delivery_version: int
+
+    def deliver(self, claim: PaymentOutboxClaim) -> PaymentReceipt: ...
+
+
+class PaymentOutboxWorkerDisposition(str, Enum):
+    IDLE = "idle"
+    DELIVERED = "delivered"
+    RETRYABLE_FAILURE = "retryable_failure"
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentOutboxWorkerResult:
+    disposition: PaymentOutboxWorkerDisposition
+    message_id: str | None
+
+    def __post_init__(self) -> None:
+        if type(self.disposition) is not PaymentOutboxWorkerDisposition:
+            raise ValueError("disposition must use PaymentOutboxWorkerDisposition")
+        if self.message_id is not None:
+            object.__setattr__(
+                self,
+                "message_id",
+                _require_id(self.message_id, "payment_outbox_worker_result.message_id"),
+            )
+        if (self.disposition is PaymentOutboxWorkerDisposition.IDLE) != (
+            self.message_id is None
+        ):
+            raise ValueError("idle is the only result without a message_id")
+
+    @classmethod
+    def idle(cls) -> PaymentOutboxWorkerResult:
+        return cls(PaymentOutboxWorkerDisposition.IDLE, None)
+
+
+class PaymentOutboxWorker:
+    """Claim and deliver at most one already-persisted payment effect."""
+
+    def __init__(
+        self,
+        *,
+        store: SQLiteFollowupUnitOfWork,
+        delivery: PaymentEffectDeliveryPort,
+        worker_id: str,
+        lease_ttl: timedelta,
+    ) -> None:
+        if type(store) is not SQLiteFollowupUnitOfWork:
+            raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
+        delivery_id = _require_id(delivery.delivery_id, "delivery.delivery_id")
+        if type(delivery.delivery_version) is not int or delivery.delivery_version < 1:
+            raise ValueError("delivery.delivery_version must be an integer >= 1")
+        if not callable(getattr(delivery, "deliver", None)):
+            raise TypeError("delivery must expose deliver(claim)")
+        if type(lease_ttl) is not timedelta or lease_ttl <= timedelta(0):
+            raise ValueError("lease_ttl must be a positive timedelta")
+        self._store = store
+        self._delivery = delivery
+        self._delivery_id = delivery_id
+        self._delivery_version = delivery.delivery_version
+        self._worker_id = _require_id(worker_id, "worker_id")
+        self._lease_ttl = lease_ttl
+
+    def run_once(self, *, now: datetime) -> PaymentOutboxWorkerResult:
+        claim = self._store.claim_payment_outbox(
+            worker_id=self._worker_id,
+            delivery_id=self._delivery_id,
+            delivery_version=self._delivery_version,
+            now=now,
+            lease_ttl=self._lease_ttl,
+        )
+        if claim is None:
+            return PaymentOutboxWorkerResult.idle()
+        try:
+            receipt = self._delivery.deliver(claim)
+            if type(receipt) is not PaymentReceipt:
+                raise TypeError("delivery must return exact PaymentReceipt")
+        except Exception:
+            try:
+                self._store.release_payment_outbox(claim, now=now)
+            except Exception as release_error:
+                raise release_error from None
+            return PaymentOutboxWorkerResult(
+                PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE,
+                claim.message_id,
+            )
+        self._store.complete_payment_outbox(claim, receipt, now=now)
+        return PaymentOutboxWorkerResult(
+            PaymentOutboxWorkerDisposition.DELIVERED,
+            claim.message_id,
+        )
 
 
 class SettlementPreparationError(RuntimeError):

@@ -1,0 +1,683 @@
+diff --git a/reservation_followup/__init__.py b/reservation_followup/__init__.py
+index 149eb9df90bada790fb450d8b45f2dc7675794be..91d04606ded14823f6bcd3d61b76edd2ae3acf25 100644
+--- a/reservation_followup/__init__.py
++++ b/reservation_followup/__init__.py
+@@ -78,0 +79,2 @@ from .types import (
++    PaymentOutboxClaim,
++    PaymentReceipt,
+@@ -91,0 +94,4 @@ from .workers import (
++    PaymentEffectDeliveryPort,
++    PaymentOutboxWorker,
++    PaymentOutboxWorkerDisposition,
++    PaymentOutboxWorkerResult,
+@@ -108,0 +115,2 @@ __all__ = [
++    "PaymentOutboxClaim",
++    "PaymentReceipt",
+@@ -188,0 +197,4 @@ __all__ = [
++    "PaymentEffectDeliveryPort",
++    "PaymentOutboxWorkerDisposition",
++    "PaymentOutboxWorkerResult",
++    "PaymentOutboxWorker",
+diff --git a/reservation_followup/types.py b/reservation_followup/types.py
+index 373272dbd79737e245e1e179a8703ac3a138bf44..aa5a95fb1cb46104878a7c0d2d584d160f1c04dd 100644
+--- a/reservation_followup/types.py
++++ b/reservation_followup/types.py
+@@ -14,0 +15 @@ if TYPE_CHECKING:
++    from .projection import PaymentEffectJob
+@@ -275,0 +277,130 @@ class HandoffReceipt:
++@dataclass(frozen=True, slots=True)
++class PaymentOutboxClaim:
++    message: PaymentEffectJob
++    message_id: str
++    payment_id: str
++    payment_version: int
++    economic_signature: str
++    settlement_command_id: str
++    worker_id: str
++    delivery_id: str
++    delivery_version: int
++    fencing_token: int
++    lease_acquired_at: datetime
++    lease_expires_at: datetime
++    delivery_attempts: int
++
++    def __post_init__(self) -> None:
++        from .projection import PaymentEffectJob
++
++        if type(self.message) is not PaymentEffectJob:
++            raise ValueError("payment_outbox_claim.message must be exact PaymentEffectJob")
++        for field_name in (
++            "message_id",
++            "payment_id",
++            "settlement_command_id",
++            "worker_id",
++            "delivery_id",
++        ):
++            object.__setattr__(
++                self,
++                field_name,
++                _require_id(
++                    getattr(self, field_name),
++                    f"payment_outbox_claim.{field_name}",
++                ),
++            )
++        _require_positive_int(
++            self.payment_version,
++            "payment_outbox_claim.payment_version",
++        )
++        _require_hash(
++            self.economic_signature,
++            "payment_outbox_claim.economic_signature",
++        )
++        _require_positive_int(
++            self.delivery_version,
++            "payment_outbox_claim.delivery_version",
++        )
++        _require_positive_int(
++            self.fencing_token,
++            "payment_outbox_claim.fencing_token",
++        )
++        _require_positive_int(
++            self.delivery_attempts,
++            "payment_outbox_claim.delivery_attempts",
++        )
++        if self.fencing_token < self.delivery_attempts:
++            raise ValueError("payment outbox fencing token cannot trail attempts")
++        acquired_at = _require_utc(
++            self.lease_acquired_at,
++            "payment_outbox_claim.lease_acquired_at",
++        )
++        expires_at = _require_utc(
++            self.lease_expires_at,
++            "payment_outbox_claim.lease_expires_at",
++        )
++        if expires_at <= acquired_at:
++            raise ValueError("payment outbox lease must expire after acquisition")
++        object.__setattr__(self, "lease_acquired_at", acquired_at)
++        object.__setattr__(self, "lease_expires_at", expires_at)
++
++
++@dataclass(frozen=True, slots=True)
++class PaymentReceipt:
++    receipt_id: str
++    idempotency_key: str
++    message_id: str
++    delivery_reference: str
++    delivery_id: str
++    delivery_version: int
++    delivered_at: datetime
++
++    def __post_init__(self) -> None:
++        for field_name in (
++            "receipt_id",
++            "idempotency_key",
++            "message_id",
++            "delivery_reference",
++            "delivery_id",
++        ):
++            object.__setattr__(
++                self,
++                field_name,
++                _require_id(
++                    getattr(self, field_name),
++                    f"payment_receipt.{field_name}",
++                ),
++            )
++        _require_positive_int(
++            self.delivery_version,
++            "payment_receipt.delivery_version",
++        )
++        object.__setattr__(
++            self,
++            "delivered_at",
++            _require_utc(self.delivered_at, "payment_receipt.delivered_at"),
++        )
++
++    @classmethod
++    def for_claim(
++        cls,
++        claim: PaymentOutboxClaim,
++        *,
++        receipt_id: str,
++        delivery_reference: str,
++        delivered_at: datetime,
++    ) -> PaymentReceipt:
++        if type(claim) is not PaymentOutboxClaim:
++            raise TypeError("claim must be exact PaymentOutboxClaim")
++        return cls(
++            receipt_id=receipt_id,
++            idempotency_key=claim.message_id,
++            message_id=claim.message_id,
++            delivery_reference=delivery_reference,
++            delivery_id=claim.delivery_id,
++            delivery_version=claim.delivery_version,
++            delivered_at=delivered_at,
++        )
++
++
+diff --git a/reservation_followup/workers.py b/reservation_followup/workers.py
+index 6d83dcb95d7a335fccf57ac8997bd9674504bd6a..2c4a59af3d0d974598971b7220bf18c41251b21a 100644
+--- a/reservation_followup/workers.py
++++ b/reservation_followup/workers.py
+@@ -10,0 +11 @@ from .handoff import HandoffEffectJob
++from .projection import PaymentEffectJob
+@@ -14,0 +16,2 @@ from .types import (
++    PaymentOutboxClaim,
++    PaymentReceipt,
+@@ -120,0 +124,95 @@ class HandoffOutboxWorker:
++@runtime_checkable
++class PaymentEffectDeliveryPort(Protocol):
++    delivery_id: str
++    delivery_version: int
++
++    def deliver(self, claim: PaymentOutboxClaim) -> PaymentReceipt: ...
++
++
++class PaymentOutboxWorkerDisposition(str, Enum):
++    IDLE = "idle"
++    DELIVERED = "delivered"
++    RETRYABLE_FAILURE = "retryable_failure"
++
++
++@dataclass(frozen=True, slots=True)
++class PaymentOutboxWorkerResult:
++    disposition: PaymentOutboxWorkerDisposition
++    message_id: str | None
++
++    def __post_init__(self) -> None:
++        if type(self.disposition) is not PaymentOutboxWorkerDisposition:
++            raise ValueError("disposition must use PaymentOutboxWorkerDisposition")
++        if self.message_id is not None:
++            object.__setattr__(
++                self,
++                "message_id",
++                _require_id(self.message_id, "payment_outbox_worker_result.message_id"),
++            )
++        if (self.disposition is PaymentOutboxWorkerDisposition.IDLE) != (
++            self.message_id is None
++        ):
++            raise ValueError("idle is the only result without a message_id")
++
++    @classmethod
++    def idle(cls) -> PaymentOutboxWorkerResult:
++        return cls(PaymentOutboxWorkerDisposition.IDLE, None)
++
++
++class PaymentOutboxWorker:
++    """Claim and deliver at most one already-persisted payment effect."""
++
++    def __init__(
++        self,
++        *,
++        store: SQLiteFollowupUnitOfWork,
++        delivery: PaymentEffectDeliveryPort,
++        worker_id: str,
++        lease_ttl: timedelta,
++    ) -> None:
++        if type(store) is not SQLiteFollowupUnitOfWork:
++            raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
++        delivery_id = _require_id(delivery.delivery_id, "delivery.delivery_id")
++        if type(delivery.delivery_version) is not int or delivery.delivery_version < 1:
++            raise ValueError("delivery.delivery_version must be an integer >= 1")
++        if not callable(getattr(delivery, "deliver", None)):
++            raise TypeError("delivery must expose deliver(claim)")
++        if type(lease_ttl) is not timedelta or lease_ttl <= timedelta(0):
++            raise ValueError("lease_ttl must be a positive timedelta")
++        self._store = store
++        self._delivery = delivery
++        self._delivery_id = delivery_id
++        self._delivery_version = delivery.delivery_version
++        self._worker_id = _require_id(worker_id, "worker_id")
++        self._lease_ttl = lease_ttl
++
++    def run_once(self, *, now: datetime) -> PaymentOutboxWorkerResult:
++        claim = self._store.claim_payment_outbox(
++            worker_id=self._worker_id,
++            delivery_id=self._delivery_id,
++            delivery_version=self._delivery_version,
++            now=now,
++            lease_ttl=self._lease_ttl,
++        )
++        if claim is None:
++            return PaymentOutboxWorkerResult.idle()
++        try:
++            receipt = self._delivery.deliver(claim)
++            if type(receipt) is not PaymentReceipt:
++                raise TypeError("delivery must return exact PaymentReceipt")
++        except Exception:
++            try:
++                self._store.release_payment_outbox(claim, now=now)
++            except Exception as release_error:
++                raise release_error from None
++            return PaymentOutboxWorkerResult(
++                PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE,
++                claim.message_id,
++            )
++        self._store.complete_payment_outbox(claim, receipt, now=now)
++        return PaymentOutboxWorkerResult(
++            PaymentOutboxWorkerDisposition.DELIVERED,
++            claim.message_id,
++        )
++
++
+diff --git a/tests/test_phase6_payment_claims.py b/tests/test_phase6_payment_claims.py
+index 7120f4ac6ee3ff5631a3b17318cff963958fe1e5..7e3eb44a228b705006cdbc64e1bc95926ab24f8a 100644
+--- a/tests/test_phase6_payment_claims.py
++++ b/tests/test_phase6_payment_claims.py
+@@ -88,0 +89 @@ def prepare_payment(
++    policy=None,
+@@ -90 +91,4 @@ def prepare_payment(
+-    opened = store.open_payment(anchor or confirmed_anchor(), payment_effect_policy())
++    opened = store.open_payment(
++        anchor or confirmed_anchor(),
++        policy or payment_effect_policy(),
++    )
+diff --git a/tests/test_phase6_payment_outbox.py b/tests/test_phase6_payment_outbox.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2805c9c7bacfa2fc75d52428dbe57e472e0c4638
+--- /dev/null
++++ b/tests/test_phase6_payment_outbox.py
+@@ -0,0 +1,403 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from datetime import timedelta
++import hashlib
++from pathlib import Path
++import tempfile
++import unittest
++
++from reservation_followup import (
++    EffectRequirement,
++    PaymentEffectJob,
++    PaymentEffectKind,
++    PaymentEffectPolicy,
++    PaymentMethod,
++    PaymentOutboxClaim,
++    PaymentOutboxWorker,
++    PaymentOutboxWorkerDisposition,
++    PaymentReceipt,
++    PaymentStatus,
++    SettlementCertainty,
++)
++from reservation_followup.sqlite_store import (
++    DataCorruption,
++    IdentityConflict,
++    SQLiteFollowupUnitOfWork,
++    StaleLease,
++)
++from tests.test_phase6_payment_claims import (
++    LEASE_TTL,
++    NOW,
++    alternate_anchor,
++    outcome,
++    pix_visual_evidence,
++    prepare_payment,
++)
++
++
++class DeliveryCrash(BaseException):
++    pass
++
++
++class FakePaymentEffectDelivery:
++    delivery_id = "payment-effect-delivery:synthetic"
++    delivery_version = 1
++
++    def __init__(self, mode: str = "success") -> None:
++        self.mode = mode
++        self.calls = 0
++        self.claims: list[PaymentOutboxClaim] = []
++
++    def deliver(self, claim: PaymentOutboxClaim) -> PaymentReceipt:
++        self.calls += 1
++        self.claims.append(claim)
++        if self.mode == "exception":
++            raise RuntimeError("SYNTHETIC_PRIVATE_PAYMENT_EFFECT_DETAIL")
++        if self.mode == "base_exception":
++            raise DeliveryCrash("synthetic payment effect crash")
++        if self.mode == "invalid":
++            return object()
++        return PaymentReceipt.for_claim(
++            claim,
++            receipt_id=f"payment:receipt:synthetic:{claim.message_id}",
++            delivery_reference=f"payment:delivery:reference:{claim.message_id}",
++            delivered_at=claim.lease_acquired_at,
++        )
++
++
++class Phase6PaymentOutboxTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.temporary = tempfile.TemporaryDirectory(prefix="phase6-task10-outbox-")
++        self.addCleanup(self.temporary.cleanup)
++        self.store = SQLiteFollowupUnitOfWork.open(Path(self.temporary.name) / "outbox.db")
++        self.addCleanup(self.store.close)
++
++    @staticmethod
++    def policy(
++        *,
++        internal: EffectRequirement = EffectRequirement.DISABLED,
++        booking: EffectRequirement = EffectRequirement.DISABLED,
++    ) -> PaymentEffectPolicy:
++        return PaymentEffectPolicy(
++            paid_state_transition=EffectRequirement.REQUIRED,
++            customer_payment_confirmation=EffectRequirement.REQUIRED,
++            internal_payment_email=internal,
++            booking_form=booking,
++        )
++
++    def settle(
++        self,
++        suffix: str,
++        *,
++        policy: PaymentEffectPolicy | None = None,
++        certainty: SettlementCertainty = SettlementCertainty.SETTLED,
++    ) -> str:
++        e2e_tail = hashlib.sha256(suffix.encode("utf-8")).hexdigest()[:11].upper()
++        state, event = prepare_payment(
++            self.store,
++            suffix=f"task10-{suffix}",
++            method=PaymentMethod.PIX,
++            evidence=pix_visual_evidence(
++                normalized_e2e=f"E1234567820270201{e2e_tail}",
++            ),
++            anchor=alternate_anchor(f"task10-{suffix}"),
++            policy=policy or self.policy(),
++        )
++        self.store.claim_payment_evidence(state.subject.payment_id, 3, event)
++        claim = self.store.claim_settlement(
++            worker_id=f"worker:settlement:task10:{suffix}",
++            now=NOW,
++            lease_ttl=LEASE_TTL,
++        )
++        permit = self.store.fence_settlement(
++            claim,
++            claim.command.canonical_payload,
++            now=NOW + timedelta(seconds=1),
++        )
++        result = outcome(
++            certainty,
++            claim_evidence=(permit.request_hash,),
++        )
++        self.store.record_settlement_outcome(
++            claim,
++            permit,
++            result,
++            now=NOW + timedelta(seconds=2),
++        )
++        return state.subject.payment_id
++
++    def worker(
++        self,
++        delivery: FakePaymentEffectDelivery,
++        *,
++        worker_id: str = "worker:payment-effect:task10",
++    ) -> PaymentOutboxWorker:
++        return PaymentOutboxWorker(
++            store=self.store,
++            delivery=delivery,
++            worker_id=worker_id,
++            lease_ttl=LEASE_TTL,
++        )
++
++    def ledger_fingerprint(self, payment_id: str):
++        return self.store._connection.execute(
++            "SELECT settlement_command_id, status, fencing_token, claim_count, "
++            "dispatch_slots_consumed, dispatch_request_hash, outcome_certainty, "
++            "outcome_hash, outcome_recorded_at FROM main.payment_ledger "
++            "WHERE payment_id=?",
++            (payment_id,),
++        ).fetchone()
++
++    def test_persisted_policy_matrix_is_exact_and_required_jobs_precede_optional(self) -> None:
++        payment_id = self.settle(
++            "policy",
++            policy=self.policy(
++                internal=EffectRequirement.OPTIONAL,
++                booking=EffectRequirement.REQUIRED,
++            ),
++        )
++        rows = tuple(
++            self.store._connection.execute(
++                "SELECT kind, payload_json FROM main.payment_outbox "
++                "WHERE payment_id=? ORDER BY kind",
++                (payment_id,),
++            )
++        )
++        self.assertEqual(
++            tuple(row[0] for row in rows),
++            (
++                "booking_form",
++                "customer_payment_confirmation",
++                "internal_payment_email",
++                "paid_state_transition",
++            ),
++        )
++        claims = []
++        for index in range(4):
++            claim = self.store.claim_payment_outbox(
++                worker_id=f"worker:payment-effect:policy:{index}",
++                delivery_id="payment-effect-delivery:policy",
++                delivery_version=1,
++                now=NOW + timedelta(seconds=3 + index),
++                lease_ttl=LEASE_TTL,
++            )
++            claims.append(claim)
++            self.store.release_payment_outbox(
++                claim,
++                now=NOW + timedelta(seconds=3 + index),
++            )
++            self.store._connection.execute(
++                "UPDATE main.payment_outbox SET status='delivered', delivered_at=?, "
++                "receipt_hash=?, updated_at=? WHERE message_id=?",
++                (
++                    (NOW + timedelta(seconds=3 + index)).isoformat(),
++                    hashlib.sha256(f"policy:{index}".encode()).hexdigest(),
++                    (NOW + timedelta(seconds=3 + index)).isoformat(),
++                    claim.message_id,
++                ),
++            )
++        self.assertEqual(
++            tuple((claim.message.kind, claim.message.required) for claim in claims),
++            (
++                (PaymentEffectKind.PAID_STATE_TRANSITION, True),
++                (PaymentEffectKind.CUSTOMER_PAYMENT_CONFIRMATION, True),
++                (PaymentEffectKind.BOOKING_FORM, True),
++                (PaymentEffectKind.INTERNAL_PAYMENT_EMAIL, False),
++            ),
++        )
++
++    def test_claim_exact_expiry_reclaims_and_stale_claim_cannot_mutate(self) -> None:
++        self.settle("expiry")
++        first = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:first",
++            delivery_id="payment-effect-delivery:expiry",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        second = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:second",
++            delivery_id="payment-effect-delivery:expiry",
++            delivery_version=1,
++            now=first.lease_expires_at,
++            lease_ttl=LEASE_TTL,
++        )
++        self.assertEqual(second.message_id, first.message_id)
++        self.assertGreater(second.fencing_token, first.fencing_token)
++        self.assertGreaterEqual(second.fencing_token, second.delivery_attempts)
++        receipt = PaymentReceipt.for_claim(
++            first,
++            receipt_id="payment:receipt:stale",
++            delivery_reference="payment:delivery:stale",
++            delivered_at=first.lease_expires_at,
++        )
++        with self.assertRaises(StaleLease):
++            self.store.complete_payment_outbox(first, receipt, now=first.lease_expires_at)
++        with self.assertRaises(StaleLease):
++            self.store.release_payment_outbox(first, now=first.lease_expires_at)
++
++    def test_success_receipt_is_atomic_replay_safe_and_worker_one_shot(self) -> None:
++        payment_id = self.settle("success")
++        delivery = FakePaymentEffectDelivery()
++        worker = self.worker(delivery)
++        before_ledger = self.ledger_fingerprint(payment_id)
++        first = worker.run_once(now=NOW + timedelta(seconds=3))
++        self.assertIs(first.disposition, PaymentOutboxWorkerDisposition.DELIVERED)
++        self.assertEqual(delivery.calls, 1)
++        self.assertEqual(self.ledger_fingerprint(payment_id), before_ledger)
++        claim = delivery.claims[0]
++        receipt = PaymentReceipt.for_claim(
++            claim,
++            receipt_id=f"payment:receipt:synthetic:{claim.message_id}",
++            delivery_reference=f"payment:delivery:reference:{claim.message_id}",
++            delivered_at=claim.lease_acquired_at,
++        )
++        replay = self.store.complete_payment_outbox(
++            claim,
++            receipt,
++            now=NOW + timedelta(seconds=11),
++        )
++        self.assertEqual(replay.message_id, claim.message_id)
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT COUNT(*) FROM main.payment_receipts"
++            ).fetchone(),
++            (1,),
++        )
++        second = worker.run_once(now=NOW + timedelta(seconds=4))
++        self.assertIs(second.disposition, PaymentOutboxWorkerDisposition.DELIVERED)
++        self.assertEqual(delivery.calls, 2)
++        self.assertIs(
++            worker.run_once(now=NOW + timedelta(seconds=5)).disposition,
++            PaymentOutboxWorkerDisposition.IDLE,
++        )
++
++    def test_delivery_failure_requeues_without_ledger_or_paid_state_regression(self) -> None:
++        payment_id = self.settle("failure")
++        delivery = FakePaymentEffectDelivery("exception")
++        before_ledger = self.ledger_fingerprint(payment_id)
++        before_state = self.store.load_payment(payment_id)
++        result = self.worker(delivery).run_once(now=NOW + timedelta(seconds=3))
++        self.assertIs(result.disposition, PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE)
++        self.assertEqual(delivery.calls, 1)
++        self.assertEqual(self.ledger_fingerprint(payment_id), before_ledger)
++        after_state = self.store.load_payment(payment_id)
++        self.assertEqual(after_state, before_state)
++        self.assertIs(after_state.status, PaymentStatus.PAID)
++        self.assertNotIn("PRIVATE", repr(result))
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT status, claim_owner, fencing_token, delivery_attempts "
++                "FROM main.payment_outbox WHERE message_id=?",
++                (result.message_id,),
++            ).fetchone(),
++            ("pending", None, 1, 1),
++        )
++
++    def test_optional_email_failure_leaves_paid_and_required_jobs_deliverable(self) -> None:
++        payment_id = self.settle(
++            "optional",
++            policy=self.policy(internal=EffectRequirement.OPTIONAL),
++        )
++        delivery = FakePaymentEffectDelivery()
++        worker = self.worker(delivery)
++        for offset in range(2):
++            self.assertIs(
++                worker.run_once(now=NOW + timedelta(seconds=3 + offset)).disposition,
++                PaymentOutboxWorkerDisposition.DELIVERED,
++            )
++        delivery.mode = "exception"
++        failed = worker.run_once(now=NOW + timedelta(seconds=5))
++        self.assertIs(failed.disposition, PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE)
++        self.assertIs(self.store.load_payment(payment_id).status, PaymentStatus.PAID)
++        self.assertIs(delivery.claims[-1].message.kind, PaymentEffectKind.INTERNAL_PAYMENT_EMAIL)
++        self.assertFalse(delivery.claims[-1].message.required)
++
++    def test_manual_review_delivery_never_changes_settlement_or_creates_command(self) -> None:
++        payment_id = self.settle(
++            "manual",
++            certainty=SettlementCertainty.DISPATCHED_UNKNOWN,
++        )
++        before_ledger = self.ledger_fingerprint(payment_id)
++        before_commands = self.store._connection.execute(
++            "SELECT COUNT(*) FROM main.payment_commands"
++        ).fetchone()
++        delivery = FakePaymentEffectDelivery()
++        result = self.worker(delivery).run_once(now=NOW + timedelta(seconds=3))
++        self.assertIs(result.disposition, PaymentOutboxWorkerDisposition.DELIVERED)
++        self.assertIs(delivery.claims[0].message.kind, PaymentEffectKind.MANUAL_REVIEW)
++        self.assertEqual(self.ledger_fingerprint(payment_id), before_ledger)
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT COUNT(*) FROM main.payment_commands"
++            ).fetchone(),
++            before_commands,
++        )
++        self.assertIs(self.store.load_payment(payment_id).status, PaymentStatus.MANUAL_REVIEW)
++
++    def test_invalid_receipt_and_divergent_replay_fail_without_write(self) -> None:
++        self.settle("receipt")
++        claim = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:receipt",
++            delivery_id="payment-effect-delivery:receipt",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        before = tuple(self.store._connection.iterdump())
++        forged = PaymentReceipt.for_claim(
++            replace(claim, delivery_id="payment-effect-delivery:forged"),
++            receipt_id="payment:receipt:forged",
++            delivery_reference="payment:delivery:forged",
++            delivered_at=NOW + timedelta(seconds=4),
++        )
++        with self.assertRaises(IdentityConflict):
++            self.store.complete_payment_outbox(
++                claim,
++                forged,
++                now=NOW + timedelta(seconds=4),
++            )
++        self.assertEqual(tuple(self.store._connection.iterdump()), before)
++
++    def test_base_exception_propagates_and_leaves_one_live_lease(self) -> None:
++        self.settle("base")
++        delivery = FakePaymentEffectDelivery("base_exception")
++        with self.assertRaises(DeliveryCrash):
++            self.worker(delivery).run_once(now=NOW + timedelta(seconds=3))
++        self.assertEqual(delivery.calls, 1)
++        self.assertEqual(
++            self.store._connection.execute(
++                "SELECT status, fencing_token, delivery_attempts FROM main.payment_outbox "
++                "WHERE status='leased'"
++            ).fetchone(),
++            ("leased", 1, 1),
++        )
++
++    def test_object_mutated_claim_and_receipt_fail_closed(self) -> None:
++        self.settle("mutated")
++        claim = self.store.claim_payment_outbox(
++            worker_id="worker:payment-effect:mutated",
++            delivery_id="payment-effect-delivery:mutated",
++            delivery_version=1,
++            now=NOW + timedelta(seconds=3),
++            lease_ttl=LEASE_TTL,
++        )
++        receipt = PaymentReceipt.for_claim(
++            claim,
++            receipt_id="payment:receipt:mutated",
++            delivery_reference="payment:delivery:mutated",
++            delivered_at=NOW + timedelta(seconds=4),
++        )
++        object.__setattr__(claim, "fencing_token", 99)
++        object.__setattr__(receipt, "message_id", "payment-effect:forged")
++        with self.assertRaises((ValueError, StaleLease, IdentityConflict)):
++            self.store.complete_payment_outbox(
++                claim,
++                receipt,
++                now=NOW + timedelta(seconds=4),
++            )
++
++
++if __name__ == "__main__":
++    unittest.main()

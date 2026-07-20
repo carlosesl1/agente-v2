@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .handoff import HandoffEffectJob
+    from .projection import PaymentEffectJob
     from .payment import PaymentSettlementCommand, VerifiedPaymentEvidence
 
 from reservation_domain import (
@@ -269,6 +270,136 @@ class HandoffReceipt:
             delivery_reference=delivery_reference,
             delivery_id=delivery_id,
             delivery_version=delivery_version,
+            delivered_at=delivered_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentOutboxClaim:
+    message: PaymentEffectJob
+    message_id: str
+    payment_id: str
+    payment_version: int
+    economic_signature: str
+    settlement_command_id: str
+    worker_id: str
+    delivery_id: str
+    delivery_version: int
+    fencing_token: int
+    lease_acquired_at: datetime
+    lease_expires_at: datetime
+    delivery_attempts: int
+
+    def __post_init__(self) -> None:
+        from .projection import PaymentEffectJob
+
+        if type(self.message) is not PaymentEffectJob:
+            raise ValueError("payment_outbox_claim.message must be exact PaymentEffectJob")
+        for field_name in (
+            "message_id",
+            "payment_id",
+            "settlement_command_id",
+            "worker_id",
+            "delivery_id",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _require_id(
+                    getattr(self, field_name),
+                    f"payment_outbox_claim.{field_name}",
+                ),
+            )
+        _require_positive_int(
+            self.payment_version,
+            "payment_outbox_claim.payment_version",
+        )
+        _require_hash(
+            self.economic_signature,
+            "payment_outbox_claim.economic_signature",
+        )
+        _require_positive_int(
+            self.delivery_version,
+            "payment_outbox_claim.delivery_version",
+        )
+        _require_positive_int(
+            self.fencing_token,
+            "payment_outbox_claim.fencing_token",
+        )
+        _require_positive_int(
+            self.delivery_attempts,
+            "payment_outbox_claim.delivery_attempts",
+        )
+        if self.fencing_token < self.delivery_attempts:
+            raise ValueError("payment outbox fencing token cannot trail attempts")
+        acquired_at = _require_utc(
+            self.lease_acquired_at,
+            "payment_outbox_claim.lease_acquired_at",
+        )
+        expires_at = _require_utc(
+            self.lease_expires_at,
+            "payment_outbox_claim.lease_expires_at",
+        )
+        if expires_at <= acquired_at:
+            raise ValueError("payment outbox lease must expire after acquisition")
+        object.__setattr__(self, "lease_acquired_at", acquired_at)
+        object.__setattr__(self, "lease_expires_at", expires_at)
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentReceipt:
+    receipt_id: str
+    idempotency_key: str
+    message_id: str
+    delivery_reference: str
+    delivery_id: str
+    delivery_version: int
+    delivered_at: datetime
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "receipt_id",
+            "idempotency_key",
+            "message_id",
+            "delivery_reference",
+            "delivery_id",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _require_id(
+                    getattr(self, field_name),
+                    f"payment_receipt.{field_name}",
+                ),
+            )
+        _require_positive_int(
+            self.delivery_version,
+            "payment_receipt.delivery_version",
+        )
+        object.__setattr__(
+            self,
+            "delivered_at",
+            _require_utc(self.delivered_at, "payment_receipt.delivered_at"),
+        )
+
+    @classmethod
+    def for_claim(
+        cls,
+        claim: PaymentOutboxClaim,
+        *,
+        receipt_id: str,
+        delivery_reference: str,
+        delivered_at: datetime,
+    ) -> PaymentReceipt:
+        if type(claim) is not PaymentOutboxClaim:
+            raise TypeError("claim must be exact PaymentOutboxClaim")
+        return cls(
+            receipt_id=receipt_id,
+            idempotency_key=claim.message_id,
+            message_id=claim.message_id,
+            delivery_reference=delivery_reference,
+            delivery_id=claim.delivery_id,
+            delivery_version=claim.delivery_version,
             delivered_at=delivered_at,
         )
 

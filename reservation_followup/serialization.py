@@ -58,6 +58,7 @@ from .types import (
     HandoffStatus,
     PaymentEffectPolicy,
     PaymentMethod,
+    PaymentReceipt,
     PaymentStatus,
     PaymentSubject,
     SettlementCertainty,
@@ -93,6 +94,7 @@ _TYPE_TAGS = {
     SettlementOutcome: "settlement_outcome",
     PaymentWorkflow: "payment_workflow",
     PaymentEffectJob: "payment_effect_job",
+    PaymentReceipt: "payment_receipt",
 }
 _NESTED_DATACLASSES = frozenset(
     (*_TYPE_TAGS, ExecutionOutcome, PaymentEvidenceTrust, VerifiedPaymentEvidence)
