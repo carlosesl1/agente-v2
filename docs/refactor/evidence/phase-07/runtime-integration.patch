@@ -817,7 +817,7 @@ index 0000000..d2799b3
 +  }
 +}
 diff --git a/tests/test_app_llm_central_webhook.py b/tests/test_app_llm_central_webhook.py
-index 7369001..f7ad83a 100644
+index 7021faf..93876be 100644
 --- a/tests/test_app_llm_central_webhook.py
 +++ b/tests/test_app_llm_central_webhook.py
 @@ -4,7 +4,8 @@ import subprocess
@@ -831,7 +831,7 @@ index 7369001..f7ad83a 100644
  from domain.debounce import InMemoryDebounceBuffer
  from domain.lead_state import LeadState
 diff --git a/tests/test_app_shadow_webhook.py b/tests/test_app_shadow_webhook.py
-index e061da7..0d06fa4 100644
+index b2eb9f3..f8ca811 100644
 --- a/tests/test_app_shadow_webhook.py
 +++ b/tests/test_app_shadow_webhook.py
 @@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
@@ -844,6 +844,19 @@ index e061da7..0d06fa4 100644
  from config.settings import Settings
  from domain.operational_orchestrator import OrchestrationResult, orchestrate_event
  from domain.routing import RouteDecision
+diff --git a/tests/test_behavior_surface_ownership.py b/tests/test_behavior_surface_ownership.py
+index 7b5a6a7..e2a32e4 100644
+--- a/tests/test_behavior_surface_ownership.py
++++ b/tests/test_behavior_surface_ownership.py
+@@ -196,7 +196,7 @@ def test_pix_instructions_are_owned_by_hermes_not_cerebro_or_skills():
+     assert "pix_hospedagem_hostel" not in faq
+     assert "pix_passeios_agencia" not in faq
+     for factual_instruction in (
+-        "synthetic-7a8d9c8b068436d8@example.invalid",
++        "synthetic-8aadbd6dabd8c61b@example.invalid",
+         "synthetic-36c49bba6c68f3f6",
+         "Rosileide Novaes Bastos",
+         "Guilherme Hoff Figueiredo",
 diff --git a/tests/test_dashboard.py b/tests/test_dashboard.py
 index 593b56f..ee1d39c 100644
 --- a/tests/test_dashboard.py
@@ -858,7 +871,7 @@ index 593b56f..ee1d39c 100644
  from domain.lead_state import LeadState, ReservationRef
  from domain.shadow_log import InMemoryShadowLog
 diff --git a/tests/test_manychat_single_confirmation_flow.py b/tests/test_manychat_single_confirmation_flow.py
-index a9d872b..5b5b63a 100644
+index a9f331b..3eda60f 100644
 --- a/tests/test_manychat_single_confirmation_flow.py
 +++ b/tests/test_manychat_single_confirmation_flow.py
 @@ -7,7 +7,7 @@ from typing import Any
@@ -1612,8 +1625,43 @@ index 0000000..12dee3e
 +        / "chapada_leads/api/lifespan.py"
 +    ).read_text()
 +    assert "phase7_turn_adapter=ctx.phase7_turn_adapter" in lifespan_source
+diff --git a/tests/test_pix_payment_instructions.py b/tests/test_pix_payment_instructions.py
+index b612dd4..792f167 100644
+--- a/tests/test_pix_payment_instructions.py
++++ b/tests/test_pix_payment_instructions.py
+@@ -11,7 +11,7 @@ def test_cerebro_does_not_own_pix_payment_details():
+
+     assert "pix_hospedagem_hostel" not in ids
+     assert "pix_passeios_agencia" not in ids
+-    assert "synthetic-7a8d9c8b068436d8@example.invalid" not in text
++    assert "synthetic-8aadbd6dabd8c61b@example.invalid" not in text
+     assert "synthetic-36c49bba6c68f3f6" not in text
+
+
+@@ -20,7 +20,7 @@ def test_hermes_context_treats_pix_data_request_as_payment_instruction_not_strip
+
+     assert "Pedido de dados Pix" in hermes_context
+     assert "Rosileide Novaes Bastos" in hermes_context
+-    assert "synthetic-7a8d9c8b068436d8@example.invalid" in hermes_context
++    assert "synthetic-8aadbd6dabd8c61b@example.invalid" in hermes_context
+     assert "Guilherme Hoff Figueiredo" in hermes_context
+     assert "synthetic-36c49bba6c68f3f6" in hermes_context
+     assert "não pedido de link Stripe" in hermes_context
+diff --git a/tests/test_recepcionista_migration.py b/tests/test_recepcionista_migration.py
+index 16b0a52..c7c75f8 100644
+--- a/tests/test_recepcionista_migration.py
++++ b/tests/test_recepcionista_migration.py
+@@ -133,7 +133,7 @@ def test_recepcionista_payment_policy_has_basic_public_guidance_owned_by_hermes(
+     hermes = (ROOT / "HERMES.md").read_text(encoding="utf-8")
+     assert "cartão ou Wise" in hermes
+     assert "cerebro_consultar` não é necessário para informar Pix" in hermes
+-    assert "synthetic-7a8d9c8b068436d8@example.invalid" in hermes
++    assert "synthetic-8aadbd6dabd8c61b@example.invalid" in hermes
+     assert "synthetic-36c49bba6c68f3f6" in hermes
+
+
 diff --git a/tests/test_requested_regressions.py b/tests/test_requested_regressions.py
-index 04a8961..12b3700 100644
+index 77396a5..68fc699 100644
 --- a/tests/test_requested_regressions.py
 +++ b/tests/test_requested_regressions.py
 @@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor

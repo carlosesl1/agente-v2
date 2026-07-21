@@ -1,32 +1,52 @@
 {
-  "candidate_commit": "01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b",
-  "candidate_tree": "0d5b4e6fea988ae581a529dcf526d6aeb80e6346",
-  "evidence_reuse_reason": "Reused without heavy rerun: reservation kernel, wheel payload, runtime patch and replica are byte-identical; the successor changes only terminal diagnostics/tests and reclassifies historical CI evidence.",
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "closeout_tests_passed": 18,
+  "evidence_reuse_reason": "Reused without heavy rerun: diff from the fifth candidate has zero changes under reservation_boundary/ and schemas/phase7, and the wheel is byte-identical; capture and sanitized runtime were rerun separately.",
   "evidence_reused_from_candidate": {
-    "commit": "42687095fd06225092b4a26f1423d06d3373ab13",
-    "tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99"
+    "commit": "01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b",
+    "tree": "0d5b4e6fea988ae581a529dcf526d6aeb80e6346"
   },
   "focused_core": {
     "passed": true,
+    "reused": true,
     "tests": 66
   },
   "live_capabilities_executed": [],
+  "package_tests_passed": 3,
   "patch_apply_reverse": {
-    "baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
-    "integration_tree": "922608a044c0e65e65eafadce3c77451e32547d9",
+    "baseline_commit": "3192a6b8122535e2b8a2fb047a152aa363aaf0de",
+    "baseline_tree": "9a6732ecba40f4771a97b931305ad9d175d48593",
+    "integration_commit": "183fb41d645e1bb04e237c986988309a28e42b34",
+    "integration_tree": "e546e9d88093c09a245502bcca3d119e2e450672",
     "passed": true,
-    "patch_sha256": "08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789"
+    "patch_bytes": 96073,
+    "patch_sha256": "4d0ccd5e6dae410abca8da8b555fd0784668eecd5c4e0499e919997be38e0218"
   },
   "phase": 7,
   "phase8_started": false,
   "rollout": "NO-GO",
+  "runtime_capture": {
+    "passed": true,
+    "tests": 9
+  },
   "runtime_full": {
-    "duration_seconds": 36,
-    "output_bytes": 1572,
-    "output_sha256": "0ae1b9a970f14e58f8914334184d6af264e5e9959d086d43d395ca257d1c2703",
+    "execution_parts": [
+      {
+        "failed": 1,
+        "failure_class": "test harness PATH only",
+        "passed": 964
+      },
+      {
+        "failed": 0,
+        "passed": 1,
+        "scope": "corrected PATH focused rerun"
+      }
+    ],
     "passed": true,
     "tests": 965
   },
+  "schema_tests_passed": 4,
   "source_unchanged": true,
   "wheel_bytes": 214954,
   "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"

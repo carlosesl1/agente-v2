@@ -1,7 +1,7 @@
 {
-  "baseline_commit": "3da1f41103fd25bc0c1c0242a7e05cf9da22ad82",
-  "baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
-  "changed_file_count": 20,
+  "baseline_commit": "3192a6b8122535e2b8a2fb047a152aa363aaf0de",
+  "baseline_tree": "9a6732ecba40f4771a97b931305ad9d175d48593",
+  "changed_file_count": 23,
   "changed_files": [
     ".hermes/plugins/chapada_leads_tools/__init__.py",
     "app.py",
@@ -17,31 +17,49 @@
     "tests/fixtures/phase7_boundary_states.json",
     "tests/test_app_llm_central_webhook.py",
     "tests/test_app_shadow_webhook.py",
+    "tests/test_behavior_surface_ownership.py",
     "tests/test_dashboard.py",
     "tests/test_manychat_single_confirmation_flow.py",
     "tests/test_operational_config_orchestrator.py",
     "tests/test_phase7_tool_dispatch_adapter.py",
     "tests/test_phase7_turn_coordinator_adapter.py",
+    "tests/test_pix_payment_instructions.py",
+    "tests/test_recepcionista_migration.py",
     "tests/test_requested_regressions.py"
   ],
   "focused_tests": [
     {
-      "duration_seconds": 36,
       "exit_code": 0,
-      "failed": 0,
-      "output_bytes": 1572,
-      "output_sha256": "0ae1b9a970f14e58f8914334184d6af264e5e9959d086d43d395ca257d1c2703",
-      "passed": 965,
-      "scope": "review3_runtime_full_and_boundary_adapters"
+      "passed": true,
+      "scope": "review5_sanitized_runtime_blast_radius",
+      "selected_test_files": 21
+    },
+    {
+      "execution_parts": [
+        {
+          "failed": 1,
+          "failure_class": "harness PATH omitted /usr/local/bin",
+          "passed": 964,
+          "scope": "full clean-env attempt"
+        },
+        {
+          "failed": 0,
+          "passed": 1,
+          "scope": "failed harness test with corrected PATH"
+        }
+      ],
+      "passed": true,
+      "scope": "review5_runtime_full_aggregate",
+      "tests": 965
     }
   ],
-  "integration_commit": "7ccb8c58235c0fc3780bf9d3fde244924158a35e",
-  "integration_tree": "922608a044c0e65e65eafadce3c77451e32547d9",
+  "integration_commit": "183fb41d645e1bb04e237c986988309a28e42b34",
+  "integration_tree": "e546e9d88093c09a245502bcca3d119e2e450672",
   "live_capabilities_executed": [],
   "patch_applies": true,
-  "patch_bytes": 93625,
+  "patch_bytes": 96073,
   "patch_path": "docs/refactor/evidence/phase-07/runtime-integration.patch",
-  "patch_sha256": "08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789",
+  "patch_sha256": "4d0ccd5e6dae410abca8da8b555fd0784668eecd5c4e0499e919997be38e0218",
   "phase": 7,
   "phase8_started": false,
   "production_files": [

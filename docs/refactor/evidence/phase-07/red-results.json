@@ -558,6 +558,19 @@
       "unfixed_patch": "review2-runtime-tests.patch",
       "unfixed_patch_bytes": 40381,
       "unfixed_patch_sha256": "1441a556cf352ecf45d34e419799c745ea61e1161170a9e80ba1c5eebff7f12a"
+    },
+    {
+      "causal_failure": "CaptureRejected: tracked HERMES.md email remained outside deterministic redaction path",
+      "command": "python3 -B -m unittest tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_capture_reconstructs_safe_dirty_state_without_source_drift -v",
+      "exit_code": 1,
+      "name": "review5-tracked-operational-guidance",
+      "output_bytes": 1431,
+      "output_path": "review5-red-reports/runtime-tracked-email-red.out",
+      "output_sha256": "30aa73fe31e5c1795bcdc1b7494c626fd284e7b6d9f31adf9be1db3c3bbe3e57",
+      "task": 17,
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1
     }
   ],
   "phase": 7,

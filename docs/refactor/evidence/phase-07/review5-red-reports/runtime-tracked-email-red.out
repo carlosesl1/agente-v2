@@ -1,0 +1,20 @@
+test_capture_reconstructs_safe_dirty_state_without_source_drift (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_capture_reconstructs_safe_dirty_state_without_source_drift) ... ERROR
+
+======================================================================
+ERROR: test_capture_reconstructs_safe_dirty_state_without_source_drift (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_capture_reconstructs_safe_dirty_state_without_source_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_runtime_capture.py", line 208, in test_capture_reconstructs_safe_dirty_state_without_source_drift
+    result = capture_runtime(
+             ^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/scripts/capture_phase7_runtime.py", line 768, in capture_runtime
+    payload, count = _scan_text(
+                     ^^^^^^^^^^^
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/scripts/capture_phase7_runtime.py", line 470, in _scan_text
+    raise CaptureRejected(f"email-like literal in capture input: {relative}")
+scripts.capture_phase7_runtime.CaptureRejected: email-like literal in capture input: HERMES.md
+
+----------------------------------------------------------------------
+Ran 1 test in 0.068s
+
+FAILED (errors=1)

@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **quinto candidato congelado; revisão terminal final e CI remoto vigente pendentes**.
+Status: **sexto candidato congelado; revisão terminal final e CI remoto vigente pendentes**.
 
 ## Entrada
 
@@ -27,7 +27,8 @@ continuam explicitamente marcadas como limitações de proveniência.
 - `runtime-integration-manifest.json`: commits/trees/wheel/testes focused;
 - `runtime-integration-contract-manifest.json`: contrato após integração.
 
-O patch reproduz a tree `922608a044c0e65e65eafadce3c77451e32547d9`.
+O patch reproduz a tree `e546e9d88093c09a245502bcca3d119e2e450672`
+a partir da baseline sanitizada `3192a6b8122535e2b8a2fb047a152aa363aaf0de`.
 O source operacional permaneceu no HEAD `57408d8b2040399bc25ee7957505208079458884`.
 O pre-flight registrou 80 entradas locais; o manifesto de captura fixa as 86
 entradas observadas posteriormente e seus hashes exatos. A Fase 7 autentica o
@@ -49,7 +50,7 @@ diffs da árvore suja.
 ## Candidato e validação terminal
 
 - `candidate.json`: commit/tree/wheel/patch do candidato congelado;
-- `local-integration-result.json`: validação local do quarto candidato;
+- `local-integration-result.json`: validação local do sexto candidato;
 - `runtime-validation-result.json`: patch apply/reverse, source e runtime;
 - `properties-result.json`: gate integral local 20.000/20.000;
 - `faults-result.json`: seis faults, 2.000 restarts e contention 200;
@@ -80,9 +81,14 @@ REDs da segunda remediação e seus patches test-only também estão retidos.
 `deleg_b0435b2f`. O batch `deleg_0b93ad03` aprovou as lanes de persistência e
 runtime, mas a lane de proveniência retornou `Needs fixes`; portanto, não houve
 aprovação 3/3 e o quarto candidato foi invalidado. `review-attempt-4.json`
-retém esses três pareceres e o RED causal do diagnóstico terminal; o quinto
-candidato corrige apenas o agregador terminal, seus testes e a classificação
-do CI histórico, sem alterar kernel, wheel, patch ou réplica.
+retém esses três pareceres e o RED causal do diagnóstico terminal. O quinto
+candidato corrigiu o agregador terminal, mas o batch `deleg_ab36b5c1` terminou
+2/3 `Approved`: a lane de proveniência demonstrou que a recaptura exata ainda
+rejeitava um e-mail operacional não reservado em `HERMES.md`.
+`review-attempt-5.json`, `review5-raw-reports/` e `review5-red-reports/` retêm
+o parecer e o RED causal. O sexto candidato fecha essa transformação, recaptura
+a source inalterada, preserva semântica de país em telefones sintéticos por área
+impossível `00`, reconstrói a réplica e reproduz o patch sobre a baseline nova.
 `review-result.json` permanece ausente até um novo candidato obter três
 verdicts terminais válidos.
 

@@ -1,0 +1,52 @@
+## Authentication
+
+- **Evidence child:** `a1feaf5cd63ce09a480cb20f517b084690d85dcd`, tree `5f4f6f8767691fd9457fd5d00f45e65c4a9b2d8f`.
+- **Pai/candidato direto:** `01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b`, tree `0d5b4e6fea988ae581a529dcf526d6aeb80e6346`; relação de pai direto confirmada.
+- **Candidato anterior:** `42687095fd06225092b4a26f1423d06d3373ab13`, tree `f9fa5d9077ef996f0e95c84187626f8758d50c99`.
+  - A aprovação anterior desta lane autenticou esse candidato por meio do evidence child `18851e355f1201efe00f0d4f68e6ff13db9ac016`, tree `97c7123e031e3cf3c004732a040a3fc11443ed5c`.
+  - `42687095… → 18851e3…` altera somente 26 caminhos em `docs/refactor/evidence/phase-07/`. Esse é o envelope correto para comparar o patch previamente aprovado.
+- **Delta para o candidato atual:** de `18851e3…` para `01d5b6f…`, exatamente:
+  - rename de `ci-result.json` para `ci-result-invalidated-29787387850.json`;
+  - `scripts/validate_phase7.py`;
+  - `tests/test_phase7_closeout.py`.
+  Nenhum arquivo de runtime/kernel/schema/catalog/adapters/ingress/store/pagamentos mudou.
+- **Evidence child atual:** 14 caminhos alterados, todos sob `docs/refactor/evidence/phase-07/`; nenhuma mudança em produção, testes, schemas ou scripts.
+- **Réplica:** `7ccb8c58235c0fc3780bf9d3fde244924158a35e`, tree `922608a044c0e65e65eafadce3c77451e32547d9`; identidade igual à previamente aprovada e worktree limpa.
+- **Patch:** `93.625` bytes, SHA-256 `08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789`.
+  - Mesmo blob Git no evidence anterior aprovado, candidato atual e evidence child atual.
+  - Reverse apply check passou.
+  - Reconstrução forward em índice/object store temporários produziu exatamente a tree `922608a044c0e65e65eafadce3c77451e32547d9`; resíduo temporário removido.
+  - O diff Git nativo tem 20 bytes adicionais, exclusivamente espaços finais em 20 linhas de contexto; universo de hunks/linhas alteradas e digest das linhas `+/-` são idênticos.
+- **Wheel:** `214.954` bytes, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`; cinco cópias locais byte-idênticas encontradas.
+- **Não-drift:** 20 blobs exatos de kernel/package/schemas/manifests/patch comparados contra o envelope anteriormente aprovado, com `0` divergências. A identidade imutável da réplica prova ausência de mudanças nos adapters, ingress, store authority e pagamentos.
+- **Catálogos/schemas:** manifests runtime e integration permanecem byte-idênticos ao aprovado; objetos dos 13 tools são exatamente iguais, com `5 read / 7 write / 1 state_commit`, incluindo os cinco tools de pagamento.
+- **Evidência:** manifesto com `102/102` arquivos presentes e hashes/tamanhos corretos; `SHA256SUMS` igual ao manifesto; hash do manifesto igual ao registrado em `candidate.json`.
+- **Checks causais fresh:** os dois testes exatos do diagnóstico terminal passaram: `Ran 2 tests ... OK`.
+- **Estado final:** repositório principal e réplica com status limpo; nenhum timeout, rede, suíte integral ou capability live.
+
+Verdict: Approved
+
+## Findings
+
+### Critical
+nenhum
+
+### Important
+nenhum
+
+### Minor
+nenhum
+
+## Residual risks
+
+- Os `965` testes da réplica, `66` focused e gates pesados (`20.000` properties, seis faults, `2.000` restarts, 200 contention rows e `12/12` mutations) são evidência histórica proporcionalmente reutilizada; não foram repetidos nesta revisão.
+- A igualdade do patch com o diff nativo é semântica, não byte a byte, devido exclusivamente aos 20 espaços finais removidos de linhas de contexto; a tree reconstruída e as linhas alteradas coincidem exatamente.
+- Nenhuma rede, provider, banco live ou capacidade comercial foi exercida.
+- Rollout permanece `NO-GO`; `phase8_started=false`.
+
+## Resumo
+
+- Autenticado zero drift de réplica, patch, wheel, kernel, catálogos, schemas, adapters, ingress, store authority e pagamentos.
+- Confirmado que o novo candidato muda apenas diagnóstico/teste terminal e reclassificação do CI histórico, e que seu evidence child contém somente documentação/evidência.
+- Arquivos criados ou modificados nos repositórios: **nenhum**.
+- Problemas encontrados: **nenhum**.

@@ -1,0 +1,40 @@
+{
+  "accepted_findings": 1,
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "capture_tests": 9,
+  "closeout_tests_passed": 18,
+  "completed_at": "2026-07-21T04:01:42Z",
+  "kernel_diff_from_invalidated_candidate": 0,
+  "live_capabilities_executed": [],
+  "package_tests_passed": 3,
+  "patch_bytes": 96073,
+  "patch_sha256": "4d0ccd5e6dae410abca8da8b555fd0784668eecd5c4e0499e919997be38e0218",
+  "phase": 7,
+  "phase8_started": false,
+  "review_attempt": "review-attempt-5.json",
+  "rollout": "NO-GO",
+  "runtime_blast_radius_passed": true,
+  "runtime_full_execution_parts": [
+    {
+      "failed": 1,
+      "failure_class": "PATH omitted /usr/local/bin",
+      "passed": 964,
+      "scope": "full clean-env attempt"
+    },
+    {
+      "failed": 0,
+      "passed": 1,
+      "scope": "focused corrected-PATH test"
+    }
+  ],
+  "runtime_full_tests": 965,
+  "runtime_integration_commit": "183fb41d645e1bb04e237c986988309a28e42b34",
+  "runtime_integration_tree": "e546e9d88093c09a245502bcca3d119e2e450672",
+  "schema_diff_from_invalidated_candidate": 0,
+  "schema_tests_passed": 4,
+  "synthetic_baseline_commit": "3192a6b8122535e2b8a2fb047a152aa363aaf0de",
+  "synthetic_baseline_tree": "9a6732ecba40f4771a97b931305ad9d175d48593",
+  "wheel_bytes": 214954,
+  "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"
+}

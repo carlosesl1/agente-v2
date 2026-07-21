@@ -1,0 +1,40 @@
+## Authentication
+
+- **Evidence child:** `a1feaf5cd63ce09a480cb20f517b084690d85dcd`, tree `5f4f6f8767691fd9457fd5d00f45e65c4a9b2d8f`.
+- **Pai/candidato direto:** `01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b`, tree `0d5b4e6fea988ae581a529dcf526d6aeb80e6346`.
+- O evidence child altera 14 arquivos, todos sob `docs/refactor/evidence/phase-07/`; nenhum código, teste, schema ou script funcional.
+- **Wheel:** reconstruída duas vezes, byte-idêntica: `214954` bytes, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`.
+- **Réplica:** autenticada diretamente em `/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b`: commit `7ccb8c58235c0fc3780bf9d3fde244924158a35e`, tree `922608a044c0e65e65eafadce3c77451e32547d9`, worktree limpa. Baseline `3da1f41103fd25bc0c1c0242a7e05cf9da22ad82`, tree `72c19010aaa6e1263384c20315cb7f4d8eeb111e`.
+- **Patch:** `93625` bytes, SHA-256 `08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789`; reverse-check sobre a réplica passou.
+- **Finding 1 anterior:** fechado. O RED retido tem `1106` bytes/SHA-256 `1572ae1a528631c690ebc6660d26ea88f97f6db5160451ee8924e92957e2042e` e falha no estado anterior. Frescamente, os dois testes diagnósticos passaram em `0.229s`. Validator pré: `passed`, exit `0`. Terminal: `blocked`, exit `1`, zero failures e exatamente os blockers `ci-result.json` e `review-result.json`.
+- **Finding 2 anterior:** fechado. O README identifica o quinto candidato, tree atual da réplica, properties locais `20.000/20.000`, CI histórico `ci-result-invalidated-29787387850.json` ligado a `ef5dd46c27ccb72e977b333f526521a5f6b0225c` e ausência de CI vigente.
+- `review-attempt-4.json` e os três raw reports conferem com seus hashes; registram 2 lanes `Approved` e lane 3 `Needs fixes`.
+- Manifest/SHA256SUMS: 102 entradas autenticadas; `sha256sum -c` e `generate_phase7_manifest.py --check` passaram.
+- Workflow: exatamente três uploads por `${{ github.sha }}`, com ausência fatal e retenção de 30 dias; teste focado passou.
+- Fingerprint operacional fresco coincide integralmente: HEAD `57408d8b2040399bc25ee7957505208079458884`, tree `67b5fe18d4685281778e41cd61cd584dd063ea60`, 86 entradas e hashes declarados.
+- Nenhuma rede ou CI novo foi executado.
+
+## Verdict
+
+Needs fixes
+
+## Findings
+
+### Critical
+
+- nenhum.
+
+### Important
+
+- `scripts/capture_phase7_runtime.py:468-470,765-772`; `docs/refactor/evidence/phase-07/runtime-source-manifest.json:34-36`; `/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b/HERMES.md:83` — a source congelada e as trees baseline/integração contêm um literal de e-mail fora dos domínios reservados aceitos pelo scanner. A recaptura fresca, usando o código versionado e a source cujo fingerprint coincide exatamente, falha com `CaptureRejected: email-like literal in capture input: HERMES.md`; o scanner estrito também rejeita diretamente o arquivo da réplica. Impacto: a réplica sanitizada não é reproduzível pela implementação atual e não satisfaz sua própria política fail-closed. É necessário corrigir a transformação/exceção de forma estreita, recapturar e reautenticar baseline, réplica, patch e evidências.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- A confirmação de zero runs para o commit `[skip ci]` foi fornecida externamente e não refeita, conforme a proibição de rede.
+- Suíte integral e gates pesados não foram executados.
+- Não há CI vigente nem `review-result.json`; o rollout permanece `NO-GO` e `phase8_started=false`.
+- Arquivos criados ou modificados nos repositórios: **nenhum**; diretórios temporários foram removidos.

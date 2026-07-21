@@ -1,23 +1,32 @@
 {
-  "candidate_commit": "01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b",
-  "candidate_tree": "0d5b4e6fea988ae581a529dcf526d6aeb80e6346",
-  "duration_seconds": 36,
-  "evidence_reuse_reason": "Reused without heavy rerun: reservation kernel, wheel payload, runtime patch and replica are byte-identical; the successor changes only terminal diagnostics/tests and reclassifies historical CI evidence.",
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "evidence_reuse_reason": "Reused without heavy rerun: diff from the fifth candidate has zero changes under reservation_boundary/ and schemas/phase7, and the wheel is byte-identical; capture and sanitized runtime were rerun separately.",
   "evidence_reused_from_candidate": {
-    "commit": "42687095fd06225092b4a26f1423d06d3373ab13",
-    "tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99"
+    "commit": "01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b",
+    "tree": "0d5b4e6fea988ae581a529dcf526d6aeb80e6346"
   },
-  "finished_at": "2026-07-21T02:38:36Z",
+  "finished_at": "2026-07-21T04:01:42Z",
   "live_capabilities_executed": [],
-  "output_bytes": 1572,
-  "output_path": "retained by hash; pytest text is non-authoritative compared with the deterministic test count",
-  "output_sha256": "0ae1b9a970f14e58f8914334184d6af264e5e9959d086d43d395ca257d1c2703",
   "passed": true,
   "phase": 7,
   "phase8_started": false,
   "rollout": "NO-GO",
-  "runtime_integration_commit": "7ccb8c58235c0fc3780bf9d3fde244924158a35e",
-  "runtime_integration_tree": "922608a044c0e65e65eafadce3c77451e32547d9",
+  "runtime_integration_commit": "183fb41d645e1bb04e237c986988309a28e42b34",
+  "runtime_integration_tree": "e546e9d88093c09a245502bcca3d119e2e450672",
+  "runtime_test_execution_parts": [
+    {
+      "failed": 1,
+      "failure_class": "PATH omitted /usr/local/bin",
+      "passed": 964,
+      "scope": "full clean-env attempt"
+    },
+    {
+      "failed": 0,
+      "passed": 1,
+      "scope": "focused corrected-PATH test"
+    }
+  ],
   "runtime_tests": 965,
   "source_after": {
     "diff_sha256": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
@@ -33,7 +42,7 @@
     "status_sha256": "e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a",
     "tree": "67b5fe18d4685281778e41cd61cd584dd063ea60"
   },
-  "started_at": "2026-07-21T02:38:00Z",
+  "started_at": "2026-07-21T03:39:00Z",
   "wheel_bytes": 214954,
   "wheel_install_mode": "stdlib zipfile extractall of pure-Python wheel into isolated target",
   "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"
