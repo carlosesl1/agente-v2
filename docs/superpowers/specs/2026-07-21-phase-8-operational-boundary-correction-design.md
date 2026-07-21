@@ -1273,6 +1273,9 @@ A factory constrói e autentica:
 - durable dispatch authority + public delivery worker/execution-lock factory +
   capability-free reconciler;
 - memory authority/learning target;
+- memory-preparation-v1 store/authority/recovery worker +
+  `MemoryPreparationExecutionLockFactory` compartilhada com o qualification
+  controller;
 - qualification journal/controller;
 - coordinator + runtime adapter;
 - routes e lifespan.
@@ -1287,7 +1290,8 @@ O graph inclui explicitamente ownership reconciler, attempt scavenger,
 `BoundaryInternalJobReconciler`,
 Phase5/6 provider workers/reconcilers, follow-up delivery workers/reconcilers,
 `PublicDeliveryWorker`, public reconciler e
-learning authority. O import graph do plugin filho mínimo faz parte do manifest.
+learning authority, memory-preparation recovery worker e qualification controller. O
+import graph do plugin filho mínimo faz parte do manifest.
 O semantic scan de readiness recompõe
 transcript commitments, canonical proposal/decision, target ingress receipts e
 todos os source acknowledgements.
@@ -1304,6 +1308,10 @@ resolved lock path, device/inode e mount precisam coincidir; os ports `lookup`
 read-only são obrigatórios e targets sem receipt lookup fail-closed.
 Follow-up delivery senders/reconcilers/canceler também precisam resolver o mesmo Phase6
 DB identity e execution-lock inode/mount; qualquer divergência falha startup.
+Memory-preparation controller/recovery worker precisam resolver o mesmo registry DB,
+payload root e execution-lock inode/mount; o controller recebe orchestration
+`reserve|prepare|commit|ack`, e o recovery worker somente
+`lookup|resume_exact|ack|abandon`, sem learning mutation genérica.
 
 Memória aprendida não contamina esse digest estrutural. Um
 `BehaviorStateSnapshot` canônico contém schema/version/hash da memória dinâmica;
@@ -1504,8 +1512,9 @@ handoff messages, fences e outcomes: `available=0`, `bound=0`, allocations
 e generations/bindings
 idênticos. Assim o excesso é impedido **antes** do efeito, não apenas detectado.
 
-Cancelamento/revogação executa saga fechada nesta ordem: (1) CAS global da
-admission para `FROZEN`; (2) drena/terminaliza cada admission ativa sob seu lead
+Cancelamento/revogação executa saga fechada nesta ordem: (1)
+`begin_cancel_qualification` faz CAS atômico run+admission para `FROZEN`; (2)
+drena/terminaliza cada admission ativa sob seu lead
 lock; (3) fecha a boundary public generation/rows e faz `begin_close_generation` nos
 roots Phase5/6, impedindo novos root binds/fences; (4) fecha source relays/internal
 jobs pelos protocolos target-local/lock e reconcilia target-commit/source-ack; (5)
@@ -1606,8 +1615,13 @@ universe exato:
    ACK/abort nunca removem
    membership;
 3. `qualification_runs` — qualification ID, contract bytes/hash, admission epoch,
-   allocation-manifest bytes/hash, status, cutoff sequence, canonical ordered
-   admitted-set JSON/hash, expected CAS fields e hashes dos artifacts terminais;
+   allocation-manifest bytes/hash, status exato em
+   `INSTALLING|OPEN|QUALIFYING|EFFECTS_VERIFIED`,
+   `LEARNING_DRAINED|MEMORY_SEALED|TRANSITION_RECORDED|QUALIFIED` ou
+   `FROZEN|CANCELLED|MANUAL_REVIEW`, cutoff sequence, canonical ordered
+   admitted-set JSON/hash, expected CAS fields, cancel operation/origin status/revision
+   nullable, reopen intent ID/attempt/state/revision nullable e hashes dos artifacts
+   terminais;
 4. `qualification_scenarios` — PK
    `(qualification_id, epoch, scenario_id)`, contract hash, aggregates e terminal
    verification receipt;
@@ -1615,8 +1629,8 @@ universe exato:
    `(qualification_id, epoch, artifact_kind, artifact_id)`, UNIQUE
    `(artifact_kind, artifact_id)` e hashes/bytes canônicos
    de turn, target ingress, allocation installation/closure, provider outcome, delivery,
-   child-allocation decision, compensation, learning, cancel, memory preparation,
-   reopen, seal, transition e
+   child-allocation decision, compensation, learning, cancel-start/cancel-terminal,
+   memory preparation/ack/abandon, reopen, seal, transition e
    binding receipts.
 
 Constraints/semantic scan exigem cached active count igual ao número de admissions
@@ -1624,6 +1638,10 @@ Constraints/semantic scan exigem cached active count igual ao número de admissi
 token/owner/preimage all-null ou all-present conforme status e backlinks terminais
 all-null/all-present. Row, scenario, installation receipt ou membership extra/ausente
 falha readiness.
+`qualification_runs.reopen_intent_state` é exatamente
+`NULL|PREPARING|ABANDONING|ABANDONED|COMMITTED`; operation ID/attempt/request hash e
+intent receipts obedecem checks all-null/all-present por estado. Apenas um intent pode
+estar `PREPARING|ABANDONING` no old run.
 
 `qualification_runs` e todas as scenario rows são criadas atomicamente na
 autorização **antes** do primeiro turno E2E, em status `INSTALLING`; cenário ausente
@@ -1662,12 +1680,16 @@ Registro nunca é apagado, e cenário abortado falha a qualificação.
 Falha normal do coordinator antes do boundary commit usa o mesmo caminho de aborto
 sob o lock; não abandona indefinidamente uma row `commit_fenced`.
 
-Status fechados:
+As máquinas de run e admission são distintas. A admission singleton controla somente
+entrada/cutoff; depois de `OPEN→QUALIFYING` ela permanece `QUALIFYING` enquanto a run
+avança pelos estados de verificação/selagem. A run possui a cadeia completa abaixo:
 
 ```text
-INSTALLING → OPEN → QUALIFYING → EFFECTS_VERIFIED → LEARNING_DRAINED → MEMORY_SEALED
-     → TRANSITION_RECORDED → QUALIFIED
-INSTALLING|OPEN|QUALIFYING → FROZEN → CANCELLED | MANUAL_REVIEW
+run: INSTALLING → OPEN → QUALIFYING → EFFECTS_VERIFIED → LEARNING_DRAINED
+       → MEMORY_SEALED → TRANSITION_RECORDED → QUALIFIED
+run: qualquer estado acima → FROZEN → CANCELLED | MANUAL_REVIEW
+admission: INSTALLING → OPEN → QUALIFYING
+admission: INSTALLING|OPEN|QUALIFYING → FROZEN → CANCELLED | MANUAL_REVIEW
 CANCELLED(old tuple) → INSTALLING(new qualification, epoch+1)  [reopen dedicado]
 ```
 
@@ -1717,8 +1739,31 @@ transition/binding write e status CAS recompõem os mesmos bytes e completam o C
 nenhum passo é best-effort. Zero learning é conjunto vazio + before==after, nunca
 campo omitido.
 
-Cancelamento começa por CAS da admission global para `FROZEN`, impedindo novas
-memberships. Ele tira snapshot das admissions `admitted|commit_fenced` e, em ordem
+Cancelamento começa por `begin_cancel_qualification`, uma única transaction do
+journal. `cancel_operation_id` deriva de qualification/epoch + request hash e não do
+estado observado. A transaction revalida que não existe rollout authorization/deploy
+binding elegível, captura run status/revision e admission status/revision anteriores,
+persiste `QualificationCancelStartReceipt`, e faz CAS conjunto:
+
+```text
+run <qualquer estado INSTALLING..QUALIFIED> → FROZEN
+admission INSTALLING|OPEN|QUALIFYING → FROZEN
+```
+
+O receipt inclui o predecessor exato, admitted/cutoff tuple e hashes de seal,
+transition e qualification binding já existentes. Esses artifacts são imutáveis e
+**não** são apagados/deselados. Duplicate do operation ID retorna os mesmos bytes;
+CAS stale recomeça antes de publicar receipt, agora com o novo predecessor. Se a run
+já está `FROZEN`, somente o receipt de mesmo operation ID/request hash pode retomá-la.
+`MANUAL_REVIEW|CANCELLED` e authorization/deploy já elegível rejeitam esse caminho.
+Assim crash não pode deixar somente run ou singleton congelado.
+Criação de `RolloutAuthorization` e `begin_cancel_qualification` usam transactions no
+mesmo journal e CAS da mesma run revision/status: se cancel vence, authorization vê
+`FROZEN`; se authorization vence, cancel falha antes do freeze e exige o gate de
+revogação/rollback apropriado.
+
+Depois desse CAS conjunto, o cancelador tira snapshot das admissions
+`admitted|commit_fenced` e, em ordem
 canônica de lead/sequence, adquire cada lead lock:
 
 - receipt boundary existente é verificado e ACKado para
@@ -1733,10 +1778,11 @@ commit+ACK, e o cancelador necessariamente observa o receipt ao adquirir esse lo
 Somente após `active_count=0` e zero admission ativa a saga executa o protocolo
 sete-passos acima: fecha root ingress/fences, reconcilia internal/parent outcomes,
 terminaliza child/follow-up/public rows e persiste todos os closure receipts.
-O CAS final é uma única transaction do journal: persiste
-`QualificationCancelReceipt` e faz run/global
-`FROZEN→CANCELLED` com o tuple completo de counts, admitted-set terminal e closure
-aggregate hashes. Duplicate retorna os mesmos bytes. Não existe “scan de rows atuais
+O CAS final é uma única transaction do journal: revalida o
+`QualificationCancelStartReceipt`, persiste `QualificationCancelReceipt` e faz
+run/admission `FROZEN→CANCELLED` com o tuple completo de predecessor, counts,
+admitted-set terminal e closure aggregate hashes. Duplicate retorna os mesmos bytes.
+Não existe “scan de rows atuais
 e depois cancelar”: os tombstones são as allocations pré-instaladas da immutable
 generation, internal jobs carregam closure/target receipts sob execution lock, e
 nenhum ACK da qualification antiga é aceito após `CANCELLED`.
@@ -1745,8 +1791,11 @@ Antes de `MEMORY_SEALED`, somente após esse drain+closure bilateral o journal p
 encerrar e reabrir em novo epoch/generation. Depois de `MEMORY_SEALED`, snapshot não
 é “deselado”: reabrir canary exige clone byte-idêntico para nova memory
 authority/root e novo epoch, invalidando toda qualification/authorization anterior.
-Injeções em cada fronteira provam retry, active-count zero, ausência de cenário
-vacuamente verde e nenhum item omitido/extra.
+Injeções pausam separadamente em `INSTALLING`, `OPEN`, `QUALIFYING`,
+`EFFECTS_VERIFIED`, `LEARNING_DRAINED`, `MEMORY_SEALED`, `TRANSITION_RECORDED` e
+`QUALIFIED`; em cada caso provam CAS conjunto para `FROZEN`, preservação dos artifacts
+já emitidos, drain até `CANCELLED`, reopen em epoch/root novo, rejeição de old ACK e
+ausência de cenário vacuamente verde ou item omitido/extra.
 
 #### Reabertura crash-idempotente após cancelamento
 
@@ -1760,7 +1809,7 @@ begin_reopen_after_cancel(
   cancel_receipt_hash,
   new_contract_bytes/hash,
   new_release/graph/policy digests,
-  new_memory_preparation_receipt
+  memory_source_snapshot_kind/hash
 ) -> QualificationReopenReceipt
 ```
 
@@ -1773,32 +1822,134 @@ bilaterais; nenhum rollout authorization antigo elegível.
 
 O novo epoch é exatamente `old_epoch + 1`. O novo qualification ID deriva de
 `H("phase8-qualification-v1", new contract hash, release, graph, policy, new epoch)`.
-O `reopen_operation_id` deriva de old qualification/epoch/cancel receipt + new
-qualification/epoch. A função primeiro busca esse ID no journal: receipt existente
-com request hash idêntico retorna os mesmos bytes mesmo se a nova run já estiver
-`INSTALLING|OPEN`; hash divergente falha. Somente `NOT_FOUND` entra no CAS abaixo.
-Antes da transaction, a memory authority retorna um receipt idempotente para um root
-**novo e isolado**: se a qualification antiga chegou a `MEMORY_SEALED`, clone
-byte-idêntico do snapshot selado; caso contrário, clone do baseline autenticado
-escolhido pelo novo contrato. Root/hash divergente bloqueia reopen.
+Antes de qualquer clone, uma transaction `reserve_reopen_intent` revalida as
+precondições e faz CAS no old run
+`reopen_intent_state NULL|ABANDONED→PREPARING`, incrementando o attempt monotônico e
+persistindo `ReopenPreparationIntent` com request hash. Há no máximo um intent ativo
+por old qualification/epoch. Retry idêntico relê o mesmo; request divergente falha
+**antes** de alcançar a memory authority. O `reopen_operation_id` deriva de old
+qualification/epoch/cancel receipt + new qualification/epoch + attempt. A função
+busca receipt existente: hash idêntico retorna os mesmos bytes mesmo se a nova run já
+estiver `INSTALLING|OPEN`; somente intent `PREPARING` sem receipt segue para prepare.
+A ordem de lookup é fechada: `COMMITTED` retorna receipt antes de revalidar singleton
+old; `PREPARING` idêntico retoma; `ABANDONING` bloqueia; somente
+`NULL|ABANDONED` entra na transaction de reserva de novo attempt.
+
+#### Preparação owner-owned do novo memory root
+
+A preparação não é um filesystem side effect solto. `MemoryPreparationAuthority`
+possui root SQLite separado `memory-preparation-v1`, universo exato de uma tabela
+`memory_preparation_operations`:
+
+```text
+operation_id PK
+request_json/hash
+old/new qualification + epoch
+attempt + UNIQUE(old qualification, old epoch, attempt)
+source snapshot kind/hash
+target root ID/path/device/inode + content hash
+state PREPARING|PREPARED|ACKED|ABANDONED|MANUAL_REVIEW
+preparation receipt bytes/hash
+journal reopen receipt hash nullable
+preparation ACK receipt bytes/hash nullable
+abandon receipt bytes/hash nullable
+revision + prepared/acked/abandoned timestamps
+```
+
+Checks all-null/all-present e semantic scan ligam `ACKED` a exatamente um journal
+reopen receipt + ACK artifact; `ABANDONED` exige zero reopen receipt e exatamente um
+journal intent/receipt `ABANDONED`. Target root é exclusivo do operation ID;
+não usa hardlink/inode compartilhado com memory antiga. Como SQLite registry e
+filesystem não têm commit atômico conjunto, `prepare` usa protocolo explícito:
+
+1. transaction target insere `PREPARING` + request/root esperado;
+2. cria root temporário operation-local, escreve/clona, fsync, chmod, fsync;
+3. publica final por rename-no-replace e faz directory fsync;
+4. transaction target verifica path/device/inode/content e faz
+   `PREPARING→PREPARED` + `MemoryPreparationReceipt`.
+
+Duplicate em qualquer estado usa o mesmo operation lock: `PREPARING` é retomado ou
+scavenged conforme a gramática abaixo; `PREPARED|ACKED` retorna receipt idêntico;
+request divergente é identity conflict.
+
+`memory_preparation_operation_id = H("phase8-memory-preparation-v1",
+reopen_operation_id, source snapshot hash, new qualification, new epoch)`. O
+controller adquire `MemoryPreparationExecutionLockFactory` por esse ID **antes** de
+lookup/prepare e mantém o mesmo flock por target prepare, journal CAS e target ACK;
+sob o lock relê e exige intent `PREPARING` exato antes do primeiro target write;
+nenhuma transaction SQLite fica aberta durante clone/fsync. Se `cancel_origin_status`
+é `MEMORY_SEALED|TRANSITION_RECORDED|QUALIFIED`, exige o seal artifact preservado e
+prepara clone byte-idêntico do snapshot selado; caso
+contrário, clone do baseline autenticado escolhido pelo novo contrato. Root/hash
+divergente bloqueia reopen.
 
 Numa única transaction do QualificationJournal, a operação:
 
-1. revalida full tuple antigo + cancel receipt + closure aggregate;
-2. insere a nova run e todas as scenario rows em `INSTALLING`;
-3. faz CAS do singleton `CANCELLED(old qualification, old epoch) →
+1. revalida full tuple antigo + cancel receipt + closure aggregate e o único
+   `ReopenPreparationIntent PREPARING` exato;
+2. revalida `MemoryPreparationReceipt PREPARED`, operation/request/root/hash e insere
+   esse artifact com backlink ao reopen operation;
+3. insere a nova run e todas as scenario rows em `INSTALLING`;
+4. faz CAS do singleton `CANCELLED(old qualification, old epoch) →
    INSTALLING(new qualification, new epoch)`, zerando active count/next sequence;
-4. persiste `QualificationReopenReceipt` referenciando cancel, memory preparation,
-   new contract/run/scenario aggregate hashes.
+5. persiste `QualificationReopenReceipt` referenciando cancel, memory preparation,
+   intent, new contract/run/scenario aggregate hashes e faz old intent
+   `PREPARING→COMMITTED`.
 
-Corrida entre duas primeiras chamadas é resolvida por UNIQUE operation ID + CAS; o
-perdedor relê o receipt vencedor. Qualquer argumento divergente é identity conflict.
-Crash antes do commit não muda o journal. Crash
-depois do commit deixa `INSTALLING`; startup retoma as instalações idempotentes dos
-novos generation headers/allocations nos três roots. Install target-commit/journal-
-ack usa qualification+epoch+generation novos; depois de todos os receipts, um CAS
-conjunto abre run/singleton em `OPEN`. Nenhuma etapa reinstala/reabre generation
-antiga.
+Depois do journal commit, ainda sob o execution lock, o controller chama
+`ack_preparation(operation_id, preparation_receipt_hash, reopen_receipt_hash)` e faz
+CAS target `PREPARED→ACKED`, retornando `MemoryPreparationAckReceipt`; então uma
+transaction do journal persiste esse ACK artifact por CAS da nova run `INSTALLING`.
+Crash pós-journal/pré-target-ACK ou pós-target-ACK/pré-journal-ACK é recuperado por
+lookup do reopen receipt, duplicate target ACK byte-idêntico e journal ACK idempotente.
+Startup não abre a nova run enquanto target row não estiver `ACKED` **e** o journal
+não contiver o mesmo `MemoryPreparationAckReceipt`.
+
+Reserva no journal elimina a corrida de duas preparações: chamadas concorrentes do
+mesmo old tuple convergem para o único intent antes de target side effect. Intent
+válido nunca é abandonado só por idade; crash é retomado pelo mesmo operation ID.
+Abandono exige operação administrativa explícita `abandon_reopen_intent`, sob CAS do
+old run ainda `CANCELLED`, zero journal reopen receipt e mesmo execution lock. Ela
+primeiro faz intent `PREPARING→ABANDONING`, depois chama
+`abandon_preparation`, persiste `MemoryPreparationAbandonReceipt`, faz target
+`PREPARING|PREPARED→ABANDONED`, fsync/cleanup e finalmente old intent
+`ABANDONING→ABANDONED`. Crash em qualquer fronteira retoma essa mesma ordem; somente
+então um novo attempt monotônico pode ser reservado.
+
+`MemoryPreparationRecoveryWorker` tem apenas os ports fechados
+`lookup|resume_exact|ack|abandon` dessa FSM — nunca learning genérico, provider ou
+delivery. Após lease/grace fechados, adquire o mesmo operation lock e consulta journal
+side-effect-free:
+
+- `PREPARING` + temp/final root válido → completa/verifica publicação até `PREPARED`;
+- `PREPARING` sem payload válido + journal intent `PREPARING` → retoma preparação;
+- matching reopen receipt → `PREPARED→ACKED` pelo receipt exato e persiste o ACK no
+  journal se ainda ausente;
+- journal intent `ABANDONING|ABANDONED` + zero reopen receipt → completa
+  `PREPARING|PREPARED→ABANDONED`, tombstone fsync e cleanup do root exclusivo;
+- journal intent ausente para row/root existente → `MANUAL_REVIEW`; não inventa
+  intent nem remove payload;
+- backlink parcial, target/journal divergente, root ausente/malformado ou lookup
+  indisponível → `MANUAL_REVIEW`, nunca delete.
+
+`ACKED` nunca é removido; `ABANDONED` retém operation/request/root hashes e receipt,
+mesmo depois do payload cleanup. Readiness falha com row/root órfão, `PREPARED`
+vencido sem recovery worker, backlink divergente, symlink/path escape ou lock identity
+distinta entre controller/worker.
+
+A gramática após crash é fechada: `S0={}`; `S1={PREPARING row}`;
+`S2={PREPARING row,temp}`; `S3={PREPARING row,final}`;
+`S4={PREPARED row,final}`; `S5={ACKED row+ACK receipt,final}`;
+`S6={ABANDONED tombstone}`. Qualquer combinação extra (root sem row, temp+final,
+ACKED sem final, inode/hash divergente) é `MANUAL_REVIEW`, nunca remoção heurística.
+
+Crash antes do journal final deixa intent `PREPARING` + target S0–S4 e é retomado,
+não scavenged como perdedor. Crash depois do commit deixa intent `COMMITTED`, nova run
+`INSTALLING` e ACK recuperável. Startup então retoma as instalações idempotentes dos
+novos generation headers/allocations nos três roots.
+Install target-commit/journal-ack usa qualification+epoch+generation novos; depois de
+todos os receipts **e target+journal memory-preparation ACK iguais**, um CAS conjunto
+abre run/singleton em `OPEN`. Nenhuma etapa reinstala/reabre generation antiga.
 
 Toda operação/ACK antiga inclui qualification ID + epoch e é rejeitada quando o
 singleton aponta para o novo tuple. IDs internos da nova execução são
@@ -1813,8 +1964,9 @@ Assim o `UNIQUE turn_id` global das memberships append-only não colide quando o
 mesmo contrato lógico é autorizado em outro epoch. Source identities externas
 continuam sujeitas aos conflict guards normais; elas não são reescritas para forçar
 replay. Fault tests param depois de cada journal/install/ack/open boundary e provam
-recovery byte-idêntico, rejeição de old ACK e ausência de admission durante
-`INSTALLING`.
+recovery byte-idêntico, reserva concorrente antes de qualquer segundo preparation,
+crash intent/prepare/journal/ACK, abandono explícito/scavenge seguro, rejeição de old
+ACK e ausência de admission durante `INSTALLING`.
 
 `SealedCanaryQualificationBinding` é criado **depois** do seal e contém:
 
@@ -1901,6 +2053,8 @@ Startup falha antes do `lifespan yield` quando houver:
   schema/hash/table-universe/WAL/FK/integrity inválido;
 - migration-ownership-v1 root/schema/hash/device/inode inválido ou diferente entre
   processos mutators;
+- memory-preparation-v1 table universe/DDL/root/lock identity inválido, preparation
+  grammar fora de S0–S6 ou PREPARED sem journal intent/recovery worker elegível;
 - lock dir/socket dir indisponível;
 - attempt root malformado, symlink/path escape ou orphan não scavenged;
 - qualquer port obrigatória ausente;
@@ -2212,9 +2366,12 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   `SealedCanaryQualificationBinding`,
   `BehaviorTransitionReceipt`, `RolloutAuthorization` e
   `ProductionInitialDeploymentBinding`;
-- `QualificationCancelReceipt`, `InternalJobClosureReceipt`,
+- `QualificationCancelStartReceipt`, `QualificationCancelReceipt`,
+  `InternalJobClosureReceipt`,
   `ChildAllocationUnusedReceipt`,
-  `MemoryPreparationReceipt` e `QualificationReopenReceipt`, com old/new epoch tuples
+  `MemoryPreparationReceipt`, `MemoryPreparationAckReceipt`,
+  `MemoryPreparationAbandonReceipt`, `ReopenPreparationIntent`,
+  `ReopenIntentAbandonReceipt` e `QualificationReopenReceipt`, com old/new epoch tuples
   fechados;
 - `E2EQualificationContract/E2EScenarioContract`,
   `ProviderEffectOutcomeReceipt` derivado, terminal scenario verification e effect
@@ -2244,7 +2401,10 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - Phase5-v6 tem oito tabelas exatas, incluindo boundary ingress receipt e
   reservation E2E effect authority;
 - Phase6-v2 tem quatorze tabelas exatas, incluindo handoff/payment boundary ingress
-  receipts e payment E2E effect authority;
+  receipts e `followup_e2e_effect_authority` para
+  `settlement_provider|handoff_delivery|payment_delivery`;
+- memory-preparation-v1 possui uma tabela exata, estados
+  `PREPARING|PREPARED|ACKED|ABANDONED|MANUAL_REVIEW` e grammar S0–S6;
 - authority header/allocation row-kind checks, immutable generation, composite FKs,
   header tombstone e transition/ledger backlinks exatos;
 - roots novos obrigatórios; schemas antigos/universos extras fail-closed;
@@ -2413,6 +2573,9 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - cancellation faz global `FROZEN`, drena/ACKa/aborta cada admission sob lead lock,
   exige active count zero e só depois executa root-close→parent-drain→child-close,
   internal/follow-up/public closure e finish receipts antes do CAS terminal;
+- para cada run state `INSTALLING..QUALIFIED`, cancellation faz CAS atômico
+  run+admission→`FROZEN`, preserva seal/transition/binding, chega a `CANCELLED`, reabre
+  em epoch/root novo e rejeita old ACK/install;
 - coordinator precommit rejeita global `FROZEN|CANCELLED`; corrida posterior é
   drenada pelo lead lock antes do CAS terminal;
 - cinco qualification tables exatas; authorization cria run/scenarios INSTALLING,
@@ -2424,9 +2587,12 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   bilateral de turn/target/provider/delivery/compensation receipts;
 - QualificationJournal crash-idempotente até `QUALIFIED`, incluindo seal orphan e
   cancel/reopen por novo epoch/root;
-- `begin_reopen_after_cancel` faz CAS old `CANCELLED`→new `INSTALLING`, cria
-  run/scenarios e reopen receipt numa transaction; target installs/ACKs retomam até
-  `OPEN`, old ACK falha e turn IDs incluem new qualification+epoch;
+- `begin_reopen_after_cancel` reserva intent antes do target e prepara memory root por
+  operation ID/lock/registry,
+  faz CAS old `CANCELLED`→new `INSTALLING`, cria run/scenarios/reopen receipt numa
+  transaction e ACKa preparation; chamadas concorrentes convergem antes de um segundo
+  clone, crash/abandon/recovery S0–S6 é retomável, target installs seguem até `OPEN`,
+  old ACK falha e turn IDs incluem new qualification+epoch;
 - effective→qualification→authorization→production oracles bilaterais e mutations;
 - historical transcript/target-ingress semantic scan em readiness;
 - memory-learning target receipt atômico e somente pós-commit;
@@ -2576,9 +2742,14 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - provider-effect receipt não é derivado deterministicamente das owner UoW rows ou
   cria tabela/ledger concorrente fora dos universos v6/v2;
 - qualification seal/transition/binding não têm journal/CAS/retry byte-idêntico;
+- cancellation não faz CAS conjunto run+admission para `FROZEN` a partir de todos os
+  estados `INSTALLING..QUALIFIED` ou apaga seal/transition/binding predecessor;
 - reopen pós-cancel não faz CAS old `CANCELLED`→new `INSTALLING` com run/scenarios e
   receipt atômicos, não retoma target installs ou reutiliza turn ID sem novo epoch;
 - reopen pós-seal reutiliza memory root antiga em vez de clone/root novo autenticado;
+- memory preparation não reserva journal intent antes do clone, não possui operation
+  registry/lock/target+journal ACK, deixa root órfão após crash ou recovery worker
+  abandona payload sem intent `ABANDONING|ABANDONED` e zero reopen receipt exatos;
 - admitted-set hash inclui status/backlink/timestamp mutável;
 - effective binding, qualification, transition receipt, rollout authorization ou
   production binding não formam a transformação fechada aprovada;
