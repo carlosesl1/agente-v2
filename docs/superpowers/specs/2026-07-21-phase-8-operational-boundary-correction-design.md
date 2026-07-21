@@ -469,10 +469,11 @@ LEGACY_OWNED → FREEZING → FROZEN → BOUNDARY_OWNED
                     ↘ RELEASED_TO_LEGACY
 ```
 
-Todo mutator legacy precisa adquirir um `LegacyWritePermit` na mesma authority
-**antes** de ler estado ou preparar um efeito. O permit contém lead, operation ID,
-epoch e fencing token; fica ativo durante provider dispatch, local commit e receipt
-terminal. O mutator revalida o permit no CAS/commit final. `begin_freeze` faz CAS
+Todo mutator legacy precisa adquirir um `LegacyWritePermit` no mesmo
+`SQLiteMigrationOwnershipStore` **antes** de ler estado ou preparar um efeito. O
+permit contém lead, operation ID, epoch e fencing token; fica ativo durante
+provider dispatch, local commit e receipt terminal. O mutator revalida o permit no
+CAS/commit final. `begin_freeze` faz CAS
 `LEGACY_OWNED→FREEZING`, incrementa epoch, nega novos permits e espera active count
 zero. Sob o mesmo lead lock, a authority captura source version/hash e faz CAS
 `FREEZING→FROZEN`; esse snapshot é o único que o passo 5 entrega à Maya. Permit de
@@ -501,6 +502,71 @@ W depois de obter permit, inicia freeze/Maya, retoma W e prova que `FROZEN` não
 publicado até W terminar ou ir para manual review; W jamais grava depois de
 `FROZEN/BOUNDARY_OWNED`.
 
+#### Migration ownership backing store
+
+O único owner persistente é `SQLiteMigrationOwnershipStore`, num root compartilhado
+montado read-write por **todos** os processos legacy e candidate. Ele não fica no
+boundary DB nem em memória. O root é um único arquivo SQLite local num volume de
+filesystem que suporta flock/POSIX locks; não pode ser NFS/object storage. Todos os
+processos no host abrem o mesmo path e startup compara device/inode. Schema
+`migration-ownership-v1`, com universo exato:
+
+1. `migration_owners` — PK `lead_key_hash`; state
+   `legacy_owned|freezing|frozen|boundary_owned|released_to_legacy|manual_review`,
+   epoch, owner token, source version/hash, active permit count, boundary
+   receipt/hash opcional, manual-review reason e timestamps;
+2. `migration_permits` — PK `permit_id`; UNIQUE operation ID; FK lead+epoch;
+   mutator kind, status `active|terminal|manual_review`, fencing token,
+   source-before hash, operation receipt JSON/hash opcional e timestamps;
+3. `migration_transitions` — append-only PK transition ID; lead/epoch, from/to,
+   expected row hash, canonical transition receipt/hash e occurred-at.
+
+Constraints e store invariants fecham `active_permit_count == COUNT(active permits)`
+na mesma transação de toda operação,
+`fencing_token == permit claim/epoch sequence`, um owner row por lead, um operation
+ID global, transition revision contígua por lead/epoch e receipt tuple
+all-null/all-present. Startup semantic scan recompõe owner state/count
+e transition chain de permits; row extra, ausente ou divergente falha readiness.
+
+Table universe, DDL hash, WAL/FK/integrity e filesystem identity são verificados em
+startup/readiness; não há migration automática. Root ausente, compartilhado com
+state live errado, schema extra ou processo mutator sem o mesmo DB device/inode é
+stop condition.
+
+Operações fechadas, todas em `BEGIN IMMEDIATE` curto e full-tuple CAS:
+
+- `register_legacy_owner(...)` cria epoch 0/`legacy_owned` somente com row ausente,
+  sob o mesmo lead lock, e exige prova de ausência de boundary state/event/receipt;
+  o compatibility rollout registra/valida toda lead elegível antes de abrir ingress;
+  lead nova é registrada pelo guard antes do primeiro legacy read/effect;
+- `acquire_permit(lead, operation_id, mutator_kind, expected_epoch)` aceita somente
+  `legacy_owned`, incrementa active count, insere permit e retorna token/receipt;
+  duplicate exata retorna os mesmos bytes;
+- `complete_permit(permit, operation_receipt)` exige token/epoch/status ativos,
+  grava receipt terminal e decrementa active count atomicamente;
+- `begin_freeze(...)` faz CAS `legacy_owned→freezing`, incrementa epoch e fecha
+  novas aquisições;
+- `finish_freeze(...)` exige active count zero, zero permit ativo, source snapshot
+  hash/version exatos e faz CAS `freezing→frozen`;
+- `finalize_boundary_ownership(...)` exige boundary turn receipt byte-idêntico e
+  faz CAS `frozen→boundary_owned`;
+- `release_to_legacy(...)` só é permitido a partir de `freezing|frozen` quando scan
+  prova ausência completa de boundary state/event/receipt/effects; nunca automático;
+- reconciler lê permits/transitions/operation receipts e só conclui estado
+  comprovável; efeito incerto faz CAS para `manual_review`, nunca decremento cego.
+
+Candidate/freeze nunca cria owner row implicitamente. Row ausente, registro sem
+prova ou lead conhecida não pré-registrada durante compatibility preflight fecha o
+ingress. Corridas register/acquire/freeze são serializadas pelo lead lock + CAS;
+unique PK garante uma única gênese da authority.
+
+Todo mutator usa um guard wrapper obrigatório que recebe `LegacyWritePermit`; o
+mesmo permit/token participa do commit local e do provider effect receipt. Import,
+freeze e boundary commit persistem ownership epoch/token nos respectivos receipts.
+Compatibility preflight compara graph/import scans + runtime observations para
+provar que webhook, debounce/flush, Stripe, Wise, image/actions e callbacks não têm
+entrypoint sem esse wrapper. Nenhum store alternativo pode implementar a port.
+
 Não existe write **boundary/commercial** pré-Maya. O único write permitido é a
 claim de ownership control-plane recuperável acima. Crash/timeout/EOF antes do
 passo 11 deixa zero row change no boundary e zero efeito comercial. Retry usa uma
@@ -517,7 +583,8 @@ cutover global quiescente; mixed-mode por lead é proibido.
 
 Implementação mínima Linux:
 
-- arquivo derivado do boundary DB e lead hash, em root privado;
+- arquivo derivado da identity do migration-ownership DB + lead hash, em lock root
+  compartilhado por legacy/candidate, privado ao serviço;
 - `flock(LOCK_EX | LOCK_NB)`;
 - polling limitado e clock injetável;
 - revalidação imediatamente após adquirir;
@@ -531,9 +598,11 @@ O lock bloqueante atual ligado ao JSONL temporário não é reutilizado.
 
 SQLite deve usar transações curtas, WAL/FK/integrity verificados e busy timeout
 estritamente menor que o tempo restante. O clock é reamostrado após `BEGIN
-IMMEDIATE`, antes do primeiro write e antes de `COMMIT`. Todos os writers de turno
-usam o mesmo lock; worker writes não dependem dele, mas obedecem seus próprios
-leases/fences e transações curtas.
+IMMEDIATE`, antes do primeiro write e antes de `COMMIT`. Todos os writers de turno,
+guards legacy, ownership transitions e candidate usam o mesmo lock file/inode.
+Startup compara ownership DB e lock-root device/inode/mount identity entre
+processos. Worker writes pós-handoff não dependem dele, mas obedecem
+seus próprios leases/fences e transações curtas.
 
 ### 9. Reply e receipt duráveis no mesmo commit
 
@@ -665,6 +734,14 @@ final, command e ledger seed. `accept_boundary_reservation` insere tudo, inclusi
 o ingress receipt, numa única transaction. Duplicate exige igualdade byte a byte
 de bundle/command/target receipt; divergência é `IdentityConflict`.
 
+O Phase5-v6 **não** adiciona tabela de provider outcome receipt. O owner continua
+`execution_ledger.outcome_json/hash`. Uma função pura e versionada
+`derive_reservation_effect_receipt(ingress_receipt, command, workflow,
+ledger_terminal)` produz bytes/hash canônicos, incluindo ingress backlink,
+certainty/evidence/economic before-after e operation identity. O qualification
+journal persiste essa projeção e source row IDs/hashes; startup/qualification
+rederivam e exigem igualdade. Não há write novo no UoW owner.
+
 **Phase 6 follow-up: schema `1 → 2`.** O universo v2 contém as onze tabelas v1
 inalteradas mais:
 
@@ -679,12 +756,29 @@ source receipt+target subject é único. `accept_boundary_handoff` e
 `accept_boundary_settlement` persistem full replay + ingress receipt na mesma
 transaction e retornam duplicate exata de forma byte-idêntica.
 
+O Phase6-v2 também não recebe tabela extra de outcome. Para settlement,
+`derive_settlement_effect_receipt(payment_boundary_ingress_receipt,
+payment_command, workflow, payment_ledger_terminal)` projeta deterministicamente o
+receipt; handoff/payment delivery receipts já são rows owner das tabelas existentes
+v1. O journal guarda somente projeção auditável + backlinks/hashes e rederiva em
+todo scan. Nenhuma função substitui/muta `outcome_json`, ledger ou ingress receipt.
+
 Não haverá migration automática desses UoWs na `0.8.0`. Phase 8 exige roots novos
 e vazios para schemas Phase5-v6 e Phase6-v2. Encontrar schema Phase5-v5,
 Phase6-v1, migration history extra ou table universe inesperado no root escolhido
 falha startup e é stop condition; migração offline futura exige design/validator e
 autorização separados. Startup, readiness, duplicate e claim executam full replay
 e semantic scan dos ingress receipts contra todas as rows alvo.
+
+Identidade de schema é declarativa e fail-closed:
+
+- Phase5 persiste `SCHEMA_VERSION=6` + DDL hash em `schema_migrations`, como já faz
+  v5;
+- boundary v8 e Phase6-v2, que não têm migration table, usam constantes de versão
+  package-owned apenas como label e autenticam o DB por igualdade exata de table
+  universe, columns/indexes/triggers/FKs/checks e aggregate DDL hash normalizado;
+- a versão sem o DDL/universe esperado nunca é aceita, e nenhum `PRAGMA
+  user_version` ou metadata row implícita altera o universo declarado.
 
 ### 11. Relay durável para as Fases 5/6
 
@@ -893,7 +987,7 @@ A factory constrói e autentica:
 - paths/state roots exclusivos;
 - boundary store probe;
 - lock factory;
-- migration ownership port/reconciler + legacy reader/importer;
+- migration ownership v1 store/port/reconciler + legacy reader/importer;
 - Maya turn port + UDS tool gateway;
 - attempt-root scavenger;
 - kernel adapter;
@@ -981,11 +1075,11 @@ somente turn receipts ou budgets externos zero **não** podem qualificar rollout
 Cada turno E2E carrega `scenario_id/contract_hash`; ingress fora do contrato é
 negado e qualquer efeito extra é finding terminal.
 
-`ProviderEffectOutcomeReceipt` é um tipo fechado, persistido pelo worker owner do
-provider/UoW, que liga command, target-ingress receipt, provider operation,
-idempotency key, before/after ou economic hash, resultado terminal e eventual
-compensation. Um `TurnReceipt` sozinho prova somente commit do turno; nunca prova
-relay, provider outcome ou delivery.
+`ProviderEffectOutcomeReceipt` é um tipo fechado derivado do estado terminal
+persistido pelo worker/UoW owner. Ele liga command, target-ingress receipt, provider
+operation, idempotency key, before/after ou economic hash, resultado terminal e
+eventual compensation. Um `TurnReceipt` sozinho prova somente commit do turno;
+nunca prova relay, provider outcome ou delivery.
 
 Ele não cria ledger concorrente. Para reserva, referencia/recompõe exatamente
 `execution_ledger.outcome_json/hash` e command/workflow rows do Phase5-v6; para
@@ -993,6 +1087,10 @@ settlement, referencia/recompõe `payment_ledger.outcome_*`; handoff/payment
 deliveries usam as receipt rows Phase6-v2. O qualification journal guarda uma cópia
 canônica + source row IDs/hashes para scan, mas a autoridade continua no UoW/worker
 owner. Outcome sem source row terminal byte-idêntica é inválido.
+
+As únicas constructors são as funções puras `derive_reservation_effect_receipt`
+e `derive_settlement_effect_receipt` definidas no contrato dos UoWs acima. O journal
+não aceita bytes enviados pelo worker; ele lê as rows owners e deriva novamente.
 
 Antes de selar, o qualification controller exige igualdade bilateral e
 cardinalidade exata entre o contrato e:
@@ -1166,6 +1264,8 @@ Startup falha antes do `lifespan yield` quando houver:
 - canary apontando para root de produção;
 - boundary v8, Phase5-v6 ou Phase6-v2 schema/hash/table universe/WAL/FK/integrity
   inválido;
+- migration-ownership-v1 root/schema/hash/device/inode inválido ou diferente entre
+  processos mutators;
 - lock dir/socket dir indisponível;
 - attempt root malformado, symlink/path escape ou orphan não scavenged;
 - qualquer port obrigatória ausente;
@@ -1437,7 +1537,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   `BehaviorTransitionReceipt`, `RolloutAuthorization` e
   `ProductionInitialDeploymentBinding`;
 - `E2EQualificationContract/E2EScenarioContract`,
-  `ProviderEffectOutcomeReceipt`, terminal scenario verification e effect budgets;
+  `ProviderEffectOutcomeReceipt` derivado, terminal scenario verification e effect
+  budgets;
 - qualification/admission states e transformação fechada, com canonical wire,
   completeness, zero-learning e forbidden-field mutations;
 - public message/receipt/relay types;
@@ -1455,6 +1556,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 
 - onze boundary tables exatas, incluindo turn artifacts e dispatch authority, com
   FKs bidirecionais;
+- migration-ownership-v1: três tabelas exatas, DDL hash, permits/transitions e
+  reconciler full-tuple CAS;
 - Phase5 schema v6 com `reservation_boundary_ingress_receipts`;
 - Phase6 schema v2 com handoff/payment boundary ingress receipts;
 - roots novos obrigatórios; schemas antigos/universos extras fail-closed;
@@ -1511,6 +1614,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - `UNAVAILABLE`/timeout do legado nunca vira empty genesis;
 - ownership `LEGACY_OWNED→FREEZING→FROZEN→BOUNDARY_OWNED`, permit drain e
   reconciler de crash;
+- acquire/complete permit, begin/finish freeze, finalize/release e uncertain-effect
+  manual-review no único ownership store compartilhado;
 - legacy snapshot A alterado para B durante Maya aborta sem gênese/import claim;
 - nenhum write/flush/callback legacy passa enquanto `FROZEN`;
 - gênese/import claim persistidos apenas no commit final;
@@ -1641,6 +1746,8 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - RED sem U/P/S/R/O reproduzíveis ou raw object publicado/retido atomicamente;
 - review não está vinculada ao mesmo F/E pair + package identity;
 - DB v7 real descoberto;
+- migration ownership não possui o único v1 store compartilhado/DDL exato ou
+  mutator alcança efeito sem permit do mesmo DB;
 - reply ainda produzida/enfileirada pós-commit;
 - filho consegue injetar observation/fact/proposal fora do transcript pai;
 - sessão Hermes de tentativa pode ser retomada após falha;
@@ -1671,6 +1778,8 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - qualification aceita ingress/learning depois do cutoff ou sela antes do drain;
 - qualification aceita zero cenário, ausência/extra, item não terminal ou apenas
   turn receipts sem target/provider/delivery outcomes;
+- provider-effect receipt não é derivado deterministicamente das owner UoW rows ou
+  cria tabela/ledger concorrente fora dos universos v6/v2;
 - qualification seal/transition/binding não têm journal/CAS/retry byte-idêntico;
 - effective binding, qualification, transition receipt, rollout authorization ou
   production binding não formam a transformação fechada aprovada;
