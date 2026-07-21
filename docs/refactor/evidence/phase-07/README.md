@@ -124,6 +124,17 @@ explicitamente o CI futuro a esse `terminal_snapshot_commit`; não há fallback
 ao candidato funcional. O evidence child desta aprovação usa `[skip ci]`.
 Somente o push temporário do SHA terminal revisado poderá abrir a janela remota.
 
+O run terminal `29803099201` executou exatamente `a60f13cc...`: static,
+properties, faults e mutations passaram, mas full-suite falhou; gate falhou por
+consequência. A causa era um teste da captura que lia
+`/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b/...`, disponível
+somente no servidor de preparação. `ci-result-invalidated-29803099201.json` e
+`review8-red-reports/external-workspace-path-red.out` preservam o run e o RED.
+A fixture foi substituída por um `TemporaryDirectory` autocontido e o closeout
+agora proíbe caminhos externos em todos os testes Phase 7. O snapshot
+`a60f13cc...` e sua aprovação ficaram invalidados para CI; o sucessor corrigido
+requer nova revisão terminal antes de outro push.
+
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi
 inventada retroativamente.

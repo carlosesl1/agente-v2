@@ -6,6 +6,8 @@
   "conclusive": 3,
   "evidence_commit": "6894270e37a2222a4e6210e6f959fd0352bdfc5f",
   "evidence_tree": "9bc409b39ac5cdf637e6125c6973eded7e1e22f4",
+  "invalidated_terminal_snapshot_commit": "a60f13cc40d808bc86bd4028e6681943b9bf7526",
+  "invalidated_terminal_snapshot_tree": "f241cdbf83a355cb07217d88d1090e7e6d14ccf3",
   "lanes": [
     {
       "batch_id": "deleg_e0db81c2",
@@ -57,11 +59,11 @@
   },
   "terminal_approved": 3,
   "terminal_conclusive": 3,
+  "terminal_invalidated": true,
+  "terminal_invalidation_reason": "remote_full_suite_external_workspace_path_dependency",
   "terminal_rejected": 0,
-  "terminal_result": "Approved",
+  "terminal_result": "Needs fixes",
   "terminal_review_attempt": "review-attempt-8.json",
   "terminal_review_batch": "deleg_3ac27224",
-  "terminal_review_completed_at": "2026-07-21T05:05:50Z",
-  "terminal_snapshot_commit": "a60f13cc40d808bc86bd4028e6681943b9bf7526",
-  "terminal_snapshot_tree": "f241cdbf83a355cb07217d88d1090e7e6d14ccf3"
+  "terminal_review_completed_at": "2026-07-21T05:05:50Z"
 }

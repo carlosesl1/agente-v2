@@ -1,0 +1,107 @@
+{
+  "artifacts": [
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8484445672/zip",
+      "created_at": "2026-07-21T05:07:40Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:07:38Z",
+      "id": 8484445672,
+      "name": "phase7-properties-a60f13cc40d808bc86bd4028e6681943b9bf7526",
+      "size_in_bytes": 1690573
+    },
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8484444897/zip",
+      "created_at": "2026-07-21T05:07:37Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:07:36Z",
+      "id": 8484444897,
+      "name": "phase7-faults-a60f13cc40d808bc86bd4028e6681943b9bf7526",
+      "size_in_bytes": 9195
+    },
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8484444134/zip",
+      "created_at": "2026-07-21T05:07:34Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:07:33Z",
+      "id": 8484444134,
+      "name": "phase7-mutations-a60f13cc40d808bc86bd4028e6681943b9bf7526",
+      "size_in_bytes": 889
+    }
+  ],
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "conclusion": "failure",
+  "failure_class": "remote_full_suite_external_workspace_path_dependency",
+  "head_sha": "a60f13cc40d808bc86bd4028e6681943b9bf7526",
+  "invalidated": true,
+  "jobs": [
+    {
+      "completed_at": "2026-07-21T05:07:38Z",
+      "conclusion": "success",
+      "id": 88547900897,
+      "name": "phase7-faults",
+      "started_at": "2026-07-21T05:07:26Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88547900897"
+    },
+    {
+      "completed_at": "2026-07-21T05:10:02Z",
+      "conclusion": "failure",
+      "id": 88547900909,
+      "name": "full-suite",
+      "started_at": "2026-07-21T05:07:26Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88547900909"
+    },
+    {
+      "completed_at": "2026-07-21T05:07:43Z",
+      "conclusion": "success",
+      "id": 88547900915,
+      "name": "phase7-properties",
+      "started_at": "2026-07-21T05:07:27Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88547900915"
+    },
+    {
+      "completed_at": "2026-07-21T05:07:38Z",
+      "conclusion": "success",
+      "id": 88547900916,
+      "name": "static",
+      "started_at": "2026-07-21T05:07:27Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88547900916"
+    },
+    {
+      "completed_at": "2026-07-21T05:07:37Z",
+      "conclusion": "success",
+      "id": 88547900946,
+      "name": "phase7-mutations",
+      "started_at": "2026-07-21T05:07:26Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88547900946"
+    },
+    {
+      "completed_at": "2026-07-21T05:10:06Z",
+      "conclusion": "failure",
+      "id": 88548253796,
+      "name": "gate",
+      "started_at": "2026-07-21T05:10:04Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201/job/88548253796"
+    }
+  ],
+  "phase": 7,
+  "phase8_started": false,
+  "remediation": {
+    "guard_test": "tests.test_phase7_closeout.Phase7CloseoutContractTests.test_phase7_tests_do_not_depend_on_external_workspace_paths",
+    "source_path": "tests/test_phase7_runtime_capture.py",
+    "strategy": "replace absolute external fixture with a tempfile fixture inside the test"
+  },
+  "rollout": "NO-GO",
+  "run_id": 29803099201,
+  "run_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29803099201",
+  "status": "completed",
+  "terminal_snapshot_commit": "a60f13cc40d808bc86bd4028e6681943b9bf7526",
+  "terminal_snapshot_tree": "f241cdbf83a355cb07217d88d1090e7e6d14ccf3",
+  "workflow_path": ".github/workflows/phase7.yml"
+}

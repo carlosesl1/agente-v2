@@ -1,0 +1,21 @@
+test_phase7_tests_do_not_depend_on_external_workspace_paths (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_phase7_tests_do_not_depend_on_external_workspace_paths) ... FAIL
+
+======================================================================
+FAIL: test_phase7_tests_do_not_depend_on_external_workspace_paths (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_phase7_tests_do_not_depend_on_external_workspace_paths)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/phase7-ci2-red-a60/tests/test_phase7_closeout.py", line 206, in test_phase7_tests_do_not_depend_on_external_workspace_paths
+    self.assertEqual(offenders, [])
+AssertionError: Lists differ: ['tests/test_phase7_runtime_capture.py'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'tests/test_phase7_runtime_capture.py'
+
+- ['tests/test_phase7_runtime_capture.py']
++ []
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)

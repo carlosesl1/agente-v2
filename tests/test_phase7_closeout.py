@@ -196,6 +196,15 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         ):
             self.assertNotIn(token, payload)
 
+    def test_phase7_tests_do_not_depend_on_external_workspace_paths(self) -> None:
+        forbidden = "/home/" + "ubuntu/workspace/"
+        offenders = [
+            path.relative_to(ROOT).as_posix()
+            for path in sorted((ROOT / "tests").glob("test_phase7_*.py"))
+            if forbidden in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(offenders, [])
+
     def test_manifest_is_deterministic_current_and_covers_runtime_patch(self) -> None:
         manifest = json.loads(read(str(MANIFEST_PATH)))
         self.assertEqual(manifest, build_manifest())

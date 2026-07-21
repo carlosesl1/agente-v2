@@ -147,14 +147,16 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
         value = _synthetic_phone("+557****2939")
         self.assertTrue(value.startswith("+5500"))
         self.assertNotRegex(value, r"^\+55(?:[1-9][0-9])")
-        fixture = Path(
-            "/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b/"
-            "tests/fixtures/phase7_boundary_states.json"
-        )
-        payload, redactions = _scan_text(
-            fixture,
-            "tests/fixtures/phase7_boundary_states.json",
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "phase7_boundary_states.json"
+            fixture.write_text(
+                '{"states":[{"phone":"+999****0002"},{"phone":"+999****0003"}]}\n',
+                encoding="utf-8",
+            )
+            payload, redactions = _scan_text(
+                fixture,
+                "tests/fixtures/phase7_boundary_states.json",
+            )
         self.assertGreater(len(payload), 0)
         self.assertEqual(redactions, 0)
 

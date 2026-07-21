@@ -597,6 +597,20 @@
       "tests_failed": 2,
       "tests_in_error": 0,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "a Phase 7 test depended on an absolute external workspace fixture that does not exist on the GitHub runner",
+      "command": "test-only backport of test_phase7_tests_do_not_depend_on_external_workspace_paths to terminal snapshot a60f13cc40d808bc86bd4028e6681943b9bf7526, then python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests.test_phase7_tests_do_not_depend_on_external_workspace_paths -v",
+      "exit_code": 1,
+      "name": "remote-full-suite-external-workspace-path",
+      "output_bytes": 1066,
+      "output_path": "review8-red-reports/external-workspace-path-red.out",
+      "output_sha256": "51f8ce48fe5b869fa8d08e3fac56b3ed5c5d74dcbe1d95423dcb7999fecf6afa",
+      "remote_run_id": 29803099201,
+      "task": 17,
+      "tests_failed": 1,
+      "tests_in_error": 0,
+      "tests_run": 1
     }
   ],
   "phase": 7,
