@@ -1,91 +1,78 @@
-# Fase 8 — Shadow, canary e rollout por digest
+# Fase 8 — Correção da fronteira operacional, shadow e rollout
 
 ## Estado
 
-- Status: **ativa — design/plano publicados; entrada autenticada**.
-- Base publicada da Fase 7: `93682024b4867d3e313324339a7060d5351dcd3d`, tree `b779e35c671f3050d056c6ef3c8c0700f5b13f35`.
-- Spec aprovada: `0dbc9cb9722762dfc4f24a3ea73bfce974835a84`.
-- Plano corrigido publicado: `49b4930d5c5df48eb85cb58c73d5ceded876259a`.
-- Branch: `phase8-shadow-canary-rollout`.
-- Rollout: **NO-GO**.
-- `phase8_started=true`.
-- `phase9_started=false`.
+- Design upstream: **aprovado 3/3 e aprovado por Carlos**.
+- Design autoritativo: commit `2889e9ec08f466bbb16a30e4bb5c9a098daf54d3`,
+  tree `ed57032319d2319389412f4407b268e3d7b7a78c`, blob
+  `0e599670b4bc585b1665d932a84afcf3c4b57456`, SHA-256
+  `0f7486191e9963b3786a83cc7096c2af12a89905c5d92fcc27edf431367dcf60`.
+- Plano substituto: `docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md`.
+- Quarentena: `../evidence/phase-08/quarantine-manifest.json`.
+- Gate atual: **plano/quarentena preparados para revisão; Slice 0 bloqueado**.
+- Implementação, wiring e build: **NO-GO**.
+- Dark canary, ingress, conversa, E2E e rollout: **não iniciados**.
+- `phase8_started=true`; `phase9_started=false`.
 
-A autorização de 2026-07-21 abre a execução controlada da Fase 8 até o gate
-conversacional. Ela não autoriza provider write, pagamento, entrega pública fora
-do contato de teste, rollout comercial nem início da Fase 9. A Task 1 somente
-autentica a entrada; não executa Docker, provider, ManyChat, rede ou capability
-live.
+A autorização de 2026-07-21 cobre somente a preparação do plano TDD substituto e da
+quarentena documental. Não autoriza código de runtime, wheel, Docker, provider,
+ManyChat, rede, deploy ou efeito live.
 
-## Objetivo
+## Por que o plano anterior foi substituído
 
-Construir uma única imagem OCI a partir da réplica sanitizada aprovada na Fase
-7, autenticar sua identidade e promover os mesmos bytes por dark canary, ingress,
-teste conversacional humano, uma canary E2E separadamente autorizada e rollout
-gradual.
+A auditoria do composition root provou que o entrypoint canônico não construía um
+adapter Phase 7 concreto. Além disso, a arquitetura anterior tratava image ID/archive
+como autoridade primária e adiava contratos indispensáveis de reply/replay, relay,
+execution locks, migration ownership, qualification e release identity.
 
-## Entrada autenticada
+Executar aquele plano congelaria uma imagem que não continha o caminho necessário ao
+gate E2E. Os blobs antigos permanecem preservados como história, mas são
+`HISTORICAL-NON-EXECUTABLE` e não possuem command ownership.
 
-`../evidence/phase-08/entry-baseline.json` fixa mecanicamente:
+## Escada de gates corrigida
 
-- closeout publicado da Fase 7 em `93682024...` / `b779e35c...`;
-- candidato funcional `2c99be11...` / `3a05029f...`;
-- snapshot terminal `73904070...` / `7017fcf9...`;
-- revisão terminal 3/3 e CI remoto `29804123764`, seis jobs verdes;
-- integração pós-merge 762/762, output SHA-256
-  `f96f1e28c580db6b2166163576ea91dbc12461093220fe65992c4b94d29da3f1`;
-- réplica limpa `183fb41d...` / `e546e9d8...`;
-- runtime operacional observado no HEAD `57408d8b...`, tree `67b5fe18...`,
-  86 entradas e fingerprints exatos, sem alteração;
-- imagem live de rollback
-  `sha256:2dc5f71557b82d4d0646ab1dba0b61edfa7d916320047dd03ce8554dbfa50d53`,
-  release `57408d8b...` / `v2026.07.13.0545`;
-- Python `3.12.13`, SQLite `3.46.1`, zero capability live, rollout `NO-GO` e
-  Fase 9 não iniciada.
+1. **Design — fechado:** spec imutável aprovada 3/3 e aprovada por Carlos.
+2. **Plano/quarentena — em preparação/revisão:** somente após aprovação pode abrir o
+   Slice 0.
+3. **Contract lock:** interfaces antigas inalcançáveis; contratos e RED provenance
+   fechados; zero runtime change.
+4. **Upstream:** kernel 0.8.0, schemas/roots, UDS, coordinator, replay, relays,
+   deliveries, qualification e cancellation por TDD faseado.
+5. **Upstream terminal:** candidatos source F/E imutáveis, heavy gate econômico e
+   review AND no mesmo par.
+6. **Wheel:** wheel 0.8.0 autenticada e revisada contra o mesmo source F/E.
+7. **Runtime wiring:** candidata limpa, factory canônica sem `None`, startup/lifespan
+   e runtime F/E aprovados.
+8. **Release contract:** tar canônico, source attestation, approval manifest combinado,
+   registry policy e child manifest `linux/arm64` testados sem build live.
+9. **GO/NO-GO de build:** decisão separada; nada anterior implica GO.
+10. **Build:** publicação OCI única e autenticação de index/child/config/layers.
+11. **Dark canary:** reads reais, zero provider write e zero delivery.
+12. **Ingress fechado:** rota isolada, somente o contato autorizado, outbound e writes
+    ainda fechados.
+13. **Conversa humana:** Carlos é avisado e executa conversas naturais; simulação não
+    substitui sua aprovação.
+14. **Canary E2E:** exige autorização posterior que fixe contato, workflow, provider,
+    período, único write e cancelamento.
+15. **Rollout/closeout:** mesmo child digest, estágios com GO explícito, rollback e
+    Fase 9 ainda separada.
 
-## Escada de gates
+## Invariantes atuais
 
-1. **Entry — autenticado nesta Task 1.** Base/spec/plano e fingerprints estão
-   fixados; os validators das Fases 0–7 permanecem verdes.
-2. **Build — não iniciado.** Exige preflight fail-closed e uma imagem construída
-   uma única vez a partir da réplica limpa.
-3. **Dark canary — bloqueado pelo build.** Reads reais podem ocorrer somente com
-   zero write e zero delivery.
-4. **Ingress — bloqueado pelo dark canary.** A mesma imagem deve continuar com
-   outbound e writes fechados.
-5. **Conversa humana — bloqueada pelo ingress.** Carlos executa o teste; nenhuma
-   simulação substitui sua aprovação.
-6. **Canary E2E — bloqueada.** Requer autorização posterior que fixe contato,
-   workflow, provider, janela, write único e cancelamento.
-7. **Rollout — bloqueado.** Reutiliza o mesmo manifest digest OCI; image ID e
-   archive hash são evidências suplementares. Avança por estágios com GO explícito.
-8. **Closeout — bloqueado.** A Fase 9 permanece fechada até nova decisão.
+- `/home/ubuntu/chapada-leads-hermes` permanece somente leitura e nunca é build
+  context.
+- Roots Boundary v7, Phase5-v5 ou Phase6-v1 encontrados em destino de migração são
+  stop conditions; a implementação requer roots novos e exatos.
+- Mixed mode é proibido sem `migration-ownership-v1` compartilhado por todos os
+  mutators legacy; caso contrário, somente cutover global quiescente é elegível.
+- Kernel e `ToolDispatch` permanecem owners únicos de decisão/autorização.
+- Provider writes e delivery ocorrem somente em workers pós-commit.
+- Qualquer timeout, summary ausente ou `Needs fixes` zera o gate AND da identidade.
+- Correção material invalida todos os pareceres anteriores.
+- Raw output, PII, segredos e payload provider não entram no Git.
 
-Artefato futuro ausente significa gate ainda não aberto, não sucesso implícito.
-Qualquer identidade divergente, efeito prematuro, PII/segredo ou drift do runtime
-é `NO-GO`.
+## Próxima decisão
 
-## Limites atuais
-
-Até um gate posterior abrir explicitamente, não executar:
-
-- Docker build/create/start/tag/promote;
-- rede, ManyChat, LLM ou entrega pública;
-- Cloudbeds/Bókun/Stripe/Wise/provider write ou pagamento;
-- Supabase, Redis, PostgreSQL ou estado/sessão live;
-- alteração em `/home/ubuntu/chapada-leads-hermes`;
-- remoção de legado ou qualquer trabalho da Fase 9.
-
-## Riscos de entrada
-
-Riscos transversais `R06`, `R07`, `R13`, `R63` e `R71`, além dos riscos
-específicos `R72`–`R75`, permanecem governados por
-`../06-risk-register.md`. Nenhum risco aberto é convertido em autorização pelo
-simples início da fase.
-
-## Gate de fechamento
-
-A fase só poderá fechar após a cadeia completa da spec: identidade de release,
-dark canary, ingress, teste de Carlos, canary E2E explicitamente autorizada,
-rollout/rollback, revisão terminal, CI remoto e atualização final dos riscos. Na
-entrada atual, somente o primeiro gate está autenticado e `phase9_started=false`.
+O commit documental de plano/quarentena precisa passar validators e revisão AND.
+Depois, Carlos revisa o plano escrito. Somente uma aprovação explícita posterior abre
+o Slice 0; nenhum trabalho de implementação começa automaticamente.

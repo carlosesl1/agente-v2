@@ -1,0 +1,378 @@
+{
+  "active_authority_paths": [
+    "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
+    "docs/refactor/README.md",
+    "docs/refactor/04-phased-delivery-plan.md",
+    "docs/refactor/05-validation-and-rollout.md",
+    "docs/refactor/06-risk-register.md",
+    "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
+    "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
+    "docs/refactor/evidence/README.md",
+    "docs/refactor/evidence/phase-08/README.md"
+  ],
+  "active_scan_extensions": [
+    "",
+    ".md",
+    ".py",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml"
+  ],
+  "active_scan_roots": [
+    "docs",
+    "scripts",
+    "tests",
+    ".github"
+  ],
+  "approved_design": {
+    "blob": "0e599670b4bc585b1665d932a84afcf3c4b57456",
+    "bytes": 160392,
+    "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+    "lines": 2872,
+    "path": "docs/superpowers/specs/2026-07-21-phase-8-operational-boundary-correction-design.md",
+    "sha256": "0f7486191e9963b3786a83cc7096c2af12a89905c5d92fcc27edf431367dcf60",
+    "tree": "ed57032319d2319389412f4407b268e3d7b7a78c"
+  },
+  "build_authorized": false,
+  "canary_authorized": false,
+  "conversation_gate_ready": false,
+  "created_from_head": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+  "design_review": {
+    "approved_on": "2026-07-21",
+    "batch_id": "deleg_1e35477e",
+    "summaries": [
+      {
+        "bytes": 4171,
+        "lane": 1,
+        "lines": 58,
+        "sha256": "786b39798d65f9bcc44426b436f3a7149827b5acc1a54e7a12202af45fa6b493",
+        "verdict": "Approved"
+      },
+      {
+        "bytes": 3290,
+        "lane": 2,
+        "lines": 45,
+        "sha256": "6df4dbe77187de23438b4989e15b787c31697dffb6eaca55ba17f51ba7fc37a9",
+        "verdict": "Approved"
+      },
+      {
+        "bytes": 2680,
+        "lane": 3,
+        "lines": 48,
+        "sha256": "3b24d842dfb80400ab95345ef5a2e70b6d9e9fdc4e0fe980106d77f35149a2d6",
+        "verdict": "Approved"
+      }
+    ],
+    "user_approval_scope": "design approved; plan/quarantine preparation only",
+    "user_approved": true,
+    "verdicts": [
+      "Approved",
+      "Approved",
+      "Approved"
+    ]
+  },
+  "e2e_authorized": false,
+  "forbidden_active_tokens": [
+    "2026-07-21-phase-8-shadow-canary-rollout-design.md",
+    "2026-07-21-phase-8-shadow-canary-rollout.md",
+    "scripts/generate_phase8_manifest.py",
+    "scripts/build_phase8_image.py",
+    "--expected-image-id",
+    "--expected-archive-sha256",
+    "ImageIdentity(image_id",
+    "docker buildx build --load",
+    "docker image save"
+  ],
+  "historical_inputs": [
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 18138,
+        "classification": "QUARANTINED-HISTORICAL",
+        "lines": 453,
+        "replacement": "docs/superpowers/specs/2026-07-21-phase-8-operational-boundary-correction-design.md",
+        "sha256": "75f709ad1d6f68429efe70f943709152293cf9c22e465f1d209a033cfc856048"
+      },
+      "path": "docs/superpowers/specs/2026-07-21-phase-8-shadow-canary-rollout-design.md",
+      "pre_quarantine_head_identity": {
+        "blob": "0613b334f99d0601f2b9e1aec16dc2d5c044e6ee",
+        "bytes": 17816,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 446,
+        "sha256": "93136a8832d8895a312c40a52b942f22bc0a094d5d38b5d1545bd1cd883e14a3"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "8a18a7ac08d15b99902f915a0226a3f559dfb613",
+        "bytes": 22649,
+        "lines": 396,
+        "sha256": "9fbe5f5a4028052228cca691219794de6f1a384f81e8d29e3ff3c55e8b34d5b6"
+      },
+      "requires_banner": true
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 50832,
+        "classification": "QUARANTINED-HISTORICAL",
+        "lines": 1267,
+        "replacement": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
+        "sha256": "1b9e548aae44a2ac47f4acad336e4b59b4d38f9b460d05c5441157cdd722139b"
+      },
+      "path": "docs/superpowers/plans/2026-07-21-phase-8-shadow-canary-rollout.md",
+      "pre_quarantine_head_identity": {
+        "blob": "20a320227bcd74d108c526fc448a9a09392ceff7",
+        "bytes": 50495,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 1260,
+        "sha256": "2765510f1ca4ec371e7843bc189ef47a4872d5369341a1c763041563a5c0256d"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "1e56f7839a5250d1a73ca12623a50e520f6d3d97",
+        "bytes": 72644,
+        "lines": 1260,
+        "sha256": "2ea8c22073a710a3de7a07b07f3e58e34e7c54938682a11b27512666f94db9dd"
+      },
+      "requires_banner": true
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 3070,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 78,
+        "replacement": "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
+        "sha256": "cb2c5943096d2b54c2b5f2e38fc715fd188c0edb09da545d5b4386a27028e2a4"
+      },
+      "path": "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
+      "pre_quarantine_head_identity": {
+        "blob": "27fbe14cd56c37508091e8c737fc6d1de5c38122",
+        "bytes": 702,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 19,
+        "sha256": "33023167589e8714b9c19f1dfdc372732ccf83c3ce1d1c6630057c7498a9f767"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "7b5d2db120bd8ba18328c7ea9f3667ea1c1c3a6d",
+        "bytes": 875,
+        "lines": 29,
+        "sha256": "25597c3cb7a26dfe030383ed41f64905c29e7a75f190641831f8f0ad7814d882"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 4310,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 78,
+        "replacement": "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
+        "sha256": "b288ee6e490ff405978ecd4dabd4a1efe5a9ec4adaf0e9e03be639252561863b"
+      },
+      "path": "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
+      "pre_quarantine_head_identity": {
+        "blob": "0f8631a1766a0ac582ed0535a12435d9d8377c47",
+        "bytes": 4177,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 91,
+        "sha256": "2ca3a2f9dd626bc9f25de4c0cf42a6a6c75063c9724b06e1fd18f49ec88910ec"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "6a5acda74c185f02aca69e819e790241983c91ef",
+        "bytes": 4559,
+        "lines": 108,
+        "sha256": "d6881239823c0c58837091380cb2705510b4874ff5464fd3f6bb25d3d0a0af1a"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 6226,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 181,
+        "replacement": "docs/refactor/04-phased-delivery-plan.md",
+        "sha256": "acf93b16751e028f793ebbe9c492053475b2f64d9aaca090275f2f124400e26c"
+      },
+      "path": "docs/refactor/04-phased-delivery-plan.md",
+      "pre_quarantine_head_identity": {
+        "blob": "9403dd682df49875fa6de61fe10ce81f149baf7b",
+        "bytes": 5530,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 172,
+        "sha256": "0ff66aa473562ddd364f99eefc3cfcc08430a11085a93065d95db22b858c40f7"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "b0821c13a972b61c83ad28afc83fd6b0291f86f2",
+        "bytes": 6038,
+        "lines": 167,
+        "sha256": "e11291e9dd32612f4f44003e33d63ce704dad9c04fdf07f66fb09c7c1e6bba44"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 5422,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 224,
+        "replacement": "docs/refactor/05-validation-and-rollout.md",
+        "sha256": "276083455da68fa83d02c59fcb2d5a4978d947e24452dd1fd9eb2bf36648f487"
+      },
+      "path": "docs/refactor/05-validation-and-rollout.md",
+      "pre_quarantine_head_identity": {
+        "blob": "a8aca212b612a739378849832249c740fbdd90be",
+        "bytes": 4333,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 200,
+        "sha256": "62e96ab023f521c46a3650543811a388f0240ab477e26a0723c4ea873fbb1748"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "1c6bd74b9db884348f7119e6e2d86fbd459addcb",
+        "bytes": 4760,
+        "lines": 179,
+        "sha256": "31189c5428005c6d63f280eff11ab4eefbe4733bfa64d885953cf4a9515ca9b3"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 18659,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 96,
+        "replacement": "docs/refactor/06-risk-register.md",
+        "sha256": "9e07a0fb00f9ee6a78976ba37693f89b4dbfb1ebd6f9ee301d8cffda7c28922b"
+      },
+      "path": "docs/refactor/06-risk-register.md",
+      "pre_quarantine_head_identity": {
+        "blob": "a872ae85dc258df02b9c8cfbb16a2d8567ea0912",
+        "bytes": 16471,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 88,
+        "sha256": "d05d6a52820a997d334be6f3cab6c8788a5482a0211f5d77220a82de8c4a60a2"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "74cb2fd41d02fc35f1c6b4277551597a25a62776",
+        "bytes": 14878,
+        "lines": 80,
+        "sha256": "d236d907df857d7231eb1c36f48444f4d993040f9f0afe1fa652fab936bb9092"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 2424,
+        "classification": "HISTORICAL-EVIDENCE-ONLY",
+        "lines": 50,
+        "replacement": "docs/refactor/evidence/phase-08/quarantine-manifest.json",
+        "sha256": "7acb04dbe81831d70d42b9cc16b30b686b96e14891a3d86e64717b59146028cd"
+      },
+      "path": "docs/refactor/evidence/phase-08/entry-baseline.json",
+      "pre_quarantine_head_identity": {
+        "blob": "7885d05d2446f255379128b2b9a2bc67bad625e4",
+        "bytes": 2424,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 50,
+        "sha256": "7acb04dbe81831d70d42b9cc16b30b686b96e14891a3d86e64717b59146028cd"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "05ac8b1084e263f22b0cc5460ee24b6e4dd7e4df",
+        "bytes": 2878,
+        "lines": 58,
+        "sha256": "950d4db264f7af9be749d28cfb2daf9ccc0b137f9784d88a7fcb4a4e39d75a29"
+      },
+      "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 1458,
+        "classification": "HISTORICAL-EVIDENCE-ONLY",
+        "lines": 40,
+        "replacement": "docs/refactor/evidence/phase-08/quarantine-manifest.json",
+        "sha256": "5d385dca3986c1e746576232d519397e60d3003db258340848b694550bd26b32"
+      },
+      "path": "docs/refactor/evidence/phase-08/red-results.json",
+      "pre_quarantine_head_identity": {
+        "blob": "52b3c2466f716636c013ca648fdc740ce6b39a87",
+        "bytes": 1458,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 40,
+        "sha256": "5d385dca3986c1e746576232d519397e60d3003db258340848b694550bd26b32"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "50292c277cf594a1f9fe49aa0df0621082f9fe23",
+        "bytes": 3672,
+        "lines": 64,
+        "sha256": "7588de9522c82e5946184434d1e106152b6280cb1bd8b3b224ea5d9f8556caef"
+      },
+      "requires_banner": false
+    }
+  ],
+  "implementation_authorized": false,
+  "phase": 8,
+  "phase9_started": false,
+  "plan_quarantine_review": {
+    "technical_and_gate": "PENDING",
+    "user_acceptance": "PENDING"
+  },
+  "replacement_plan": {
+    "bytes": 57738,
+    "lines": 1364,
+    "path": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
+    "sha256": "0d221b221c7ee688be64b9d3bc5ece7d7da4d05a575400cc47fea13baebac11b"
+  },
+  "rollout": "NO-GO",
+  "scan_exclusions": [
+    {
+      "path": "docs/superpowers/specs/2026-07-21-phase-8-operational-boundary-correction-design.md",
+      "reason": "approved spec documents rejected interfaces normatively"
+    },
+    {
+      "path": "docs/refactor/evidence/phase-08/quarantine-manifest.json",
+      "reason": "manifest owns forbidden token inventory"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-07-21-phase-8-shadow-canary-rollout-design.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-21-phase-8-shadow-canary-rollout.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/04-phased-delivery-plan.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/05-validation-and-rollout.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/06-risk-register.md",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/evidence/phase-08/entry-baseline.json",
+      "reason": "historical bytes or historical evidence"
+    },
+    {
+      "path": "docs/refactor/evidence/phase-08/red-results.json",
+      "reason": "historical bytes or historical evidence"
+    }
+  ],
+  "schema_version": 1,
+  "source_implementation_started": false,
+  "status": "PLAN_QUARANTINE_CANDIDATE",
+  "wheel_build_authorized": false
+}

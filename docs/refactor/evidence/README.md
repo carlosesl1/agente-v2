@@ -165,13 +165,13 @@ python3 scripts/validate_phase7.py --terminal
 
 ## Fase 8
 
-`phase-08/entry-baseline.json` autentica base/spec/plano, candidato e snapshot
-terminal da Fase 7, revisão/CI, réplica limpa, fingerprints read-only do runtime,
-imagem/release live de rollback e o output pós-merge 762/762.
-`phase-08/red-results.json` registra somente o envelope do RED funcional da Task
-1; o output bruto permanece fora do Git.
+`phase-08/entry-baseline.json` e `red-results.json` preservam a entrada histórica e
+seus envelopes sanitizados, sem reescrita. `phase-08/quarantine-manifest.json`
+registra as nove identidades rejeitadas fixadas pela spec, os bytes pré-quarentena e
+as autoridades documentais substitutas.
 
-A Fase 8 está ativa no gate de entrada. Build, dark canary, ingress, teste
-conversacional, canary E2E e rollout não foram iniciados. Nenhum provider write,
-Docker, ManyChat ou rede foi executado nesta entrada; rollout `NO-GO` e
-`phase9_started=false`.
+O design upstream está aprovado 3/3 e por Carlos. O plano/quarentena é ainda um
+candidato documental; Slice 0 continua bloqueado. Implementação, wheel 0.8.0,
+release contract, build, dark canary, ingress, teste conversacional, canary E2E e
+rollout não foram iniciados. Nenhum provider write, Docker, ManyChat ou rede foi
+executado nesta etapa; rollout `NO-GO` e `phase9_started=false`.

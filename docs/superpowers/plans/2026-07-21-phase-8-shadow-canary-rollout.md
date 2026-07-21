@@ -1,3 +1,10 @@
+> **HISTORICAL-NON-EXECUTABLE**
+>
+> Preservado apenas como registro do plano rejeitado. Nenhum comando deste arquivo
+> pode ser executado. O único plano elegível é
+> `2026-07-21-phase-8-operational-boundary-correction.md`, condicionado à aprovação
+> documental própria e sem autorização implícita de implementação ou build.
+
 # Fase 8 — Shadow, Canary e Rollout por Digest — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

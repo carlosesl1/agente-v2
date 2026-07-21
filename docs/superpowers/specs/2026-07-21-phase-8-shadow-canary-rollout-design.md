@@ -1,3 +1,10 @@
+> **HISTORICAL-NON-EXECUTABLE**
+>
+> Preservado apenas como registro da arquitetura rejeitada. Não use seus comandos,
+> identidades de imagem ou ordem de gates. O design autoritativo é
+> `2026-07-21-phase-8-operational-boundary-correction-design.md`, aprovado na
+> identidade `2889e9ec08f466bbb16a30e4bb5c9a098daf54d3`.
+
 # Fase 8 — Shadow, canary e rollout por digest
 
 ## Estado e decisão

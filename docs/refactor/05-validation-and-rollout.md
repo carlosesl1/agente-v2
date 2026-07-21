@@ -89,7 +89,21 @@ Provider results são gravados/sanitizados para todos os modelos receberem a mes
 - revisão cega;
 - nunca rerodar até ficar verde.
 
-### 7. Dark canary
+### 7. Fechamento pré-build
+
+Antes de Docker, exigir:
+
+- spec e plano/quarentena aprovados;
+- candidatos source/runtime F e filhos E evidence-only imutáveis;
+- wheel 0.8.0 ligada ao source F/E;
+- composition root canônica, startup/readiness e workers supervisionados;
+- um approval manifest combinado externo;
+- payload manifest, source attestation e tar canônico sem ciclo;
+- decisão explícita GO/NO-GO de build.
+
+Nenhum desses itens implica executar o build.
+
+### 8. Dark canary
 
 Usar a própria imagem candidata:
 
@@ -109,7 +123,7 @@ Executar pelo menos três fluxos completos. Esperado:
 - zero mensagem pública;
 - zero efeito comercial.
 
-### 8. Ingress ManyChat real
+### 9. Ingress ManyChat real
 
 Contato autorizado, endpoint e debounce reais, com outbound/write fechados. Provar:
 
@@ -119,7 +133,13 @@ Contato autorizado, endpoint e debounce reais, com outbound/write fechados. Prov
 - nenhuma rota legada;
 - estado isolado.
 
-### 9. Canary E2E real
+### 10. Conversa humana
+
+Somente depois do ingress isolado e com writes/delivery ainda fechados, avisar Carlos.
+Ele executa conversas naturais pelo contato autorizado. A proveniência precisa ligar
+webhook, sessão `leads`, reply pública e estado isolado; simulação não vale como gate.
+
+### 11. Canary E2E real
 
 Somente com autorização explícita para:
 
@@ -147,8 +167,11 @@ Falha significa NO-GO. Não repetir comercialmente até nova RCA.
 
 O manifesto da release deve conter:
 
-- Git commit limpo;
-- image digest OCI;
+- source/runtime functional F e evidence child E;
+- wheel/package identity e approval manifest combinado;
+- payload-context manifest, source attestation e build-input identity;
+- OCI index e exatamente um child manifest `linux/arm64`;
+- config e layers;
 - `uv.lock` hash;
 - hashes de HERMES, SOUL, config, skills e plugin;
 - versão Hermes;
@@ -156,7 +179,8 @@ O manifesto da release deve conter:
 - versão do schema;
 - fingerprint de env não secreto.
 
-Canary e rollout usam o mesmo digest, sem rebuild.
+Canary, promoção e rollback usam o mesmo child manifest digest, sem rebuild. Image ID
+e archive hash são evidências suplementares, não autoridade de execução.
 
 ## Rollout
 

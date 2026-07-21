@@ -128,21 +128,30 @@ Cada fase tem objetivo, entregáveis, não objetivos, gate e rollback. Somente u
 
 ## Fase 8 — Shadow, canary e rollout
 
-**Objetivo:** provar o mesmo artefato em condições progressivamente reais.
+**Objetivo:** fechar a fronteira operacional upstream e o composition root antes de
+construir, então provar o mesmo child manifest OCI em condições progressivamente
+reais.
 
 **Entregáveis:**
 
-- clean commit;
-- imagem OCI por digest;
-- manifesto de build/runtime;
+- plano/quarentena aprovados e contract lock;
+- kernel 0.8.0 com reply/replay, relays, authorities e qualification duráveis;
+- composition root canônica e runtime F/E revisados;
+- wheel e source/runtime F/E autenticados;
+- release contract acíclico e decisão separada GO/NO-GO de build;
+- imagem OCI fixada pelo child manifest `linux/arm64`;
+- manifesto comum de release e attestation por instância;
 - dark canary com reads reais e writes fechados;
 - ingress ManyChat real;
 - uma canary E2E autorizada;
 - rollout 1% → 5% → 25% → 100%.
 
-**Gate:** definido em `05-validation-and-rollout.md`.
+**Gate:** design → plano/quarentena → upstream F/E → wheel → runtime F/E → release
+contract → GO de build → build → dark → ingress → conversa humana → E2E → rollout.
+Cada seta é uma decisão independente, definida em `05-validation-and-rollout.md`.
 
-**Rollback:** por digest, sem rebuild; worker/feature flag retornam ao fluxo anterior.
+**Rollback:** pelo mesmo child manifest digest, sem rebuild; efeitos incertos são
+reconciliados antes de qualquer nova tentativa.
 
 ## Fase 9 — Remoção do legado
 
