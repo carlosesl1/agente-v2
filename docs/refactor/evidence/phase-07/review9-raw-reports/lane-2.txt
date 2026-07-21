@@ -1,0 +1,56 @@
+## Authentication
+
+- Snapshot autenticado: commit `73904070dfcb52a3183459bc97abbc87595e1efe`, tree `7017fcf9f88c87e89eef2e633904d539649949b0`.
+- Pai e ref remota **em cache local**: `51f809f2cee51263fb17434a48a0e2c647d8837f`; branch está `ahead 1`. Nenhum acesso à rede foi feito.
+- Worktree limpa na entrada e na saída: `staged=0`, `unstaged=0`, `untracked=0`.
+- Delta pai→snapshot restrito a evidências e dois testes; nenhum código de produção, workflow, schema ou script foi alterado.
+- Run `29803099201` autenticado em `ci-result-invalidated-29803099201.json:31-106`:
+  - `head_sha=a60f13cc40d808bc86bd4028e6681943b9bf7526`, tree Git `f241cdbf83a355cb07217d88d1090e7e6d14ccf3`;
+  - `static`, `phase7-properties`, `phase7-faults` e `phase7-mutations`: `success`;
+  - `full-suite` e `gate`: `failure`;
+  - classe: `remote_full_suite_external_workspace_path_dependency`;
+  - três artifacts vinculados ao SHA: properties `8484445672`, faults `8484444897`, mutations `8484444134`.
+- Invalidação coerente em:
+  - `candidate.json:21-34`;
+  - `review-result.json:9-10,62-65`;
+  - `README.md:127-136`;
+  - `red-results.json:601-613`.
+- RED retido autenticado: 1 teste, 1 failure, exit `1`, 1.066 bytes, SHA-256 `51f8ce48fe5b869fa8d08e3fac56b3ed5c5d74dcbe1d95423dcb7999fecf6afa`; saída confirma o offender `tests/test_phase7_runtime_capture.py`.
+- A correção usa `TemporaryDirectory` em `tests/test_phase7_runtime_capture.py:145-161`; a regressão contra o caminho externo está em `tests/test_phase7_closeout.py:199-206`.
+- `ci-result.json` vigente está ausente tanto no filesystem quanto na tree de `HEAD`.
+- `a60f13cc...` não pode mais satisfazer o binding: o review vigente removeu `terminal_snapshot_commit` e o marcou invalidado. Probe temporário com CI artificialmente verde nesse SHA foi rejeitado com `review terminal snapshot is invalid` e `remote CI is not green`.
+- Checks leves executados sobre `git archive HEAD`:
+  - schema: passed;
+  - manifest: `126` arquivos, aggregate SHA-256 `b4781e01dc9a23a7062d3439fc00466b755bc5036c703af4508f434d3a288d96`;
+  - `SHA256SUMS`: `126/126`;
+  - validator pré-terminal: passed, sem failures, `terminal_ready=false`, faltando apenas `ci-result.json`;
+  - compileall: passed;
+  - capture: `9/9`;
+  - closeout: `21/21`.
+- Suíte integral e gates pesados não foram executados.
+- Arquivos criados ou modificados no repositório: nenhum.
+
+## Verdict
+
+Approved
+
+## Findings
+
+### Critical
+
+Nenhum.
+
+### Important
+
+Nenhum.
+
+### Minor
+
+Nenhum.
+
+## Residual risks
+
+- Sem rede, a ref remota é apenas a tracking ref em cache; metadados do run/jobs/artifacts foram autenticados pelos artefatos versionados, não reconsultados ao vivo. Os bytes dos archives remotos não foram baixados.
+- O closeout global continua aberto: o snapshot corrigido ainda requer revisão terminal completa e novo CI remoto no SHA exato antes da criação de um `ci-result.json` vigente.
+- **Rollout: NO-GO**
+- **phase8_started=false**

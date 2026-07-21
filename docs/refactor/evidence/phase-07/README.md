@@ -135,6 +135,12 @@ agora proíbe caminhos externos em todos os testes Phase 7. O snapshot
 `a60f13cc...` e sua aprovação ficaram invalidados para CI; o sucessor corrigido
 requer nova revisão terminal antes de outro push.
 
+O sucessor autocontido `73904070dfcb52a3183459bc97abbc87595e1efe`
+foi aprovado 3/3, sem findings, no batch `deleg_4f26f158`.
+`review-attempt-9.json`, `review9-raw-reports/` e `review-result.json` vinculam
+o próximo CI exatamente a esse snapshot. O evidence child da aprovação usa
+`[skip ci]`; somente o push temporário do SHA terminal abrirá o novo run.
+
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi
 inventada retroativamente.

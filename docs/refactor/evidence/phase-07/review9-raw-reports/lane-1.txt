@@ -1,0 +1,26 @@
+## Authentication
+
+- Snapshot: `73904070dfcb52a3183459bc97abbc87595e1efe`
+- Tree: `7017fcf9f88c87e89eef2e633904d539649949b0`
+- Pai e upstream local: `51f809f2cee51263fb17434a48a0e2c647d8837f`
+- Divergência autenticada: `+1/-0` (`upstream-only=0`, `HEAD-only=1`)
+- Worktree limpa antes e depois: `0` caminhos alterados ou não rastreados.
+- `tests/test_phase7_runtime_capture.py:146-161`: fixture absoluta substituída por `TemporaryDirectory`, com JSON sintético; `_scan_text` continua sendo reexecutado e confirma payload não vazio e zero redações.
+- `tests/test_phase7_closeout.py:199-206`: guard cobre `tests/test_phase7_*.py`, monta o caminho proibido por concatenação e, portanto, não se autoincrimina. Busca estática no snapshot encontrou zero ocorrências literais de `/home/ubuntu/workspace/`.
+- RED autenticado: SHA-256 `51f8ce48fe5b869fa8d08e3fac56b3ed5c5d74dcbe1d95423dcb7999fecf6afa`, `1066` bytes; 1 teste/1 falha no snapshot anterior.
+- GREEN causal: runtime capture `9/9`, closeout `21/21`, ambos `OK`.
+- Arquivos criados ou modificados: nenhum.
+
+## Verdict
+
+Approved
+
+## Findings
+
+- Critical: nenhum.
+- Important: nenhum.
+- Minor: nenhum.
+
+## Residual risks
+
+Sem suíte integral/gates pesados/rede por escopo. Novo CI no SHA exato permanece necessário. Rollout NO-GO; phase8_started=false.

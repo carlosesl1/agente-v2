@@ -1,0 +1,48 @@
+{
+  "approved_lanes": 3,
+  "attempt": 9,
+  "batch_id": "deleg_4f26f158",
+  "candidate_commit": "73904070dfcb52a3183459bc97abbc87595e1efe",
+  "candidate_tree": "7017fcf9f88c87e89eef2e633904d539649949b0",
+  "completed_at": "2026-07-21T05:27:29Z",
+  "conclusive_lanes": 3,
+  "functional_candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "functional_candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "invalidated": false,
+  "lanes": [
+    {
+      "batch_id": "deleg_4f26f158",
+      "findings": [],
+      "lane": 1,
+      "report_bytes": 1316,
+      "report_path": "review9-raw-reports/lane-1.txt",
+      "report_sha256": "9a3e73ca6ccc8252003240caa547ccbe5fd9124040ea22f196f67691154650b6",
+      "verdict": "Approved"
+    },
+    {
+      "batch_id": "deleg_4f26f158",
+      "findings": [],
+      "lane": 2,
+      "report_bytes": 2964,
+      "report_path": "review9-raw-reports/lane-2.txt",
+      "report_sha256": "37fa63ebfeeee0c953d427d2f078b6398ecbdfdd29e344a94d1d862541bafe91",
+      "verdict": "Approved"
+    },
+    {
+      "batch_id": "deleg_4f26f158",
+      "findings": [],
+      "lane": 3,
+      "report_bytes": 2924,
+      "report_path": "review9-raw-reports/lane-3.txt",
+      "report_sha256": "fbd2fc4b71894fdcf237200540a6f35a92d30f5868eca21e5e70ad87f106dcff",
+      "verdict": "Approved"
+    }
+  ],
+  "phase": 7,
+  "phase8_started": false,
+  "rejected_lanes": 0,
+  "result": "Approved",
+  "rollout": "NO-GO",
+  "terminal_snapshot_commit": "73904070dfcb52a3183459bc97abbc87595e1efe",
+  "terminal_snapshot_tree": "7017fcf9f88c87e89eef2e633904d539649949b0"
+}

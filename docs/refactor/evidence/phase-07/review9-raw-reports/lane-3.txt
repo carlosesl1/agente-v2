@@ -1,0 +1,53 @@
+## Authentication
+
+- Snapshot local autenticado:
+  - commit `73904070dfcb52a3183459bc97abbc87595e1efe`
+  - tree `7017fcf9f88c87e89eef2e633904d539649949b0`
+  - pai único `51f809f2cee51263fb17434a48a0e2c647d8837f`
+- Candidato funcional autenticado:
+  - commit `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`
+  - tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`
+  - ancestral do snapshot.
+- Zero diff candidato→snapshot em:
+  - `reservation_boundary/`
+  - `schemas/phase7/`
+  - `pyproject.toml`
+  - `scripts/build_phase7_wheel.py`
+  - `.github/workflows/phase7.yml`
+- Todos os seis pacotes de entrada do wheel também têm os mesmos objetos Git.
+- Wheel reconstruído duas vezes integralmente em memória, sem importar o builder:
+  - 54 fontes, 58 membros;
+  - `214954` bytes;
+  - SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`;
+  - ambas as reconstruções byte a byte idênticas.
+- Pai→snapshot sem drift nos relatórios `properties`, `faults`, `mutation`, `performance` e nos três raw gzip. Hashes compactados/descompactados, tamanhos, `mtime=0`, manifest e `SHA256SUMS` conferem.
+- Manifest fechado estaticamente: 126 arquivos; aggregate SHA-256 `b4781e01dc9a23a7062d3439fc00466b755bc5036c703af4508f434d3a288d96`.
+- Worktree/index limpos; nenhum staged, unstaged ou untracked. Upstream local `origin/phase7-boundary-migration` aponta para o pai; `branch.ab +1 -0`, equivalente a behind `0`, ahead `1`.
+- O único commit publicável não contém nenhum marcador GitHub de skip-CI.
+- `ci-result.json` ausente no worktree, em `HEAD`, no manifest e em `SHA256SUMS`.
+- Run anterior `29803099201` autenticado como `invalidated=true`, `conclusion=failure`, ligado a `a60f13cc40d808bc86bd4028e6681943b9bf7526`; `full-suite` e `gate` falharam.
+- Workflow elegível localmente:
+  - seis jobs exatos: `static`, `full-suite`, `phase7-properties`, `phase7-faults`, `phase7-mutations`, `gate`;
+  - aggregate fail-closed sobre os cinco jobs materiais;
+  - três artifacts exatos, vinculados a `${{ github.sha }}`: `phase7-properties`, `phase7-faults` e `phase7-mutations`;
+  - trigger exclusivo de push no branch correto, sem filtros de paths.
+- Nenhuma rede, suíte integral, gate pesado ou código revisado foi executado. Nenhum arquivo foi criado ou modificado.
+
+## Verdict
+
+Approved
+
+## Findings
+
+- Critical: nenhum.
+- Important: nenhum.
+- Minor: nenhum.
+
+## Residual risks
+
+- A elegibilidade é local contra a remote-tracking ref armazenada; sem rede não foi possível provar o tip remoto atual, branch protection, Actions habilitado ou aceitação efetiva do push.
+- O CI do SHA atual ainda não existe. O rollout continua bloqueado até o run exato concluir com os seis jobs e três artifacts autenticados.
+- Suíte integral e gates pesados não foram reexecutados nesta lane; sua preservação foi aceita por non-drift e autenticação dos artefatos históricos.
+
+Rollout: NO-GO  
+phase8_started=false

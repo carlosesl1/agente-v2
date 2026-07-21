@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "b4781e01dc9a23a7062d3439fc00466b755bc5036c703af4508f434d3a288d96",
-  "file_count": 126,
+  "aggregate_sha256": "3f8f3936415c93ee0827e3894d6d0da9d2c69388c77e558e404be659abe75d05",
+  "file_count": 130,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "c9cf878e129427dd0c6a66a6a43cd0f95462a6959bae8e21df58f6ec04262329",
-      "size": 8830
+      "sha256": "4001f75fb2b0c71a26b11843d0fded5383b970c766e9616868d32435714c293f",
+      "size": 9190
     },
     {
       "path": "docs/refactor/evidence/phase-07/ci-result-invalidated-29787387850.json",
@@ -135,6 +135,11 @@
     {
       "path": "docs/refactor/evidence/phase-07/review-attempt-8.json",
       "sha256": "d73261d13ad2438c60c3fe4834f1e283190c20b4dc64730db5f169cd85493fcf",
+      "size": 1590
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-9.json",
+      "sha256": "1d7427f9d508b6c4689fb9de8b0676e52ce944e0ddfc397a22e753c81e34f6de",
       "size": 1590
     },
     {
@@ -391,6 +396,21 @@
       "path": "docs/refactor/evidence/phase-07/review8-red-reports/external-workspace-path-red.out",
       "sha256": "51f8ce48fe5b869fa8d08e3fac56b3ed5c5d74dcbe1d95423dcb7999fecf6afa",
       "size": 1066
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review9-raw-reports/lane-1.txt",
+      "sha256": "9a3e73ca6ccc8252003240caa547ccbe5fd9124040ea22f196f67691154650b6",
+      "size": 1316
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review9-raw-reports/lane-2.txt",
+      "sha256": "37fa63ebfeeee0c953d427d2f078b6398ecbdfdd29e344a94d1d862541bafe91",
+      "size": 2964
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review9-raw-reports/lane-3.txt",
+      "sha256": "fbd2fc4b71894fdcf237200540a6f35a92d30f5868eca21e5e70ad87f106dcff",
+      "size": 2924
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",
