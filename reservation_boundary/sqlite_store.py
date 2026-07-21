@@ -198,7 +198,12 @@ class SQLiteBoundaryStore:
             self._connection.close()
             self._closed = True
 
-    def _versioned_from_row(self, row: tuple[object, ...]) -> VersionedBoundaryState:
+    def _versioned_from_row(
+        self,
+        row: tuple[object, ...],
+        *,
+        expected_lead_key: str,
+    ) -> VersionedBoundaryState:
         version, state_json, state_hash = row
         if type(version) is not int or type(state_json) is not str or type(state_hash) is not str:
             raise DataCorruption("boundary_state row has wrong SQLite types")
@@ -206,8 +211,12 @@ class SQLiteBoundaryStore:
             state = from_wire_json(state_json, BoundaryState)
         except (TypeError, ValueError) as exc:
             raise DataCorruption("boundary state wire is invalid") from exc
-        if state.version != version or semantic_hash(state) != state_hash:
-            raise DataCorruption("boundary state hash/version does not bind")
+        if (
+            state.lead_key != expected_lead_key
+            or state.version != version
+            or semantic_hash(state) != state_hash
+        ):
+            raise DataCorruption("boundary state identity/hash/version does not bind")
         return VersionedBoundaryState(state, version, state_hash)
 
     def _load_state_in_transaction(self, lead_key: str) -> VersionedBoundaryState:
@@ -217,7 +226,7 @@ class SQLiteBoundaryStore:
         ).fetchone()
         if row is None:
             raise StateNotFound(lead_key)
-        return self._versioned_from_row(row)
+        return self._versioned_from_row(row, expected_lead_key=lead_key)
 
     def load_state(self, lead_key: str) -> VersionedBoundaryState:
         self._ensure_open()
@@ -316,7 +325,13 @@ class SQLiteBoundaryStore:
             ).rowcount
             if updated != 1:
                 raise ConcurrencyConflict("fencing token changed concurrently")
-            return self._versioned_from_row(row[:3]), token
+            return (
+                self._versioned_from_row(
+                    row[:3],
+                    expected_lead_key=exact_lead_key,
+                ),
+                token,
+            )
 
     def commit(
         self,

@@ -14,10 +14,12 @@ from reservation_execution.types import OutboxKind
 from reservation_boundary.legacy_state import import_legacy_state
 from reservation_boundary.sqlite_store import (
     ConcurrencyConflict,
+    DataCorruption,
     IdentityConflict,
     LegacyStateReadPort,
     SQLiteBoundaryStore,
 )
+from reservation_boundary.serialization import semantic_hash, to_wire_json
 from reservation_boundary.types import BoundaryCommit, ImportDisposition, TypedFact
 from tests.test_phase2_serialization import complete_flow
 from tests.test_phase7_legacy_state import advanced_metadata, snapshot
@@ -124,6 +126,22 @@ class Phase7SingleWriteStoreTests(unittest.TestCase):
                 committed_at=T0,
             )
         self.assertEqual(self.counts(), (1, 0, 0, 0, 1, 0))
+
+    def test_load_rejects_state_whose_embedded_identity_differs_from_row(self) -> None:
+        source, imported = collecting_import()
+        self.store.import_genesis(source, imported, claimed_at=T0)
+        foreign = replace(imported.state, lead_key="lead-synthetic-foreign")
+        self.store._connection.execute(
+            "UPDATE boundary_state SET state_json=?, state_hash=? WHERE lead_key=?",
+            (
+                to_wire_json(foreign),
+                semantic_hash(foreign),
+                source.raw_fields["lead_key"],
+            ),
+        )
+
+        with self.assertRaises(DataCorruption):
+            self.store.load_state(source.raw_fields["lead_key"])
 
     def test_event_dedupe_is_idempotent_and_conflict_is_closed(self) -> None:
         source, imported = collecting_import()

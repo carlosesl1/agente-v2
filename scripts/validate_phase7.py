@@ -276,7 +276,7 @@ def validate_phase7(*, terminal: bool) -> dict[str, object]:
     source = _json("docs/refactor/evidence/phase-07/runtime-source-manifest.json")
     checks["runtime_source"] = _runtime_source_is_authentic(source)
     red = _json("docs/refactor/evidence/phase-07/red-results.json")
-    checks["red_coverage"] = {row["task"] for row in red["entries"]} == set(range(1, 16))
+    checks["red_coverage"] = {row["task"] for row in red["entries"]} == set(range(1, 17))
     workflow = (ROOT / ".github/workflows/phase7.yml").read_text()
     checks["workflow_scope"] = (
         "- phase7-boundary-migration" in workflow

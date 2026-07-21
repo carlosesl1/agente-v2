@@ -355,6 +355,20 @@ class Phase7LegacyStateTests(unittest.TestCase):
         self.assertIs(result.reason, ImportReason.MISSING_PROVENANCE)
         self.assertIsNone(result.state)
 
+        for wires in (["not-a-wire"], []):
+            with self.subTest(wires=wires):
+                financial = import_legacy_state(
+                    snapshot(
+                        metadata={
+                            "workflow_id": "workflow-synthetic-001",
+                            "state_updated_at": T0.isoformat(),
+                            "phase6_payment_wires": wires,
+                        },
+                    )
+                )
+                self.assertIsNot(financial.disposition, ImportDisposition.MIGRATED)
+                self.assertIsNone(financial.state)
+
     def test_import_is_deterministic_and_does_not_mutate_snapshot(self) -> None:
         source = snapshot(stage="hostel")
         before = source.raw_fields
@@ -441,6 +455,35 @@ class Phase7LegacyStateTests(unittest.TestCase):
         mismatch = import_legacy_state(mismatched)
         self.assertIs(mismatch.disposition, ImportDisposition.REJECTED)
         self.assertIs(mismatch.reason, ImportReason.UNVERIFIED_PAYMENT)
+
+    def test_reservation_and_payment_statuses_and_times_are_fail_closed(self) -> None:
+        _, state, payment, reservation = payment_fixture()
+        cases = (
+            {**reservation, "status": "cancelled"},
+            {**reservation, "payment_status": "unknown-status"},
+            {
+                **reservation,
+                "created_at": (state.meta.last_event_at - timedelta(days=1)).isoformat(),
+            },
+            {
+                **reservation,
+                "payment_confirmed_at": state.meta.last_event_at.isoformat(),
+            },
+        )
+        for changed in cases:
+            with self.subTest(changed=changed):
+                candidate = snapshot(
+                    stage="payment_pending",
+                    agency_bookings=[changed],
+                    metadata=advanced_metadata(
+                        state,
+                        phase6_payment_wires=[to_phase6_wire_json(payment)],
+                    ),
+                )
+                result = import_legacy_state(candidate)
+                self.assertIs(result.disposition, ImportDisposition.REJECTED)
+                self.assertIs(result.reason, ImportReason.UNVERIFIED_PAYMENT)
+                self.assertIsNone(result.state)
 
     def test_missing_wire_and_unknown_historical_outcome_route_to_review(self) -> None:
         missing = import_legacy_state(

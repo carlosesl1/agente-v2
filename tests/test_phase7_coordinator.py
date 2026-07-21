@@ -20,6 +20,8 @@ from reservation_boundary.sqlite_store import IdentityConflict, SQLiteBoundarySt
 from reservation_boundary.types import (
     ConversationIntent,
     ConversationIntentKind,
+    ImportDisposition,
+    ImportReason,
     KernelDecision,
     NormalizedMessage,
     TurnEnvelope,
@@ -294,6 +296,26 @@ class Phase7CoordinatorTests(unittest.TestCase):
             value.coordinate(envelope())
         self.assertIs(raised.exception.reason, TurnPlanReason.MANUAL_REVIEW)
         self.assertEqual((intent.calls, kernel.calls, store.commits), (0, 0, 0))
+
+    def test_snapshot_identity_must_bind_requested_lead_before_genesis(self) -> None:
+        trace: list[str] = []
+        foreign = snapshot(lead_key="lead-synthetic-foreign")
+        value, store, _, _, intent, kernel = coordinator(
+            trace,
+            legacy_value=foreign,
+        )
+        self.keep(store)
+
+        with self.assertRaises(TurnImportRejected) as raised:
+            value.coordinate(envelope())
+
+        self.assertIs(raised.exception.disposition, ImportDisposition.REJECTED)
+        self.assertIs(raised.exception.import_reason, ImportReason.CONFLICTING_IDENTITY)
+        self.assertEqual((store.imports, store.commits, intent.calls, kernel.calls), (0, 0, 0, 0))
+        self.assertEqual(
+            store.inner._connection.execute("SELECT count(*) FROM boundary_state").fetchone()[0],
+            0,
+        )
 
     def test_invalid_intent_is_rejected_before_reduce_or_event_commit(self) -> None:
         trace: list[str] = []

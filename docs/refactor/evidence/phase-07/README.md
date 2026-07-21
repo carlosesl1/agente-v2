@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **candidato congelado; local e remoto verdes; revisão terminal pendente**.
+Status: **candidato anterior invalidado; remediação terminal focused em curso**.
 
 ## Entrada
 
@@ -14,7 +14,7 @@ Status: **candidato congelado; local e remoto verdes; revisão terminal pendente
 - zero capability live;
 - rollout `NO-GO` e `phase8_started=false`.
 
-`red-results.json` cobre Tasks 1–15 com envelopes sanitizados: task, comando,
+`red-results.json` cobre Tasks 1–16 com envelopes sanitizados: task, comando,
 exit, classe causal, SHA-256 e bytes. Raw outputs permanecem em `/tmp`.
 
 ## Runtime isolado
@@ -59,7 +59,14 @@ O workflow não publicou os JSONs de `/tmp` como artifacts. Os resumos remotos
 são vinculados ao job real `success`, ao SHA exato, ao comando versionado e às
 constantes fechadas dos runners; não houve rerun local substituto.
 
-`review-result.json` permanece ausente até a revisão terminal real.
+`review-attempt-1.json` registra a lane 1 `Needs fixes` e os dois timeouts que
+valem zero. `review-remediation-tests.patch` torna os novos REDs reconstruíveis
+sobre o evidence commit anterior. `review-result.json` permanece ausente até um
+novo candidato obter os três verdicts terminais válidos.
+
+O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
+unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi
+inventada retroativamente.
 
 O candidato `4eb0495a2296ac76d4b2ab25038b6a822f19ec18` foi invalidado
 após uma única tentativa local terminar em collection exit 2. A causa e a saída

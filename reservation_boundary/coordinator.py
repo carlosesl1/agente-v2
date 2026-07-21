@@ -17,6 +17,7 @@ from reservation_boundary.types import (
     BoundaryState,
     ConversationIntent,
     ImportDisposition,
+    ImportReason,
     ImportResult,
     IntentRequest,
     KernelDecision,
@@ -192,6 +193,11 @@ class TurnCoordinator:
             raise TurnImportRejected(
                 ImportDisposition.MANUAL_REVIEW,
                 "legacy_snapshot_missing",
+            )
+        if snapshot.raw_fields.get("lead_key") != envelope.lead_key:
+            raise TurnImportRejected(
+                ImportDisposition.REJECTED,
+                ImportReason.CONFLICTING_IDENTITY,
             )
         result = self._importer.import_snapshot(snapshot)
         if type(result) is not ImportResult:

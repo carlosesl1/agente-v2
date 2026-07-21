@@ -88,8 +88,20 @@ _ADVANCED_KEYS: Final = frozenset(
         "rendered_summary_hash",
         "reservation_status",
         "payment_status",
+        "phase6_payment_wires",
     )
 )
+_ACTIVE_RESERVATION_STATUSES: Final = frozenset(
+    (
+        "active",
+        "confirmed",
+        "reserved",
+        "reservation_confirmed",
+        "payment_pending",
+        "pending_payment",
+    )
+)
+_UNPAID_PAYMENT_STATUSES: Final = frozenset(("", "pending"))
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 
 
@@ -483,6 +495,18 @@ def _payment_workflows(
             _fail(ImportReason.UNVERIFIED_PAYMENT)
         service = state.command.payload.components[0].service
         if (
+            reservation.status not in _ACTIVE_RESERVATION_STATUSES
+            or reservation.created_at != anchor.confirmed_at
+            or reservation.payment_status
+            not in (*_UNPAID_PAYMENT_STATUSES, "paid")
+        ):
+            _fail(ImportReason.UNVERIFIED_PAYMENT)
+        paid = reservation.payment_status == "paid"
+        expected_amount = 0 if paid else anchor.amount_minor
+        expected_method = (
+            "" if payment.subject.method is None else payment.subject.method.value
+        )
+        if (
             anchor.reservation_workflow_id != state.meta.workflow_id
             or anchor.reservation_command_id != state.command.command_id
             or anchor.reservation_subject_signature != state.command.subject_signature
@@ -493,21 +517,27 @@ def _payment_workflows(
             or anchor.business_unit is not _expected_business_unit(service)
             or anchor.payment_target_id != reservation.target_id
             or anchor.payment_target_id != state.outcome.provider_reference
-            or anchor.amount_minor != reservation.amount_minor
+            or expected_amount != reservation.amount_minor
             or anchor.currency != reservation.currency
             or anchor.payment_deadline != reservation.payment_deadline
+            or reservation.payment_method != expected_method
+            or (
+                paid
+                and (
+                    payment.settlement_finish is None
+                    or reservation.payment_confirmed_at
+                    != payment.settlement_finish.finished_at
+                )
+            )
+            or (not paid and reservation.payment_confirmed_at is not None)
         ):
             _fail(ImportReason.UNVERIFIED_PAYMENT)
         if reservation.service != (
             "agency" if service is ServiceKind.ACTIVITY else "hostel"
         ):
             _fail(ImportReason.UNVERIFIED_PAYMENT)
-        paid = reservation.payment_status == "paid"
         if paid != (payment.status is PaymentStatus.PAID):
             _fail(ImportReason.UNVERIFIED_PAYMENT)
-        if reservation.payment_method:
-            if payment.subject.method is None or payment.subject.method.value != reservation.payment_method:
-                _fail(ImportReason.UNVERIFIED_PAYMENT)
     return tuple(payments)
 
 
@@ -555,6 +585,8 @@ def _has_advanced_state(fields: Mapping[str, object], metadata: Mapping[str, obj
     if fields["hostel_reservations"] or fields["agency_bookings"]:
         return True
     if fields["desired_services"] or fields["missing_slots"] or fields["memory_long"]:
+        return True
+    if "phase6_payment_wires" in metadata:
         return True
     return any(key in metadata and metadata[key] not in (None, "", (), []) for key in _ADVANCED_KEYS)
 

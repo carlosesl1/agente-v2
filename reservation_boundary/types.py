@@ -20,6 +20,7 @@ _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 _DECIMAL_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*|-[1-9][0-9]*)\.[0-9]{2}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
+_BOUNDARY_SCHEMA_VERSION: Final = 7
 
 
 def _require_exact_str(value: object, name: str, *, identifier: bool = False) -> str:
@@ -478,6 +479,10 @@ class BoundaryState:
 
     def __post_init__(self) -> None:
         _require_exact_int(self.schema_version, "BoundaryState.schema_version", minimum=1)
+        if self.schema_version != _BOUNDARY_SCHEMA_VERSION:
+            raise ValueError(
+                f"BoundaryState.schema_version must equal {_BOUNDARY_SCHEMA_VERSION}"
+            )
         _require_exact_str(self.lead_key, "BoundaryState.lead_key", identifier=True)
         _require_exact_int(self.version, "BoundaryState.version", minimum=0)
         if self.workflow is not None and type(self.workflow) not in STATE_TYPES:

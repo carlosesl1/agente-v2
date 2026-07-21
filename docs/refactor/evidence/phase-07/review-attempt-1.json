@@ -1,0 +1,48 @@
+{
+  "batch_id": "deleg_005406ed",
+  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
+  "candidate_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
+  "evidence_commit": "2518c3e400df307ec66a83d4597caeba57d44e13",
+  "evidence_tree": "954a4a64999422b2731e8dacd921931ca56770cf",
+  "followup_red": {
+    "output_sha256": "d9ff97e6e2aeff54d309f138e8c6737991effef6b8f201eeb92d46ba053b508e",
+    "unfixed_patch": "review-remediation-empty-wires.patch",
+    "unfixed_patch_bytes": 42623,
+    "unfixed_patch_sha256": "dff472ab41514d18eedddc2ff43644a32b066cf38da9d74d379cffac6d033462"
+  },
+  "functional_candidate_invalidated": true,
+  "historical_red_limit": "The original Task 6 semantic RED output lacks an unfixed commit/tree. This record does not retroactively claim reconstructibility; remediation REDs are bound to the exact evidence parent and test-only patch.",
+  "lanes": [
+    {
+      "critical": 1,
+      "important": 6,
+      "lane": "identity/import/dual-read-single-write",
+      "minor": 0,
+      "status": "completed",
+      "summary_sha256": "4f7359a8ad114263f0795e5d6c7585a983a7ddad89759edfa8c6d9e983526d25",
+      "verdict": "Needs fixes"
+    },
+    {
+      "api_calls": 29,
+      "duration_seconds": 600.2,
+      "lane": "coordinator/dispatch/deadline/side-effects",
+      "status": "timeout",
+      "verdict": null
+    },
+    {
+      "api_calls": 21,
+      "duration_seconds": 600.14,
+      "lane": "replica/provenance/patch/comparator/CI/claims",
+      "status": "timeout",
+      "verdict": null
+    }
+  ],
+  "live_capabilities_executed": [],
+  "phase": 7,
+  "phase8_started": false,
+  "policy": "timeouts and missing summaries count as zero; no approval was inferred",
+  "red_test_patch": "review-remediation-tests.patch",
+  "red_test_patch_bytes": 8790,
+  "red_test_patch_sha256": "9e8941d5dfda18b8f1f2c9de8cd271c7e4d4c88f7a8f2bca10088f6030b691a4",
+  "rollout": "NO-GO"
+}

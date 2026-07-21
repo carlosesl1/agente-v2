@@ -162,6 +162,16 @@ class Phase7TypeContractTests(unittest.TestCase):
             processed_event_ids=(),
         )
         self.assertIs(state.workflow, workflow)
+        with self.assertRaises(ValueError):
+            BoundaryState(
+                schema_version=8,
+                lead_key="lead-1",
+                version=0,
+                workflow=workflow,
+                handoff=None,
+                payments=(),
+                processed_event_ids=(),
+            )
         with self.assertRaises(TypeError):
             BoundaryState(
                 schema_version=7,

@@ -1,0 +1,192 @@
+diff --git a/tests/test_phase7_coordinator.py b/tests/test_phase7_coordinator.py
+index 6661dae..b3651b3 100644
+--- a/tests/test_phase7_coordinator.py
++++ b/tests/test_phase7_coordinator.py
+@@ -20,6 +20,8 @@ from reservation_boundary.sqlite_store import IdentityConflict, SQLiteBoundarySt
+ from reservation_boundary.types import (
+     ConversationIntent,
+     ConversationIntentKind,
++    ImportDisposition,
++    ImportReason,
+     KernelDecision,
+     NormalizedMessage,
+     TurnEnvelope,
+@@ -295,6 +297,26 @@ class Phase7CoordinatorTests(unittest.TestCase):
+         self.assertIs(raised.exception.reason, TurnPlanReason.MANUAL_REVIEW)
+         self.assertEqual((intent.calls, kernel.calls, store.commits), (0, 0, 0))
+ 
++    def test_snapshot_identity_must_bind_requested_lead_before_genesis(self) -> None:
++        trace: list[str] = []
++        foreign = snapshot(lead_key="lead-synthetic-foreign")
++        value, store, _, _, intent, kernel = coordinator(
++            trace,
++            legacy_value=foreign,
++        )
++        self.keep(store)
++
++        with self.assertRaises(TurnImportRejected) as raised:
++            value.coordinate(envelope())
++
++        self.assertIs(raised.exception.disposition, ImportDisposition.REJECTED)
++        self.assertIs(raised.exception.import_reason, ImportReason.CONFLICTING_IDENTITY)
++        self.assertEqual((store.imports, store.commits, intent.calls, kernel.calls), (0, 0, 0, 0))
++        self.assertEqual(
++            store.inner._connection.execute("SELECT count(*) FROM boundary_state").fetchone()[0],
++            0,
++        )
++
+     def test_invalid_intent_is_rejected_before_reduce_or_event_commit(self) -> None:
+         trace: list[str] = []
+         invalid = FakeIntent(trace, source_event_id="different-event")
+diff --git a/tests/test_phase7_fault_injection.py b/tests/test_phase7_fault_injection.py
+index 4666aad..80be8ca 100644
+--- a/tests/test_phase7_fault_injection.py
++++ b/tests/test_phase7_fault_injection.py
+@@ -21,6 +21,27 @@ class Phase7FaultHarnessTests(unittest.TestCase):
+         self.assertGreaterEqual(len(report.faults), 4)
+         self.assertEqual(report.restart_schedules, 10)
+         self.assertEqual(report.contention_rows, 2 * len(CONTENTION_DOMAINS))
++        self.assertTrue(hasattr(report, "contention_details"))
++        details = report.contention_details
++        self.assertEqual(len(details), report.contention_rows)
++        for domain in CONTENTION_DOMAINS:
++            rows = tuple(row for row in details if row.domain == domain)
++            self.assertEqual(len(rows), 2)
++            self.assertEqual(tuple(row.round_index for row in rows), (0, 1))
++            self.assertTrue(all(row.contenders == 2 for row in rows))
++            self.assertTrue(all(row.winners == 1 for row in rows))
++            self.assertTrue(all(row.conflicts == 1 for row in rows))
++            self.assertTrue(all(row.passed for row in rows))
++            self.assertTrue(all(row.detail_hash for row in rows))
++        self.assertTrue(all(row.state_rows == 1 for row in details))
++        self.assertTrue(
++            all(
++                row.event_rows == (0 if row.domain == "genesis" else 1)
++                and row.command_rows == (1 if row.domain == "command" else 0)
++                and row.outbox_rows == (1 if row.domain == "outbox" else 0)
++                for row in details
++            )
++        )
+         self.assertTrue(all(row.passed for row in report.faults))
+         self.assertEqual(len({row.name for row in report.faults}), len(report.faults))
+ 
+diff --git a/tests/test_phase7_legacy_state.py b/tests/test_phase7_legacy_state.py
+index e2320db..d7b35af 100644
+--- a/tests/test_phase7_legacy_state.py
++++ b/tests/test_phase7_legacy_state.py
+@@ -355,6 +355,18 @@ class Phase7LegacyStateTests(unittest.TestCase):
+         self.assertIs(result.reason, ImportReason.MISSING_PROVENANCE)
+         self.assertIsNone(result.state)
+ 
++        financial = import_legacy_state(
++            snapshot(
++                metadata={
++                    "workflow_id": "workflow-synthetic-001",
++                    "state_updated_at": T0.isoformat(),
++                    "phase6_payment_wires": ["not-a-wire"],
++                },
++            )
++        )
++        self.assertIsNot(financial.disposition, ImportDisposition.MIGRATED)
++        self.assertIsNone(financial.state)
++
+     def test_import_is_deterministic_and_does_not_mutate_snapshot(self) -> None:
+         source = snapshot(stage="hostel")
+         before = source.raw_fields
+@@ -442,6 +454,35 @@ class Phase7LegacyStateTests(unittest.TestCase):
+         self.assertIs(mismatch.disposition, ImportDisposition.REJECTED)
+         self.assertIs(mismatch.reason, ImportReason.UNVERIFIED_PAYMENT)
+ 
++    def test_reservation_and_payment_statuses_and_times_are_fail_closed(self) -> None:
++        _, state, payment, reservation = payment_fixture()
++        cases = (
++            {**reservation, "status": "cancelled"},
++            {**reservation, "payment_status": "unknown-status"},
++            {
++                **reservation,
++                "created_at": (state.meta.last_event_at - timedelta(days=1)).isoformat(),
++            },
++            {
++                **reservation,
++                "payment_confirmed_at": state.meta.last_event_at.isoformat(),
++            },
++        )
++        for changed in cases:
++            with self.subTest(changed=changed):
++                candidate = snapshot(
++                    stage="payment_pending",
++                    agency_bookings=[changed],
++                    metadata=advanced_metadata(
++                        state,
++                        phase6_payment_wires=[to_phase6_wire_json(payment)],
++                    ),
++                )
++                result = import_legacy_state(candidate)
++                self.assertIs(result.disposition, ImportDisposition.REJECTED)
++                self.assertIs(result.reason, ImportReason.UNVERIFIED_PAYMENT)
++                self.assertIsNone(result.state)
++
+     def test_missing_wire_and_unknown_historical_outcome_route_to_review(self) -> None:
+         missing = import_legacy_state(
+             snapshot(
+diff --git a/tests/test_phase7_sqlite_store.py b/tests/test_phase7_sqlite_store.py
+index 36e5962..0b19cab 100644
+--- a/tests/test_phase7_sqlite_store.py
++++ b/tests/test_phase7_sqlite_store.py
+@@ -14,10 +14,12 @@ from reservation_execution.types import OutboxKind
+ from reservation_boundary.legacy_state import import_legacy_state
+ from reservation_boundary.sqlite_store import (
+     ConcurrencyConflict,
++    DataCorruption,
+     IdentityConflict,
+     LegacyStateReadPort,
+     SQLiteBoundaryStore,
+ )
++from reservation_boundary.serialization import semantic_hash, to_wire_json
+ from reservation_boundary.types import BoundaryCommit, ImportDisposition, TypedFact
+ from tests.test_phase2_serialization import complete_flow
+ from tests.test_phase7_legacy_state import advanced_metadata, snapshot
+@@ -125,6 +127,22 @@ class Phase7SingleWriteStoreTests(unittest.TestCase):
+             )
+         self.assertEqual(self.counts(), (1, 0, 0, 0, 1, 0))
+ 
++    def test_load_rejects_state_whose_embedded_identity_differs_from_row(self) -> None:
++        source, imported = collecting_import()
++        self.store.import_genesis(source, imported, claimed_at=T0)
++        foreign = replace(imported.state, lead_key="lead-synthetic-foreign")
++        self.store._connection.execute(
++            "UPDATE boundary_state SET state_json=?, state_hash=? WHERE lead_key=?",
++            (
++                to_wire_json(foreign),
++                semantic_hash(foreign),
++                source.raw_fields["lead_key"],
++            ),
++        )
++
++        with self.assertRaises(DataCorruption):
++            self.store.load_state(source.raw_fields["lead_key"])
++
+     def test_event_dedupe_is_idempotent_and_conflict_is_closed(self) -> None:
+         source, imported = collecting_import()
+         self.store.import_genesis(source, imported, claimed_at=T0)
+diff --git a/tests/test_phase7_types.py b/tests/test_phase7_types.py
+index ab2ac14..c62967a 100644
+--- a/tests/test_phase7_types.py
++++ b/tests/test_phase7_types.py
+@@ -162,6 +162,16 @@ class Phase7TypeContractTests(unittest.TestCase):
+             processed_event_ids=(),
+         )
+         self.assertIs(state.workflow, workflow)
++        with self.assertRaises(ValueError):
++            BoundaryState(
++                schema_version=8,
++                lead_key="lead-1",
++                version=0,
++                workflow=workflow,
++                handoff=None,
++                payments=(),
++                processed_event_ids=(),
++            )
+         with self.assertRaises(TypeError):
+             BoundaryState(
+                 schema_version=7,

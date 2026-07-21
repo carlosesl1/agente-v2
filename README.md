@@ -12,8 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — candidato congelado; validações local/remota verdes;
-  revisão terminal pendente**.
+- Fase ativa: **Fase 7 — primeiro candidato congelado invalidado pela revisão;
+  remediação focused em preparação para novo freeze**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -36,9 +36,10 @@ Contrato central:
 - Fase 7: **em fechamento técnico** na branch `phase7-boundary-migration`, com
   `LegacyStateImporter`, `TurnCoordinator`, `ToolDispatch` e
   `DecisionComparator` como fronteiras únicas. Quatro writes têm command owner
-  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. A
+  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. O
   candidato `ef5dd46c27ccb72e977b333f526521a5f6b0225c` passou 963 testes
-  locais e o run remoto `29787387850` ficou 6/6 verde; revisão ainda pendente.
+  locais e o run remoto `29787387850` ficou 6/6 verde, mas foi invalidado por
+  findings de identidade/import/store/contention na revisão terminal.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
   `e2e1570757c2afe3d0b1d25a1ef94cd2c709d674`.

@@ -21,6 +21,27 @@ class Phase7FaultHarnessTests(unittest.TestCase):
         self.assertGreaterEqual(len(report.faults), 4)
         self.assertEqual(report.restart_schedules, 10)
         self.assertEqual(report.contention_rows, 2 * len(CONTENTION_DOMAINS))
+        self.assertTrue(hasattr(report, "contention_details"))
+        details = report.contention_details
+        self.assertEqual(len(details), report.contention_rows)
+        for domain in CONTENTION_DOMAINS:
+            rows = tuple(row for row in details if row.domain == domain)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(tuple(row.round_index for row in rows), (0, 1))
+            self.assertTrue(all(row.contenders == 2 for row in rows))
+            self.assertTrue(all(row.winners == 1 for row in rows))
+            self.assertTrue(all(row.conflicts == 1 for row in rows))
+            self.assertTrue(all(row.passed for row in rows))
+            self.assertTrue(all(row.detail_hash for row in rows))
+        self.assertTrue(all(row.state_rows == 1 for row in details))
+        self.assertTrue(
+            all(
+                row.event_rows == (0 if row.domain == "genesis" else 1)
+                and row.command_rows == (1 if row.domain == "command" else 0)
+                and row.outbox_rows == (1 if row.domain == "outbox" else 0)
+                for row in details
+            )
+        )
         self.assertTrue(all(row.passed for row in report.faults))
         self.assertEqual(len({row.name for row in report.faults}), len(report.faults))
 

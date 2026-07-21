@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "5c8fd48392afcac13c070d86e09756be2c99425a2ebbbf3a9a2bc7b082b8dcf1",
-  "file_count": 56,
+  "aggregate_sha256": "88734a9a7263d03e8d0cd93d5007709cb4283a607871ccab82c415ae2bf7cb06",
+  "file_count": 59,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -9,8 +9,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "b6dbb65093c16d5c26ae1b9781a63dfc78ffde587e11c0d7e8eff38d1bacd91f",
-      "size": 5133
+      "sha256": "f632e778c51b42d968a09126fa647391f371b066b2d8a9e6510cf8906dfd7125",
+      "size": 5229
     },
     {
       "path": "docs/refactor/06-risk-register.md",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "695b7f280114fd1b120f92c95ce424257a24257244e3c0a9255995c744a9bd31",
-      "size": 3298
+      "sha256": "46104ed7769941e76212717b73283f0ff8a96f638f07f0c90b7e5e5d19afa29d",
+      "size": 3718
     },
     {
       "path": "docs/refactor/evidence/phase-07/entry-baseline.json",
@@ -44,8 +44,23 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/red-results.json",
-      "sha256": "b91471d2652eacd23e1fbfbbe8e43b698d27923b826f6ee76fdaf3e4db85ac84",
-      "size": 13724
+      "sha256": "073c4ad2e224abeee0445ba16f3aae27d5e805280ba78df4b634c7f3aaf77068",
+      "size": 18141
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
+      "sha256": "6e4ba63bd03a195b7798b7012bf06b72161878e2d4cba825866c2f0edb5f13fb",
+      "size": 1903
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-empty-wires.patch",
+      "sha256": "dff472ab41514d18eedddc2ff43644a32b066cf38da9d74d379cffac6d033462",
+      "size": 42623
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-tests.patch",
+      "sha256": "9e8941d5dfda18b8f1f2c9de8cd271c7e4d4c88f7a8f2bca10088f6030b691a4",
+      "size": 8790
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",
@@ -79,8 +94,8 @@
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
-      "sha256": "49caa28c00ccd6d6abb951628abe069d281b28aa304be193622a5b1dfb2d8ec6",
-      "size": 5490
+      "sha256": "8e575aadf75d75bbb67062976297bd0ce13bb2fa651d13b8f613f7e14596d3fd",
+      "size": 6350
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-phase-7-boundary-migration.md",
@@ -104,8 +119,8 @@
     },
     {
       "path": "reservation_boundary/coordinator.py",
-      "sha256": "2a835b62ec651cdf7d82e26eb66f45612e724ce770a8485a5a286a2476310b12",
-      "size": 10561
+      "sha256": "8bfc3031f59b953dbd66cd9c2fefd9ff4aa8d4dca6f94747e26231f25c25d0c7",
+      "size": 10795
     },
     {
       "path": "reservation_boundary/dispatch.py",
@@ -114,13 +129,13 @@
     },
     {
       "path": "reservation_boundary/faults.py",
-      "sha256": "519df9318a07939ebf7b00b4261eae72f4616c9aa9c6c63e67d534f739debdfb",
-      "size": 10923
+      "sha256": "dca361d62d08f594f77e2f97c5393ff646f6381edf87c1e25e9d82ed806e327a",
+      "size": 22437
     },
     {
       "path": "reservation_boundary/legacy_state.py",
-      "sha256": "d2e2c919352123b06ac8f8a87e61de47163402a2b51a8141cff666a6ecbb5793",
-      "size": 24137
+      "sha256": "2478f77d84f3e0450c9cba8a0cc54bf61f21f72b1c94d23882e7d3352fc806d3",
+      "size": 25176
     },
     {
       "path": "reservation_boundary/mutations.py",
@@ -149,13 +164,13 @@
     },
     {
       "path": "reservation_boundary/sqlite_store.py",
-      "sha256": "f5af1a303e02022b427e0198603740ee324116af62f656dc7904981fd141c664",
-      "size": 19127
+      "sha256": "459c39ec8e6bcc03cdf431fd75f401f8d95f9173537602a3ac39cfec5850407d",
+      "size": 19459
     },
     {
       "path": "reservation_boundary/types.py",
-      "sha256": "06c9d67450b5235e65a2a48a0efe70df8a3c7d0a77163868679944d117908649",
-      "size": 26851
+      "sha256": "54e78544c2aeae3a87f0c8d3c5f3b79b5aab8db5e27ea0d60ada1b30fd239dcc",
+      "size": 27077
     },
     {
       "path": "schemas/phase7/postgresql.sql",
@@ -204,7 +219,7 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "7634e5a8b4a1dcf50a160c907a1b28c9a5341c97cbc237ec1306d2c51004c4a1",
+      "sha256": "548b7bff42737b4d4302d9c1c3d35d82bf5df32e3a20099b1e575a65b69064a4",
       "size": 12727
     },
     {
@@ -214,13 +229,13 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "924a6a0dec5c4caea4b4fb82ff6553f8be35d94913db37aa70cf7ba48bda381c",
-      "size": 10029
+      "sha256": "4343518707147c5e0eab845a2d2d3acb24c46ad97b89628fd31dbce9c0101ab9",
+      "size": 10041
     },
     {
       "path": "tests/test_phase7_coordinator.py",
-      "sha256": "1b5ef353d9830eb569bf47d665fa35cf0cd155b926fc7d9a9739fe695f1b3ca8",
-      "size": 10850
+      "sha256": "1d6471ca09d6400179f158f3d8cd50d879f4b913b5979a8e9981d9903aa2fe99",
+      "size": 11738
     },
     {
       "path": "tests/test_phase7_dispatch.py",
@@ -229,13 +244,13 @@
     },
     {
       "path": "tests/test_phase7_fault_injection.py",
-      "sha256": "c8f8335cbba192dfdfc0c77a9a03d097df141cc2672f456aa87b33cad66ec2be",
-      "size": 1886
+      "sha256": "ec82393a27316d7f94e470f70828d3e8fe1d8198aeb28d165f019a8ff963d489",
+      "size": 3020
     },
     {
       "path": "tests/test_phase7_legacy_state.py",
-      "sha256": "47d018440c5b23832113263bbabfe69d9a9ac8faeab52748b0b35ca04d432eb3",
-      "size": 18059
+      "sha256": "d999e6bc6c785a6b24c98ddb8d7f881b334ac3e99d852464af596b179ae4c36b",
+      "size": 19900
     },
     {
       "path": "tests/test_phase7_mutation_runner.py",
@@ -274,13 +289,13 @@
     },
     {
       "path": "tests/test_phase7_sqlite_store.py",
-      "sha256": "3591c292717365d8268e35ef2fc226cd712d9b9f1a5431d808b4da2983ce7393",
-      "size": 8261
+      "sha256": "cdd2bd5cef50f67c91f2eb9d41ddcba884a55200ac3219a00e66ca2074aaf323",
+      "size": 9040
     },
     {
       "path": "tests/test_phase7_types.py",
-      "sha256": "4bbf671970685cf41e71dac5c833140b1e6d15ea192cbcce8a9f202bdf9e014d",
-      "size": 9349
+      "sha256": "dc4d20414c0bad911dde390347114e65a19a7907606c2552b1785d543d9d9e0c",
+      "size": 9664
     }
   ],
   "package_version": "0.7.0",
