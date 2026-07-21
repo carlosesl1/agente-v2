@@ -117,6 +117,13 @@ hex40 explícito sempre que `ci-result.json` existir e alinha comando, contagem 
 hash da evidência anterior. O novo snapshot ainda requer revisão conclusiva 3/3
 antes de qualquer push.
 
+O snapshot sucessor `a60f13cc40d808bc86bd4028e6681943b9bf7526` foi
+autenticado 3/3 `Approved`, sem findings, no batch `deleg_3ac27224`.
+`review-attempt-8.json`, `review8-raw-reports/` e `review-result.json` ligam
+explicitamente o CI futuro a esse `terminal_snapshot_commit`; não há fallback
+ao candidato funcional. O evidence child desta aprovação usa `[skip ci]`.
+Somente o push temporário do SHA terminal revisado poderá abrir a janela remota.
+
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi
 inventada retroativamente.

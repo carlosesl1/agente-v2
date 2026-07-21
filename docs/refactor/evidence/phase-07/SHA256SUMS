@@ -3,7 +3,7 @@ ba8ff88f87419b87dc76c254abf49d7e61ef80e82787e6af975e3989fba14003  README.md
 5caeb3a5d4b6622711228dc5e777f980373801d0e4f3e1a035b11cfd08b82630  docs/refactor/06-risk-register.md
 d31468f38a2d974c06f4954935cb4a61c6e1b4a2b9d727f9d3953878470dc33c  docs/refactor/README.md
 fe574591c027f5d28eeaf8886db9dce17eec5b6216c12a07f58737ff4f0a97eb  docs/refactor/evidence/README.md
-c74fbee9a48cf0bcb7f1bec3262f3844585019d22854f1cfaa47cf92389897c1  docs/refactor/evidence/phase-07/README.md
+92e5287a59817379027c15a35c655c3081652bd27872fba107015812d5eb73bf  docs/refactor/evidence/phase-07/README.md
 e496647e775bb8ca26c25531f614361127706e2adfd8b64924156e4c7dec68e2  docs/refactor/evidence/phase-07/ci-result-invalidated-29787387850.json
 7c7d305285af52f090395b12f93895358294ab343358cf45087a36ffd80b840b  docs/refactor/evidence/phase-07/ci-result-invalidated-29801546771.json
 d5fd3351440ece97df60ac70151fce861c061fd5cab8276b1ab9a593ffc16826  docs/refactor/evidence/phase-07/entry-baseline.json
@@ -23,6 +23,7 @@ d5fd3351440ece97df60ac70151fce861c061fd5cab8276b1ab9a593ffc16826  docs/refactor/
 e658026732c5ad9f157569d9fadda062abfafc873cc3ca8ea03d49b85761347b  docs/refactor/evidence/phase-07/review-attempt-5.json
 f6cc73eeb1b19a70149f122286dda298f5f4675985df49ac70e521c5945d3c17  docs/refactor/evidence/phase-07/review-attempt-6.json
 dd19124aa048b954e691f7f475b9e4791b71980e92e491052be25e71b7e08159  docs/refactor/evidence/phase-07/review-attempt-7.json
+d73261d13ad2438c60c3fe4834f1e283190c20b4dc64730db5f169cd85493fcf  docs/refactor/evidence/phase-07/review-attempt-8.json
 45f632eb2283231d921b61e8e55f45d4f3671a896e7d231196ab61839a54add6  docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch
 f6ec752cd85178ea826a1f73ee88ee51c82d33239259f39b08c2ddb797c42940  docs/refactor/evidence/phase-07/review-remediation-artifact-test.patch
 6d6ac87c023036cc8617dfbc3e7d673e35e2af0b61ff1a12416f52a0474652a4  docs/refactor/evidence/phase-07/review-remediation-contention-integrity-test.patch
@@ -70,6 +71,9 @@ bde50582d151e55559cf52daf865a6d304f25244b7fa3225239e052dcebf71dd  docs/refactor/
 91aae55cfbbcdda78e574f68c178d76f765a19589f1214450e13839bc7dd54d1  docs/refactor/evidence/phase-07/review7-raw-reports/lane-2.txt
 7492145c7456455c288ce27b9fdb73d80848e9a633b112937c0188d232953bcc  docs/refactor/evidence/phase-07/review7-raw-reports/lane-3.txt
 f58bd8417063b96c6fa8a4a40f60eafd38c61f876344d97e60ab2cfc73e907f5  docs/refactor/evidence/phase-07/review7-red-reports/terminal-snapshot-required-red.out
+23dd1c8e3e6aa32eaead6f8a03148fbad97255081c904355ffa3b76c41e589d2  docs/refactor/evidence/phase-07/review8-raw-reports/lane-1.txt
+62c35df54e8861c7ad5443a2429b391c1528a4bf200aa0eb9b703e88a27f6eab  docs/refactor/evidence/phase-07/review8-raw-reports/lane-2.txt
+0ab5044549492aa3960f1faba22e54f4143b267c33b3fc38bf124b40d3b5fde4  docs/refactor/evidence/phase-07/review8-raw-reports/lane-3.txt
 0f5a5b683d4956f9430fabdcd8ec1bbe447422760687e749d45a614e2924ff03  docs/refactor/evidence/phase-07/runtime-contract-manifest.json
 9d39f84a5ac81910741e9dccfaf6d23159b32c2359efaba38ccba9ee366a927c  docs/refactor/evidence/phase-07/runtime-integration-contract-manifest.json
 9f2df0377ec77c761b0bb94642d778fd7d126052002cb49f71c6d0fca2dd7a7f  docs/refactor/evidence/phase-07/runtime-integration-manifest.json

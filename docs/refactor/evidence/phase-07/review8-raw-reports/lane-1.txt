@@ -1,0 +1,40 @@
+## Authentication
+
+- Snapshot local autenticado:
+  - commit: `a60f13cc40d808bc86bd4028e6681943b9bf7526`
+  - tree: `f241cdbf83a355cb07217d88d1090e7e6d14ccf3`
+  - pai: `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`
+  - upstream local cacheado: `origin/phase7-boundary-migration` em `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`
+  - relação: `ahead=1`, `behind=0`; não publicado segundo o estado local/cacheado.
+- Worktree limpa antes e depois da revisão: zero alterações staged, unstaged ou untracked. Blobs dos dois arquivos inspecionados coincidem com `HEAD`.
+- Estado pré-terminal:
+  - `ci-result.json` ausente do commit e da worktree;
+  - `review-result.json` sem `terminal_snapshot_commit`;
+  - revisão funcional preservada em `approved=3`, `rejected=0`;
+  - candidato funcional preservado em `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`.
+- Binding em `scripts/validate_phase7.py:373-387`:
+  - a ausência de CI não valida nem exige o campo terminal;
+  - com CI presente, review/campo ausente, `null` ou valor não-hex40 adiciona `review terminal snapshot is invalid`, define o head esperado como inválido e não reutiliza `candidate.commit`;
+  - somente lowercase hex40 exato é aceito como head esperado.
+- Prova causal leve adicional: **7/7 casos passaram**, incluindo review ausente, campo ausente, `null`, não-hex40, hex40 válido e tentativa de CI apontando ao candidato funcional.
+- RED review7 autenticado:
+  - SHA-256: `f58bd8417063b96c6fa8a4a40f60eafd38c61f876344d97e60ab2cfc73e907f5`
+  - tamanho: `2206` bytes
+  - comando registrado seleciona exatamente um método; a saída registra `Ran 1 test` e duas falhas de subtests (`None` e campo ausente), portanto comando e saída são coerentes.
+- GREEN/closeout executado agora: `python3 -B -m unittest tests.test_phase7_closeout -v` — **20/20**, `OK`, exit code 0.
+- Arquivos criados ou modificados: **nenhum**. Problemas de execução: **nenhum**.
+
+## Verdict: Approved
+
+## Findings
+
+- **Critical:** nenhum.
+- **Important:** nenhum.
+- **Minor:** nenhum.
+
+## Residual risks
+
+- Sem rede por escopo: a relação de publicação foi autenticada somente contra o tracking ref local; estado remoto atual e CI remoto não foram consultados.
+- Suíte integral e gates pesados não foram reexecutados. O RED histórico teve bytes, hash e coerência comando↔saída autenticados, mas não foi reexecutado contra o snapshot defeituoso.
+- **Rollout: NO-GO**
+- **phase8_started=false**

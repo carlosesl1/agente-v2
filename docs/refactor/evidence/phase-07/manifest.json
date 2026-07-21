@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "d59d4b66806fcf12fbefb3db746beb058bc44d287a2ddb5750a51dc0c2f91642",
-  "file_count": 120,
+  "aggregate_sha256": "02cb8a7c28e25091ce3dc2eb5a9a5f0fa54f61ecf633c2012b80885d185f31ed",
+  "file_count": 124,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "c74fbee9a48cf0bcb7f1bec3262f3844585019d22854f1cfaa47cf92389897c1",
-      "size": 7647
+      "sha256": "92e5287a59817379027c15a35c655c3081652bd27872fba107015812d5eb73bf",
+      "size": 8100
     },
     {
       "path": "docs/refactor/evidence/phase-07/ci-result-invalidated-29787387850.json",
@@ -126,6 +126,11 @@
       "path": "docs/refactor/evidence/phase-07/review-attempt-7.json",
       "sha256": "dd19124aa048b954e691f7f475b9e4791b71980e92e491052be25e71b7e08159",
       "size": 1718
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-8.json",
+      "sha256": "d73261d13ad2438c60c3fe4834f1e283190c20b4dc64730db5f169cd85493fcf",
+      "size": 1590
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
@@ -361,6 +366,21 @@
       "path": "docs/refactor/evidence/phase-07/review7-red-reports/terminal-snapshot-required-red.out",
       "sha256": "f58bd8417063b96c6fa8a4a40f60eafd38c61f876344d97e60ab2cfc73e907f5",
       "size": 2206
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review8-raw-reports/lane-1.txt",
+      "sha256": "23dd1c8e3e6aa32eaead6f8a03148fbad97255081c904355ffa3b76c41e589d2",
+      "size": 2439
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review8-raw-reports/lane-2.txt",
+      "sha256": "62c35df54e8861c7ad5443a2429b391c1528a4bf200aa0eb9b703e88a27f6eab",
+      "size": 2217
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review8-raw-reports/lane-3.txt",
+      "sha256": "0ab5044549492aa3960f1faba22e54f4143b267c33b3fc38bf124b40d3b5fde4",
+      "size": 3223
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",

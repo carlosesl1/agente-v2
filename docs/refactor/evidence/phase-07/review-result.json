@@ -54,5 +54,14 @@
     "reason": "timeout_without_summary",
     "status": "timeout",
     "verdict_credit": 0
-  }
+  },
+  "terminal_approved": 3,
+  "terminal_conclusive": 3,
+  "terminal_rejected": 0,
+  "terminal_result": "Approved",
+  "terminal_review_attempt": "review-attempt-8.json",
+  "terminal_review_batch": "deleg_3ac27224",
+  "terminal_review_completed_at": "2026-07-21T05:05:50Z",
+  "terminal_snapshot_commit": "a60f13cc40d808bc86bd4028e6681943b9bf7526",
+  "terminal_snapshot_tree": "f241cdbf83a355cb07217d88d1090e7e6d14ccf3"
 }

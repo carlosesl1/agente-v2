@@ -1,0 +1,40 @@
+## Authentication
+
+- Snapshot local autenticado: commit `a60f13cc40d808bc86bd4028e6681943b9bf7526`, tree `f241cdbf83a355cb07217d88d1090e7e6d14ccf3`, pai único `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`.
+- Candidato funcional autenticado: commit `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`, tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`; é ancestral do snapshot.
+- Zero diff, tanto `2c99be11… → a60f13cc…` quanto `c91b6bd2… → a60f13cc…`, em:
+  - `reservation_boundary/`
+  - `schemas/phase7/`
+  - `pyproject.toml`
+  - `scripts/build_phase7_wheel.py`
+  - `.github/workflows/phase7.yml`
+- Todos os seis inputs do wheel também permaneceram idênticos ao candidato funcional. Reconstrução independente, em memória e sem importar o builder: 54 fontes, 58 membros, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`, `214954` bytes, reprodução byte a byte confirmada.
+- Relatórios pesados, remediações e os três raw gzip têm blobs idênticos entre o snapshot anterior `c91b6bd2…` e o atual. Hashes comprimidos, tamanhos e descompressão dos gzip foram autenticados.
+- Delta do snapshot confinado a 15 arquivos de evidência/protocolo, `scripts/validate_phase7.py` e `tests/test_phase7_closeout.py`; nenhum kernel, schema, wheel input ou workflow mudou.
+- Manifest fechado estaticamente: 120 arquivos, aggregate SHA-256 `d59d4b66806fcf12fbefb3db746beb058bc44d287a2ddb5750a51dc0c2f91642`; renderização, conjunto rastreado e `SHA256SUMS` integralmente válidos.
+- Manifest, README, `review-result.json`, `review-attempt-7.json` e evidência de snapshot estão presentes. O review anterior está corretamente preservado como histórico; a tentativa 7 está marcada como invalidada.
+- Run `29801546771` explicitamente invalidado em `docs/refactor/evidence/phase-07/ci-result-invalidated-29801546771.json:31-36,111-114`. `ci-result.json` está ausente no commit e no worktree.
+- Workflow elegível localmente:
+  - push exato para `phase7-boundary-migration`, sem filtros de path (`.github/workflows/phase7.yml:3-6`);
+  - seis jobs esperados;
+  - propriedades, faults e mutations têm owner único e artifacts vinculados a `${{ github.sha }}`;
+  - gate depende dos cinco jobs materiais e rejeita qualquer resultado diferente de `success` (`.github/workflows/phase7.yml:99-130`).
+- Branch local está `+1/-0` contra `origin/phase7-boundary-migration`; upstream local resolve exatamente ao pai `c91b6bd2…`. O único commit a publicar é `a60f13cc…`, cuja mensagem completa não contém marcador skip-CI.
+- Worktree limpa antes e depois da revisão. Nenhum arquivo criado ou modificado. Sem rede, testes pesados, validators do projeto ou execução/importação do código revisado.
+
+## Verdict
+
+Approved
+
+## Findings
+
+- Critical: nenhum.
+- Important: nenhum.
+- Minor: nenhum.
+
+## Residual risks
+
+- A aprovação é de elegibilidade **local contra a remote-tracking ref**. Sem rede, não foi possível confirmar avanço remoto, branch protection, habilitação do GitHub Actions ou garantir o push.
+- O snapshot `a60f13cc…` ainda não possui execução remota exata nem `ci-result.json`; sucesso dos jobs e artifacts continua pendente.
+- Rollout: **NO-GO**
+- `phase8_started=false`
