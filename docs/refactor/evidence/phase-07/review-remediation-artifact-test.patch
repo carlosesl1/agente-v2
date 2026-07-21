@@ -1,0 +1,21 @@
+diff --git a/tests/test_phase7_closeout.py b/tests/test_phase7_closeout.py
+index 8e8e590..0124b17 100644
+--- a/tests/test_phase7_closeout.py
++++ b/tests/test_phase7_closeout.py
+@@ -95,6 +95,16 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         self.assertIn("scripts/run_phase7_mutations.py --integral", workflow)
+         self.assertNotIn("chapada-leads-hermes", workflow)
+ 
++    def test_heavy_jobs_publish_raw_reports_bound_to_sha(self) -> None:
++        workflow = read(".github/workflows/phase7.yml")
++        self.assertEqual(workflow.count("uses: actions/upload-artifact@v4"), 3)
++        for name in ("properties", "faults", "mutations"):
++            with self.subTest(name=name):
++                self.assertIn(f"name: phase7-{name}-${{{{ github.sha }}}}", workflow)
++                self.assertIn(f"path: /tmp/phase7-{name}.json", workflow)
++        self.assertEqual(workflow.count("if-no-files-found: error"), 3)
++        self.assertEqual(workflow.count("retention-days: 30"), 3)
++
+     def test_workflow_and_validator_forbid_live_capabilities(self) -> None:
+         payload = read(".github/workflows/phase7.yml") + read(
+             "scripts/validate_phase7.py"

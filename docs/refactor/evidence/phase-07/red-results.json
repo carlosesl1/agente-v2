@@ -414,6 +414,24 @@
       "unfixed_patch_bytes": 42623,
       "unfixed_patch_sha256": "dff472ab41514d18eedddc2ff43644a32b066cf38da9d74d379cffac6d033462",
       "unfixed_tree": "954a4a64999422b2731e8dacd921931ca56770cf"
+    },
+    {
+      "causal_failure": "heavy CI jobs produced /tmp reports but did not publish SHA-bound artifacts",
+      "command": "python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests.test_heavy_jobs_publish_raw_reports_bound_to_sha -v",
+      "exit_code": 1,
+      "output_bytes": 878,
+      "output_sha256": "c059526520035e2650adeca97fc22676402168287e804726675d9135c48ce648",
+      "red_kind": "review_remediation_artifact",
+      "sequence": 6,
+      "task": 16,
+      "test_patch": "review-remediation-artifact-test.patch",
+      "test_patch_bytes": 1192,
+      "test_patch_sha256": "f6ec752cd85178ea826a1f73ee88ee51c82d33239259f39b08c2ddb797c42940",
+      "tests_failed": 1,
+      "tests_in_error": 0,
+      "tests_run": 1,
+      "unfixed_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
+      "unfixed_tree": "e1db1211f0010452f70ded131f4343592f11e7ce"
     }
   ],
   "phase": 7,

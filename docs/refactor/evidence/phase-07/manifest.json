@@ -1,11 +1,11 @@
 {
-  "aggregate_sha256": "88734a9a7263d03e8d0cd93d5007709cb4283a607871ccab82c415ae2bf7cb06",
-  "file_count": 59,
+  "aggregate_sha256": "ec8ac6ae49b1281e1748ae26bc35789a010530ba4e9bbc9d9a7d6079addc08c9",
+  "file_count": 60,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
-      "sha256": "e544a8b0353cfc8ba1500da7d7ce2f65fb0771032461f0274ac8cf1b9c0b7971",
-      "size": 3220
+      "sha256": "922fb8c8d8e18bd62d30c9c9c7e7fb7af13300fd586b350f27227bc92fbdd5c7",
+      "size": 3991
     },
     {
       "path": "README.md",
@@ -44,13 +44,18 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/red-results.json",
-      "sha256": "073c4ad2e224abeee0445ba16f3aae27d5e805280ba78df4b634c7f3aaf77068",
-      "size": 18141
+      "sha256": "c929d13e1ba445d00d859502259d1e8f7174604b80b3d2b53219b67da6ebe286",
+      "size": 19031
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
       "sha256": "6e4ba63bd03a195b7798b7012bf06b72161878e2d4cba825866c2f0edb5f13fb",
       "size": 1903
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-test.patch",
+      "sha256": "f6ec752cd85178ea826a1f73ee88ee51c82d33239259f39b08c2ddb797c42940",
+      "size": 1192
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-empty-wires.patch",
@@ -229,8 +234,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "4343518707147c5e0eab845a2d2d3acb24c46ad97b89628fd31dbce9c0101ab9",
-      "size": 10041
+      "sha256": "def957a0b5948935c9843451b4c99427123f0897209387a75d744d13af8bb5fa",
+      "size": 10649
     },
     {
       "path": "tests/test_phase7_coordinator.py",

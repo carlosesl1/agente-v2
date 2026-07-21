@@ -48,6 +48,13 @@ jobs:
         run: |
           tree=$(git write-tree)
           PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_properties.py --cases 20000 --seed 2026072007 --output /tmp/phase7-properties.json
+      - name: Publish frozen properties report
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-properties-${{ github.sha }}
+          path: /tmp/phase7-properties.json
+          if-no-files-found: error
+          retention-days: 30
 
   phase7-faults:
     runs-on: ubuntu-latest
@@ -61,6 +68,13 @@ jobs:
         run: |
           tree=$(git write-tree)
           PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_faults.py --integral --output /tmp/phase7-faults.json
+      - name: Publish frozen faults report
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-faults-${{ github.sha }}
+          path: /tmp/phase7-faults.json
+          if-no-files-found: error
+          retention-days: 30
 
   phase7-mutations:
     runs-on: ubuntu-latest
@@ -74,6 +88,13 @@ jobs:
         run: |
           tree=$(git write-tree)
           PHASE7_FROZEN_TREE="$tree" python3 -B scripts/run_phase7_mutations.py --integral --output /tmp/phase7-mutations.json
+      - name: Publish frozen mutations report
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-mutations-${{ github.sha }}
+          path: /tmp/phase7-mutations.json
+          if-no-files-found: error
+          retention-days: 30
 
   gate:
     if: always()
