@@ -1,9 +1,14 @@
 {
-  "candidate_commit": "42687095fd06225092b4a26f1423d06d3373ab13",
-  "candidate_tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99",
+  "candidate_commit": "01d5b6f2a4bcfc4cd9bd7c856d930688235bf82b",
+  "candidate_tree": "0d5b4e6fea988ae581a529dcf526d6aeb80e6346",
   "completed_at": "2026-07-21T03:03:06Z",
   "compressed_bytes": 1795969,
   "compressed_sha256": "9520145b52262fc6eed2c413ef65b624846a7a8933fe815798a5a3212e2bd807",
+  "evidence_reuse_reason": "Reused without heavy rerun: reservation kernel, wheel payload, runtime patch and replica are byte-identical; the successor changes only terminal diagnostics/tests and reclassifies historical CI evidence.",
+  "evidence_reused_from_candidate": {
+    "commit": "42687095fd06225092b4a26f1423d06d3373ab13",
+    "tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99"
+  },
   "execution_scope": "local affected integral rerun on exact frozen tree",
   "live_capabilities_executed": [],
   "passed": true,

@@ -1,0 +1,15 @@
+test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing) ... ERROR
+
+======================================================================
+ERROR: test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_closeout.py", line 135, in test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing
+    missing, failures = _terminal_artifact_checks(evidence_dir)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: _terminal_artifact_checks() takes 0 positional arguments but 1 was given
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (errors=1)

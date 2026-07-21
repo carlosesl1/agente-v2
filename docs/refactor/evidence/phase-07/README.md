@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **terceiro candidato congelado; revisão terminal e CI remoto pendentes**.
+Status: **quinto candidato congelado; revisão terminal final e CI remoto vigente pendentes**.
 
 ## Entrada
 
@@ -27,7 +27,7 @@ continuam explicitamente marcadas como limitações de proveniência.
 - `runtime-integration-manifest.json`: commits/trees/wheel/testes focused;
 - `runtime-integration-contract-manifest.json`: contrato após integração.
 
-O patch reproduz a tree `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`.
+O patch reproduz a tree `922608a044c0e65e65eafadce3c77451e32547d9`.
 O source operacional permaneceu no HEAD `57408d8b2040399bc25ee7957505208079458884`.
 O pre-flight registrou 80 entradas locais; o manifesto de captura fixa as 86
 entradas observadas posteriormente e seus hashes exatos. A Fase 7 autentica o
@@ -49,12 +49,14 @@ diffs da árvore suja.
 ## Candidato e validação terminal
 
 - `candidate.json`: commit/tree/wheel/patch do candidato congelado;
-- `local-integration-result.json`: histórico do candidato invalidado;
+- `local-integration-result.json`: validação local do quarto candidato;
 - `runtime-validation-result.json`: patch apply/reverse, source e runtime;
-- `properties-result.json`: job remoto 20.000/20.000;
+- `properties-result.json`: gate integral local 20.000/20.000;
 - `faults-result.json`: seis faults, 2.000 restarts e contention 200;
 - `mutation-result.json`: 12/12;
-- `ci-result.json`: run real `29787387850`, 6/6 jobs verdes;
+- `ci-result-invalidated-29787387850.json`: run histórico real, 6/6 jobs verdes,
+  ligado ao candidato invalidado `ef5dd46c27ccb72e977b333f526521a5f6b0225c`;
+- `ci-result.json`: ausente até existir run remoto autenticado do candidato vigente;
 - `performance-result.json`: tempos local e remoto.
 - `remediation-local-result.json`: wheel, focused/closeout e adapters remediados;
 - `remediation-properties-result.json`: 20.000/20.000 com hash do raw report;
@@ -74,6 +76,13 @@ Esse novo workflow ainda não foi executado remotamente.
 valem zero. `review-attempt-2.json` retém os três pareceres conclusivos
 `Needs fixes` do batch `deleg_39e3d235`, com hashes e summaries integrais. Os
 REDs da segunda remediação e seus patches test-only também estão retidos.
+`review-attempt-3.json` retém os três pareceres `Needs fixes` do batch
+`deleg_b0435b2f`. O batch `deleg_0b93ad03` aprovou as lanes de persistência e
+runtime, mas a lane de proveniência retornou `Needs fixes`; portanto, não houve
+aprovação 3/3 e o quarto candidato foi invalidado. `review-attempt-4.json`
+retém esses três pareceres e o RED causal do diagnóstico terminal; o quinto
+candidato corrige apenas o agregador terminal, seus testes e a classificação
+do CI histórico, sem alterar kernel, wheel, patch ou réplica.
 `review-result.json` permanece ausente até um novo candidato obter três
 verdicts terminais válidos.
 

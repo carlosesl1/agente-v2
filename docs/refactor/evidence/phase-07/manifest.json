@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "2ba98849b442e34282908156e415af4c835df5a6ec9a500e48105ce55d968b10",
-  "file_count": 96,
+  "aggregate_sha256": "44e6c7052d3093707f8f9e3cbbc3ca4f8225a1c18d987cbc5cd9e253fbabbba1",
+  "file_count": 102,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -29,8 +29,13 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "c58a34ecbd421537e6a4acf7f592b9b68787838b9ef3fd303133495f9eaf604d",
-      "size": 4652
+      "sha256": "be870a05d82a2e5982a0269e410d30c1f4712c3f157232e0dd34a94190ba95f4",
+      "size": 5393
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/ci-result-invalidated-29787387850.json",
+      "sha256": "e496647e775bb8ca26c25531f614361127706e2adfd8b64924156e4c7dec68e2",
+      "size": 2426
     },
     {
       "path": "docs/refactor/evidence/phase-07/entry-baseline.json",
@@ -96,6 +101,11 @@
       "path": "docs/refactor/evidence/phase-07/review-attempt-3.json",
       "sha256": "435796d09795a24cde2ddd04ec28d84c1f0cc5bd5d6e3aa2b4190ccb4bb508f8",
       "size": 4128
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-4.json",
+      "sha256": "0190a2ec392ff37ca9af27ca7fd1f2694881ec3beeb0797718dfb44600338d4a",
+      "size": 2354
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
@@ -248,6 +258,26 @@
       "size": 1001
     },
     {
+      "path": "docs/refactor/evidence/phase-07/review4-raw-reports/lane-1.txt",
+      "sha256": "5271c048e3092b82483a441a7fc2902e3c6f06d98a2bfd9616098dfd0c5bb468",
+      "size": 2725
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review4-raw-reports/lane-2.txt",
+      "sha256": "99306ef72f9705e1757c1232e15ce40c71a11cea79cb6206e10ea17495d56c70",
+      "size": 3004
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review4-raw-reports/lane-3.txt",
+      "sha256": "34b326588be5297a092b83e92e1cc29a5d08e4b7f9b55b16d0fb8e5317992690",
+      "size": 3922
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review4-red-reports/terminal-aggregate-red.out",
+      "sha256": "1572ae1a528631c690ebc6660d26ea88f97f6db5160451ee8924e92957e2042e",
+      "size": 1106
+    },
+    {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",
       "sha256": "0f5a5b683d4956f9430fabdcd8ec1bbe447422760687e749d45a614e2924ff03",
       "size": 14610
@@ -274,8 +304,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-validation-result.json",
-      "sha256": "e15a4c7f62a535cf930089318c2663d830975e9e9a9246b501f36b2c4abacd4e",
-      "size": 909
+      "sha256": "28ac3e0eb73141ea6ab4a0675e345b1b26535c5b2e5998cfb83220b196200e67",
+      "size": 1299
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
@@ -404,8 +434,8 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "08856e947df6b19c1ff4717d9aded28837a8c2a4c8c315d0f9a2aa680140a319",
-      "size": 16968
+      "sha256": "391f27d433243f70ada916ae9cc50f7c8a74b51bf8f70fc0da501fbcd6394647",
+      "size": 17582
     },
     {
       "path": "tests/phase7_helpers.py",
@@ -414,8 +444,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "3a3d8f253e193f3bf45508051f69037f5f9b886ebf3cf7e85c67c9931d017c87",
-      "size": 13934
+      "sha256": "e0f2b48856ca19619de73c4288ee0cdf9d69667489c776a4e95d7dde41e02d20",
+      "size": 15049
     },
     {
       "path": "tests/test_phase7_coordinator.py",

@@ -1,0 +1,44 @@
+## Authentication
+
+- **Evidence:** commit `18851e355f1201efe00f0d4f68e6ff13db9ac016`, tree `97c7123e031e3cf3c004732a040a3fc11443ed5c`.
+- **Pai funcional direto:** commit `42687095fd06225092b4a26f1423d06d3373ab13`, tree `f9fa5d9077ef996f0e95c84187626f8758d50c99`; relação pai direto confirmada.
+- **Réplica congelada:** commit `7ccb8c58235c0fc3780bf9d3fde244924158a35e`, tree `922608a044c0e65e65eafadce3c77451e32547d9`.
+- **Baseline da réplica:** commit `3da1f41103fd25bc0c1c0242a7e05cf9da22ad82`, tree `72c19010aaa6e1263384c20315cb7f4d8eeb111e`.
+- **Wheel autenticada:** `/tmp/phase7-candidate4-dist/chapada_reservation_kernel-0.7.0-py3-none-any.whl`, `214954` bytes, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`. Duas cópias adicionais encontradas são byte-idênticas.
+- **Patch autenticado:** `93625` bytes, SHA-256 `08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789`; `git apply --reverse --check` passou. A diferença de 20 bytes para o `git diff` nativo consiste exclusivamente em espaços finais removidos de linhas de contexto, sem diferença semântica ou de hunks.
+- **Repos:** limpos antes e depois da revisão.
+- **Testes causais executados:**
+  - `tests/test_phase7_tool_dispatch_adapter.py` + `tests/test_phase7_turn_coordinator_adapter.py`: exit code `0`.
+  - Seleção causal de `test_phase7_dispatch.py` e `test_phase7_sqlite_store.py`: `8 passed`, `10 subtests passed`, `10 deselected`.
+- Confirmado por inspeção e execução:
+  - adapter propagado por `AppContext`, lifespan, três ingressos ManyChat, flush explícito e auto-flush;
+  - ausência do adapter rejeitada em `app.py:2168-2170`, sem reabrir planner/executor legado;
+  - implementação legada isolada em `_process_legacy_event_for_regression_tests` e no harness explicitamente regression-only;
+  - wire comparado ao estado SQLite readonly e comando comparado integralmente à linha durável;
+  - bindings completos de reserva e pagamento, incluindo receiver profile e status;
+  - Bókun preserva `tour_product_id`/`date_start`; state commit lê `collected_slots`/`desired_services`;
+  - três writes bloqueadas permanecem manual review;
+  - aliases de produção, nomes desconhecidos e deadline expirado rejeitam fechados;
+  - core, runtime e manifest do patch expõem os mesmos 13 nomes, com contagem `5 read / 7 write / 1 state_commit`;
+  - schemas dos manifests são iguais e preservam a propriedade real `description`;
+  - `chapada_commit_state` classificado como `state_commit`.
+
+Verdict: Approved
+
+## Findings
+
+### Critical
+nenhum
+
+### Important
+nenhum
+
+### Minor
+nenhum
+
+## Residual risks
+
+- A suíte integral histórica de `965/965` foi autenticada no manifesto, mas não foi repetida conforme solicitado.
+- A revisão cobriu somente a réplica congelada, a wheel e o patch; nenhuma capacidade live ou rede foi utilizada.
+- Rollout permanece **NO-GO** e `phase8_started=false`.
+- Nenhum arquivo foi criado ou modificado nos repositórios; ambos terminaram limpos.

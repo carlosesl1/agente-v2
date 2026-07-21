@@ -1,0 +1,41 @@
+## Authentication
+
+- Evidence commit autenticado: `18851e355f1201efe00f0d4f68e6ff13db9ac016`, tree `97c7123e031e3cf3c004732a040a3fc11443ed5c`.
+- Pai funcional direto autenticado: `42687095fd06225092b4a26f1423d06d3373ab13`, tree `f9fa5d9077ef996f0e95c84187626f8758d50c99`.
+- Worktree limpa; o evidence child altera somente caminhos de documentação/evidência sob `docs/refactor/evidence/phase-07/`.
+- Wheel reconstruída em diretório temporário pelo builder stdlib do repositório: `chapada_reservation_kernel-0.7.0-py3-none-any.whl`, **214954 bytes**, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`.
+- Testes causais frescos: **25 testes**, `tests.test_phase7_schema`, `tests.test_phase7_sqlite_store` e `tests.test_phase7_coordinator`; resultado `OK` em 0,872 s.
+- Replay compara `event_hash`, `commit_hash` canônico e versão exata (`sqlite_store.py:472,481-489`).
+- Outbox preserva `message.created_at`, independentemente de `committed_at`, e persiste lead/event/workflow/comando e demais campos de identidade (`sqlite_store.py:550-568`).
+- `command_id` opcional possui FK composta para comando do mesmo lead/event; mensagens sem comando mantêm FK ao evento e validação do workflow (`schema.py:81-97`; `sqlite_store.py:110-136`).
+- CAS/fencing e uniques estão presentes (`schema.py:62-78,82-96`; `sqlite_store.py:420-444,492-514`).
+- A transação externa cobre genesis, claim, fence, evento, comando e outbox; o guard final ocorre antes do `COMMIT`, e operações aninhadas usam savepoints sem commit parcial (`sqlite_store.py:250-286`; `coordinator.py:280-333`).
+- Evidência integral de contenção reconstruída independentemente: **200 linhas**, quatro domínios × 50 rounds, catálogo completo `0..49`, todos os hashes exatos, resultados reconstruíveis e todas as linhas aprovadas.
+- REDs da review3 foram inspecionados; as duas falhas desta lane — timestamp do outbox e FK composta — estão corrigidas no candidato atual.
+- Evidência confirma `rollout=NO-GO` e `phase8_started=false`.
+
+## Verdict
+
+Approved
+
+## Findings
+
+### Critical
+
+- nenhum.
+
+### Important
+
+- nenhum.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- Suíte integral, gates pesados, rede, providers e runtime operacional não foram executados, conforme restrição.
+- A contenção integral não foi reexecutada; foram autenticadas e recalculadas suas 200 linhas e hashes publicados.
+- PostgreSQL foi avaliado apenas pelo DDL estático, sem conexão real.
+- O Python global não continha `build` nem `pytest`; isso foi contornado sem instalação ou rede usando o builder determinístico do repositório e `unittest`.
+- Arquivos criados ou modificados no repositório: **nenhum**; worktree permaneceu limpa.
