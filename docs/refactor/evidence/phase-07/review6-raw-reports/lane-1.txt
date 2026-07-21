@@ -1,0 +1,24 @@
+## Authentication
+
+- HEAD autenticado: `6894270e37a2222a4e6210e6f959fd0352bdfc5f`, tree `9bc409b39ac5cdf637e6125c6973eded7e1e22f4`; pai direto `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`, tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`.
+- Worktree limpa e alinhada à branch remota; nenhuma criação ou modificação de arquivo.
+- Comparação `01d5b6f...` → `2c99be1...`: zero mudanças em `reservation_boundary/` e `schemas/phase7/`. Os respectivos tree IDs são idênticos nos candidatos quinto, sexto e evidence child.
+- Todo delta funcional fora da evidência limita-se a `scripts/capture_phase7_runtime.py`, `scripts/validate_phase7.py` e aos testes causais `tests/test_phase7_{closeout,runtime_capture}.py`. A inspeção confirmou correção da captura/redação de `HERMES.md`, atualização dos fingerprints do validator e regressões causais correspondentes.
+- Replay, outbox/FKs, coordinator, deadline e CAS/fencing não tiveram drift: não existe delta funcional nessas áreas e kernel/schema permanecem byte-idênticos.
+- Wheel declarada de forma consistente no quinto candidato, `review-attempt-5.json` e candidato atual: SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`, `214954` bytes.
+- Raw heavy reports de properties, faults/restarts/contention e mutations mantêm exatamente os mesmos blobs Git, hashes e tamanhos entre o quinto candidato, candidato funcional e HEAD. A reutilização dessas evidências é legítima pelo zero-diff de kernel/schema e wheel byte-idêntica.
+- Runtime manifests registram source fingerprint inalterado, recaptura sanitizada, patch autenticado com SHA-256 `4d0ccd5e...0218` e `96073` bytes, sem capacidades live.
+- Evidence child contém somente documentação/evidência. `rollout=NO-GO` e `phase8_started=false`.
+
+## Verdict
+Approved
+
+## Findings
+
+- Critical: nenhum
+- Important: nenhum
+- Minor: nenhum
+
+## Residual risks
+
+Nenhum risco residual novo nesta lane. Por escopo explícito, não foram executados testes, recaptura runtime, rebuild da wheel nem gates pesados; essas verificações pertencem às lanes 2/3. O rollout permanece **NO-GO** e a Fase 8 não foi iniciada.

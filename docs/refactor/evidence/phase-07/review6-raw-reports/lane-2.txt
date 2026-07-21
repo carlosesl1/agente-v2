@@ -1,0 +1,57 @@
+## Authentication
+
+- **Resumo:** revisão terminal somente leitura concluída; identidades, patch, wheel, réplica, source operacional e evidência foram autenticados sem drift material.
+- **Evidence child:** `6894270e37a2222a4e6210e6f959fd0352bdfc5f`, tree `9bc409b39ac5cdf637e6125c6973eded7e1e22f4`.
+- **Pai/candidato direto:** `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`, tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`; parentesco direto confirmado.
+- **Evidence-only:** 19 caminhos alterados, todos sob `docs/refactor/evidence/phase-07/`; nenhum código de produção, teste, schema ou script alterado pelo child.
+- **Réplica candidata:** `183fb41d645e1bb04e237c986988309a28e42b34`, tree `e546e9d88093c09a245502bcca3d119e2e450672`.
+- **Baseline direto:** `3192a6b8122535e2b8a2fb047a152aa363aaf0de`, tree `9a6732ecba40f4771a97b931305ad9d175d48593`.
+- **Patch:** `96.073` bytes, SHA-256 `4d0ccd5e6dae410abca8da8b555fd0784668eecd5c4e0499e919997be38e0218`.
+  - Forward apply/check produziu exatamente `e546e9d88093c09a245502bcca3d119e2e450672`.
+  - Reverse apply/check produziu exatamente `9a6732ecba40f4771a97b931305ad9d175d48593`.
+  - Índice/object store temporários externos foram removidos; resíduo `0`.
+- **Wheel:** três cópias locais byte-idênticas, cada uma com `214.954` bytes e SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`.
+- **Réplica previamente aprovada:** `7ccb8c58235c0fc3780bf9d3fde244924158a35e`, tree `922608a044c0e65e65eafadce3c77451e32547d9`.
+  - Os oito arquivos de produção de adapters/ingress são byte a byte idênticos: `0` divergências.
+  - Entre as réplicas há somente 19 mudanças rastreadas: `HERMES.md` e 18 testes/oráculos sanitizados; nenhuma adição ou remoção.
+  - Catálogos/manifests permanecem byte-idênticos ao previamente aprovado: 13 tools únicos, `5 read / 7 write / 1 state_commit`, com nomes, categorias e schemas exatos, incluindo pagamentos.
+  - Wheel idêntico preserva store authority/kernel/package.
+- **Source operacional:** `/home/ubuntu/chapada-leads-hermes`, somente leitura:
+  - HEAD `57408d8b2040399bc25ee7957505208079458884`;
+  - tree `67b5fe18d4685281778e41cd61cd584dd063ea60`;
+  - 86 entradas;
+  - status SHA-256 `e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a`;
+  - tracked diff SHA-256 `7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69`;
+  - `0` divergências nos caminhos incluídos e untracked declarados.
+- **Evidência runtime:** 50/50 vínculos estruturados conferidos em quatro envelopes; todos registram `964` passes no full clean-env com uma única falha de harness por PATH e `1/1` no rerun focado após corrigir PATH, total `965`.
+- **Integridade documental:** `SHA256SUMS` com `108/108` entradas únicas e válidas; manifest com `108/108` hashes/tamanhos válidos.
+- **Estado final:** evidence repo, réplica candidata e réplica previamente aprovada limpos. Nenhuma suíte integral, gate pesado, rede ou capability live executada.
+
+Verdict: Approved
+
+## Findings
+
+### Critical
+
+nenhum
+
+### Important
+
+nenhum
+
+### Minor
+
+nenhum
+
+## Residual risks
+
+- Os `965` testes são evidência histórica autenticada pelos envelopes e checksums; não foram reexecutados nesta revisão.
+- Nenhuma rede, provider, banco live ou capacidade comercial foi exercida.
+- O source operacional permanece intencionalmente sujo com 86 entradas, mas seu fingerprint foi autenticado e permaneceu exato.
+- Rollout permanece `NO-GO`; `phase8_started=false`; CI remoto vigente continua pendente.
+
+## Resumo
+
+- Autenticados identidade, parentesco, árvores, patch forward/reverse, wheel, source e equivalência funcional da réplica.
+- Nenhum problema material encontrado.
+- Arquivos criados ou modificados: **nenhum**.

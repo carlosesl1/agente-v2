@@ -1,0 +1,64 @@
+{
+  "approved": 3,
+  "attempt": 6,
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "completed_at": "2026-07-21T04:29:27Z",
+  "conclusive": 3,
+  "evidence_commit": "6894270e37a2222a4e6210e6f959fd0352bdfc5f",
+  "evidence_tree": "9bc409b39ac5cdf637e6125c6973eded7e1e22f4",
+  "lanes": [
+    {
+      "batch_id": "deleg_e0db81c2",
+      "findings": [],
+      "lane": 1,
+      "report_bytes": 2155,
+      "report_path": "review6-raw-reports/lane-1.txt",
+      "report_sha256": "ccef42dead54dec0eb3ffd658ba931f2b356dbc627999d66e408459d7c36b8d0",
+      "verdict": "Approved"
+    },
+    {
+      "batch_id": "deleg_d743f68e",
+      "findings": [],
+      "lane": 2,
+      "report_bytes": 3741,
+      "report_path": "review6-raw-reports/lane-2.txt",
+      "report_sha256": "c89b3a6ef5501cd0046a6f5cf2474f106ff735f9474f337ecfe9ef2e09c1903a",
+      "verdict": "Approved"
+    },
+    {
+      "batch_id": "deleg_d743f68e",
+      "findings": [],
+      "lane": 3,
+      "report_bytes": 4098,
+      "report_path": "review6-raw-reports/lane-3.txt",
+      "report_sha256": "bde50582d151e55559cf52daf865a6d304f25244b7fa3225239e052dcebf71dd",
+      "verdict": "Approved"
+    }
+  ],
+  "live_capabilities_executed": [],
+  "phase": 7,
+  "phase8_started": false,
+  "rejected": 0,
+  "replacement_lane": {
+    "batch_id": "deleg_e0db81c2",
+    "lane": 1,
+    "status": "completed",
+    "verdict": "Approved"
+  },
+  "result": "Approved",
+  "review_batches": [
+    "deleg_d743f68e",
+    "deleg_e0db81c2"
+  ],
+  "rollout": "NO-GO",
+  "schema_version": 1,
+  "superseded_zero_lane": {
+    "batch_id": "deleg_d743f68e",
+    "lane": 1,
+    "reason": "timeout_without_summary",
+    "status": "timeout",
+    "verdict_credit": 0
+  },
+  "terminal_gate": "approved"
+}

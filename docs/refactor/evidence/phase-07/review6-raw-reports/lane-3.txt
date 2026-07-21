@@ -1,0 +1,43 @@
+## Authentication
+
+- **Resumo:** o finding de `deleg_ab36b5c1` está fechado; a revisão foi somente leitura, sem rede, capabilities live, suíte integral ou gates pesados.
+- **Evidence:** commit `6894270e37a2222a4e6210e6f959fd0352bdfc5f`, tree `9bc409b39ac5cdf637e6125c6973eded7e1e22f4`; pai direto/candidato `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`, tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`. As 19 alterações do child estão exclusivamente em `docs/refactor/evidence/phase-07/`; worktree limpa.
+- **Wheel:** reconstruída duas vezes a partir do archive exato do candidato, byte-idêntica: `214954` bytes, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`.
+- **Réplica:** commit `183fb41d645e1bb04e237c986988309a28e42b34`, tree `e546e9d88093c09a245502bcca3d119e2e450672`; pai/baseline `3192a6b8122535e2b8a2fb047a152aa363aaf0de`, tree `9a6732ecba40f4771a97b931305ad9d175d48593`; worktree limpa.
+- **Source congelada:** fingerprint autenticado antes/depois: HEAD `57408d8b2040399bc25ee7957505208079458884`, tree `67b5fe18d4685281778e41cd61cd584dd063ea60`, 86 entradas, status hash `e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a` e diff hash `7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69`.
+- **Recaptura fresca em `/tmp`:** `source_unchanged=true`; reproduziu byte a byte os dois manifests, o baseline commit/tree e os 20 `redacted_paths`. `HERMES.md` teve seis transformações determinísticas e hash sanitizado `f8050cac6b9e0c7c8eff1e1aba50fe4540c52cf870e505b5f39cc5159138b8ea`.
+- **RED review5:** `review-attempt-5.json`, os três raw reports e o RED de `1431` bytes/SHA-256 `30aa73fe31e5c1795bcdc1b7494c626fd284e7b6d9f31adf9be1db3c3bbe3e57` conferem. A composição imutável do candidato anterior com o teste corretivo foi reproduzida em `/tmp` e falhou causalmente com `CaptureRejected: email-like literal in capture input: HERMES.md`; o teste atual passou.
+- **Sanitização:** e-mail e referência de pagamento hostis são transformados determinística e fail-closed; o resultado passa scanner estrito byte-idêntico, com zero novas redações. Telefones preservam os países `55`/`54` usando área impossível `00`; relações entre telefone, IDs e oráculos derivados passaram. O `HERMES.md` da réplica atual também passou revarredura estrita sem alteração.
+- **Patch:** `96073` bytes, SHA-256 `4d0ccd5e6dae410abca8da8b555fd0784668eecd5c4e0499e919997be38e0218`; aplicação forward produziu exatamente `e546e9d88093c09a245502bcca3d119e2e450672`, e a reversão efetiva voltou a `9a6732ecba40f4771a97b931305ad9d175d48593`.
+- **Contratos:** baseline e integração têm shape fechado, 13 tools (`5 read`, `7 write`, `1 state_commit`), nomes/parameters/schema hashes bilateralmente iguais e todos os hashes reconstruídos.
+- **Manifestos/README:** 108/108 arquivos, tamanhos e SHA-256 conferem; aggregate `6a8d369deab1d76f13b09f8af03dd92a696da6eb0bdd7c8aeab5522783e5aea0`; `SHA256SUMS` passou 108/108 e o README descreve corretamente o sexto candidato, CI histórico e artefatos vigentes ausentes.
+- **Checks frescos:** closeout `18/18`, package `3/3`, schema `4/4`, capture `9/9` — total `34/34`.
+- **Validator:** pré-terminal `passed`, exit `0`; terminal `blocked`, exit `1`, zero failures e exatamente:
+  - `missing terminal artifact: ci-result.json`
+  - `missing terminal artifact: review-result.json`
+- **Estado final:** `rollout=NO-GO`; `phase8_started=false`.
+- **Arquivos criados ou modificados:** nenhum no evidence repo, réplica ou source. Os diretórios temporários de revisão foram removidos.
+
+## Verdict
+
+Approved
+
+## Findings
+
+### Critical
+
+- nenhum.
+
+### Important
+
+- nenhum.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- A confirmação remota de zero runs para o evidence push `[skip ci]` não foi refeita devido à proibição de rede.
+- Suíte integral, gates pesados e capabilities live não foram executados nesta lane.
+- `ci-result.json` e `review-result.json` continuam ausentes por desenho; portanto, o closeout global permanece bloqueado, com rollout `NO-GO` e `phase8_started=false`.

@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **sexto candidato congelado; revisão terminal final e CI remoto vigente pendentes**.
+Status: **sexto candidato aprovado 3/3; CI remoto vigente pendente**.
 
 ## Entrada
 
@@ -89,8 +89,13 @@ rejeitava um e-mail operacional não reservado em `HERMES.md`.
 o parecer e o RED causal. O sexto candidato fecha essa transformação, recaptura
 a source inalterada, preserva semântica de país em telefones sintéticos por área
 impossível `00`, reconstrói a réplica e reproduz o patch sobre a baseline nova.
-`review-result.json` permanece ausente até um novo candidato obter três
-verdicts terminais válidos.
+O batch `deleg_d743f68e` aprovou as lanes de runtime e proveniência; sua lane de
+persistência expirou sem summary e valeu zero. A repetição isolada
+`deleg_e0db81c2` autenticou o mesmo snapshot e retornou `Approved` sem findings.
+`review-attempt-6.json`, `review6-raw-reports/` e `review-result.json` registram
+os três verdicts conclusivos e autenticados. O gate de revisão está fechado;
+`ci-result.json` permanece ausente até uma execução remota real e vinculada ao
+candidato funcional exato.
 
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi
