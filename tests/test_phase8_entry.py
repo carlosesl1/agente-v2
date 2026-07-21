@@ -115,6 +115,75 @@ class Phase8EntryTests(unittest.TestCase):
         )[1].split("## 5. Verificação do próprio plano antes do Slice 0", 1)[0]
         self.assertNotIn("```bash", post_gate)
 
+    def test_replacement_plan_closes_reviewed_tdd_and_owner_gaps(self) -> None:
+        manifest = _manifest()
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+        task_13 = plan.split("## Task 13:", 1)[1].split("## Task 14:", 1)[0]
+        task_14 = plan.split("## Task 14:", 1)[1].split("## Task 15:", 1)[0]
+
+        for literal in (
+            "test_patch_paths: tuple[str, ...]",
+            "execution_root_manifest_sha256",
+            "env_name_allowlist: tuple[str, ...]",
+            "duration_ns: int",
+            "S0 = {}",
+            "S1 = {owner.lock}",
+            "S2 = {owner.lock, object.tmp}",
+            "InternalJobExecutionLockFactory",
+            "MemoryPreparationExecutionLockFactory",
+            "MemoryPreparationRecoveryWorker",
+            "LearningClaimsClosedReceipt",
+            "SourceEventIdentity",
+            "ConversationTestDispatchAuthorization",
+            "BehaviorStateSnapshot",
+            "CapabilityPolicy",
+        ):
+            self.assertIn(literal, plan)
+
+        self.assertIn("settlement command relays", task_13)
+        self.assertIn("accept_boundary_settlement", task_13)
+        self.assertIn("exclusivamente para handoff e learning", task_14)
+        self.assertNotIn("Handoff/settlement ingresses", task_14)
+        self.assertNotIn("tests/test_dispatch.py", plan)
+        self.assertNotIn("`tests.test_serialization`", plan)
+        self.assertNotIn("Create package:", plan)
+        self.assertIn("Modify: `reservation_execution/reconciliation.py`", plan)
+        self.assertIn("Modify: `reservation_followup/reconciliation.py`", plan)
+        for task in range(23):
+            self.assertIn(
+                f"docs/refactor/evidence/phase-08/tasks/task-{task:02d}/",
+                plan,
+            )
+
+    def test_replacement_plan_keeps_historical_runtime_read_only_and_build_one_shot(self) -> None:
+        manifest = _manifest()
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+        task_21 = plan.split("## Task 21:", 1)[1].split("## Task 22:", 1)[0]
+        task_24 = plan.split("## Task 24:", 1)[1].split("## Task 25:", 1)[0]
+        task_25 = plan.split("## Task 25:", 1)[1].split("## Task 26:", 1)[0]
+        task_26 = plan.split("## Task 26:", 1)[1].split("## 4. Gates pós-plano", 1)[0]
+
+        self.assertIn("git clone --no-local --no-checkout", task_24)
+        self.assertNotIn(" worktree add ", task_24)
+        self.assertIn("183fb41d645e1bb04e237c986988309a28e42b34", task_24)
+        self.assertIn("e546e9d88093c09a245502bcca3d119e2e450672", task_24)
+        for literal in (
+            "decision=GO_BUILD_ONCE",
+            "authorization ID/nonce",
+            "not-before/expires-at",
+            "BuildAuthorizationStore.consume_once",
+            "loopback registry",
+            "Delete, tag overwrite e garbage",
+            "collection são proibidos",
+            "RootFS/layers",
+        ):
+            self.assertIn(literal, task_21)
+        self.assertIn("--frozen --no-dev --offline", task_25)
+        self.assertIn("reservation_boundary.__file__", task_25)
+        self.assertIn("GO_BUILD_ONCE_ELIGIBLE|NO_GO", task_26)
+        self.assertIn("não é aceito pelo", task_26)
+        self.assertIn("publisher e não executa build", task_26)
+
     def test_historical_spec_and_plan_have_non_executable_banners(self) -> None:
         manifest = _manifest()
         banner_paths = {
@@ -131,7 +200,7 @@ class Phase8EntryTests(unittest.TestCase):
             first_lines = (ROOT / relative).read_text(encoding="utf-8").splitlines()[:8]
             self.assertIn("HISTORICAL-NON-EXECUTABLE", "\n".join(first_lines), relative)
 
-    def test_manifest_preserves_all_nine_rejected_identities(self) -> None:
+    def test_manifest_preserves_all_ten_replaced_identities(self) -> None:
         manifest = _manifest()
         rejected = {
             item["path"]: item["rejected_identity_fixed_by_approved_spec"]
@@ -143,10 +212,10 @@ class Phase8EntryTests(unittest.TestCase):
             separators=(",", ":"),
         ).encode("utf-8")
 
-        self.assertEqual(len(rejected), 9)
+        self.assertEqual(len(rejected), 10)
         self.assertEqual(
             hashlib.sha256(canonical).hexdigest(),
-            "cded17b8bf5e813ef2d0523b749b14cba312caa5113be4990f28b0c5c3136ed3",
+            "3a42c5da37140296618b1541a7844448813ee4f93c429d0bf929deb60ffe2da0",
         )
         for item in manifest["historical_inputs"]:
             self.assertEqual(item["classification"], "HISTORICAL-NON-EXECUTABLE")

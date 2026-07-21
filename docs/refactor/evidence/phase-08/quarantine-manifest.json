@@ -8,7 +8,8 @@
     "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
     "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
     "docs/refactor/evidence/README.md",
-    "docs/refactor/evidence/phase-08/README.md"
+    "docs/refactor/evidence/phase-08/README.md",
+    "tests/test_phase8_entry.py"
   ],
   "active_scan_extensions": [
     "",
@@ -309,6 +310,31 @@
         "sha256": "7588de9522c82e5946184434d1e106152b6280cb1bd8b3b224ea5d9f8556caef"
       },
       "requires_banner": false
+    },
+    {
+      "classification": "HISTORICAL-NON-EXECUTABLE",
+      "current_state": {
+        "bytes": 12903,
+        "classification": "ACTIVE-RECONCILED",
+        "lines": 280,
+        "replacement": "tests/test_phase8_entry.py",
+        "sha256": "15ac0a19aae22e87e7c939c843494662f6525b959cfe27b742b2e32dbe501728"
+      },
+      "path": "tests/test_phase8_entry.py",
+      "pre_quarantine_head_identity": {
+        "blob": "a96aeafaf76b6a497041771418ae6f399ac45609",
+        "bytes": 1209,
+        "commit": "2889e9ec08f466bbb16a30e4bb5c9a098daf54d3",
+        "lines": 30,
+        "sha256": "1068f2d416d416f755ea839d141fc46ad998b87b1a016a3840c407fa7f3c2e88"
+      },
+      "rejected_identity_fixed_by_approved_spec": {
+        "blob": "a96aeafaf76b6a497041771418ae6f399ac45609",
+        "bytes": 1209,
+        "lines": 30,
+        "sha256": "1068f2d416d416f755ea839d141fc46ad998b87b1a016a3840c407fa7f3c2e88"
+      },
+      "requires_banner": false
     }
   ],
   "implementation_authorized": false,
@@ -319,10 +345,10 @@
     "user_acceptance": "PENDING"
   },
   "replacement_plan": {
-    "bytes": 57738,
-    "lines": 1364,
+    "bytes": 83542,
+    "lines": 1655,
     "path": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
-    "sha256": "0d221b221c7ee688be64b9d3bc5ece7d7da4d05a575400cc47fea13baebac11b"
+    "sha256": "6c495266a0a6cee22b33d54d0306847d0aaa7e93d4f9dbc33f715d4513054e68"
   },
   "rollout": "NO-GO",
   "scan_exclusions": [

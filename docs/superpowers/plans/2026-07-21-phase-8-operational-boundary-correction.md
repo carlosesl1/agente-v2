@@ -45,7 +45,9 @@ Este plano **não autoriza**:
 
 - alteração de `/home/ubuntu/chapada-leads-hermes`;
 - import, webhook, provider call, ManyChat send, pagamento, e-mail ou learning live;
-- construção/publicação de wheel antes da Task 22;
+- construção da wheel **candidata** antes da Task 23; a Task 21 pode produzir wheels
+  temporárias somente em roots descartáveis para RED/GREEN de reproducibilidade, sem
+  package identity, review ou promoção;
 - build OCI, dark canary, ingress, conversa, E2E, deploy, rollout ou rollback;
 - usar candidate1/candidate2 como build context;
 - promover por tag, image ID ou archive hash;
@@ -60,7 +62,8 @@ independentes. Nada neste plano é autorização implícita para esses runbooks.
 - repo source: `/home/ubuntu/agente-v2`;
 - runtime operacional: `/home/ubuntu/chapada-leads-hermes` — sempre read-only;
 - candidate1/candidate2: evidência histórica read-only;
-- runtime candidate novo: criado somente na Task 23, em root limpo e autenticado;
+- runtime candidate novo: criado somente na Task 24, em repositório independente,
+  root limpo e autenticado;
 - evidência raw: root privado externo ao Git, modo `0700`, definido no brief de cada
   execução e nunca inferido por default.
 
@@ -93,14 +96,35 @@ Cada RED é autenticado como:
 class RedProvenance:
     unfixed_commit: str          # U
     unfixed_tree: str
-    test_patch_sha256: str       # P
+    test_patch_blob: str         # P, bytes Git binary patch canônicos
+    test_patch_sha256: str
+    test_patch_paths: tuple[str, ...]
     staged_tree: str             # S = apply(U, P)
+    execution_root_manifest_sha256: str
+    execution_root_absolute: str
     argv: tuple[str, ...]        # R
     cwd: str
-    env_allowlist: tuple[tuple[str, str], ...]
+    env_name_allowlist: tuple[str, ...]  # nomes apenas, nunca valores
+    python_version: str
+    tool_versions: tuple[tuple[str, str], ...]
     exit_code: int
+    duration_ns: int
+    counts: tuple[tuple[str, int], ...]
     output_sha256: str           # O
     output_bytes: int
+
+@dataclass(frozen=True)
+class ExecutionRootManifest:
+    absolute_root: str
+    root_kind: Literal["detached_worktree", "temporary_index"]
+    git_dir_identity: str
+    head_commit: str
+    staged_tree: str
+    patch_paths: tuple[str, ...]
+    python_executable: str
+    python_version: str
+    tool_versions: tuple[tuple[str, str], ...]
+    env_names: tuple[str, ...]
 ```
 
 Regras:
@@ -116,19 +140,29 @@ Regras:
 
 ### EvidenceArtifactStore
 
-O store externo usa `coord.lock → object.lock`, dirfd/no-follow, staging fechado,
-`chmod 0400`, fsync de arquivo/diretório e rename-no-replace. Os únicos estados de
-recuperação são:
+O store externo possui exatamente `coord.lock`, `.staging/` e `objects/`. Publisher e
+scavenger usam a ordem global `coord.lock → owner.lock`; qualquer segundo nome de lock
+é proibido e não há caminho owner→coord. Sob `coord.lock`, o publisher cria o path
+`.staging/{secrets.token_hex(16)}`, cria
+`owner.lock` e `object.tmp` com `openat(O_CREAT|O_EXCL|O_NOFOLLOW, 0600)`, retém o
+owner flock e então libera coord. Escreve `object.tmp`, calcula hash/bytes, faz fsync,
+reabre no-follow, rehasheia, executa `chmod 0400` e um **segundo fsync do inode após o
+chmod**. Só então publica em `objects/{expected_sha256}` por rename/link no-replace e faz
+directory fsync. Os únicos prefixos de staging recuperáveis são literalmente:
 
 ```text
-S0 = staging vazio/parcial validável
-S1 = objeto final ausente + staging válido
-S2 = objeto final presente com hash/tamanho/mode exatos
+S0 = {}
+S1 = {owner.lock}
+S2 = {owner.lock, object.tmp}
 ```
 
-Objeto final divergente, symlink, owner/mode incorreto ou membro desconhecido é
-`MANUAL_REVIEW`, nunca overwrite. Git recebe somente o envelope sanitizado com
-hash/tamanho/contagens/conclusão.
+Sob coord, scavenger remove+dir-fsync S0; para S1/S2 exige owner lock livre. Staging
+com publisher vivo não é removido. Objeto final existente é reaberto no-follow,
+owner/mode/hash/bytes são verificados e somente igualdade exata é aceita. Objeto final
+divergente, symlink, owner/mode incorreto, membro desconhecido, scanner failure ou
+retenção não comprovada é `MANUAL_REVIEW`, nunca overwrite. Manifest externo fixa
+path/hash/bytes/retention; reviewer reabre e rehasheia. Git recebe somente P e envelopes
+sanitizados com U/P/S/R/O, contagens e conclusão; raw output permanece no store.
 
 ### Candidatos F/E e reviews
 
@@ -148,7 +182,7 @@ hash/tamanho/contagens/conclusão.
 ### Matriz econômica
 
 - durante cada task: RED focado + GREEN focado + regressão pelo blast radius;
-- suites pesadas somente na Task 21, uma vez por candidato terminal;
+- suites pesadas somente na Task 22, uma vez por candidato terminal;
 - correção material depois do gate pesado invalida o candidato e reroda o gate todo;
 - não rerodar suite pesada até “ficar verde”.
 
@@ -179,6 +213,8 @@ reservation_boundary/
   uds_protocol.py              # frames, HMAC chain, peer/binding checks
   attempt_root.py              # staging/active grammar and scavenger
   locks.py                     # lead/internal/public lock factories
+  maya.py                      # MayaTurnPort e child lifecycle
+  kernel_adapter.py            # adapter puro proposal→kernel decision
   relay.py                     # command/internal-job workers + reconcilers
   public_delivery.py           # public sender/reconciler
   runtime_graph.py             # graph manifest, readiness contracts
@@ -218,8 +254,9 @@ reservation_qualification/
   admission.py
   effect_scan.py
   cancellation.py
+  locks.py                     # MemoryPreparationExecutionLockFactory
   memory_preparation.py        # memory-preparation-v1 / 1 table + filesystem protocol
-  reconciliation.py
+  reconciliation.py           # admission + MemoryPreparationRecoveryWorker
 phase8_release/
   __init__.py
   red_provenance.py
@@ -229,6 +266,7 @@ phase8_release/
   payload_manifest.py
   source_attestation.py
   build_input.py
+  build_authorization.py       # GO_BUILD_ONCE + one-shot ledger/receipt
   oci_identity.py
   approval_manifest.py
   validator.py
@@ -292,8 +330,8 @@ uv.lock
 | 7 Kernel adapter | 10 |
 | 8 Coordinator/commit | 11 |
 | 9 Duplicate/replay | 12 |
-| 10 Relay reserva | 13 |
-| 11 Handoff/settlement/learning | 14 |
+| 10 Command relay reserva/settlement + internal handoff/learning | 13–14 |
+| 11 Delivery pública | 16 |
 | 12 Factory/readiness | 19 e 24 |
 | 13 Ingress/legacy poison | 20 e 24 |
 | 14 Terminal upstream | 22 |
@@ -304,6 +342,125 @@ uv.lock
 
 Tasks 15–18 detalham authorities, execution locks, public delivery e qualification que
 fazem parte das obrigações transversais dos Slices 10–13.
+
+## 3.1 Contratos TDD autocontidos das Tasks 0–22
+
+Esta seção é parte normativa da seção **Files/Interfaces/Steps** de cada task. Para
+cada linha, o executor:
+
+1. cria os selectors listados em P, sem production path;
+2. executa no staged tree S o argv formado por
+   `("python3", "-B", "-m", "unittest") + tuple(selectors_da_linha) + ("-v",)`;
+3. exige exit não-zero pela causa/asserção literal da linha, e não por import/typo;
+4. publica U/P/S/R/O no diretório E exato;
+5. implementa somente os producers enumerados;
+6. repete o mesmo argv até exit `0`, executa o blast radius literal e prova P
+   byte-idêntico de S→F.
+
+### Ownership de interfaces
+
+| Task | Consumes | Produces; único owner inicial |
+|---:|---|---|
+| 0 | commit documental aprovado + quarantine manifest | `RedProvenance`, `ExecutionRootManifest`, `EvidenceArtifactStore`, `CandidatePair`, contract scanner |
+| 1 | canonical JSON v7 | todos os DTOs/unions v8, `SourceEventIdentity`, `CapabilityPolicy`, `BehaviorStateSnapshot`, bindings/receipts/relay bundles |
+| 2 | `NormalizedToolProposal`, `KernelDecision` | `ToolDispatch.normalize_proposal`, `verify_authorized` |
+| 3 | DTOs v8 | Boundary-v8 schema/store, `commit_turn_v8`, semantic scan |
+| 4 | allocations/relay bundles v8 | Phase5-v6/Phase6-v2 stores, reservation/settlement ingress e derived outcome receipts |
+| 5 | clock/deadline ports | migration-ownership-v1, `LegacyWriteGuard`, `LeadExecutionLockFactory` |
+| 6 | qualification DTOs | QualificationJournal e memory-preparation-v1 schema/stores |
+| 7 | `LeadExecutionLockFactory` da Task 5 | factory endurecida + transaction/deadline helpers |
+| 8 | DTOs/ToolDispatch | UDS frame codec, gateway e `TranscriptCommitment` |
+| 9 | UDS da Task 8 | `AttemptRootManager`, scavenger e `MayaTurnPort` |
+| 10 | proposal + ToolDispatch | `KernelPort`/adapter puro e binding/evidence checks |
+| 11 | Tasks 3–10 | coordinator v8, genesis tri-state, admission/commit/ACK handshake |
+| 12 | receipt/store da Task 11 | duplicate replay byte-idêntico + integrity scanner |
+| 13 | command/bundles/stores | `BoundaryCommandRelayWorker`; reservation **e settlement** target ingress |
+| 14 | internal union/lead locks | handoff/learning worker+reconciler+canceler e `InternalJobExecutionLockFactory` |
+| 15 | target authorities | provider/follow-up lock factories, senders e capability-free reconcilers |
+| 16 | public allocation DTO/store | public execution lock, sender e reconciler |
+| 17 | journal + todos os owner receipts | install/admission/cutoff/effect scan/learning seal |
+| 18 | Task 17 + target closures | cancellation/reopen, `MemoryPreparationExecutionLockFactory` e recovery worker |
+| 19 | todos os nodes anteriores | `RuntimeGraphManifest`, readiness scan, behavior/policy digests |
+| 20 | graph scanner | ingress universe literal e legacy/child capability poison |
+| 21 | F/E candidates ainda mutáveis | wheel/release/prebuild/publish tooling e runners completos |
+| 22 | producers 0–21 congelados | source F, evidence-only E e terminal review AND |
+
+Nenhuma task posterior pode introduzir producer atribuído a uma linha anterior sem
+invalidar seu F/E e repetir o RED/review da task owner.
+
+### Selectors, RED causal e blast radius
+
+| Task | Selectors exatos em R | RED causal obrigatório | Blast radius após GREEN |
+|---:|---|---|---|
+| 0 | `tests.test_phase8_red_provenance.RedProvenanceTests.test_records_exact_patch_paths_execution_manifest_versions_duration_counts_without_env_values`; `tests.test_phase8_evidence_store.EvidenceStoreTests.test_scavenger_accepts_only_literal_s0_s1_s2_and_never_removes_live_publisher`; `tests.test_phase8_contract_lock.ContractLockTests.test_quarantined_interfaces_have_zero_active_owner` | tipos/módulos ausentes; falha deve nomear o producer, nunca collection error | os três módulos Phase8 + `scripts/validate_phase8_contracts.py` |
+| 1 | `tests.test_phase8_conversation_types.ConversationTypesTests.test_closed_registry_matches_approved_spec_contract`; `tests.test_phase8_wire_v8.WireV8Tests.test_rejects_unknown_bool_float_mutable_and_cross_domain_bytes` | registry/type v8 ausente ou schema mismatch exato | quatro módulos Phase8 + `tests.test_phase7_serialization` + `tests.test_phase7_types` |
+| 2 | `tests.test_phase8_tool_dispatch.ToolDispatchV8Tests.test_normalize_never_authorizes_and_verify_requires_exact_kernel_decision`; `tests.test_phase8_tool_dispatch.ToolDispatchV8Tests.test_handmade_or_stale_proposal_is_rejected` | método v8 ausente ou proposal→decision mismatch | módulo Phase8 + `tests.test_phase7_dispatch` |
+| 3 | `tests.test_phase8_boundary_schema_v8.BoundarySchemaV8Tests.test_exact_eleven_table_universe_and_ddl_hash`; `tests.test_phase8_boundary_atomic_commit.BoundaryAtomicCommitTests.test_every_statement_fault_rolls_back_all_logical_rows` | universe ainda v7/6 ou `commit_turn_v8` ausente | três módulos Phase8 + Phase7 schema/store/serialization |
+| 4 | `tests.test_phase8_phase5_v6.Phase5V6Tests.test_exact_eight_table_universe`; `tests.test_phase8_phase6_v2.Phase6V2Tests.test_exact_fourteen_table_universe`; `tests.test_phase8_target_ingress.TargetIngressTests.test_reservation_and_settlement_bind_preinstalled_allocation_atomically` | target schemas antigos/ingress ausente | quatro módulos Phase8 + Phase5/6 schema/store |
+| 5 | `tests.test_phase8_migration_ownership.MigrationOwnershipTests.test_freeze_drains_old_epoch_permits_without_waiting_under_lead_lock`; `tests.test_phase8_legacy_write_guard.LegacyWriteGuardTests.test_revalidates_permit_before_dispatch_and_commit`; `tests.test_phase8_migration_contention.MigrationContentionTests.test_shared_lead_lock_serializes_register_freeze_and_release` | package/factory/guard ausentes | quatro módulos Phase8, `200` contention schedules |
+| 6 | `tests.test_phase8_qualification_schema.QualificationSchemaTests.test_exact_five_table_universe`; `tests.test_phase8_memory_preparation_schema.MemoryPreparationSchemaTests.test_exact_one_table_and_closed_receipt_tuples` | roots/schemas ausentes | três módulos Phase8 + semantic scans |
+| 7 | `tests.test_phase8_lead_lock.LeadLockTests.test_same_db_and_lead_contend_across_processes`; `tests.test_phase8_deadline_transaction.DeadlineTransactionTests.test_deadline_at_lock_begin_first_write_and_commit_changes_zero_rows` | factory não endurecida/deadline não reamostrada | dois módulos Phase8 + Phase7 store/coordinator |
+| 8 | `tests.test_phase8_uds_frames.UdsFrameTests.test_rejects_length_duplicate_key_sequence_and_divergent_retry`; `tests.test_phase8_uds_peer_auth.UdsPeerAuthTests.test_rejects_wrong_uid_pid_group_and_second_connection`; `tests.test_phase8_uds_transcript.UdsTranscriptTests.test_terminal_commitment_recomputes_without_hmac_secret` | codec/gateway ausente | quatro módulos Phase8 + `2000` malformed frames |
+| 9 | `tests.test_phase8_attempt_root.AttemptRootTests.test_publish_prefixes_are_s0_s1_s2_s3_then_active`; `tests.test_phase8_attempt_scavenger.AttemptScavengerTests.test_sigkill_restart_never_resumes_or_deletes_unknown_member`; `tests.test_phase8_maya_turn_port.MayaTurnPortTests.test_child_graph_has_only_minimal_uds_plugin` | attempt/Maya producer ausente | três módulos Phase8 + SIGKILL/os._exit/restart catalog |
+| 10 | `tests.test_phase8_kernel_adapter.KernelAdapterTests.test_unresolved_read_fact_or_command_without_proposal_is_rejected`; `tests.test_phase8_kernel_ownership.KernelOwnershipTests.test_kernel_and_tooldispatch_are_only_authorizers` | kernel adapter ausente/legacy path reachable | dois módulos Phase8 + Phase7 dispatch/coordinator |
+| 11 | `tests.test_phase8_coordinator_genesis.CoordinatorGenesisTests.test_unavailable_never_becomes_empty_genesis`; `tests.test_phase8_coordinator_commit.CoordinatorCommitTests.test_reply_receipt_relays_jobs_and_chunks_commit_atomically`; `tests.test_phase8_admission_handshake.AdmissionHandshakeTests.test_abort_and_commit_are_linearized_by_same_lead_lock` | coordinator v7 não satisfaz handshake | três módulos Phase8 + Phase7 coordinator/store |
+| 12 | `tests.test_phase8_duplicate_replay.DuplicateReplayTests.test_restart_duplicate_returns_exact_persisted_bytes_with_all_ports_poisoned`; `tests.test_phase8_receipt_integrity.ReceiptIntegrityTests.test_missing_extra_or_divergent_child_blocks_replay_and_readiness` | duplicate chama port ou integrity scan ausente | dois módulos Phase8 + `2000` replay/restart properties |
+| 13 | `tests.test_phase8_reservation_relay.ReservationRelayTests.test_target_commit_source_ack_recovers_same_receipt`; `tests.test_phase8_settlement_relay.SettlementRelayTests.test_settlement_is_command_relay_not_internal_job`; `tests.test_phase8_relay_target_ack.RelayTargetAckTests.test_stale_tuple_or_divergent_target_is_rejected_without_provider` | relay/settlement owner ausente | três módulos Phase8 + Phase5/6 store/replay faults |
+| 14 | `tests.test_phase8_internal_jobs.InternalJobTests.test_union_is_exactly_handoff_or_learning`; `tests.test_phase8_internal_job_execution_lock.InternalJobLockTests.test_worker_reconciler_and_canceler_share_lock_through_target_ack`; `tests.test_phase8_learning_job.LearningJobTests.test_memory_and_receipt_commit_atomically` | settlement aceito no union ou factory ausente | quatro módulos Phase8 + Phase6 handoff + barrier faults |
+| 15 | `tests.test_phase8_provider_execution_lock.ProviderLockTests.test_sender_rechecks_lease_deadline_and_allocation_under_shared_lock`; `tests.test_phase8_followup_delivery_lock.FollowupLockTests.test_fence_delivery_receipt_and_allocation_are_serialized`; `tests.test_phase8_capability_free_reconciler.CapabilityFreeReconcilerTests.test_reconciler_has_no_external_port` | lock factory/recheck ausente | três módulos Phase8 + Phase5/6 worker/reconciliation, `200` races/family |
+| 16 | `tests.test_phase8_public_allocations.PublicAllocationTests.test_exact_manifest_precedes_ingress_and_close_blocks_late_bind`; `tests.test_phase8_public_delivery.PublicDeliveryTests.test_idempotency_key_binds_release_lead_target_channel_and_chunk`; `tests.test_phase8_public_reconciliation.PublicReconciliationTests.test_uncertain_fence_never_resends` | public authority/lock ausente | três módulos Phase8 + faults/restarts |
+| 17 | `tests.test_phase8_qualification_install.QualificationInstallTests.test_open_requires_three_target_installation_receipts`; `tests.test_phase8_admission_cutoff.AdmissionCutoffTests.test_cutoff_and_membership_copy_are_one_transaction`; `tests.test_phase8_effect_scan.EffectScanTests.test_exact_owner_receipts_and_nonzero_provider_public_budget_required`; `tests.test_phase8_learning_seal.LearningSealTests.test_learning_claim_close_and_seal_use_target_commit_journal_ack` | controller path/status/receipt ausente | quatro módulos Phase8 + restart em cada transition |
+| 18 | `tests.test_phase8_qualification_cancel.QualificationCancelTests.test_all_eight_origins_freeze_both_fsms_and_preserve_artifacts`; `tests.test_phase8_memory_prepare.MemoryPrepareTests.test_s0_to_s5_recovery_is_exact`; `tests.test_phase8_memory_abandon.MemoryAbandonTests.test_a0_to_a4_each_barrier_converges_with_zero_payload`; `tests.test_phase8_memory_recovery.MemoryRecoveryTests.test_worker_has_only_lookup_resume_ack_abandon_and_shared_lock`; `tests.test_phase8_qualification_reopen.QualificationReopenTests.test_new_epoch_root_ids_and_old_ack_rejection` | lock/recovery/cancel producer ausente | cinco módulos Phase8 + `2000` restarts por grammar catalog |
+| 19 | `tests.test_phase8_runtime_graph_contract.RuntimeGraphContractTests.test_manifest_contains_every_worker_reconciler_canceler_lock_and_recovery_node`; `tests.test_phase8_readiness_contract.ReadinessContractTests.test_schema_root_lock_receipt_or_worker_mismatch_is_not_ready` | node/digest scanner ausente | dois módulos Phase8 + closed graph mutation catalog |
+| 20 | `tests.test_phase8_ingress_universe.IngressUniverseTests.test_four_turn_ingresses_have_exact_source_identities_and_coordinator_owner`; `tests.test_phase8_legacy_poison.LegacyPoisonTests.test_every_mutator_is_coordinator_or_shared_migration_guarded`; `tests.test_phase8_child_capability_graph.ChildCapabilityGraphTests.test_child_cannot_import_legacy_provider_delivery_or_memory_writer` | alternate owner/import reachable | três módulos Phase8 + runtime inventory static scan |
+| 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact` | release producers ausentes | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate e terminal_gate |
+| 22 | `tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f` | F/E ainda não congelados/envelopes ausentes | suite integral única + runners/counters literais da própria Task 22 |
+
+### Evidence child paths exatos
+
+Para cada task `00`–`21`, a seção **Files** inclui, no ref/worktree E separado, os
+cinco paths abaixo sob o diretório enumerado na tabela. Task 22 usa o mesmo conjunto
+em `task-22` e acrescenta `terminal-manifest.json` e `review-request.json`.
+
+```text
+red.patch
+red-provenance.json
+green-result.json
+candidate-pair.json
+SHA256SUMS
+```
+
+| Task | Diretório E exato |
+|---:|---|
+| 0 | `docs/refactor/evidence/phase-08/tasks/task-00/` |
+| 1 | `docs/refactor/evidence/phase-08/tasks/task-01/` |
+| 2 | `docs/refactor/evidence/phase-08/tasks/task-02/` |
+| 3 | `docs/refactor/evidence/phase-08/tasks/task-03/` |
+| 4 | `docs/refactor/evidence/phase-08/tasks/task-04/` |
+| 5 | `docs/refactor/evidence/phase-08/tasks/task-05/` |
+| 6 | `docs/refactor/evidence/phase-08/tasks/task-06/` |
+| 7 | `docs/refactor/evidence/phase-08/tasks/task-07/` |
+| 8 | `docs/refactor/evidence/phase-08/tasks/task-08/` |
+| 9 | `docs/refactor/evidence/phase-08/tasks/task-09/` |
+| 10 | `docs/refactor/evidence/phase-08/tasks/task-10/` |
+| 11 | `docs/refactor/evidence/phase-08/tasks/task-11/` |
+| 12 | `docs/refactor/evidence/phase-08/tasks/task-12/` |
+| 13 | `docs/refactor/evidence/phase-08/tasks/task-13/` |
+| 14 | `docs/refactor/evidence/phase-08/tasks/task-14/` |
+| 15 | `docs/refactor/evidence/phase-08/tasks/task-15/` |
+| 16 | `docs/refactor/evidence/phase-08/tasks/task-16/` |
+| 17 | `docs/refactor/evidence/phase-08/tasks/task-17/` |
+| 18 | `docs/refactor/evidence/phase-08/tasks/task-18/` |
+| 19 | `docs/refactor/evidence/phase-08/tasks/task-19/` |
+| 20 | `docs/refactor/evidence/phase-08/tasks/task-20/` |
+| 21 | `docs/refactor/evidence/phase-08/tasks/task-21/` |
+| 22 | `docs/refactor/evidence/phase-08/tasks/task-22/` |
+
+`red.patch` é o blob P exato; `red-provenance.json` fecha U/P/S/R/O e retention;
+`green-result.json` fecha o mesmo R em F e o blast radius; `candidate-pair.json` fecha
+F/E, `parent(E)==F`, allowlists e P-path→S-blob→F-blob; `SHA256SUMS` cobre os quatro
+artifacts anteriores. Nenhum desses diretórios recebe raw output, DB, WAL, socket,
+token ou PII.
 
 ---
 
@@ -377,6 +534,7 @@ python3 -B scripts/validate_phase8_contracts.py
 - Create: `tests/test_phase8_effect_types.py`
 - Create: `tests/test_phase8_qualification_types.py`
 - Create: `tests/test_phase8_wire_v8.py`
+- Create: `tests/fixtures/phase8_wire_contract_v8.json`
 
 **Dataclasses frozen/unions obrigatórios:** `ConversationProjection`,
 `FoundSnapshot|ProvenAbsent|LegacyUnavailable`, `MayaTurnRequest`,
@@ -396,10 +554,47 @@ fechados de installation/closure. Também são obrigatórios
 `QualificationCancelStartReceipt`, `QualificationCancelReceipt`,
 `ReopenPreparationIntent`, `ReopenIntentAbandonStartReceipt`,
 `ReopenIntentAbandonReceipt`, `MemoryPreparationReceipt`,
-`MemoryPreparationAckReceipt`, `MemoryPreparationAbandonReceipt` e
-`QualificationReopenReceipt`. Os campos e domínios de hash são exatamente os da spec
-aprovada; adicionar campo aberto ou omitir receipt exige delta arquitetural, não
-decisão local do implementador.
+`MemoryPreparationAckReceipt`, `MemoryPreparationAbandonReceipt`,
+`QualificationReopenReceipt`, `SourceEventIdentity`,
+`LearningClaimsClosedReceipt`, `ConversationTestDispatchAuthorization`,
+`CapabilityPolicy` e `BehaviorStateSnapshot`. `ReservationRelayBundle` e
+`HandoffRelayBundle` também pertencem ao wire fechado, com owners nas Tasks 13 e 14.
+Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; campos, enums e
+ordem são os blocos normativos da spec aprovada. O validator desta task extrai esses
+blocos por heading/hash fixo e compara um registry literal versionado no teste; não é
+permitido “decidir depois” campo, nome, enum, nullable tuple ou domínio de hash.
+Adicionar campo aberto ou omitir receipt exige delta arquitetural, não decisão local.
+
+**Field registry mínimo literal:**
+
+```text
+SourceEventIdentity(source_event_id, source_event_hash)
+ConversationProjection(stage, desired_services, locale, facts,
+                       reservation_execution_projection)
+MayaTurnRequest(boundary_state_bytes, state_version, state_hash,
+                normalized_message, aggregate_turn_id, source_events,
+                lead_key_hash, private_delivery_binding_hash, deadline_at,
+                behavior_profile_fingerprint)
+MayaIntentClosure(kind, selection, confirmation, handoff)
+MayaTurnClosure(aggregate_turn_id, intent_closure, public_text, route, reply_type,
+                final_seq, expected_prefix_mac, ephemeral_session_id,
+                zero_requests_in_flight)
+ReadObservation(request_bytes, request_hash, status, typed_result_bytes,
+                result_hash, derived_facts, safe_for_public_claims,
+                frame_commitment_hash)
+TranscriptCommitment(direction, kind, sequence, request_id, request_hash,
+                     response_hash, previous_frame_commitment)
+BehaviorStateSnapshot(schema, version, memory_snapshot_hash)
+CapabilityPolicy(capability_matrix, worker_modes, guard_semantics)
+```
+
+`MayaIntentClosure` não possui facts/tool/command. `CapabilityPolicy` não possui roots,
+allowlist concreta ou percentual. O fixture fecha ainda: todos os artifact canonical
+bytes/hash + frame backlink; bindings com os doze campos literais da spec; scenario/
+allocation families, roles e parent tuples; receipt predecessor/backlink tuples; FSMs;
+nullable all-null/all-present; e domain strings versionadas. O teste compara o fixture
+com uma constante independente em cada módulo e falha se um símbolo referido neste
+plano estiver sem owner, field list, enum list ou hash domain.
 
 **Steps:**
 
@@ -412,8 +607,8 @@ decisão local do implementador.
 - [ ] `MayaIntentClosure` não pode conter facts/tool/command; `ReadObservation` aceita
   somente union sanitizado; `TurnReceipt` separa `artifact_hash` de backlink.
 - [ ] Round-trip hostil de todo tipo e cross-type/domain collision tests.
-- [ ] Executar os quatro módulos focados e regressão `tests.test_serialization`,
-  `tests.test_boundary_types`; criar F/E e review AND.
+- [ ] Executar os quatro módulos focados e regressão
+  `tests.test_phase7_serialization tests.test_phase7_types`; criar F/E e review AND.
 
 ## Task 2: Separar normalização de autorização em ToolDispatch
 
@@ -422,7 +617,7 @@ decisão local do implementador.
 - Modify: `reservation_boundary/dispatch.py`
 - Modify: `reservation_boundary/types.py`
 - Create: `tests/test_phase8_tool_dispatch.py`
-- Modify: `tests/test_dispatch.py`
+- Modify: `tests/test_phase7_dispatch.py`
 
 **API:**
 
@@ -538,7 +733,14 @@ Phase6-v2: onze nomes v1 endurecidos + handoff_boundary_ingress_receipts
 
 **Files:**
 
-- Create package: `reservation_migration/`
+- Create: `reservation_boundary/locks.py`
+- Create: `reservation_migration/__init__.py`
+- Create: `reservation_migration/types.py`
+- Create: `reservation_migration/schema.py`
+- Create: `reservation_migration/sqlite_store.py`
+- Create: `reservation_migration/locks.py`
+- Create: `reservation_migration/guard.py`
+- Create: `reservation_migration/reconciliation.py`
 - Modify: `pyproject.toml`
 - Create: `tests/test_phase8_migration_schema.py`
 - Create: `tests/test_phase8_migration_ownership.py`
@@ -555,6 +757,10 @@ MIGRATION_OWNERSHIP_V1_TABLES = {
 
 **Steps:**
 
+- [ ] Produzir `LeadExecutionLockFactory` nesta task, antes do primeiro contention
+  probe. API: `acquire(ownership_db_identity, lead_hash, deadline, clock)` retorna
+  context manager flock por dirfd/no-follow. Task 7 consome e endurece a mesma classe;
+  não cria factory concorrente.
 - [ ] RED owner FSM `legacy_owned→freezing→frozen→boundary_owned`, release dedicado e
   `manual_review`; transition revision/hash chain precisa ser contígua.
 - [ ] Implementar register/acquire/complete/begin/finish/finalize/release por full-tuple
@@ -572,7 +778,10 @@ MIGRATION_OWNERSHIP_V1_TABLES = {
 
 **Files:**
 
-- Create package: `reservation_qualification/`
+- Create: `reservation_qualification/__init__.py`
+- Create: `reservation_qualification/types.py`
+- Create: `reservation_qualification/schema.py`
+- Create: `reservation_qualification/sqlite_store.py`
 - Modify: `pyproject.toml`
 - Create: `tests/test_phase8_qualification_schema.py`
 - Create: `tests/test_phase8_qualification_store.py`
@@ -605,11 +814,11 @@ MEMORY_PREPARATION_TABLES = {"memory_preparation_operations"}
 
 # Parte C — Turno autenticado e commit/replay
 
-## Task 7: Lead lock deadline-aware e transaction curta
+## Task 7: Endurecer lead lock deadline-aware e transaction curta
 
 **Files:**
 
-- Create: `reservation_boundary/locks.py`
+- Modify: `reservation_boundary/locks.py`
 - Modify: `reservation_boundary/sqlite_store.py`
 - Create: `tests/test_phase8_lead_lock.py`
 - Create: `tests/test_phase8_deadline_transaction.py`
@@ -621,6 +830,9 @@ class LeadExecutionLockFactory:
     def acquire(self, *, ownership_db_identity: str, lead_hash: str,
                 deadline: datetime, clock: Clock) -> AbstractContextManager[None]: ...
 ```
+
+**Consumes:** a factory mínima criada na Task 5. **Produces:** a mesma API com deadline,
+path/device/inode/mount identity e crash semantics completas para Tasks 11, 17 e 18.
 
 **Steps:**
 
@@ -789,22 +1001,31 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 
 # Parte D — Relays, effects e locks externos
 
-## Task 13: Reservation command relay e target ACK
+## Task 13: Reservation e settlement command relays com target ACK
 
 **Files:**
 
 - Create: `reservation_boundary/relay.py`
 - Modify: `reservation_boundary/sqlite_store.py`
 - Modify: `reservation_execution/sqlite_store.py`
+- Modify: `reservation_followup/sqlite_store.py`
 - Create: `tests/test_phase8_reservation_relay.py`
+- Create: `tests/test_phase8_settlement_relay.py`
 - Create: `tests/test_phase8_relay_target_ack.py`
 
 **Steps:**
 
 - [ ] RED pending/leased/acked/cancelled/manual_review FSM, full tuple lease CAS, stale
   ACK, preparation max 3 e target identity conflict.
-- [ ] Implementar bundle com genesis, eventos contíguos, summary outboxes, final state,
-  command/ledger seed e allocation binding.
+- [ ] `BoundaryCommandRelayWorker` é owner 1:1 de **todo** `boundary_command`.
+  `ReservationRelayBundle` contém genesis/eventos/summary outboxes/final state/
+  command-ledger seed/allocation; o bundle Phase6 de settlement contém
+  anchor/policy/history/evidence/command/final state/allocation. Ambos carregam
+  `artifact_hash`; a relay row carrega `source_turn_receipt_hash` fora do bundle hash.
+- [ ] Implementar os ingresses fechados
+  `SQLiteUnitOfWork.accept_boundary_reservation(...)` e
+  `SQLiteFollowupUnitOfWork.accept_boundary_settlement(...)`; full replay, target
+  receipt e allocation bind acontecem na mesma transaction e nunca chamam provider.
 - [ ] Worker one-shot faz claim→prepare→target idempotent ingress→receipt validation→
   source ACK; nunca chama provider.
 - [ ] Crash antes target libera/requeue; crash target-commit/source-ACK retorna mesmo
@@ -812,27 +1033,33 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 - [ ] Closure cancela apenas pre-target; target receipt existente precisa reconcile/ACK.
 - [ ] GREEN + faults/restarts; F/E + AND.
 
-## Task 14: Internal jobs para handoff, settlement e learning
+## Task 14: Internal jobs exclusivamente para handoff e learning
 
 **Files:**
 
 - Modify: `reservation_boundary/relay.py`
+- Modify: `reservation_boundary/locks.py`
 - Modify: `reservation_boundary/sqlite_store.py`
 - Modify: `reservation_followup/sqlite_store.py`
 - Modify: `reservation_followup/workers.py`
 - Create: `tests/test_phase8_internal_jobs.py`
+- Create: `tests/test_phase8_internal_job_execution_lock.py`
 - Create: `tests/test_phase8_handoff_ingress.py`
-- Create: `tests/test_phase8_settlement_ingress.py`
 - Create: `tests/test_phase8_learning_job.py`
 
 **Steps:**
 
-- [ ] RED union fechado por kind, operation ID determinístico, target lookup
+- [ ] RED prova que `BoundaryInternalJob` aceita somente
+  `HandoffRelayBundle|LearningProposal`; settlement internal job é schema error e
+  permanece command relay da Task 13. Operation ID é determinístico, target lookup
   side-effect-free e `NOT_FOUND` somente após zero-scan completo.
+- [ ] Implementar `InternalJobExecutionLockFactory.acquire(boundary_db_identity,
+  boundary_job_id, deadline, clock)` em
+  `internal-target/{boundary_db_identity}/{boundary_job_id}.lock`, por dirfd/no-follow.
 - [ ] Worker/reconciler/canceler compartilham `InternalJobExecutionLockFactory` por
   boundary DB + job; lock cobre lookup→target commit→source ACK.
-- [ ] Handoff/settlement ingresses persistem full replay/receipts/allocations; learning
-  aplica `expected_version/hash` e receipt na mesma memory transaction.
+- [ ] Handoff ingress persiste full replay/receipts/allocations; learning aplica
+  `expected_version/hash` e receipt na mesma memory transaction.
 - [ ] Outcome parcial/órfão/uncerto termina manual review; reconciler não recebe
   capability genérica de mutation.
 - [ ] Pause probes em lookup, target commit e source ACK contra canceler; stale worker
@@ -844,10 +1071,10 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 **Files:**
 
 - Create: `reservation_execution/locks.py`
-- Create: `reservation_execution/reconciliation.py`
+- Modify: `reservation_execution/reconciliation.py`
 - Modify: `reservation_execution/worker.py`
 - Create: `reservation_followup/locks.py`
-- Create: `reservation_followup/reconciliation.py`
+- Modify: `reservation_followup/reconciliation.py`
 - Modify: `reservation_followup/workers.py`
 - Create: `tests/test_phase8_provider_execution_lock.py`
 - Create: `tests/test_phase8_followup_delivery_lock.py`
@@ -901,9 +1128,9 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 
 **Files:**
 
-- Modify: `reservation_qualification/controller.py`
-- Modify: `reservation_qualification/admission.py`
-- Modify: `reservation_qualification/effect_scan.py`
+- Create: `reservation_qualification/controller.py`
+- Create: `reservation_qualification/admission.py`
+- Create: `reservation_qualification/effect_scan.py`
 - Modify: `reservation_qualification/sqlite_store.py`
 - Create: `tests/test_phase8_qualification_install.py`
 - Create: `tests/test_phase8_admission_cutoff.py`
@@ -919,7 +1146,9 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 - [ ] Admission membership digest exclui status/revision/timestamps; lead lock protege
   fence/commit/ACK e reconciler abort.
 - [ ] `OPEN→QUALIFYING` congela cutoff + admitted-set na mesma transaction e fecha
-  learning claims normais.
+  learning claims normais pela operação idempotente que retorna
+  `LearningClaimsClosedReceipt`; target-commit/journal-ACK é retomável e o receipt fica
+  em `qualification_artifacts` antes de effects scan.
 - [ ] Scan rederiva target ingresses, provider outcomes e deliveries owner-owned;
   cardinalidade ausente/extra ou estado não terminal falha.
 - [ ] Avançar por CAS/receipts
@@ -931,13 +1160,15 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 
 **Files:**
 
-- Modify: `reservation_qualification/cancellation.py`
-- Modify: `reservation_qualification/memory_preparation.py`
-- Modify: `reservation_qualification/reconciliation.py`
+- Create: `reservation_qualification/cancellation.py`
+- Create: `reservation_qualification/locks.py`
+- Create: `reservation_qualification/memory_preparation.py`
+- Create: `reservation_qualification/reconciliation.py`
 - Modify: `reservation_qualification/sqlite_store.py`
 - Create: `tests/test_phase8_qualification_cancel.py`
 - Create: `tests/test_phase8_memory_prepare.py`
 - Create: `tests/test_phase8_memory_abandon.py`
+- Create: `tests/test_phase8_memory_recovery.py`
 - Create: `tests/test_phase8_qualification_reopen.py`
 
 **States de origem obrigatórios:**
@@ -959,13 +1190,20 @@ CANCELLABLE_RUN_STATES = (
   closure receipts bilaterais completos.
 - [ ] Reopen reserva journal intent **antes** do clone; operation/attempt/root/artifact
   IDs nunca são reutilizados.
+- [ ] Implementar `MemoryPreparationExecutionLockFactory.acquire(operation_id,
+  deadline, clock)` e `MemoryPreparationRecoveryWorker` com ports exclusivamente
+  `lookup|resume_exact|ack|abandon`. Controller, recovery e canceler resolvem o mesmo
+  registry DB, payload root e path/device/inode/mount do lock; mismatch falha startup.
 - [ ] Memory prepare usa `PREPARING→PREPARED→ACKED`, sem transaction aberta durante
   clone/fsync.
 - [ ] Abandon usa journal start→target `ABANDONING`→rename tombstone→cleanup/fsync/
   zero-scan→target `ABANDONED`→journal `ABANDONED`; `ABANDONED` com payload residual é
   manual review.
-- [ ] Fault probe nos sete checkpoints A0–A4 e restart no pair target terminal/journal
-  intermediário; convergir ao mesmo receipt bilateral.
+- [ ] Fault matrix cobre preparação `S0–S5` e abandono `A0–A4`, com barreiras em
+  journal `ABANDONING`, target `ABANDONING`, antes/depois do rename, antes/depois de
+  **cada** directory fsync, no meio do unlink recursivo, depois do zero-scan, target
+  `ABANDONED` e antes/depois do journal `ABANDONED`. Restart repetido converge ao mesmo
+  receipt bilateral; `ABANDONED` sempre possui zero payload.
 - [ ] Reopen cria epoch+1/new qualification/new root; old ACK/receipt/allocation é
   rejeitado para sempre.
 - [ ] Depois do target prepare, uma transaction do journal faz o CAS old
@@ -998,6 +1236,10 @@ routes/lifespan
 
 - [ ] RED qualquer node ausente/`None`, classe/version/hash divergente, lock root
   mismatch, behavior snapshot inválido ou plugin graph extra.
+- [ ] O graph literal inclui `InternalJobExecutionLockFactory`,
+  `MemoryPreparationExecutionLockFactory`, `MemoryPreparationRecoveryWorker`,
+  provider/follow-up/public lock factories e todos os cancelers/reconcilers que
+  compartilham esses inodes.
 - [ ] Implementar manifest canônico de classes/versions/wheel placeholder/profile/
   config/skills/plugin/catalog/adapters/workers; learned memory fica em snapshot
   separado.
@@ -1046,6 +1288,7 @@ routes/lifespan
 - Create: `phase8_release/payload_manifest.py`
 - Create: `phase8_release/source_attestation.py`
 - Create: `phase8_release/build_input.py`
+- Create: `phase8_release/build_authorization.py`
 - Create: `phase8_release/oci_identity.py`
 - Create: `phase8_release/approval_manifest.py`
 - Create: `phase8_release/validator.py`
@@ -1054,6 +1297,7 @@ routes/lifespan
 - Create: `tests/test_phase8_payload_manifest.py`
 - Create: `tests/test_phase8_source_attestation.py`
 - Create: `tests/test_phase8_build_input.py`
+- Create: `tests/test_phase8_build_authorization.py`
 - Create: `tests/test_phase8_oci_identity.py`
 - Create: `tests/test_phase8_approval_manifest.py`
 - Create: `tests/test_phase8_publish_gate.py`
@@ -1071,9 +1315,27 @@ routes/lifespan
 - [ ] Implementar approval manifest externo, payload-context manifest fechado,
   source attestation acíclica, canonical tar/build-input identity e OCI
   index/child/config/layer validator. Nenhum módulo abre Docker/registry.
-- [ ] Implementar `phase8_publish_oci.py` com runner injetado e gate que recusa qualquer
-  chamada sem build authorization bytes, build-input identity e destino
-  registry/repository explícitos; os testes usam poison runner e zero rede.
+- [ ] Implementar schema canônico `BuildOnceAuthorization` com campos fechados:
+  `schema=phase8-build-once-v1`, `decision=GO_BUILD_ONCE`, authorization ID/nonce,
+  issued/not-before/expires-at, explicit human-approval receipt hash, source F/E,
+  runtime F/E, wheel hash/bytes, combined approval-manifest hash, payload-manifest
+  hash, source-attestation hash, build-input identity, context-tar hash/bytes,
+  `platform=linux/arm64`, loopback registry host+port, repository, immutable-retention
+  policy hash e expected child count `1`.
+- [ ] `PrebuildDecision` da Task 26 aceita somente
+  `GO_BUILD_ONCE_ELIGIBLE|NO_GO` e **não** é autorização operacional.
+  `BuildAuthorizationStore.consume_once(...)` usa release lock e ledger externo
+  `available→consuming→consumed|manual_review`; malformed, stale, future, expired,
+  wrong identity/platform/destination, nonce duplicado, replay e crash incerto fazem
+  zero runner call e nunca reabrem uma autorização.
+- [ ] Implementar `phase8_publish_oci.py` com runner injetado; ele aceita somente os
+  bytes canônicos acima, reautentica todos os inputs e consome uma vez. Registry port
+  exige loopback, immutable policy e release lock; Delete, tag overwrite e garbage
+  collection são proibidos durante release/rollback eligibility. Após cada operação,
+  reconsulta e
+  revalida index/child/config/layers. Rollback import só é elegível após igualdade
+  exata do config digest e RootFS/layers da imagem live autenticada. Testes usam fake
+  registry/builder ou poison runner e zero rede.
 - [ ] Criar também todos os runners e o terminal-gate test que a Task 22 executará;
   counters/catalogs são literais e independentes do source sob teste.
 - [ ] Executar somente testes unitários focados de package/release tooling com fakes e
@@ -1183,19 +1445,27 @@ uvicorn chapada_leads.runtime:create_app --factory
 
 **Steps:**
 
-- [ ] Criar `/home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3` a partir do
+- [ ] Criar `/home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3` como
+  **repositório Git independente** a partir do
   commit runtime Phase7 `183fb41d645e1bb04e237c986988309a28e42b34`, tree
-  `e546e9d88093c09a245502bcca3d119e2e450672`, usando o Git object store da réplica
-  sanitizada e nunca o runtime live. Candidate1 e o candidate2 experimental/sujo
+  `e546e9d88093c09a245502bcca3d119e2e450672`, lendo a réplica sanitizada e nunca o
+  runtime live. Candidate1 e o candidate2 experimental/sujo
   permanecem somente leitura e inelegíveis.
-- [ ] O comando de criação é fixo e só pode ser executado após autenticar que o path
-  não existe e que o base object é o commit/tree acima:
+- [ ] Antes e depois, hashear `for-each-ref`, `worktree list --porcelain`, HEAD/tree e
+  status do candidate1; qualquer drift falha. É proibido criar linked worktree, branch,
+  ref ou checkout no repositório histórico. O comando de criação é fixo:
 
 ```bash
-git -C /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate1 worktree add \
-  -b phase8-operational-runtime-candidate3 \
-  /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3 \
-  183fb41d645e1bb04e237c986988309a28e42b34
+test ! -e /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3
+git clone --no-local --no-checkout \
+  /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate1 \
+  /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3
+git -C /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3 \
+  checkout --detach 183fb41d645e1bb04e237c986988309a28e42b34
+test "$(git -C /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3 \
+  rev-parse HEAD^{tree})" = e546e9d88093c09a245502bcca3d119e2e450672
+git -C /home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3 \
+  switch -c phase8-operational-runtime-candidate3
 ```
 - [ ] RED boot real da factory encontra o adapter obrigatório ausente no predecessor e
   prova zero import/write live.
@@ -1243,9 +1513,27 @@ uv run --frozen python -B -m pytest -q -p no:cacheprovider \
   --basetemp=/tmp/phase8-runtime-full
 ```
 
-- [ ] Instalar produção offline em venv externo sem dev dependencies e executar
-  `python -I` para provar versão `0.8.0` e imports da wheel/`chapada_leads.runtime`,
-  nunca do checkout. Importar factory não inicia app/provider/worker.
+- [ ] Hashear o wheelhouse/cache externo antes da instalação e executar o argv literal
+  abaixo; produção não instala dev dependencies nem usa rede/checkout:
+
+```bash
+RT3=/home/ubuntu/workspace/agente-v2-phase8-runtime-candidate3
+PROD_ROOT="$REL/runtime/prod-import"
+UV_CACHE_DIR="$REL/runtime/offline-uv-cache"
+UV_PROJECT_ENVIRONMENT="$PROD_ROOT/venv" \
+UV_CACHE_DIR="$UV_CACHE_DIR" \
+uv sync --project "$RT3" --frozen --no-dev --offline
+cd "$PROD_ROOT"
+"$PROD_ROOT/venv/bin/python" -I -c \
+'import reservation_boundary, chapada_leads.runtime; print(
+reservation_boundary.__version__,
+reservation_boundary.__file__,
+chapada_leads.runtime.__file__
+)'
+```
+
+  Esperado: `0.8.0`; ambos os `__file__` resolvem no venv/runtime F autenticado, nunca
+  no source checkout; importar a factory não inicia app, provider ou worker.
 - [ ] Executar os três graph/role gates adicionais, sem omitir classes:
 
 ```bash
@@ -1305,9 +1593,11 @@ source F/E + wheel + runtime F/E
 - [ ] Poison context com arquivo não listado/secret/DB/WAL precisa falhar antes de
   qualquer builder; review AND recebe o mesmo conjunto imutável de identities e
   prebuild object hashes.
-- [ ] Produzir somente um relatório **GO/NO-GO de build**. O resultado GO não executa
-  build; Carlos precisa autorizar um novo runbook com registry/repository/retention e
-  credenciais já definidos fora do Git.
+- [ ] Produzir somente `PrebuildDecision(decision=
+  GO_BUILD_ONCE_ELIGIBLE|NO_GO, ...)`. `GO_BUILD_ONCE_ELIGIBLE` não é aceito pelo
+  publisher e não executa build. Carlos precisa autorizar um novo runbook; esse gate
+  posterior cria `BuildOnceAuthorization(decision=GO_BUILD_ONCE, ...)` com
+  registry/repository/retention, nonce e expiração exatos, fora do Git.
 
 ---
 
@@ -1347,7 +1637,8 @@ Além disso, um validator documental precisa provar:
 - spec aprovada com commit/tree/blob/SHA-256/bytes/linhas exatos;
 - plano substituto com hash/tamanho/linhas ligados ao manifesto de quarentena;
 - banners `HISTORICAL-NON-EXECUTABLE` nos dois arquivos históricos executáveis;
-- nove identidades históricas preservadas no manifesto;
+- dez identidades históricas/substituídas preservadas no manifesto, incluindo o entry
+  test exigido pela spec;
 - zero token/interface quarentenado nos active authority paths;
 - ADR, página, índice, validation/rollout, risk register e evidence README coerentes;
 - `implementation_authorized=false`, `build_authorized=false`, `rollout=NO-GO`;

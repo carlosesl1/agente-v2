@@ -26,7 +26,8 @@ rollout `NO-GO` e `phase9_started=false`.
 
 `quarantine-manifest.json` registra três camadas sem apagar história:
 
-1. as nove identidades rejeitadas fixadas pela spec aprovada;
+1. as dez identidades históricas/substituídas fixadas pela spec aprovada, incluindo o
+   entry test;
 2. os bytes observados no HEAD imediatamente antes da quarentena;
 3. o estado atual preservado ou substituído de cada path.
 
