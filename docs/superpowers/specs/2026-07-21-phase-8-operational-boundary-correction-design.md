@@ -439,44 +439,55 @@ O coordinator atual abre `turn_transaction` antes do intent. O desenho novo evit
 reter write transaction durante uma chamada de até dezenas de segundos:
 
 1. validar envelope/deadline;
-2. adquirir lock cross-process por lead/DB;
+2. adquirir lock cross-process por lead/ownership DB;
 3. consultar duplicate;
 4. se não existe boundary state, solicitar freeze na authority compartilhada;
-   ela entra em `FREEZING`, nega novos permits legacy, drena/resolve permits já em
-   voo e só então publica `FROZEN` com epoch/token;
-5. carregar estado e gênese/import **somente em memória**, sem persistir
+   sob o lock, `begin_freeze` entra em `FREEZING`, incrementa epoch e nega novos
+   permits; então libera o lock;
+5. fora do lead lock e de qualquer boundary transaction, aguardar/reconciliar os
+   permits do epoch anterior até active count zero; cada mutator conclui seu permit
+   em transação própria, sem precisar do lead lock;
+6. readquirir o lead lock e executar `finish_freeze`, que revalida owner row/epoch,
+   zero permits ativos e source snapshot, e só então publica `FROZEN` com token;
+7. carregar estado e gênese/import **somente em memória**, sem persistir
    `boundary_state`, import claim ou fencing token;
-6. executar Maya + reads ainda sob o lead lock, sem DB write transaction;
-7. reduzir no kernel puro e validar proposal/decision/receipt;
-8. ainda em `FROZEN`, reler source version/snapshot A fora de qualquer boundary
+8. executar Maya + reads ainda sob o lead lock, sem DB write transaction;
+9. reduzir no kernel puro e validar proposal/decision/receipt;
+10. ainda em `FROZEN`, reler source version/snapshot A fora de qualquer boundary
    transaction; divergência em relação ao snapshot usado por Maya aborta;
-9. abrir transação boundary curta com busy timeout menor que o tempo restante;
-10. depois de obter o writer lock, reamostrar deadline e revalidar apenas
+11. abrir transação boundary curta com busy timeout menor que o tempo restante;
+12. depois de obter o writer lock, reamostrar deadline e revalidar apenas
    event/source identities, state version/hash e o epoch/token `FROZEN` local;
    nenhuma leitura legacy/remota ocorre dentro da transação;
-11. persistir gênese/import claim, CAS state/fence, event/sources, receipt,
+13. persistir gênese/import claim, CAS state/fence, event/sources, receipt,
    commands, relays e outboxes atomicamente;
-12. reamostrar deadline imediatamente antes de `COMMIT`; deadline vencida causa
+14. reamostrar deadline imediatamente antes de `COMMIT`; deadline vencida causa
     rollback integral;
-13. após commit, finalizar ownership como `BOUNDARY_OWNED` vinculado ao receipt;
-14. liberar lock.
+15. após commit, finalizar ownership como `BOUNDARY_OWNED` vinculado ao receipt;
+16. liberar lock.
 
 `LeadMigrationOwnershipPort` é uma autoridade separada que **todos** os ingress e
 efeitos mutantes legacy/candidate precisam consultar. Estados fechados:
 
 ```text
 LEGACY_OWNED → FREEZING → FROZEN → BOUNDARY_OWNED
-                    ↘ RELEASED_TO_LEGACY
+                    ↘ LEGACY_OWNED(new epoch)  [released_to_legacy receipt]
 ```
 
 Todo mutator legacy precisa adquirir um `LegacyWritePermit` no mesmo
 `SQLiteMigrationOwnershipStore` **antes** de ler estado ou preparar um efeito. O
 permit contém lead, operation ID, epoch e fencing token; fica ativo durante
-provider dispatch, local commit e receipt terminal. O mutator revalida o permit no
-CAS/commit final. `begin_freeze` faz CAS
-`LEGACY_OWNED→FREEZING`, incrementa epoch, nega novos permits e espera active count
-zero. Sob o mesmo lead lock, a authority captura source version/hash e faz CAS
-`FREEZING→FROZEN`; esse snapshot é o único que o passo 5 entrega à Maya. Permit de
+provider dispatch, local commit e receipt terminal. Permit lifetime **não** mantém
+o lead flock; acquire/complete usam transactions próprias. O mutator revalida o
+permit por full-tuple CAS imediatamente antes de provider dispatch e no commit
+local final; durante `freezing`, somente o `draining_epoch` permanece autorizado.
+`begin_freeze` faz CAS
+`LEGACY_OWNED→FREEZING`, move o epoch corrente para `draining_epoch`, incrementa o
+owner epoch e nega novos permits. O freezer então libera o lock e observa active
+count até zero enquanto permite `complete_permit`; ele nunca espera sob flock ou
+SQLite writer transaction. Ao readquirir o lead lock, a
+authority captura source version/hash e faz CAS
+`FREEZING→FROZEN`; esse snapshot é o único que o passo 7 entrega à Maya. Permit de
 processo morto só pode ser fechado por reconciler quando um
 operation receipt prova resultado terminal; resultado externo incerto bloqueia a
 migração em `manual_review`. Freeze nunca ignora ou expira permit em voo.
@@ -495,12 +506,15 @@ migração em `manual_review`. Freeze nunca ignora ou expira permit em voo.
   há permit legacy ativo, ele não pode mudar no intervalo até o commit;
 - stale token/owner ou source hash divergente nunca cria gênese/import claim.
 
-Ownership transitions, reconciler e coordinator usam o mesmo lead lock. A
-transação boundary faz somente CAS local do epoch/token esperado; nenhuma authority
-remota ou legacy I/O fica sob `BEGIN IMMEDIATE`. A corrida obrigatória pausa writer
-W depois de obter permit, inicia freeze/Maya, retoma W e prova que `FROZEN` não é
-publicado até W terminar ou ir para manual review; W jamais grava depois de
-`FROZEN/BOUNDARY_OWNED`.
+`register`, `begin_freeze`, `finish_freeze`, `finalize`, `release` e coordinator
+usam o lead lock. `acquire_permit` e `complete_permit` usam apenas transactions
+curtas do ownership DB; isso é necessário para o drain convergir enquanto o freezer
+não segura o lock. A transação boundary faz somente CAS local do epoch/token
+esperado; nenhuma authority remota ou legacy I/O fica sob `BEGIN IMMEDIATE`. A
+corrida obrigatória pausa writer W depois de obter permit, executa `begin_freeze`,
+libera o lock, retoma W/complete, readquire e executa `finish_freeze`; prova que
+`FROZEN` não é publicado até W terminar ou ir para manual review e que W jamais
+grava depois de `FROZEN/BOUNDARY_OWNED`.
 
 #### Migration ownership backing store
 
@@ -512,12 +526,15 @@ processos no host abrem o mesmo path e startup compara device/inode. Schema
 `migration-ownership-v1`, com universo exato:
 
 1. `migration_owners` — PK `lead_key_hash`; state
-   `legacy_owned|freezing|frozen|boundary_owned|released_to_legacy|manual_review`,
-   epoch, owner token, source version/hash, active permit count, boundary
-   receipt/hash opcional, manual-review reason e timestamps;
-2. `migration_permits` — PK `permit_id`; UNIQUE operation ID; FK lead+epoch;
-   mutator kind, status `active|terminal|manual_review`, fencing token,
-   source-before hash, operation receipt JSON/hash opcional e timestamps;
+   `legacy_owned|freezing|frozen|boundary_owned|manual_review`,
+   epoch, `draining_epoch` nullable apenas em `freezing`, owner token, source
+   version/hash, active permit count, boundary receipt/hash opcional,
+   manual-review reason e timestamps;
+2. `migration_permits` — PK `permit_id`; UNIQUE operation ID; FK somente para
+   `migration_owners.lead_key_hash`; `permit_epoch` imutável, mutator kind, status
+   `active|terminal|manual_review`, fencing token, source-before hash, operation
+   receipt JSON/hash opcional e timestamps; epoch/token são validados por full-tuple
+   CAS/trigger contra o owner state, não por FK composto mutável;
 3. `migration_transitions` — append-only PK transition ID; lead/epoch, from/to,
    expected row hash, canonical transition receipt/hash e occurred-at.
 
@@ -527,6 +544,14 @@ na mesma transação de toda operação,
 ID global, transition revision contígua por lead/epoch e receipt tuple
 all-null/all-present. Startup semantic scan recompõe owner state/count
 e transition chain de permits; row extra, ausente ou divergente falha readiness.
+
+Matriz de permit imutável: acquire exige owner `legacy_owned` e
+`permit_epoch == owner.epoch`; completion aceita essa mesma igualdade enquanto
+`legacy_owned`, ou owner `freezing` com
+`permit_epoch == owner.draining_epoch == owner.epoch - 1`. Nenhum UPDATE de owner
+reescreve `permit_epoch`; trigger proíbe UPDATE desse campo. `finish_freeze` exige
+`draining_epoch` presente, active count zero, zero permit ativo daquele epoch e
+limpa `draining_epoch` ao entrar em `frozen`.
 
 Table universe, DDL hash, WAL/FK/integrity e filesystem identity são verificados em
 startup/readiness; não há migration automática. Root ausente, compartilhado com
@@ -539,26 +564,36 @@ Operações fechadas, todas em `BEGIN IMMEDIATE` curto e full-tuple CAS:
   sob o mesmo lead lock, e exige prova de ausência de boundary state/event/receipt;
   o compatibility rollout registra/valida toda lead elegível antes de abrir ingress;
   lead nova é registrada pelo guard antes do primeiro legacy read/effect;
-- `acquire_permit(lead, operation_id, mutator_kind, expected_epoch)` aceita somente
+- `acquire_permit(lead, external_operation_id, mutator_kind, expected_epoch)`
+  deriva `operation_id = H("phase8-migration-op-v1", lead_key_hash,
+  mutator_kind, external_operation_id)`; a UNIQUE global é sobre esse ID
+  domain-separated. Aceita somente
   `legacy_owned`, incrementa active count, insere permit e retorna token/receipt;
   duplicate exata retorna os mesmos bytes;
 - `complete_permit(permit, operation_receipt)` exige token/epoch/status ativos,
   grava receipt terminal e decrementa active count atomicamente;
 - `begin_freeze(...)` faz CAS `legacy_owned→freezing`, incrementa epoch e fecha
-  novas aquisições;
+  novas aquisições, preservando o epoch antigo em `draining_epoch`; retorna
+  imediatamente com drain receipt, sem esperar sob lock;
 - `finish_freeze(...)` exige active count zero, zero permit ativo, source snapshot
   hash/version exatos e faz CAS `freezing→frozen`;
 - `finalize_boundary_ownership(...)` exige boundary turn receipt byte-idêntico e
   faz CAS `frozen→boundary_owned`;
-- `release_to_legacy(...)` só é permitido a partir de `freezing|frozen` quando scan
-  prova ausência completa de boundary state/event/receipt/effects; nunca automático;
+- `release_to_legacy(...)` só é permitido a partir de `freezing|frozen` com active
+  count zero/zero permit ativo, quando scan prova ausência completa de boundary
+  state/event/receipt/effects; ele incrementa
+  epoch e faz CAS diretamente para um novo `legacy_owned`, retornando receipt
+  byte-idêntico em retry. `released_to_legacy` é somente transition-receipt kind no
+  log append-only, não estado terminal da owner row; nunca automático;
 - reconciler lê permits/transitions/operation receipts e só conclui estado
   comprovável; efeito incerto faz CAS para `manual_review`, nunca decremento cego.
 
 Candidate/freeze nunca cria owner row implicitamente. Row ausente, registro sem
 prova ou lead conhecida não pré-registrada durante compatibility preflight fecha o
-ingress. Corridas register/acquire/freeze são serializadas pelo lead lock + CAS;
-unique PK garante uma única gênese da authority.
+ingress. Corridas register/freeze são serializadas pelo lead lock + CAS; acquire
+concorrente é serializado pelo SQLite writer lock/full-tuple state CAS: ou
+incrementa count no epoch antigo antes de begin, ou observa `freezing` e falha.
+Unique PK garante uma única gênese da authority.
 
 Todo mutator usa um guard wrapper obrigatório que recebe `LegacyWritePermit`; o
 mesmo permit/token participa do commit local e do provider effect receipt. Import,
@@ -576,7 +611,7 @@ pública.
 O runtime legacy atual não conhece essa autoridade. Portanto rollout gradual é
 NO-GO até um compatibility guard separado, explicitamente autorizado, provar que
 webhook, debounce/flush, Stripe, Wise, image/actions e todos os mutating callbacks
-respeitam `FROZEN/BOUNDARY_OWNED`. Sem esse guard, a única alternativa elegível é
+respeitam `FREEZING/FROZEN/BOUNDARY_OWNED`. Sem esse guard, a única alternativa elegível é
 cutover global quiescente; mixed-mode por lead é proibido.
 
 ### 8. Lock cross-process deadline-aware
@@ -720,7 +755,9 @@ A premissa atual é que não há DB v7 implantado. Encontrar um DB v7 é stop co
 O relay exige novas versões declarativas; não pode anexar colunas/tabelas ad hoc:
 
 **Phase 5 execution: schema `5 → 6`.** O universo v6 contém as seis tabelas v5
-inalteradas mais `reservation_boundary_ingress_receipts` com:
+inalteradas mais duas tabelas, total oito:
+
+1. `reservation_boundary_ingress_receipts` com:
 
 - `ingress_receipt_id` PK;
 - `source_turn_receipt_hash` e UNIQUE `(source_turn_receipt_hash, command_id)`;
@@ -729,12 +766,22 @@ inalteradas mais `reservation_boundary_ingress_receipts` com:
 - `target_receipt_json`, `target_receipt_hash`;
 - `applied_at`.
 
+O ID lógico de um turn receipt pode alimentar múltiplos commands; por isso não há
+UNIQUE isolada em `source_turn_receipt_hash`. A unicidade é composta por
+source receipt + command, enquanto `command_id` continua globalmente único.
+
+2. `reservation_e2e_effect_authority`, com PK scenario/command, qualification
+contract/effective-binding digests, generation/state, effect kind, exact budget,
+slots consumed e FKs ao command/workflow. Ela participa da transaction de
+`execution_ledger` fence no Gate 13; fica vazia/closed fora de E2E.
+
 O target receipt recompõe genesis, eventos contíguos, summary outboxes, workflow
 final, command e ledger seed. `accept_boundary_reservation` insere tudo, inclusive
 o ingress receipt, numa única transaction. Duplicate exige igualdade byte a byte
 de bundle/command/target receipt; divergência é `IdentityConflict`.
 
-O Phase5-v6 **não** adiciona tabela de provider outcome receipt. O owner continua
+O Phase5-v6 **não** adiciona tabela de provider outcome receipt. A segunda tabela é
+apenas authority preventiva de budget/fence. O owner do outcome continua
 `execution_ledger.outcome_json/hash`. Uma função pura e versionada
 `derive_reservation_effect_receipt(ingress_receipt, command, workflow,
 ledger_terminal)` produz bytes/hash canônicos, incluindo ingress backlink,
@@ -743,12 +790,15 @@ journal persiste essa projeção e source row IDs/hashes; startup/qualification
 rederivam e exigem igualdade. Não há write novo no UoW owner.
 
 **Phase 6 follow-up: schema `1 → 2`.** O universo v2 contém as onze tabelas v1
-inalteradas mais:
+inalteradas mais três, total quatorze:
 
 1. `handoff_boundary_ingress_receipts`, vinculada por FK/UNIQUE a
    `handoff_workflows.handoff_id`;
 2. `payment_boundary_ingress_receipts`, vinculada por FK/UNIQUE a
    `payment_commands.settlement_command_id`.
+3. `payment_e2e_effect_authority`, vinculada a scenario/qualification contract,
+   effective binding e settlement command, com generation/state, effect kind,
+   exact budget e slots consumed; participa da mesma transaction do payment fence.
 
 Ambas possuem `ingress_receipt_id` PK, `source_turn_receipt_hash`, bundle
 JSON/hash, target subject ID, target receipt JSON/hash e `applied_at`; cada par
@@ -756,7 +806,8 @@ source receipt+target subject é único. `accept_boundary_handoff` e
 `accept_boundary_settlement` persistem full replay + ingress receipt na mesma
 transaction e retornam duplicate exata de forma byte-idêntica.
 
-O Phase6-v2 também não recebe tabela extra de outcome. Para settlement,
+O Phase6-v2 também não recebe tabela extra de **outcome**; a terceira tabela nova é
+somente authority preventiva. Para settlement,
 `derive_settlement_effect_receipt(payment_boundary_ingress_receipt,
 payment_command, workflow, payment_ledger_terminal)` projeta deterministicamente o
 receipt; handoff/payment delivery receipts já são rows owner das tabelas existentes
@@ -1051,6 +1102,56 @@ turno. Provider/workflow/effect scopes são enums/IDs canônicos, nunca texto li
 Roots são classes fechadas, validadas contra mounts reais; paths concretos não
 entram em hashes de comportamento.
 
+#### E2E provider effect authority
+
+Post-validation não controla budget. Antes do Gate 13, cada target UoW recebe uma
+authority owner-local, consumida **na mesma transaction do provider fence**:
+
+- Phase5-v6 ganha uma oitava tabela
+  `reservation_e2e_effect_authority` vinculada a scenario/contract/effective-
+  binding/command; contém generation, state `open|closed`, exact allowed effect
+  kind/count, slots consumed e timestamps;
+- Phase6-v2 ganha uma décima-quarta tabela
+  `payment_e2e_effect_authority` com o mesmo contrato e FK para
+  `payment_commands.settlement_command_id`.
+
+Isso altera os universos finais para **Phase5-v6 = 8 tabelas** e
+**Phase6-v2 = 14 tabelas**. As autoridades só existem/abrem para E2E explicitamente
+autorizada; produção usa policy própria da mesma classe/graph, nunca uma row E2E
+reaproveitada. `fence_dispatch` dos workers Phase5/6 revalida em um único CAS:
+
+```text
+scenario_id + qualification_contract_hash
+effective-E2E-binding digest
+provider/workflow/effect scope
+authority generation=open
+expected command/economic binding
+slots_consumed < exact_budget
+```
+
+O CAS consome um slot e persiste authority generation/digests no ledger fence. A
+revogação fecha/incrementa generation e impede novos fences; item já fenced mantém
+semântica conservadora do worker owner. Qualquer worker path que fence sem essa
+authority durante E2E é poison test/stop condition. Qualification compara slots e
+ledger outcomes bilateralmente ao contrato, mas a prevenção do excesso ocorre no
+fence target-local.
+
+O scan bilateral inclui todas as authority rows esperadas e exige
+`slots_consumed == exact_budget`, generations/bindings iguais e nenhum command sem
+authority. Corrida close-vs-fence é serializada pela transaction target: se close
+vence, fence falha sem provider call; se fence vence, o slot consumido deve produzir
+outcome terminal ou `manual_review`, e cancel/qualification não pode ignorá-lo.
+
+As rows target-local não são pré-criadas com FK impossível. O relay bundle E2E leva
+scenario/contract/effective-binding e exact budget já autorizados; na mesma
+transaction de `accept_boundary_reservation|settlement`, o target valida esses bytes
+contra o source turn receipt e insere command + ingress receipt + authority row.
+Duplicate exige igualdade integral. A instalação recebe target-commit receipt e o
+journal faz ack idempotente; crash entre os dois reconsulta pelo command ID. Cancelar
+antes do consumo fecha/incrementa **primeiro** todas as authorities target-local com
+target-commit/journal-ack, e só depois marca o journal `CANCELLED`; falha ou authority
+inalcançável mantém admission/effects fechados em `MANUAL_REVIEW`.
+
 Dark/ingress fechado exercitam o graph completo com capabilities negadas, não
 omitem classes. Antes de abrir a canary E2E, a autorização humana cria um
 `E2EQualificationContract` canônico e imutável. Ele contém uma lista **não vazia**
@@ -1078,7 +1179,10 @@ negado e qualquer efeito extra é finding terminal.
 `ProviderEffectOutcomeReceipt` é um tipo fechado derivado do estado terminal
 persistido pelo worker/UoW owner. Ele liga command, target-ingress receipt, provider
 operation, idempotency key, before/after ou economic hash, resultado terminal e
-eventual compensation. Um `TurnReceipt` sozinho prova somente commit do turno;
+effect role `primary|compensation` e parent-effect ID quando for compensation. Uma
+compensation é outro command/ledger outcome owner-owned, com seu próprio
+`ProviderEffectOutcomeReceipt`; ela nunca é campo aninhado do receipt primário. Um
+`TurnReceipt` sozinho prova somente commit do turno;
 nunca prova relay, provider outcome ou delivery.
 
 Ele não cria ledger concorrente. Para reserva, referencia/recompõe exatamente
@@ -1106,22 +1210,37 @@ extra, duplicado, divergente, cenário não executado ou efeito fora do budget f
 a qualificação. O scan inclui source e target stores; não aceita contagem derivada
 somente do boundary receipt.
 
+No contrato/scans, “compensation receipt” significa um
+`ProviderEffectOutcomeReceipt(effect_role=compensation, parent_effect_id=...)`
+derivado de command/workflow/ledger owner rows. Se o workflow não possui command de
+compensation migrado, o contrato não pode prometer compensação e o gate humano deve
+autorizar somente cenário cujo rollback externo não a exige.
+
 A recuperação usa `QualificationJournal`, um SQLite root isolado com schema/table
 universe exato:
 
-1. `qualification_admission` — singleton com state `OPEN|QUALIFYING|FROZEN`, epoch,
-   active turn IDs/count e qualification ID opcional;
-2. `qualification_runs` — qualification ID, contract bytes/hash, admission epoch,
-   cutoff, status, expected CAS fields e hashes dos artifacts terminais;
-3. `qualification_scenarios` — uma row por scenario ID/contract hash, com os
+1. `qualification_admission_state` — singleton com state
+   `OPEN|QUALIFYING|FROZEN`, epoch, next admission sequence, cached active count e
+   qualification ID;
+2. `qualification_admissions` — append-only PK qualification/epoch/sequence e
+   UNIQUE turn ID; scenario/contract hashes, status
+   `admitted|turn_receipt_committed|aborted`, turn/abort receipt backlinks e
+   timestamps. ACK/abort nunca removem membership;
+3. `qualification_runs` — qualification ID, contract bytes/hash, admission epoch,
+   status, cutoff sequence, canonical ordered admitted-set JSON/hash, expected CAS
+   fields e hashes dos artifacts terminais;
+4. `qualification_scenarios` — uma row por scenario ID/contract hash, com os
    aggregates e terminal verification receipt;
-4. `qualification_artifacts` — IDs/kinds/hashes/bytes canônicos de turn, target
+5. `qualification_artifacts` — IDs/kinds/hashes/bytes canônicos de turn, target
    ingress, provider outcome, delivery, compensation, learning, seal, transition e
    binding receipts.
 
-Esse journal é também a autoridade de admission da canary E2E: todo ingress faz
-CAS/registro de active turn na mesma DB antes de entrar no coordinator e fecha esse
-registro por target-commit/journal-ack depois de persistir o boundary turn receipt.
+`qualification_runs` e todas as scenario rows são criadas atomicamente na
+autorização **antes** do primeiro turno E2E, em status `OPEN`; cenário ausente não
+pode receber admission. Esse journal é também a autoridade de admission da canary
+E2E: todo ingress incrementa a sequence e insere uma membership row na mesma DB
+antes de entrar no coordinator; depois fecha apenas o status por
+target-commit/journal-ack ao persistir o boundary turn receipt.
 Crash nessa janela é recuperado por reconciler que encontra o receipt pelo
 deterministic turn ID e faz ack idempotente. Registro sem boundary receipt nunca é
 silenciosamente apagado: retry conclui o turno ou um `AdmissionAbortReceipt` prova
@@ -1150,12 +1269,14 @@ avançar para effects scan.
 
 Quando o gate solicita qualificação, o controller executa esta ordem obrigatória:
 
-1. numa única transaction do journal, insere `qualification_runs` e faz CAS
-   `qualification_admission OPEN→QUALIFYING`, incrementa epoch e fixa
-   qualification ID; o commit bloqueia **primeiro** novos turn admissions. Depois,
-   a authority de learning é fechada para claims normais com target-commit/journal-
-   ack idempotente antes de continuar;
-2. fixa a lista de turnos já admitidos/in-flight no cutoff e aguarda todos os turn
+1. numa única transaction do journal, faz CAS da run `OPEN→QUALIFYING` e de
+   `qualification_admission_state OPEN→QUALIFYING`, fixa `cutoff_sequence` no
+   último admission e copia **todas** as membership rows ordenadas até o cutoff para
+   `admitted_set_json/hash` da run. ACK concorrente só muda status/backlink e nunca
+   membership; o commit bloqueia novos admissions sem janela. Depois, a authority
+   de learning é fechada para claims normais com target-commit/journal-ack
+   idempotente antes de continuar;
+2. usa exclusivamente o admitted set já congelado e aguarda todos os turn
    receipts, target ingress, provider outcome, compensation e delivery receipts
    exigidos pelo contrato;
 3. executa o scan E2E bilateral acima; só então persiste `EFFECTS_VERIFIED`;
@@ -1262,8 +1383,8 @@ Startup falha antes do `lifespan yield` quando houver:
 
 - role/instance/state root ausente ou compartilhado;
 - canary apontando para root de produção;
-- boundary v8, Phase5-v6 ou Phase6-v2 schema/hash/table universe/WAL/FK/integrity
-  inválido;
+- boundary-v8/11, Phase5-v6/8 ou Phase6-v2/14
+  schema/hash/table-universe/WAL/FK/integrity inválido;
 - migration-ownership-v1 root/schema/hash/device/inode inválido ou diferente entre
   processos mutators;
 - lock dir/socket dir indisponível;
@@ -1340,8 +1461,19 @@ Antes do build, o controller cria uma identidade de input acíclica em três ní
    bytes e hash — incluindo Dockerfile, `.dockerignore`, wheel, profile/config,
    skills/plugins e todos os sources de `COPY/ADD`;
 3. `source-attestation.json` referencia o payload-manifest hash e fixa
-   upstream/wheel/runtime commit/tree, graph/profile/catalog hashes. Ela exclui
-   explicitamente os dois artifacts gerados do domínio do payload.
+   `source_F_commit/tree`, `source_E_commit/tree`, wheel/package identity,
+   `runtime_F_commit/tree`, `runtime_E_commit/tree`, graph/profile/catalog hashes
+   e `approval_manifest_hash`. Ela exclui explicitamente os dois artifacts gerados
+   do domínio do payload.
+
+`approval-manifest.json` é artifact externo, evidence-only e content-addressed,
+criado **depois** de F/E imutáveis e dos reviews; não é member de E, portanto não
+contém o próprio hash por ciclo. Ele autentica os pares source/runtime F/E,
+parent(E)==F, diffs evidence-only, pareceres AND e package/wheel identity. O payload
+funcional vem exclusivamente dos Fs; Es nunca entram nos bytes executáveis, mas o
+hash do approval manifest entra na autorização da release. Alterar E, parecer ou
+approval manifest exige novo manifest/review gate e muda source attestation/build-
+input identity.
 
 O controller monta o contexto final como tar canônico a partir **exclusivamente**
 dos members listados no payload manifest mais os dois generated metadata files.
@@ -1362,9 +1494,11 @@ Depois da publicação, um `release-manifest.json` externo, imutável e montado
 read-only no container, vincula:
 
 ```text
-upstream commit/tree
+source F commit/tree + source E commit/tree
+→ source approval-manifest hash
 → wheel 0.8.0 hash/bytes
-→ runtime candidate commit/tree limpo
+→ runtime F commit/tree + runtime E commit/tree
+→ runtime approval-manifest hash
 → payload-context manifest/hash
 → source-attestation hash
 → external build-input identity
@@ -1487,16 +1621,26 @@ Raw output não entra no Git. Em vez de `/tmp`, ele vai para um
 
 - runner usa env scrubbed e scanner fail-closed para impedir segredo ou PII de
   lead no output retido;
-- runner cria um temp random `0600` em staging privado por
-  `openat(O_CREAT|O_EXCL|O_NOFOLLOW)`, escreve enquanto calcula hash/bytes, faz
-  `fsync`, reabre/no-follow e confirma o digest esperado;
-- somente depois aplica mode final read-only e publica no namespace SHA-256 por
+- o store root possui `coord.lock`, `.staging/` e `objects/`. Sob `coord.lock`, o
+  publisher cria `.staging/<random>/owner.lock` e `object.tmp` por
+  `openat(O_CREAT|O_EXCL|O_NOFOLLOW, 0600)`, adquire/retém o owner flock e libera o
+  coord lock. Scavenger usa sempre `coord.lock→owner.lock` e nunca remove staging
+  cujo owner lock não consegue adquirir;
+- publisher escreve `object.tmp` enquanto calcula hash/bytes, faz `fsync`,
+  reabre/no-follow e confirma o digest esperado; aplica mode final read-only e faz
+  **novo `fsync` do inode depois do chmod**;
+- somente depois publica no namespace SHA-256 em `objects/` por
   `renameat2(RENAME_NOREPLACE)` ou `linkat` no-replace, seguido de directory
   `fsync`; reviewer nunca observa o nome final antes dos bytes completos;
 - se o nome final já existe, o publisher reabre/no-follow, valida mode/owner,
   rehasheia bytes e aceita apenas igualdade exata; conteúdo parcial/divergente
-  bloqueia o gate, nunca é sobrescrito. Temp órfão é scavenged por gramática
-  fechada e não impede retry idempotente;
+  bloqueia o gate, nunca é sobrescrito. Depois da publicação, publisher libera o
+  owner lock; para cleanup, adquire `coord.lock` e só então readquire owner lock,
+  valida members, remove staging e faz dir-fsync. Se o scavenger venceu essa janela,
+  ausência do staging termina cleanup idempotentemente. Staging órfão válido é
+  exatamente `{owner.lock}` ou `{owner.lock, object.tmp}`; com owner lock livre, o
+  scavenger remove/dir-fsync. Member desconhecido/symlink falha readiness, e
+  publisher vivo nunca é removido; não existe caminho owner→coord;
 - manifest externo fixa path, bytes, hash e retention; reviewers reabrem e
   rehasheiam o object;
 - ausência, mutação, scanner failure ou retenção não comprovada vale zero.
@@ -1507,6 +1651,17 @@ Depois dos RED/GREEN, congela-se o par:
 F = functional candidate commit/tree (code + tests, sem evidence-only envelopes)
 E = filho direto de F contendo somente evidence/quarantine/manifest paths
 ```
+
+Antes de criar F, o validator compara bilateralmente staged tree S com os paths de
+P em F:
+
+- todo test/fixture blob tocado por P precisa permanecer byte-idêntico em F;
+- remover, enfraquecer ou alterar qualquer desses blobs exige novo U/P/S/R/O RED;
+- production paths ausentes de P podem mudar de S→F somente dentro da allowlist de
+  implementação do slice;
+- test/fixture novo não coberto por P exige sua própria proveniência RED ou marcação
+  explícita de GREEN-only helper sem substituir a asserção causal;
+- o mapping P-path→S-blob→F-blob é versionado em E e validado nos reviews.
 
 `E` versiona P, S e envelopes sanitizados que apontam para O; não versiona raw.
 Um validator prova parent(E)==F, diff F→E restrito à allowlist evidence-only e
@@ -1558,8 +1713,10 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   FKs bidirecionais;
 - migration-ownership-v1: três tabelas exatas, DDL hash, permits/transitions e
   reconciler full-tuple CAS;
-- Phase5 schema v6 com `reservation_boundary_ingress_receipts`;
-- Phase6 schema v2 com handoff/payment boundary ingress receipts;
+- Phase5-v6 tem oito tabelas exatas, incluindo boundary ingress receipt e
+  reservation E2E effect authority;
+- Phase6-v2 tem quatorze tabelas exatas, incluindo handoff/payment boundary ingress
+  receipts e payment E2E effect authority;
 - roots novos obrigatórios; schemas antigos/universos extras fail-closed;
 - receipt/public/relay atômicos com fault injection entre todos os writes;
 - v7/universo divergente fail-closed;
@@ -1569,6 +1726,10 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 ### Slice 4 — Lock e transações curtas
 
 - multiprocess flock;
+- freeze split-phase: begin sob lock, drain sem lock, finish após readquirir;
+- permit ativo no epoch antigo → begin freeze → complete permit → finish freeze;
+- FK de permit somente ao lead; permit_epoch permanece imutável após epoch advance;
+- release-to-legacy cria novo epoch `legacy_owned` byte-idempotente;
 - B expira sem mudança enquanto A segura lock;
 - C sucede após release;
 - nenhum write transaction aberto durante fake Maya lento;
@@ -1642,6 +1803,11 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - learning target atualiza memória+LearningReceipt na mesma transaction e source
   ack é crash-safe;
 - accept idempotente e atômico nos UoWs 5/6;
+- bundle E2E instala authority target-local na mesma transaction do command/ingress;
+- execution/payment fence consome scenario/binding/generation/budget no mesmo CAS
+  do ledger; revogação/cancel fecha target authorities antes do journal;
+- crash target-authority-commit/journal-ack, stale generation, over-budget e worker
+  que tenta fence sem authority falham sem provider call;
 - command/internal relay machines: exact expiry, full-tuple CAS, pre-target reclaim,
   max 3 failures, stale ack rejection e target-receipt divergence;
 - crash target-commit/boundary-ack;
@@ -1673,6 +1839,9 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - ownership/internal/relay/public/learning workers e reconcilers supervisionados;
 - qualification controller bloqueia admission/normal learning claims antes de
   drenar, sela por CAS e mantém freeze até rollout/cancel;
+- cinco qualification tables exatas; authorization cria run/scenarios OPEN;
+  cutoff copia membership append-only para admitted-set na mesma transaction que
+  OPEN→QUALIFYING; ACK/crash concorrente não altera membership;
 - `E2EQualificationContract` não vazio, cardinalidade/effect budgets exatos e scan
   bilateral de turn/target/provider/delivery/compensation receipts;
 - QualificationJournal crash-idempotente até `QUALIFIED`, incluindo seal orphan e
@@ -1698,8 +1867,12 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 
 - properties/faults/restarts/contention/mutations afetadas;
 - suíte integral upstream única;
-- validator terminal e revisão funcional no mesmo F/E pair;
-- somente depois congelar o functional commit F e evidence child E elegíveis.
+- primeiro congelar/publicar candidatos imutáveis F e evidence child E;
+- validator terminal reautentica F/E, S→F test blobs e artifacts retidos;
+- EvidenceArtifactStore prova write/fsync/chmod/fsync/publish/dir-fsync e
+  coord→owner scavenger contra publisher vivo, SIGKILL e power-loss simulations;
+- revisão funcional ocorre somente depois, no mesmo F/E pair já congelado;
+- qualquer mudança subsequente cria novo par e invalida os pareceres.
 
 ### Slice 15 — Wheel 0.8.0
 
@@ -1728,6 +1901,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   continuam coerentes com child manifest `linux/arm64`;
 - payload-context manifest, source attestation e external build-input identity
   sem ciclo; canonical tar + Dockerfile/`.dockerignore` poison tests;
+- source/runtime F e E + approval-manifest hashes explícitos na source attestation
+  e release manifest, enquanto bytes executáveis vêm somente de F;
 - registry local immutable-policy, index/child/config/layers e rollback import;
 - chain source→wheel→runtime→OCI→container;
 - graph/profile/config/policy hashes;
@@ -1744,6 +1919,7 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - timeout de auditor/reviewer sem summary;
 - plano substituto/quarantine não aprovados antes do Slice 0;
 - RED sem U/P/S/R/O reproduzíveis ou raw object publicado/retido atomicamente;
+- test/fixture blobs do RED S divergem em F sem novo RED autenticado;
 - review não está vinculada ao mesmo F/E pair + package identity;
 - DB v7 real descoberto;
 - migration ownership não possui o único v1 store compartilhado/DDL exato ou
@@ -1769,9 +1945,13 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - transaction aberta durante LLM/read remoto;
 - write boundary persistido antes de Maya;
 - permit legacy anterior sobrevive a `FROZEN` ou não é revalidado no commit final;
+- freeze espera permits mantendo lead lock/transaction, permit_epoch é reescrito ao
+  avançar owner epoch ou release não retorna a novo `legacy_owned`;
 - snapshot legacy não é relido sob freeze antes da transaction boundary;
 - UoW Phase5/6 target não está no schema novo exato/root novo;
 - relay/internal/public lease machine não fecha pre-target/pre-fence CAS e expiry;
+- provider E2E fence não consome target-local scenario/budget generation no mesmo
+  CAS do execution/payment ledger;
 - memory apply e `LearningReceipt` não são atômicos;
 - `create_app` aceita adapter obrigatório `None`;
 - factory/graph ou capability policy do E2E diferente da promoção;
@@ -1789,6 +1969,8 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
   directory build context mutável;
 - evidence object usa nome SHA final antes de write+fsync+rehash completos;
 - release manifest comum inclui container/instance state;
+- source/runtime F/E pairs ou approval-manifest hash ausentes da source attestation
+  e release manifest;
 - promoção/rollback não fixados ao child manifest digest `linux/arm64`;
 - Slice 14–18 ou review AND gate incompleto;
 - runtime operacional alterado antes da autorização correspondente.
