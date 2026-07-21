@@ -343,9 +343,9 @@ uv.lock
 Tasks 15–18 detalham authorities, execution locks, public delivery e qualification que
 fazem parte das obrigações transversais dos Slices 10–13.
 
-## 3.1 Contratos TDD autocontidos das Tasks 0–22
+## 3.1 Contratos TDD autocontidos das Tasks 0–21
 
-Esta seção é parte normativa da seção **Files/Interfaces/Steps** de cada task. Para
+Esta seção é parte normativa da seção **Files/Interfaces/Steps** das Tasks 0–21. Para
 cada linha, o executor:
 
 1. cria os selectors listados em P, sem production path;
@@ -383,7 +383,7 @@ cada linha, o executor:
 | 19 | todos os nodes anteriores | `RuntimeGraphManifest`, readiness scan, behavior/policy digests |
 | 20 | graph scanner | ingress universe literal e legacy/child capability poison |
 | 21 | F/E candidates ainda mutáveis | wheel/release/prebuild/publish tooling e runners completos |
-| 22 | producers 0–21 congelados | source F, evidence-only E e terminal review AND |
+| 22 | producers 0–21 congelados | gate puro: source F, evidence-only E, terminal result e review request; nenhum novo producer funcional |
 
 Nenhuma task posterior pode introduzir producer atribuído a uma linha anterior sem
 invalidar seu F/E e repetir o RED/review da task owner.
@@ -414,13 +414,29 @@ invalidar seu F/E e repetir o RED/review da task owner.
 | 19 | `tests.test_phase8_runtime_graph_contract.RuntimeGraphContractTests.test_manifest_contains_every_worker_reconciler_canceler_lock_and_recovery_node`; `tests.test_phase8_readiness_contract.ReadinessContractTests.test_schema_root_lock_receipt_or_worker_mismatch_is_not_ready` | node/digest scanner ausente | dois módulos Phase8 + closed graph mutation catalog |
 | 20 | `tests.test_phase8_ingress_universe.IngressUniverseTests.test_four_turn_ingresses_have_exact_source_identities_and_coordinator_owner`; `tests.test_phase8_legacy_poison.LegacyPoisonTests.test_every_mutator_is_coordinator_or_shared_migration_guarded`; `tests.test_phase8_child_capability_graph.ChildCapabilityGraphTests.test_child_cannot_import_legacy_provider_delivery_or_memory_writer` | alternate owner/import reachable | três módulos Phase8 + runtime inventory static scan |
 | 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact` | release producers ausentes | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate e terminal_gate |
-| 22 | `tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f` | F/E ainda não congelados/envelopes ausentes | suite integral única + runners/counters literais da própria Task 22 |
+
+Task 22 é deliberadamente excluída desta matriz RED/GREEN: é um gate puro sobre
+bytes já congelados. Os testes de `tests.test_phase8_terminal_gate` pertencem à Task
+21 e usam fixtures sintéticos para provar que o validator rejeita parent errado,
+child não evidence-only, runner/catalog ausente e P-path→S-blob→F-blob divergente.
+Depois de F e E reais existirem, a Task 22 executa esse mesmo validator já congelado
+em F com os dois commits explícitos; ela não cria novo P, selector ou U/P/S/R/O.
 
 ### Evidence child paths exatos
 
-Para cada task `00`–`21`, a seção **Files** inclui, no ref/worktree E separado, os
-cinco paths abaixo sob o diretório enumerado na tabela. Task 22 usa o mesmo conjunto
-em `task-22` e acrescenta `terminal-manifest.json` e `review-request.json`.
+Para cada task `00`–`21`, a seção **Files** inclui implicitamente as ações abaixo no
+ref/worktree E separado, sob o diretório enumerado na tabela:
+
+```text
+Create in E: red.patch
+Create in E: red-provenance.json
+Create in E: green-result.json
+Create in E: candidate-pair.json
+Create in E: SHA256SUMS
+```
+
+Task 22 não herda esses cinco artifacts RED/GREEN. Suas ações `Create in E` são
+declaradas literalmente na própria Task 22.
 
 ```text
 red.patch
@@ -548,8 +564,8 @@ python3 -B scripts/validate_phase8_contracts.py
 `E2EEffectAuthorizationBinding`, `SealedCanaryQualificationBinding`,
 `BehaviorTransitionReceipt`, `RolloutAuthorization`,
 `ProductionInitialDeploymentBinding`, `E2EQualificationContract`,
-`E2EScenarioContract`, `ProviderEffectOutcomeReceipt`, o receipt fechado de
-verificação terminal de cenário, `ExactEffectAllocationManifest` e os receipts
+`E2EScenarioContract`, `ProviderEffectOutcomeReceipt`,
+`ScenarioTerminalVerificationReceipt`, `ExactEffectAllocationManifest` e os receipts
 fechados de installation/closure. Também são obrigatórios
 `QualificationCancelStartReceipt`, `QualificationCancelReceipt`,
 `ReopenPreparationIntent`, `ReopenIntentAbandonStartReceipt`,
@@ -557,8 +573,9 @@ fechados de installation/closure. Também são obrigatórios
 `MemoryPreparationAckReceipt`, `MemoryPreparationAbandonReceipt`,
 `QualificationReopenReceipt`, `SourceEventIdentity`,
 `LearningClaimsClosedReceipt`, `ConversationTestDispatchAuthorization`,
-`CapabilityPolicy` e `BehaviorStateSnapshot`. `ReservationRelayBundle` e
-`HandoffRelayBundle` também pertencem ao wire fechado, com owners nas Tasks 13 e 14.
+`CapabilityPolicy` e `BehaviorStateSnapshot`. `ReservationRelayBundle`,
+`SettlementRelayBundle` e `HandoffRelayBundle` também pertencem ao wire fechado, com
+owners de execução nas Tasks 13 e 14.
 Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; campos, enums e
 ordem são os blocos normativos da spec aprovada. O validator desta task extrai esses
 blocos por heading/hash fixo e compara um registry literal versionado no teste; não é
@@ -586,7 +603,43 @@ TranscriptCommitment(direction, kind, sequence, request_id, request_hash,
                      response_hash, previous_frame_commitment)
 BehaviorStateSnapshot(schema, version, memory_snapshot_hash)
 CapabilityPolicy(capability_matrix, worker_modes, guard_semantics)
+ReservationRelayBundle(genesis_state, phase5_events, summary_outboxes,
+                       expected_final_state, expected_final_state_hash,
+                       command_ledger_seed, qualification_id, scenario_id,
+                       immutable_generation, allocation_id, artifact_hash)
+SettlementRelayBundle(workflow_anchor, policy, payment_history, evidence,
+                      payment_command, expected_final_state,
+                      expected_final_state_hash, qualification_id, scenario_id,
+                      immutable_generation, allocation_id, artifact_hash)
+ScenarioTerminalVerificationReceipt(qualification_id, epoch, scenario_id,
+                    scenario_contract_hash, cutoff_sequence, admitted_set_hash,
+                    admitted_turn_receipt_aggregate_hash,
+                    target_ingress_receipt_aggregate_hash,
+                    provider_effect_outcome_aggregate_hash,
+                    followup_delivery_receipt_aggregate_hash,
+                    public_delivery_receipt_aggregate_hash,
+                    compensation_receipt_aggregate_hash, final_state_hash,
+                    final_economic_hash, allocation_manifest_hash,
+                    exact_effect_budget_hash, previous_qualification_artifact_hash)
 ```
+
+Os domínios literais são:
+
+```text
+RESERVATION_RELAY_DOMAIN = phase8-reservation-relay-bundle-v1
+SETTLEMENT_RELAY_DOMAIN = phase8-settlement-relay-bundle-v1
+SCENARIO_TERMINAL_VERIFICATION_DOMAIN = phase8-scenario-terminal-verification-v1
+```
+
+Nos dois relay bundles, os quatro campos E2E
+`qualification_id|scenario_id|immutable_generation|allocation_id` são todos nulos ou
+todos presentes. `phase5_events`, `summary_outboxes`, `payment_history` e `evidence`
+são tuples ordenados de canonical bytes; vazio e ausente não são equivalentes.
+`artifact_hash` é independente do backlink. `source_turn_receipt_hash` fica somente na
+relay row/assinatura de ingress e é excluído do hash do bundle. No receipt terminal,
+aggregate vazio usa o hash canônico do tuple vazio, nunca `None`; todos os aggregates
+são rederivados das rows owner e `previous_qualification_artifact_hash` fecha o
+backlink no journal.
 
 `MayaIntentClosure` não possui facts/tool/command. `CapabilityPolicy` não possui roots,
 allowlist concreta ou percentual. O fixture fecha ainda: todos os artifact canonical
@@ -714,14 +767,41 @@ Phase6-v2: onze nomes v1 endurecidos + handoff_boundary_ingress_receipts
                                    + followup_e2e_effect_authority = 14
 ```
 
+**Ingress APIs exatas:**
+
+```python
+class SQLiteUnitOfWork:
+    def accept_boundary_reservation(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: ReservationRelayBundle,
+    ) -> TargetOperationReceipt: ...
+
+class SQLiteFollowupUnitOfWork:
+    def accept_boundary_settlement(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: SettlementRelayBundle,
+    ) -> TargetOperationReceipt: ...
+```
+
+`operation_id` é o target operation ID domain-separated da relay row; os UoWs
+recalculam `bundle.artifact_hash`, validam o backlink separado e retornam o receipt
+owner byte-idêntico em duplicate. Eles nunca aceitam `dict|bytes` genérico no lugar do
+tipo fechado.
+
 **Steps:**
 
 - [ ] RED: roots novos aceitos; v5/v1, migration extra ou universe inesperado são stop
   condition.
 - [ ] Implementar instalação atômica `generation_header + manifest completo`,
   header-tombstone quando close vence install e states literais por header/allocation.
-- [ ] Implementar `accept_boundary_reservation`, `accept_boundary_handoff` e
-  `accept_boundary_settlement`: full replay, target receipt e allocation bind na mesma
+- [ ] Implementar as duas assinaturas acima e `accept_boundary_handoff` com seu
+  `HandoffRelayBundle`: full replay, target receipt e allocation bind na mesma
   transaction; duplicate byte-idêntico, conflito terminal.
 - [ ] Implementar pure derivations `derive_reservation_effect_receipt` e
   `derive_settlement_effect_receipt`; não criar segundo owner de outcome.
@@ -1013,13 +1093,57 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 - Create: `tests/test_phase8_settlement_relay.py`
 - Create: `tests/test_phase8_relay_target_ack.py`
 
+**Target ports e consumo exatos:**
+
+```python
+class ReservationIngressPort(Protocol):
+    def lookup(
+        self,
+        *,
+        operation_id: str,
+        artifact_hash: str,
+        source_turn_receipt_hash: str,
+    ) -> OperationReceiptLookupResult: ...
+
+    def accept(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: ReservationRelayBundle,
+    ) -> TargetOperationReceipt: ...
+
+class SettlementIngressPort(Protocol):
+    def lookup(
+        self,
+        *,
+        operation_id: str,
+        artifact_hash: str,
+        source_turn_receipt_hash: str,
+    ) -> OperationReceiptLookupResult: ...
+
+    def accept(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: SettlementRelayBundle,
+    ) -> TargetOperationReceipt: ...
+```
+
+`BoundaryCommandRelayWorker` recebe somente boundary store, os dois ports tipados,
+clock e policy. Ele escolhe o port pelo command kind fechado, passa exatamente o
+bundle persistido e o backlink separado, valida o `TargetOperationReceipt` contra
+operation/bundle/source tuple e então produz `BoundaryRelayReceipt` no source ACK.
+Nenhum port aceita `BoundaryInternalJob`, provider ou generic callable.
+
 **Steps:**
 
 - [ ] RED pending/leased/acked/cancelled/manual_review FSM, full tuple lease CAS, stale
   ACK, preparation max 3 e target identity conflict.
 - [ ] `BoundaryCommandRelayWorker` é owner 1:1 de **todo** `boundary_command`.
   `ReservationRelayBundle` contém genesis/eventos/summary outboxes/final state/
-  command-ledger seed/allocation; o bundle Phase6 de settlement contém
+  command-ledger seed/allocation; `SettlementRelayBundle` contém
   anchor/policy/history/evidence/command/final state/allocation. Ambos carregam
   `artifact_hash`; a relay row carrega `source_turn_receipt_hash` fora do bundle hash.
 - [ ] Implementar os ingresses fechados
@@ -1137,6 +1261,37 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
 - Create: `tests/test_phase8_effect_scan.py`
 - Create: `tests/test_phase8_learning_seal.py`
 
+**Terminal scenario verification API:**
+
+```python
+class ScenarioEffectScanner:
+    def verify_terminal_scenario(
+        self,
+        *,
+        qualification_id: str,
+        epoch: int,
+        scenario_id: str,
+        expected_contract_hash: str,
+        expected_allocation_manifest_hash: str,
+        previous_qualification_artifact_hash: str,
+    ) -> ScenarioTerminalVerificationReceipt: ...
+
+class SQLiteQualificationStore:
+    def commit_scenario_terminal_verification(
+        self,
+        *,
+        receipt: ScenarioTerminalVerificationReceipt,
+        expected_run_revision: int,
+    ) -> ScenarioTerminalVerificationReceipt: ...
+```
+
+O scanner recebe ports read-only fechados para boundary, Phase5, Phase6 e public
+delivery, carrega o `E2EScenarioContract` e o `ExactEffectAllocationManifest`
+persistidos pelo tuple informado e rederiva todos os aggregates. Nenhum aggregate ou
+owner receipt é aceito do caller. O store persiste cenário + qualification artifact
+na mesma transaction; duplicate do mesmo receipt retorna bytes idênticos e qualquer
+contract/allocation/revision/backlink divergente é conflito terminal.
+
 **Steps:**
 
 - [ ] RED contrato exige cenário não vazio, pelo menos um provider terminal e uma
@@ -1149,8 +1304,11 @@ LegacyGenesisResult = FoundSnapshot | ProvenAbsent | LegacyUnavailable
   learning claims normais pela operação idempotente que retorna
   `LearningClaimsClosedReceipt`; target-commit/journal-ACK é retomável e o receipt fica
   em `qualification_artifacts` antes de effects scan.
-- [ ] Scan rederiva target ingresses, provider outcomes e deliveries owner-owned;
-  cardinalidade ausente/extra ou estado não terminal falha.
+- [ ] `ScenarioEffectScanner.verify_terminal_scenario(...)` rederiva target ingresses,
+  provider outcomes e deliveries owner-owned; cardinalidade ausente/extra ou estado
+  não terminal falha. O controller persiste o
+  `ScenarioTerminalVerificationReceipt` pela assinatura fechada acima antes de
+  avançar a run.
 - [ ] Avançar por CAS/receipts
   `EFFECTS_VERIFIED→LEARNING_DRAINED→MEMORY_SEALED→TRANSITION_RECORDED→QUALIFIED`;
   seal duplicate byte-idêntico e zero learning explícito.
@@ -1279,6 +1437,7 @@ routes/lifespan
 - Create: `scripts/build_phase8_wheel.py`
 - Create: `scripts/phase8_prebuild_gate.py`
 - Create: `scripts/phase8_publish_oci.py`
+- Create: `scripts/phase8_terminal_gate.py`
 - Create: `scripts/run_phase8_properties.py`
 - Create: `scripts/run_phase8_faults.py`
 - Create: `scripts/run_phase8_restarts.py`
@@ -1336,8 +1495,11 @@ routes/lifespan
   revalida index/child/config/layers. Rollback import só é elegível após igualdade
   exata do config digest e RootFS/layers da imagem live autenticada. Testes usam fake
   registry/builder ou poison runner e zero rede.
-- [ ] Criar também todos os runners e o terminal-gate test que a Task 22 executará;
-  counters/catalogs são literais e independentes do source sob teste.
+- [ ] Criar também todos os runners, `phase8_terminal_gate.py` e os testes do validator
+  com pares F/E sintéticos. Os testes provam parent direto, allowlist evidence-only,
+  presença pré-F de runners/catalogs/validators e P-path→S-blob→F-blob; não dependem
+  do F/E real que será criado na Task 22. Counters/catalogs são literais e
+  independentes do source sob teste.
 - [ ] Executar somente testes unitários focados de package/release tooling com fakes e
   poison transports; GREEN + blast radius; F/E task-local + AND.
 - [ ] Stop condition: qualquer builder, validator, runner ou teste funcional ausente
@@ -1348,8 +1510,19 @@ routes/lifespan
 
 **Files:**
 
-- No functional source/test/builder changes
-- Create only sanitized envelopes under `docs/refactor/evidence/phase-08/` in E
+- No changes in F: functional source, tests, builders, runners e validators
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/gate-input-manifest.json`
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/heavy-gate-result.json`
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/terminal-result.json`
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/candidate-pair.json`
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/review-request.json`
+- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/SHA256SUMS`
+
+Task 22 é um gate puro: não cria novo U/P/S/R/O, `red.patch`, selector ou producer
+funcional. `gate-input-manifest.json` autentica F, argv, runner/catalog digests e
+private-output roots; `heavy-gate-result.json` contém apenas exit codes, counts,
+durations e hashes sanitizados. Os outros artifacts autenticam E, o resultado do
+validator e o objeto único enviado às três lanes.
 
 **Steps:**
 
@@ -1375,6 +1548,24 @@ python3 -B scripts/validate_phase8_contracts.py
 - [ ] Criar E terminal como filho direto de F consolidando os envelopes aprovados de
   todas as tasks, hashes, counts e conclusions; verificar que E não altera bytes
   funcionais/empacotáveis nem incorpora os evidence-child commits intermediários.
+- [ ] Depois de criar E, executar a partir do checkout ainda fixado em F o validator
+  externo já congelado na Task 21, com roots e commits explícitos:
+
+```bash
+python3 -B "$SOURCE_F_ROOT/scripts/phase8_terminal_gate.py" \
+  --source-root "$SOURCE_F_ROOT" \
+  --source-f "$F" \
+  --evidence-root "$EVIDENCE_E_ROOT" \
+  --evidence-e "$E" \
+  --output "$PRIVATE_RESULT_ROOT/terminal-result.json"
+```
+
+  Esperado: exit `0`; `parent(E)==F`; diff E evidence-only; todos os runners,
+  catalogs, validators e tests já presentes em F; cada P-path→S-blob→F-blob e
+  envelope task-00..21 íntegro; task-22 contém somente a allowlist acima. O script
+  escreve raw output apenas no private result root; E recebe o envelope sanitizado
+  autenticado pelo hash do private result. Falha não autoriza editar F/E: exige novo
+  ciclo a partir da task owner e novo F.
 - [ ] Enviar o mesmo `(F,E)` às três lanes. Timeout/ausência/Needs fixes = NO-GO.
 - [ ] Correção material reroda todos os comandos e todas as lanes; sem exceção.
 

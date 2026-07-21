@@ -190,6 +190,45 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertIn("não é aceito pelo", task_26)
         self.assertIn("publisher e não executa build", task_26)
 
+    def test_replacement_plan_closes_task22_gate_and_relay_dto_interfaces(self) -> None:
+        manifest = _manifest()
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+        task_1 = plan.split("## Task 1:", 1)[1].split("## Task 2:", 1)[0]
+        task_4 = plan.split("## Task 4:", 1)[1].split("## Task 5:", 1)[0]
+        task_13 = plan.split("## Task 13:", 1)[1].split("## Task 14:", 1)[0]
+        task_17 = plan.split("## Task 17:", 1)[1].split("## Task 18:", 1)[0]
+        task_22 = plan.split("## Task 22:", 1)[1].split("## Task 23:", 1)[0]
+
+        self.assertIn("Tasks 0–21", plan)
+        self.assertIn("Task 22 é um gate puro", task_22)
+        self.assertIn("não cria novo U/P/S/R/O", task_22)
+        self.assertIn("--source-f", task_22)
+        self.assertIn("--evidence-e", task_22)
+        self.assertLess(task_22.index("Criar E terminal"), task_22.index("--source-f"))
+        self.assertNotIn("F/E ainda não congelados/envelopes ausentes", plan)
+
+        for literal in (
+            "SettlementRelayBundle",
+            "ScenarioTerminalVerificationReceipt",
+            "RESERVATION_RELAY_DOMAIN = phase8-reservation-relay-bundle-v1",
+            "SETTLEMENT_RELAY_DOMAIN = phase8-settlement-relay-bundle-v1",
+            "SCENARIO_TERMINAL_VERIFICATION_DOMAIN = phase8-scenario-terminal-verification-v1",
+        ):
+            self.assertIn(literal, task_1)
+        self.assertIn("bundle: ReservationRelayBundle", task_4)
+        self.assertIn("bundle: SettlementRelayBundle", task_4)
+        self.assertIn("-> TargetOperationReceipt", task_4)
+        self.assertIn("SettlementIngressPort", task_13)
+        self.assertIn("source_turn_receipt_hash: str", task_13)
+        self.assertIn("-> ScenarioTerminalVerificationReceipt", task_17)
+        self.assertIn("qualification_id: str", task_17)
+        self.assertIn("scenario_id: str", task_17)
+
+        self.assertIn("Create in E:", plan)
+        self.assertIn("gate-input-manifest.json", task_22)
+        self.assertIn("terminal-result.json", task_22)
+        self.assertNotIn("Create in E: red.patch", task_22)
+
     def test_historical_spec_and_plan_have_non_executable_banners(self) -> None:
         manifest = _manifest()
         banner_paths = {
