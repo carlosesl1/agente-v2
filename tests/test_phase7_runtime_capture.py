@@ -58,6 +58,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
         ),
         ".env.example": "API_KEY=placeholder\n",
         ".dockerignore": "__pycache__\n",
+        "HERMES.md": "safe operational guidance\n",
         "README.md": "synthetic runtime\n",
         "uv.lock": "version = 1\n",
         "tests/test_app_llm_central_webhook.py": (
@@ -98,6 +99,10 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
     )
     (source / ".env.example").write_text("API_KEY=real-looking-but-excluded\n")
     (source / ".dockerignore").write_text("__pycache__\n*.tmp\n")
+    (source / "HERMES.md").write_text(
+        "PAYMENT_EMAIL = 'private.person@private-domain.test'\n"
+        "PAYMENT_REFERENCE = '12345678901'\n"
+    )
     (source / "uv.lock").write_text("version = 2\n")
     (source / "domain/tool_executor.py").write_text(
         "CONTACT_SCHEMA = {\n"
@@ -138,10 +143,10 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
 
 
 class Phase7RuntimeCaptureTests(unittest.TestCase):
-    def test_synthetic_phone_uses_reserved_non_e164_namespace_and_fixture_rescans(self) -> None:
-        value = _synthetic_phone("+5575999992939")
-        self.assertTrue(value.startswith("+999"))
-        self.assertFalse(value.startswith("+55"))
+    def test_synthetic_phone_uses_reserved_impossible_area_and_fixture_rescans(self) -> None:
+        value = _synthetic_phone("+557****2939")
+        self.assertTrue(value.startswith("+5500"))
+        self.assertNotRegex(value, r"^\+55(?:[1-9][0-9])")
         fixture = Path(
             "/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b/"
             "tests/fixtures/phase7_boundary_states.json"
@@ -221,6 +226,11 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
                 (output / ".env.example").read_text(),
                 "API_KEY=placeholder\n",
             )
+            hermes = (output / "HERMES.md").read_text()
+            self.assertNotIn("private.person@private-domain.test", hermes)
+            self.assertNotIn("12345678901", hermes)
+            self.assertRegex(hermes, r"synthetic-[0-9a-f]{16}@example\.invalid")
+            self.assertRegex(hermes, r"PAYMENT_REFERENCE = 'synthetic-[0-9a-f]{16}'")
             self.assertTrue(
                 (output / "qa/maya_test_lab/scenarios/__init__.py").is_file()
             )
@@ -239,34 +249,34 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertIn("Synthetic Lead", redacted)
             self.assertIn("'name': 'cloudbeds_criar_reserva_v2'", redacted)
             self.assertIn("OPERATIONAL_SOURCE_ID = 'ss-960889123456'", redacted)
-            self.assertRegex(redacted, r"'whatsapp_phone': '\+999\d{10}'")
-            self.assertRegex(redacted, r"'phone_number': '999\d{10}'")
-            self.assertRegex(redacted, r"'telefone': '999\d{10}'")
-            raw_phone = re.search(r"'phone_number': '(999\d{10})'", redacted)
-            expected_phone = re.search(r"EXPECTED_PHONE = '(\+999\d{10})'", redacted)
+            self.assertRegex(redacted, r"'whatsapp_phone': '\+5500\d{9}'")
+            self.assertRegex(redacted, r"'phone_number': '5500\d{9}'")
+            self.assertRegex(redacted, r"'telefone': '5400\d{9}'")
+            raw_phone = re.search(r"'phone_number': '(5500\d{9})'", redacted)
+            expected_phone = re.search(r"EXPECTED_PHONE = '(\+5500\d{9})'", redacted)
             self.assertIsNotNone(raw_phone)
             self.assertIsNotNone(expected_phone)
             self.assertEqual("+" + raw_phone.group(1), expected_phone.group(1))
             relation = re.search(
-                r"def test_parser_phone_relation\(\):.*?phone_number': '(999\d{10})'.*?"
-                r"assert event\.phone == '(\+999\d{10})'",
+                r"def test_parser_phone_relation\(\):.*?phone_number': '(5500\d{9})'.*?"
+                r"assert event\.phone == '(\+5500\d{9})'",
                 redacted,
                 re.DOTALL,
             )
             self.assertIsNotNone(relation)
             self.assertEqual("+" + relation.group(1), relation.group(2))
             prompt_phone = re.search(
-                r"def test_parser_phone_relation\(\):.*?telefone=(\+999\d{10})",
+                r"def test_parser_phone_relation\(\):.*?telefone=(\+5500\d{9})",
                 redacted,
                 re.DOTALL,
             )
             self.assertIsNotNone(prompt_phone)
             self.assertEqual(relation.group(2), prompt_phone.group(1))
             provider_test = (output / "tests/test_bokun_v2_tools.py").read_text()
-            self.assertRegex(provider_test, r"'whatsapp_phone': '\+999\d{10}'")
+            self.assertRegex(provider_test, r"'whatsapp_phone': '\+5500\d{9}'")
             self.assertNotIn("\x2b\x35\x35\x32\x32\x37\x37\x37\x37\x37\x36\x36\x36\x36", provider_test)
-            first_phone = re.search(r"'whatsapp_phone': '(\+999\d{10})'", redacted)
-            second_phone = re.search(r"'whatsapp_phone': '(\+999\d{10})'", provider_test)
+            first_phone = re.search(r"'whatsapp_phone': '(\+5500\d{9})'", redacted)
+            second_phone = re.search(r"'whatsapp_phone': '(\+5500\d{9})'", provider_test)
             self.assertIsNotNone(first_phone)
             self.assertIsNotNone(second_phone)
             self.assertNotEqual(first_phone.group(1), second_phone.group(1))
@@ -285,6 +295,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertEqual(
                 [row["path"] for row in source_doc["redacted_paths"]],
                 [
+                    "HERMES.md",
                     "tests/test_app_llm_central_webhook.py",
                     "tests/test_bokun_v2_tools.py",
                 ],

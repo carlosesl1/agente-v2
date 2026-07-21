@@ -241,9 +241,12 @@ class Phase7CloseoutContractTests(unittest.TestCase):
             "docs/refactor/evidence/phase-07/runtime-integration-manifest.json"
         )
         self.assertTrue(manifest["patch_applies"])
+        candidate = read_json(
+            "docs/refactor/evidence/phase-07/candidate.json"
+        )
         self.assertEqual(
             manifest["integration_tree"],
-            "922608a044c0e65e65eafadce3c77451e32547d9",
+            candidate["runtime_integration_tree"],
         )
         self.assertEqual(
             manifest["changed_file_count"], len(manifest["changed_files"])

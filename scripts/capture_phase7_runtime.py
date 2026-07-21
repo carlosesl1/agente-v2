@@ -41,6 +41,15 @@ PII_REDACTION_ALLOWLIST: Final = frozenset(
         "tests/test_manychat_single_confirmation_flow.py",
     )
 )
+TRACKED_PII_REDACTION_ALLOWLIST: Final = frozenset(("HERMES.md",))
+TRACKED_LONG_NUMBER_REDACTION_ALLOWLIST: Final = frozenset(
+    (
+        "HERMES.md",
+        "tests/test_behavior_surface_ownership.py",
+        "tests/test_pix_payment_instructions.py",
+        "tests/test_recepcionista_migration.py",
+    )
+)
 SENSITIVE_SCENARIO_PATH: Final = "qa/maya_test_lab/scenarios/real_world_v1.json"
 BASELINE_ONLY_PATHS: Final = frozenset((".env.example", SENSITIVE_SCENARIO_PATH))
 _SAFE_TEXT_SUFFIXES: Final = frozenset(
@@ -84,6 +93,7 @@ _LONG_DIGIT_OPERATIONAL_MARKERS: Final = (
     "tour_product_id",
     "room_type_id",
     "reservation_id",
+    "reservationid",
     "bookingcode",
     "command_id",
     "workflow_id",
@@ -92,6 +102,17 @@ _LONG_DIGIT_OPERATIONAL_MARKERS: Final = (
     "session_id",
     "evidence_id",
     "provider_ref",
+    "transaction_id",
+    "flow_ns",
+    "page_id",
+    "live_chat_url",
+    "manychat_live_allowed_subscriber_ids",
+    "conversation_id",
+    '"key": "user:',
+    "not in str(actions",
+    "synthetic-",
+    "deadline_epoch",
+    "sha256",
 )
 
 
@@ -230,13 +251,20 @@ def _synthetic_digits(value: str) -> str:
 def _synthetic_phone(value: str) -> str:
     source_digits = "".join(character for character in value if character.isdigit())
     digest = hashlib.sha256(source_digits.encode()).digest()
-    tail = "".join(str(byte % 10) for byte in digest)
-    synthetic_digits = "999" + tail[:10]
+    tail = "".join(str(byte % 10) for byte in digest)[:4]
+    country = source_digits[:2]
+    body_length = max(0, len(source_digits) - len(country) - 2 - len(tail))
+    synthetic_digits = country + "00" + ("0" * body_length) + tail
     return "+" + synthetic_digits if value.lstrip().startswith("+") else synthetic_digits
 
 
 def _reserved_synthetic_phone(value: str) -> bool:
-    return value.lstrip().startswith("+999")
+    candidate = value.strip()
+    return (
+        re.fullmatch(r"\+999\d{8,12}", candidate) is not None
+        or re.fullmatch(r"\+?\d{3}\*{4}\d{4}", candidate) is not None
+        or re.fullmatch(r"\+?\d{2}00\d{5,12}", candidate) is not None
+    )
 
 
 def _synthetic_email(value: str) -> str:
@@ -244,11 +272,20 @@ def _synthetic_email(value: str) -> str:
     return f"synthetic-{digest}@example.invalid"
 
 
+def _synthetic_reference(value: str) -> str:
+    digest = hashlib.sha256(value.encode()).hexdigest()[:16]
+    return f"synthetic-{digest}"
+
+
 def _safe_email(value: str) -> bool:
     return value.rsplit("@", 1)[-1].casefold() in _SAFE_EMAIL_DOMAINS
 
 
-def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
+def _sanitize_allowlisted_test(
+    text: str, *, redact_long_numbers: bool = False
+) -> tuple[str, int]:
+    if type(redact_long_numbers) is not bool:
+        raise TypeError("redact_long_numbers must be an exact bool")
     count = 0
     literal_map: dict[str, str] = {}
     embedded_literal_map: dict[str, str] = {}
@@ -261,6 +298,15 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
         occurrences = text.count(email)
         text = text.replace(email, replacement)
         count += occurrences
+
+    if redact_long_numbers:
+        for value in sorted(
+            set(_LONG_DIGITS_RE.findall(text)), key=lambda item: (-len(item), item)
+        ):
+            replacement = _synthetic_reference(value)
+            occurrences = text.count(value)
+            text = text.replace(value, replacement)
+            count += occurrences
 
     def values_for_key(key: str) -> tuple[str, ...]:
         pattern = re.compile(
@@ -359,23 +405,22 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     def align_function_phone(match: re.Match[str]) -> str:
         nonlocal count
         block = match.group(0)
-        digit_sets = {
-            "".join(character for character in item.group("value") if character.isdigit())
-            for item in phone_key_pattern.finditer(block)
-        }
-        digit_sets.discard("")
-        if len(digit_sets) != 1:
+        values = {item.group("value") for item in phone_key_pattern.finditer(block)}
+        values.discard("")
+        if len(values) != 1:
             return block
-        digits = next(iter(digit_sets))
-        if len(digits) != 13 or not digits.startswith("999"):
+        replacement = next(iter(values))
+        if not _reserved_synthetic_phone(replacement):
             return block
-        replacement = "+" + digits
+        normalized_replacement = (
+            replacement if replacement.startswith("+") else "+" + replacement
+        )
 
         def align_assertion(assertion: re.Match[str]) -> str:
             nonlocal count
             count += 1
             quote = assertion.group("quote")
-            return assertion.group("prefix") + quote + replacement + quote
+            return assertion.group("prefix") + quote + normalized_replacement + quote
 
         aligned = phone_assert_pattern.sub(align_assertion, block)
 
@@ -383,7 +428,7 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
             nonlocal count
             count += 1
             quote = assertion.group("quote")
-            return quote + "telefone=" + replacement + quote
+            return quote + "telefone=" + normalized_replacement + quote
 
         return prompt_phone_pattern.sub(align_prompt_phone, aligned)
 
@@ -416,9 +461,14 @@ def _scan_text(
     relative: str,
     *,
     allow_pii_redaction: bool = False,
+    redact_long_numbers: bool = False,
 ) -> tuple[bytes, int]:
     if type(allow_pii_redaction) is not bool:
         raise TypeError("allow_pii_redaction must be an exact bool")
+    if type(redact_long_numbers) is not bool:
+        raise TypeError("redact_long_numbers must be an exact bool")
+    if redact_long_numbers and not allow_pii_redaction:
+        raise ValueError("long-number redaction requires PII redaction")
     if path.is_symlink() or not path.is_file():
         raise CaptureRejected(f"non-regular capture input: {relative}")
     if _forbidden_path(relative):
@@ -439,7 +489,9 @@ def _scan_text(
         raise CaptureRejected(f"non-UTF8 capture input: {relative}") from exc
     redactions = 0
     if allow_pii_redaction:
-        text, redactions = _sanitize_allowlisted_test(text)
+        text, redactions = _sanitize_allowlisted_test(
+            text, redact_long_numbers=redact_long_numbers
+        )
     for match in _PHONE_RE.finditer(text):
         if _reserved_synthetic_phone(match.group(0)):
             continue
@@ -768,7 +820,13 @@ def capture_runtime(
             payload, count = _scan_text(
                 path,
                 relative,
-                allow_pii_redaction=relative.startswith("tests/"),
+                allow_pii_redaction=(
+                    relative.startswith("tests/")
+                    or relative in TRACKED_PII_REDACTION_ALLOWLIST
+                ),
+                redact_long_numbers=(
+                    relative in TRACKED_LONG_NUMBER_REDACTION_ALLOWLIST
+                ),
             )
             if payload != path.read_bytes():
                 transforms[relative] = (payload, count)

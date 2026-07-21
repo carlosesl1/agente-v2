@@ -39,14 +39,14 @@ EXPECTED_REMOTE_JOBS = frozenset(
     }
 )
 EXPECTED_RUNTIME_SOURCE = {
-    "runtime_contract_manifest_sha256": "4dbdcedaea80452f9ce6d4f031ef77d15cb06a144b55eb623a513a8ec203f013",
+    "runtime_contract_manifest_sha256": "764f5f02fd53edee3d955b4db8caabf67aad5d58ec2c2b5d8d0c8408ade2f5fd",
     "source_head": "57408d8b2040399bc25ee7957505208079458884",
     "source_status_entries": 86,
     "source_status_hash": "e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a",
     "source_tracked_diff_hash": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
     "source_tree": "67b5fe18d4685281778e41cd61cd584dd063ea60",
-    "synthetic_baseline_commit": "3da1f41103fd25bc0c1c0242a7e05cf9da22ad82",
-    "synthetic_baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
+    "synthetic_baseline_commit": "3192a6b8122535e2b8a2fb047a152aa363aaf0de",
+    "synthetic_baseline_tree": "9a6732ecba40f4771a97b931305ad9d175d48593",
 }
 
 
