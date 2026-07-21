@@ -314,11 +314,11 @@
     {
       "classification": "HISTORICAL-NON-EXECUTABLE",
       "current_state": {
-        "bytes": 16742,
+        "bytes": 20947,
         "classification": "ACTIVE-RECONCILED",
-        "lines": 359,
+        "lines": 435,
         "replacement": "tests/test_phase8_entry.py",
-        "sha256": "5c818813c6ee95658941196e866c21c409375c87e5d1384e9510c38763049292"
+        "sha256": "77bf7bbb441f2e11f08c8d3a9ea6d2a99ce2bfb95b76539b799072554cd3ae5d"
       },
       "path": "tests/test_phase8_entry.py",
       "pre_quarantine_head_identity": {
@@ -345,10 +345,10 @@
     "user_acceptance": "PENDING"
   },
   "replacement_plan": {
-    "bytes": 91411,
-    "lines": 1846,
+    "bytes": 94585,
+    "lines": 1892,
     "path": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
-    "sha256": "167130e46d94964e48691d29247257a4e2ae7a408ecb3f1bd5cdc586c1231bd7"
+    "sha256": "5fd4f772331360e22abf78483dc35b4b4fd4e348a9be67f22006e2ac42f3e656"
   },
   "rollout": "NO-GO",
   "scan_exclusions": [

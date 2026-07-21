@@ -229,6 +229,82 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertIn("terminal-result.json", task_22)
         self.assertNotIn("Create in E: red.patch", task_22)
 
+    def test_replacement_plan_closes_terminal_gate_provenance_without_self_reference(self) -> None:
+        manifest = _manifest()
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+        task_1 = plan.split("## Task 1:", 1)[1].split("## Task 2:", 1)[0]
+        task_21_row = next(
+            line
+            for line in plan.splitlines()
+            if line.startswith("| 21 |") and "tests.test_phase8_wheel" in line
+        )
+        task_22 = plan.split("## Task 22:", 1)[1].split("## Task 23:", 1)[0]
+        scripts_inventory = plan.split("scripts/", 1)[1].split("```", 1)[0]
+        task_1_compact = " ".join(task_1.split())
+
+        expected_selectors = (
+            "tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical",
+            "tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once",
+            "tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times",
+            "tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact",
+            "tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f",
+            "tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f",
+        )
+        self.assertEqual(tuple(re.findall(r"`([^`]+)`", task_21_row)), expected_selectors)
+        self.assertIn("phase8_terminal_gate.py", scripts_inventory)
+
+        self.assertIn("Implementation Closure Registry", task_1_compact)
+        self.assertIn("não afirma que esses nomes", task_1_compact)
+        self.assertIn("aprovação humana explícita", task_1_compact)
+        self.assertIn("artifact_preimage_bytes", task_1_compact)
+        self.assertIn("exclui o campo artifact_hash", task_1_compact)
+
+        def registry_fields(type_name: str) -> tuple[str, ...]:
+            match = re.search(rf"{type_name}\((.*?)\)\n", task_1, re.S)
+            self.assertIsNotNone(match, type_name)
+            return tuple(
+                field.strip()
+                for field in match.group(1).replace("\n", " ").split(",")
+            )
+
+        self.assertEqual(
+            registry_fields("SettlementRelayBundle"),
+            (
+                "workflow_anchor", "policy", "payment_history", "evidence",
+                "payment_command", "expected_final_state",
+                "expected_final_state_hash", "qualification_id", "scenario_id",
+                "immutable_generation", "allocation_id", "artifact_hash",
+            ),
+        )
+        self.assertEqual(
+            registry_fields("ScenarioTerminalVerificationReceipt"),
+            (
+                "qualification_id", "epoch", "scenario_id", "scenario_contract_hash",
+                "cutoff_sequence", "admitted_set_hash",
+                "admitted_turn_receipt_aggregate_hash",
+                "target_ingress_receipt_aggregate_hash",
+                "provider_effect_outcome_aggregate_hash",
+                "followup_delivery_receipt_aggregate_hash",
+                "public_delivery_receipt_aggregate_hash",
+                "compensation_receipt_aggregate_hash", "final_state_hash",
+                "final_economic_hash", "allocation_manifest_hash",
+                "exact_effect_budget_hash", "previous_qualification_artifact_hash",
+            ),
+        )
+
+        self.assertEqual(
+            tuple(re.findall(r"^- Create in E: `([^`]+)`$", task_22, re.M)),
+            (
+                "docs/refactor/evidence/phase-08/tasks/task-22/gate-input-manifest.json",
+                "docs/refactor/evidence/phase-08/tasks/task-22/heavy-gate-result.json",
+                "docs/refactor/evidence/phase-08/tasks/task-22/SHA256SUMS",
+            ),
+        )
+        self.assertIn("terminal-verification packet V", task_22)
+        self.assertIn("fora de E", task_22)
+        self.assertIn("mesmo tuple imutável `(F,E,V)`", task_22)
+        self.assertIn("não inclui o próprio digest", task_22)
+
     def test_historical_spec_and_plan_have_non_executable_banners(self) -> None:
         manifest = _manifest()
         banner_paths = {

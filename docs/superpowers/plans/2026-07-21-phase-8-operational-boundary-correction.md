@@ -274,6 +274,7 @@ scripts/
   validate_phase8_contracts.py
   phase8_prebuild_gate.py
   phase8_publish_oci.py
+  phase8_terminal_gate.py
   run_phase8_properties.py
   run_phase8_faults.py
   run_phase8_restarts.py
@@ -413,7 +414,7 @@ invalidar seu F/E e repetir o RED/review da task owner.
 | 18 | `tests.test_phase8_qualification_cancel.QualificationCancelTests.test_all_eight_origins_freeze_both_fsms_and_preserve_artifacts`; `tests.test_phase8_memory_prepare.MemoryPrepareTests.test_s0_to_s5_recovery_is_exact`; `tests.test_phase8_memory_abandon.MemoryAbandonTests.test_a0_to_a4_each_barrier_converges_with_zero_payload`; `tests.test_phase8_memory_recovery.MemoryRecoveryTests.test_worker_has_only_lookup_resume_ack_abandon_and_shared_lock`; `tests.test_phase8_qualification_reopen.QualificationReopenTests.test_new_epoch_root_ids_and_old_ack_rejection` | lock/recovery/cancel producer ausente | cinco módulos Phase8 + `2000` restarts por grammar catalog |
 | 19 | `tests.test_phase8_runtime_graph_contract.RuntimeGraphContractTests.test_manifest_contains_every_worker_reconciler_canceler_lock_and_recovery_node`; `tests.test_phase8_readiness_contract.ReadinessContractTests.test_schema_root_lock_receipt_or_worker_mismatch_is_not_ready` | node/digest scanner ausente | dois módulos Phase8 + closed graph mutation catalog |
 | 20 | `tests.test_phase8_ingress_universe.IngressUniverseTests.test_four_turn_ingresses_have_exact_source_identities_and_coordinator_owner`; `tests.test_phase8_legacy_poison.LegacyPoisonTests.test_every_mutator_is_coordinator_or_shared_migration_guarded`; `tests.test_phase8_child_capability_graph.ChildCapabilityGraphTests.test_child_cannot_import_legacy_provider_delivery_or_memory_writer` | alternate owner/import reachable | três módulos Phase8 + runtime inventory static scan |
-| 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact` | release producers ausentes | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate e terminal_gate |
+| 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f` | release/terminal-gate producers ausentes ou validator sintético aceita F/E inválido | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate e terminal_gate |
 
 Task 22 é deliberadamente excluída desta matriz RED/GREEN: é um gate puro sobre
 bytes já congelados. Os testes de `tests.test_phase8_terminal_gate` pertencem à Task
@@ -576,11 +577,30 @@ fechados de installation/closure. Também são obrigatórios
 `CapabilityPolicy` e `BehaviorStateSnapshot`. `ReservationRelayBundle`,
 `SettlementRelayBundle` e `HandoffRelayBundle` também pertencem ao wire fechado, com
 owners de execução nas Tasks 13 e 14.
-Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; campos, enums e
-ordem são os blocos normativos da spec aprovada. O validator desta task extrai esses
-blocos por heading/hash fixo e compara um registry literal versionado no teste; não é
-permitido “decidir depois” campo, nome, enum, nullable tuple ou domínio de hash.
-Adicionar campo aberto ou omitir receipt exige delta arquitetural, não decisão local.
+
+**Implementation Closure Registry — autoridade e limite:** a spec aprovada no commit
+`2889e9e…` é autoridade única para invariantes arquiteturais e shapes descritivos. Ela
+usa deliberadamente nomes descritivos e assinaturas elípticas em alguns pontos. O
+registry literal abaixo é um **refinamento de implementação pertencente ao
+plano**, necessário para tornar TDD, wire e ownership não ambíguos; ele não afirma
+que esses nomes, field lists, assinaturas ou domains aparecem literalmente na spec
+aprovada. Este refinamento não pode ampliar effects, capabilities, owners,
+tabelas, cardinalidades, FSMs ou gates da spec. Conflito com qualquer invariante da
+spec é stop condition e exige delta arquitetural, não interpretação local.
+
+O registry só se torna autoridade executável depois de: (1) review AND 3/3 sobre o
+mesmo commit do plano; e (2) aprovação humana explícita desse plano ou de uma futura
+autorização de implementação que cite sua identidade. Até ambos existirem, é
+candidate documental e Task 0 permanece bloqueada. O validator da Task 1 autentica
+separadamente o commit/blob/hash da spec e o hash deste **Implementation Closure
+Registry** no commit do plano; ele não tenta extrair do texto da spec nomes que a spec
+não contém.
+
+Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; o registry e o
+fixture independente comparam lista completa ordenada de campos, enums, nullability,
+assinaturas e domains, rejeitando item ausente **ou extra**. Adicionar campo aberto ou
+omitir receipt exige nova identidade/review/aceite do plano e, se alterar invariante,
+delta arquitetural.
 
 **Field registry mínimo literal:**
 
@@ -635,8 +655,12 @@ Nos dois relay bundles, os quatro campos E2E
 `qualification_id|scenario_id|immutable_generation|allocation_id` são todos nulos ou
 todos presentes. `phase5_events`, `summary_outboxes`, `payment_history` e `evidence`
 são tuples ordenados de canonical bytes; vazio e ausente não são equivalentes.
-`artifact_hash` é independente do backlink. `source_turn_receipt_hash` fica somente na
-relay row/assinatura de ingress e é excluído do hash do bundle. No receipt terminal,
+`artifact_preimage_bytes()` serializa por canonical JSON, na ordem do registry, todos
+os campos do bundle **exceto** `artifact_hash`; portanto exclui o campo artifact_hash
+da própria preimage. `artifact_hash = SHA256(DOMAIN || 0x00 ||
+artifact_preimage_bytes())`. `to_canonical_bytes()` inclui o `artifact_hash` já
+calculado e o decoder sempre o recompõe e compara. `source_turn_receipt_hash` fica
+somente na relay row/assinatura de ingress e é excluído do hash do bundle. No receipt terminal,
 aggregate vazio usa o hash canônico do tuple vazio, nunca `None`; todos os aggregates
 são rederivados das rows owner e `previous_qualification_artifact_hash` fecha o
 backlink no journal.
@@ -1513,16 +1537,33 @@ routes/lifespan
 - No changes in F: functional source, tests, builders, runners e validators
 - Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/gate-input-manifest.json`
 - Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/heavy-gate-result.json`
-- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/terminal-result.json`
-- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/candidate-pair.json`
-- Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/review-request.json`
 - Create in E: `docs/refactor/evidence/phase-08/tasks/task-22/SHA256SUMS`
+- Create outside Git/E under private terminal-verification staging:
+  `terminal-result.json`, `candidate-pair.json`, `review-request.json`,
+  `packet-manifest.json`, `SHA256SUMS`
 
 Task 22 é um gate puro: não cria novo U/P/S/R/O, `red.patch`, selector ou producer
 funcional. `gate-input-manifest.json` autentica F, argv, runner/catalog digests e
 private-output roots; `heavy-gate-result.json` contém apenas exit codes, counts,
-durations e hashes sanitizados. Os outros artifacts autenticam E, o resultado do
-validator e o objeto único enviado às três lanes.
+durations e hashes sanitizados. E contém somente evidência disponível antes de sua
+própria identidade; nenhum arquivo em E pode nomear E ou depender de resultado obtido
+depois de congelá-lo.
+
+Depois de E existir, o validator produz um **terminal-verification packet V**
+armazenado fora de E no `EvidenceArtifactStore` privado/content-addressed. Seus
+membros têm contratos acíclicos:
+
+- `terminal-result.json`: inputs F/E, argv/validator hash e conclusão;
+- `candidate-pair.json`: F, E, `parent(E)==F` e allowlist do diff;
+- `review-request.json`: F, E, hashes dos dois membros anteriores e critérios das
+  lanes; não contém V;
+- `packet-manifest.json`: lista ordenada `(path, sha256, bytes)` dos três membros;
+- `SHA256SUMS`: cobre os quatro arquivos anteriores.
+
+`packet-manifest.json` não inclui o próprio digest nem o digest V. O identificador
+externo é `V = SHA256("phase8-terminal-verification-packet-v1" || 0x00 ||
+canonical(packet-manifest.json))`; o store publica o diretório por V com no-replace,
+rehash e fsync. Assim F, E e V são identidades distintas e nenhuma é autorreferente.
 
 **Steps:**
 
@@ -1547,7 +1588,9 @@ python3 -B scripts/validate_phase8_contracts.py
   chmod→fsync→publish→dir-fsync e scavenger S0/S1/S2 sob lock order coord→owner.
 - [ ] Criar E terminal como filho direto de F consolidando os envelopes aprovados de
   todas as tasks, hashes, counts e conclusions; verificar que E não altera bytes
-  funcionais/empacotáveis nem incorpora os evidence-child commits intermediários.
+  funcionais/empacotáveis nem incorpora os evidence-child commits intermediários. Em
+  `task-22`, incluir somente `gate-input-manifest.json`, `heavy-gate-result.json` e o
+  `SHA256SUMS` correspondente; então congelar E definitivamente.
 - [ ] Depois de criar E, executar a partir do checkout ainda fixado em F o validator
   externo já congelado na Task 21, com roots e commits explícitos:
 
@@ -1563,10 +1606,13 @@ python3 -B "$SOURCE_F_ROOT/scripts/phase8_terminal_gate.py" \
   Esperado: exit `0`; `parent(E)==F`; diff E evidence-only; todos os runners,
   catalogs, validators e tests já presentes em F; cada P-path→S-blob→F-blob e
   envelope task-00..21 íntegro; task-22 contém somente a allowlist acima. O script
-  escreve raw output apenas no private result root; E recebe o envelope sanitizado
-  autenticado pelo hash do private result. Falha não autoriza editar F/E: exige novo
-  ciclo a partir da task owner e novo F.
-- [ ] Enviar o mesmo `(F,E)` às três lanes. Timeout/ausência/Needs fixes = NO-GO.
+  escreve raw output apenas no private result root e nunca altera E. Falha não
+  autoriza editar F/E: exige novo ciclo a partir da task owner e novo F.
+- [ ] Com o resultado privado verde, construir os cinco arquivos do packet V, validar
+  seus schemas/hashes, publicar V no EvidenceArtifactStore e reabrir F/E apenas para
+  leitura. Não copiar nenhum membro de V para E e não amend/recommit E.
+- [ ] Enviar o mesmo tuple imutável `(F,E,V)` às três lanes. Cada summary precisa autenticar
+  os três digests. Timeout/ausência/Needs fixes = NO-GO.
 - [ ] Correção material reroda todos os comandos e todas as lanes; sem exceção.
 
 ---
