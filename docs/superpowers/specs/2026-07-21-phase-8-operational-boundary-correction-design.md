@@ -298,23 +298,36 @@ duplicado divergente, sequência quebrada, peer inválido, deadline ou schema
 inválido abortam o turno sem commit boundary. O diretório/socket/capability e a
 sessão Hermes efêmera são apagados no `finally`.
 
-`finally` é apenas a limpeza rápida. Cada tentativa vive sob
-`${STATE_ROOT}/attempts/<random-128-bit-id>/`, criado com `0700`, `O_EXCL` e sem
-symlinks. O pai mantém um `owner.lock` aberto com `flock` exclusivo durante toda a
-tentativa; isso é a autoridade de liveness e não PID reutilizável. No startup e
-periodicamente, um scavenger capability-free:
+`finally` é apenas a limpeza rápida. Criação e scavenge usam um protocolo de
+publicação, sem janela `mkdir→owner.lock`. O root privado contém
+`coord.lock`, `.staging/` e `active/`; creators e scavenger precisam adquirir
+`coord.lock` exclusivamente por dirfd/no-follow. O creator, ainda sob esse lock:
 
-- abre o root por dirfd/no-follow e rejeita symlink, path escape, owner/mode ou
-  marker inválido;
-- nunca remove diretório cujo `owner.lock` não consegue adquirir;
-- adquire o lock exclusivo de órfão antes de apagar somente o conteúdo fechado
-  conhecido;
-- diante de entry desconhecida/malformada, falha readiness em vez de apagar;
-- prova limpeza após `SIGKILL`, `os._exit` e restart real.
+1. cria `.staging/<random-128-bit-id>` com `0700` e fail-if-exists;
+2. cria `owner.lock` por `openat(O_CREAT|O_EXCL|O_NOFOLLOW, 0600)`, abre e adquire
+   `flock` exclusivo;
+3. grava todos os markers fechados por `openat`, faz `fsync` de files/dir;
+4. publica somente a tentativa completa por
+   `renameat2(RENAME_NOREPLACE, .staging/id, active/id)` e faz `fsync` dos dirs;
+5. libera `coord.lock`, mas mantém o fd/lock de owner até o fim da tentativa.
+
+O scavenger capability-free também segura `coord.lock` durante scan/remoção. Como
+nenhum creator solta esse lock antes do publish, qualquer staging entry observada
+sob o lock foi deixada por crash. O scavenger:
+
+- abre roots/entries por dirfd/no-follow e rejeita symlink, path escape,
+  owner/mode ou marker inválido;
+- em `.staging`, exige universo fechado, adquire `owner.lock` e remove apenas
+  tentativa abandonada; entry malformada falha readiness;
+- em `active`, nunca remove diretório cujo `owner.lock` não consegue adquirir;
+- adquire o owner lock de órfão antes de apagar somente o conteúdo fechado;
+- faz `fsync` após unlink/rmdir e antes de liberar `coord.lock`;
+- prova barreiras em cada fronteira create→lock→markers→rename, além de limpeza
+  após `SIGKILL`, `os._exit`, power loss simulado e restart real.
 
 Attempt roots jamais são pesquisados para retomar sessão ou estado canônico.
-Power loss pode deixar bytes órfãos, mas o próximo startup não fica ready antes de
-scavenge autenticado.
+Startup só fica ready depois de adquirir `coord.lock`, resolver staging/active e
+provar zero órfão; o scanner periódico usa o mesmo protocolo.
 
 O processo filho recebe **um plugin novo e mínimo de boundary client**, além das
 tools protocolares. Esse plugin contém somente schemas e cliente UDS. Terminal,
@@ -395,44 +408,69 @@ reter write transaction durante uma chamada de até dezenas de segundos:
 1. validar envelope/deadline;
 2. adquirir lock cross-process por lead/DB;
 3. consultar duplicate;
-4. se não existe boundary state, adquirir `LeadMigrationOwnership` no estado
-   durável `FROZEN`, antes de ler o legado;
+4. se não existe boundary state, solicitar freeze na authority compartilhada;
+   ela entra em `FREEZING`, nega novos permits legacy, drena/resolve permits já em
+   voo e só então publica `FROZEN` com epoch/token;
 5. carregar estado e gênese/import **somente em memória**, sem persistir
    `boundary_state`, import claim ou fencing token;
 6. executar Maya + reads ainda sob o lead lock, sem DB write transaction;
 7. reduzir no kernel puro e validar proposal/decision/receipt;
-8. abrir transação curta com busy timeout menor que o tempo restante;
-9. depois de obter o writer lock, reamostrar deadline e revalidar
-   event/source identities + state version/hash ou ausência da gênese; na gênese,
-   revalidar também ownership token, source version e snapshot hash;
-10. persistir gênese/import claim, CAS state/fence, event/sources, receipt,
+8. ainda em `FROZEN`, reler source version/snapshot A fora de qualquer boundary
+   transaction; divergência em relação ao snapshot usado por Maya aborta;
+9. abrir transação boundary curta com busy timeout menor que o tempo restante;
+10. depois de obter o writer lock, reamostrar deadline e revalidar apenas
+   event/source identities, state version/hash e o epoch/token `FROZEN` local;
+   nenhuma leitura legacy/remota ocorre dentro da transação;
+11. persistir gênese/import claim, CAS state/fence, event/sources, receipt,
    commands, relays e outboxes atomicamente;
-11. reamostrar deadline imediatamente antes de `COMMIT`; deadline vencida causa
+12. reamostrar deadline imediatamente antes de `COMMIT`; deadline vencida causa
     rollback integral;
-12. após commit, finalizar ownership como `BOUNDARY_OWNED` vinculado ao receipt;
-13. liberar lock.
+13. após commit, finalizar ownership como `BOUNDARY_OWNED` vinculado ao receipt;
+14. liberar lock.
 
 `LeadMigrationOwnershipPort` é uma autoridade separada que **todos** os ingress e
 efeitos mutantes legacy/candidate precisam consultar. Estados fechados:
 
 ```text
-LEGACY_OWNED → FROZEN → BOUNDARY_OWNED
-                   ↘ RELEASED_TO_LEGACY
+LEGACY_OWNED → FREEZING → FROZEN → BOUNDARY_OWNED
+                    ↘ RELEASED_TO_LEGACY
 ```
 
-- `FROZEN` bloqueia writes/flush/callbacks legacy e nova entrega para o lead;
+Todo mutator legacy precisa adquirir um `LegacyWritePermit` na mesma authority
+**antes** de ler estado ou preparar um efeito. O permit contém lead, operation ID,
+epoch e fencing token; fica ativo durante provider dispatch, local commit e receipt
+terminal. O mutator revalida o permit no CAS/commit final. `begin_freeze` faz CAS
+`LEGACY_OWNED→FREEZING`, incrementa epoch, nega novos permits e espera active count
+zero. Sob o mesmo lead lock, a authority captura source version/hash e faz CAS
+`FREEZING→FROZEN`; esse snapshot é o único que o passo 5 entrega à Maya. Permit de
+processo morto só pode ser fechado por reconciler quando um
+operation receipt prova resultado terminal; resultado externo incerto bloqueia a
+migração em `manual_review`. Freeze nunca ignora ou expira permit em voo.
+
+- `FREEZING` bloqueia novos writers e drena/invalida de forma comprovável todos os
+  writers autorizados no epoch anterior;
+- `FROZEN` só existe com active permits zero e bloqueia writes/flush/callbacks
+  legacy e nova entrega para o lead;
 - contém owner token, source version/hash e nunca expira de volta ao legado
   automaticamente;
 - crash antes do boundary commit deixa o lead congelado; reconciler só libera
   depois de provar ausência de boundary state/event/receipt;
 - crash depois do boundary commit deixa o lead congelado; reconciler encontra o
   receipt e finaliza `BOUNDARY_OWNED`;
-- source snapshot é relido sob o freeze antes do commit e qualquer mudança aborta;
+- source snapshot é relido sob o freeze antes de abrir `BEGIN IMMEDIATE`; como não
+  há permit legacy ativo, ele não pode mudar no intervalo até o commit;
 - stale token/owner ou source hash divergente nunca cria gênese/import claim.
+
+Ownership transitions, reconciler e coordinator usam o mesmo lead lock. A
+transação boundary faz somente CAS local do epoch/token esperado; nenhuma authority
+remota ou legacy I/O fica sob `BEGIN IMMEDIATE`. A corrida obrigatória pausa writer
+W depois de obter permit, inicia freeze/Maya, retoma W e prova que `FROZEN` não é
+publicado até W terminar ou ir para manual review; W jamais grava depois de
+`FROZEN/BOUNDARY_OWNED`.
 
 Não existe write **boundary/commercial** pré-Maya. O único write permitido é a
 claim de ownership control-plane recuperável acima. Crash/timeout/EOF antes do
-passo 10 deixa zero row change no boundary e zero efeito comercial. Retry usa uma
+passo 11 deixa zero row change no boundary e zero efeito comercial. Retry usa uma
 nova sessão efêmera porque a tentativa anterior não pode ser retomada nem se tornar
 pública.
 
@@ -483,7 +521,7 @@ TurnReceipt
   relay IDs/bundle hashes
   internal outbox IDs/hashes
   UDS transcript MAC/final_seq
-  structural graph + capability policy + deployment binding digests
+  structural graph + capability policy + effective stage-binding digest
   behavior-state snapshot digest lido no turno
   committed_at
 ```
@@ -742,10 +780,20 @@ slot=0. Somente `fence_dispatch` consome permanentemente o único slot.
 chamada ManyChat:
 
 1. claim;
-2. prepara request sem side effect;
-3. consome permanentemente um único dispatch slot (`dispatch_fenced`);
-4. chama ManyChat somente se role/capability/allowlist permitem;
-5. grava receipt de exatamente uma chamada externa.
+2. prepara request sem side effect e valida role, capability, binding e allowlist;
+3. produz `DispatchPermit` canônico contendo row/chunk/request hash, lease owner e
+   token, target binding hash, capability-policy digest, deployment-binding digest
+   e validade limitada pela lease/deadline;
+4. `fence_dispatch` revalida todos esses campos e a policy/binding corrente no CAS
+   `leased→dispatch_fenced`; permit negado/stale nunca consome slot;
+5. somente depois do CAS consome permanentemente o único dispatch slot e chama
+   ManyChat exatamente uma vez;
+6. grava receipt de exatamente uma chamada externa.
+
+Policy/allowlist denial é preparation failure terminal ou requeue conforme o
+motivo fechado, sempre com slot 0; jamais vira resultado externo incerto. Mudança
+de policy/binding entre prepare e fence invalida o permit e rejeita o CAS. Dark
+mode nega claim e, por defesa em profundidade, também prepare/fence/send.
 
 Falha/crash depois do fence e antes de receipt deixa a row representavelmente
 `dispatch_fenced`. Um **reconciler sem capability de send** varre leases vencidas
@@ -802,71 +850,101 @@ todos os source acknowledgements.
 
 Memória aprendida não contamina esse digest estrutural. Um
 `BehaviorStateSnapshot` canônico contém schema/version/hash da memória dinâmica;
-ele é validado no startup, vinculado ao `DeploymentBinding` inicial e persistido
+ele é validado no startup, vinculado ao stage binding de admissão e persistido
 por turno. Canary recebe clone autenticado e isolado do snapshot escolhido, nunca
 mount RW da memória de produção.
 
 Cada estágio possui ainda uma `CapabilityPolicy` canônica e hash, contendo a
 matriz de capabilities, worker modes e guard semantics, mas **não** roots,
-allowlist concreta ou percentual. Esses valores ficam em um `DeploymentBinding`
-separado, também hashado e persistido para auditoria.
+allowlist concreta ou percentual. Esses valores ficam nas identidades de stage
+fechadas abaixo, todas hashadas e persistidas para auditoria.
 
-`DeploymentBinding` tem schema fechado:
+Há quatro identidades distintas; não se exige igualdade impossível entre o
+binding efetivo dos turnos e um binding criado somente depois da selagem.
+
+`EffectiveE2EDeploymentBinding`, persistido em cada turn receipt, tem schema
+fechado:
 
 ```text
 release_child_manifest_digest
 runtime_graph_digest
 capability_policy_digest
-behavior_state_snapshot_digest
-behavior_transition_receipt_hash | null
-runtime_role
-provider_scope
-workflow_scope
-effect_scope
+behavior_state_snapshot_digest_at_admission
+runtime_role = canary_e2e
+provider_scope + workflow_scope + effect_scope
 allowlist_digest + allowlist_cardinality
 traffic_stage
-state_root_class + instance_id
+state_root_class = ephemeral_canary
+instance_id + admission_epoch
 ```
 
-Provider/workflow/effect scopes são enums/IDs canônicos, nunca texto livre. Roots
-são classificados `ephemeral_canary|persistent_production` e validados contra
-mounts reais; paths não entram em hashes de comportamento.
+O behavior digest pode avançar entre turnos apenas por `LearningReceipt` válido;
+isso gera um novo effective-binding digest e fica explícito no receipt daquele
+turno. Provider/workflow/effect scopes são enums/IDs canônicos, nunca texto livre.
+Roots são classes fechadas, validadas contra mounts reais; paths concretos não
+entram em hashes de comportamento.
 
 Dark/ingress fechado exercitam o graph completo com capabilities negadas, não
-omitem classes.
-O último canary E2E que autoriza rollout usa exatamente o mesmo graph e
-capability-policy da promoção. Depois do último turno E2E:
+omitem classes. Depois do último turno E2E pretendido, um qualification controller
+executa esta ordem obrigatória:
 
-1. drenar todos os learning jobs canary;
-2. construir `BehaviorTransitionReceipt` que liga, em ordem, receipts de turno,
-   snapshots lidos e `LearningReceipt`s ao snapshot final;
-3. selar o `BehaviorStateSnapshot` final;
-4. bloquear novos ingress/learning até a decisão de rollout;
-5. inicializar produção byte-idêntica nesse snapshot.
+1. CAS `admission OPEN→QUALIFYING`, incrementa qualification epoch e bloqueia
+   **primeiro** novos turn admissions e claims normais de learning;
+2. fixa a lista de turnos já admitidos/in-flight no cutoff e aguarda todos os
+   receipts terminais;
+3. recompõe dos receipts o conjunto finito e completo de learning jobs desses
+   turnos; um drainer de qualificação pode claimar somente esse conjunto;
+4. aguarda completion/ack de jobs leased e drena os pending do conjunto; qualquer
+   extra, ausente, divergente ou `manual_review` falha a qualificação;
+5. a memory authority executa CAS
+   `seal(expected_version, expected_hash, qualification_epoch, admitted_set_hash)`
+   e retorna um `SealedBehaviorStateSnapshot`; nenhuma nova mutation/claim entra;
+6. constrói `BehaviorTransitionReceipt` sobre cutoff, ordered turn receipts, todos
+   os effective-binding digests, todos os learning job/receipt IDs e a cadeia
+   contínua before→after até o snapshot selado;
+7. mantém admission/memory congelados até rollout ou cancelamento explícito.
 
-O binding promovido aponta ao snapshot final e ao transition receipt. Qualquer
-alteração de memória depois do seal invalida E2E. Se não houve learning, o
-transition receipt ainda prova identidade entre snapshot inicial/final.
+Zero learning é representado por conjunto vazio + before==after, nunca por campo
+omitido. O transition scan é bilateral: todo turno/job no cutoff aparece uma vez e
+todo item do receipt pertence ao cutoff; pending/leased/manual-review ou quebra na
+cadeia invalida o gate. Injeções em cada fronteira devem provar que nenhum turno ou
+job posterior ao cutoff é aceito e que nenhum anterior é omitido.
 
-A transformação canary-E2E → produção inicial é um oráculo fechado. Exige
-igualdade de release, graph, capability policy, behavior snapshot,
-behavior-transition receipt, provider scope, workflow scope e effect scope. Só
-permite:
+`SealedCanaryQualificationBinding` é criado **depois** do seal e contém:
 
-- role `canary_e2e → production_initial` sem alterar branches do graph;
+```text
+release + graph + capability policy digests
+provider/workflow/effect scopes
+qualification epoch + cutoff/admitted-set hash
+ordered effective-E2E-binding aggregate hash
+sealed behavior snapshot digest
+behavior transition receipt hash
+canary root class + image/container binding attestations
+```
+
+Ele não finge ser o binding usado nos turnos. `RolloutAuthorization` é outro
+artefato canônico e independente: referencia o qualification-binding digest e
+fixa target role, allowlist digest/cardinality, traffic stage, production root
+class, instance constraints, janela e approver identity. Seu digest esperado é
+registrado antes de criar produção.
+
+Uma função fechada
+`derive_production_initial_binding(qualification, authorization)` produz
+`ProductionInitialDeploymentBinding`. Ela exige igualdade de release, graph,
+capability policy, sealed behavior snapshot, transition receipt e
+provider/workflow/effect scopes; permite somente:
+
+- role `sealed_canary_qualification → production_initial`;
 - root class `ephemeral_canary → persistent_production`;
-- instance ID;
-- allowlist digest/cardinality e traffic stage exatamente fixados na autorização
-  de rollout gradual.
+- instance ID dentro das constraints autorizadas;
+- allowlist e traffic stage exatamente iguais ao `RolloutAuthorization`.
 
-Qualquer outra diferença — memória, provider/workflow/effect, capability, guard,
-modelo/profile ou worker mode — exige nova canary E2E. A allowlist/traffic target é
-input fechado do gate, não “transformação declarada” livre.
-
-Fora da transformação E2E→produção acima, nenhum campo pode variar entre o
-binding certificado e o promovido. Paths privados concretos podem diferir apenas
-quando o campo fechado `state_root_class` autoriza e o mount preflight prova a
-classe esperada; eles não alteram bytes ou comportamento.
+Produção é inicializada por clone byte-idêntico do snapshot selado e o digest do
+clone é revalidado antes de readiness. Qualquer diferença em memória, model/profile,
+worker mode, scopes, capability/guard ou campo não listado falha. Cancelamento
+transiciona a qualificação para `CANCELLED`; reabrir canary incrementa epoch e
+invalida qualification/authorization anteriores. Paths privados podem diferir
+somente conforme a root class e mount preflight, sem mudar bytes/comportamento.
 
 Nenhuma factory alternativa, global `app`, `LegacyRegressionTurnAdapter` ou helper
 legado pode estar alcançável pelo Docker target.
@@ -967,9 +1045,33 @@ Rollback usa `repo@child-manifest-digest`, nunca tag ou rebuild.
 
 ### Cadeia source→container
 
-Antes do build, o contexto contém `source-attestation.json` canônico com
-upstream/wheel/runtime commit/tree, build-context paths/hashes e graph/profile
-hashes. Seu hash é baked em label e arquivo da imagem.
+Antes do build, o controller cria uma identidade de input acíclica em três níveis:
+
+1. um **payload root** limpo contém somente inputs source reais; os paths reservados
+   `.phase8-generated/payload-context-manifest.json` e
+   `.phase8-generated/source-attestation.json` precisam estar ausentes;
+2. fora do payload root, `payload-context-manifest.json` canônico enumera cada input
+   Docker-reachable por path relativo, kind, mode, symlink target quando permitido,
+   bytes e hash — incluindo Dockerfile, `.dockerignore`, wheel, profile/config,
+   skills/plugins e todos os sources de `COPY/ADD`;
+3. `source-attestation.json` referencia o payload-manifest hash e fixa
+   upstream/wheel/runtime commit/tree, graph/profile/catalog hashes. Ela exclui
+   explicitamente os dois artifacts gerados do domínio do payload.
+
+O controller monta o contexto final como tar canônico a partir **exclusivamente**
+dos members listados no payload manifest mais os dois generated metadata files.
+Não passa um diretório mutável ao builder. Uma identidade externa
+`build_input_identity = H(domain, payload_manifest_bytes/hash,
+source_attestation_bytes/hash)` cobre payload + attestation sem auto-referência.
+Payload manifest e source attestation são baked em paths/labels fixos; a identidade
+externa entra no `release-manifest.json`.
+
+O preflight interpreta todos os stages/instruções do Dockerfile e a semântica de
+`.dockerignore`, resolve wildcards e exige igualdade entre o universo alcançável e
+o manifest. `ADD` remoto, named/external context, bind mount de build, path não
+listado, member extra, `COPY` que resolve fora do universo ou mudança de
+Dockerfile/`.dockerignore` falham. Poison tests adicionam arquivo não listado e
+alargam `COPY`; ambos precisam falhar antes do builder.
 
 Depois da publicação, um `release-manifest.json` externo, imutável e montado
 read-only no container, vincula:
@@ -978,20 +1080,27 @@ read-only no container, vincula:
 upstream commit/tree
 → wheel 0.8.0 hash/bytes
 → runtime candidate commit/tree limpo
-→ build-context manifest/hash
+→ payload-context manifest/hash
+→ source-attestation hash
+→ external build-input identity
 → OCI index digest
 → linux/arm64 child manifest digest
 → config/layers
-→ container efetivo
 ```
 
 Não se tenta incorporar o digest OCI da própria imagem dentro dela. O controller
-verifica manifest→config/layers→container; o startup verifica que a source
+verifica manifest→config/layers; o startup verifica payload manifest/source
 attestation baked, release manifest montado, expected child digest injetado,
-runtime graph e capability/deployment hashes concordam. Qualquer lado ausente ou
-divergente falha readiness. O hash do release manifest externo é igual em todas as
-instâncias da mesma release; somente o `DeploymentBinding` hash-autenticado e
-aprovado pelo gate é específico da instância.
+runtime graph e stage binding hashes. Qualquer lado ausente ou divergente falha
+readiness. O release manifest comum termina em child/config/layers e seu hash é
+igual em todas as instâncias da mesma release.
+
+Container ID, runtime mounts, resolved immutable image reference, instance ID,
+root paths/classes, effective config digest e stage binding pertencem a uma
+`ContainerExecutionAttestation` por instância. O controller cria e revalida essa
+attestation após `docker create` e antes de readiness; ela referencia o release
+manifest, mas não altera o documento comum. Canary, produção e rollback precisam
+de attestations próprias que provem child digest→config/layers→container efetivo.
 
 SOUL, HERMES, profile, skills, plugin, config não secreto, ToolDispatch catalog,
 modelo/provider/reasoning e Hermes version ficam dentro da imagem ou têm hashes
@@ -1000,9 +1109,43 @@ exatos no release manifest e são verificados fail-closed no startup. O
 receipts. Segredos são referenciados somente por nomes de slots/capabilities, nunca
 por valor ou hash reversível.
 
-Esta decisão substitui os trechos anteriores da spec/plano Phase 8 que tratavam
-image ID + archive como identidade primária. Spec, plano, ADR/evidência e scripts
-principais precisam ser corrigidos e aprovados antes do build.
+Esta decisão substitui os trechos anteriores que tratavam image ID + archive como
+identidade primária. A substituição precisa ocorrer **antes do Slice 0**, não no
+fim da implementação.
+
+### Quarentena obrigatória antes do Slice 0
+
+Os blobs abaixo são inputs históricos, não autoridade executável:
+
+| Path | Blob/SHA-256 histórico |
+|---|---|
+| `docs/superpowers/specs/2026-07-21-phase-8-shadow-canary-rollout-design.md` | `0613b334f99d0601f2b9e1aec16dc2d5c044e6ee` / `93136a8832d8895a312c40a52b942f22bc0a094d5d38b5d1545bd1cd883e14a3` |
+| `docs/superpowers/plans/2026-07-21-phase-8-shadow-canary-rollout.md` | `20a320227bcd74d108c526fc448a9a09392ceff7` / `2765510f1ca4ec371e7843bc189ef47a4872d5369341a1c763041563a5c0256d` |
+| `docs/refactor/decisions/0006-promote-identical-oci-digest.md` | `27fbe14cd56c37508091e8c737fc6d1de5c38122` / `33023167589e8714b9c19f1dfdc372732ccf83c3ce1d1c6630057c7498a9f767` |
+| `docs/refactor/phases/phase-08-shadow-canary-rollout.md` | `0f8631a1766a0ac582ed0535a12435d9d8377c47` / `2ca3a2f9dd626bc9f25de4c0cf42a6a6c75063c9724b06e1fd18f49ec88910ec` |
+| `docs/refactor/evidence/phase-08/entry-baseline.json` | `7885d05d2446f255379128b2b9a2bc67bad625e4` / `7acb04dbe81831d70d42b9cc16b30b686b96e14891a3d86e64717b59146028cd` |
+| `docs/refactor/evidence/phase-08/red-results.json` | `52b3c2466f716636c013ca648fdc740ce6b39a87` / `5d385dca3986c1e746576232d519397e60d3003db258340848b694550bd26b32` |
+| `tests/test_phase8_entry.py` | `a96aeafaf76b6a497041771418ae6f399ac45609` / `1068f2d416d416f755ea839d141fc46ad998b87b1a016a3840c407fa7f3c2e88` |
+
+Antes de qualquer RED do Slice 0, um commit de contract replacement deve:
+
+1. publicar o plano substituto
+   `docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md`;
+2. atualizar ADR 0006, phase page, risk/evidence interfaces e entry tests para
+   child manifest arm64, F/E evidence pair e gates desta spec;
+3. marcar spec/plano anteriores como `HISTORICAL-NON-EXECUTABLE` e removê-los de
+   qualquer index/validator/command owner ativo;
+4. publicar um quarantine manifest com paths, blobs e SHA-256 completos;
+5. provar por teste/scan que nenhum comando ou import ativo referencia as
+   interfaces antigas.
+
+Até esse commit/plano receberem aprovação, ficam proibidos os comandos/interfaces
+do plano antigo: `docker buildx build --load`, `docker image save`,
+`python3 -B scripts/build_phase8_image.py`,
+`python3 -B scripts/generate_phase8_manifest.py --write|--check`,
+`ImageIdentity(image_id, archive_sha256, ...)` como autoridade e qualquer
+create/promote por image ID. Slice 18 apenas **verifica e fecha** o contrato já
+corrigido; ele não corrige retrospectivamente o plano que governou Slices 0–17.
 
 ## Alternatives consideradas
 
@@ -1036,19 +1179,56 @@ na transação do turno.
 Cada slice exige RED causal, GREEN focado, blast radius pelo módulo e revisão
 antes do próximo. Não executar suíte integral repetidamente.
 
-Envelope de evidência obrigatório por RED/GREEN:
+Cada RED possui identidade reproduzível própria:
 
-- base commit/tree e status;
-- comando exato, exit code, duração e contagens;
-- SHA-256 e bytes do raw output; somente o raw fica em `/tmp`;
-- conclusão causal sanitizada versionada.
+```text
+U = unfixed base commit/tree
+P = test-only patch blob/SHA-256 + exact paths
+S = expected staged Git tree after applying P to U
+R = execution-root manifest + command/env/exit/duration/counts
+O = exact raw output object SHA-256/bytes
+```
 
-Reviews são AND gates no mesmo commit/tree/package. `Needs fixes`, timeout ou
-summary ausente valem zero. Qualquer correção material invalida todas as
-aprovações do pacote e exige nova rodada completa das lanes.
+O runner cria worktree detached/temporary index a partir de U, aplica P, verifica
+que apenas test/fixture paths permitidos mudaram e que `git write-tree == S`, então
+executa em `S`. O envelope fixa U/P/S, root absoluto resolvido, Python/tool versions,
+env-name allowlist sem valores secretos, comando exato e O. Um patch que toca
+production code não é RED elegível. Reexecução a partir de U/P precisa reproduzir
+a mesma causa/asserção, embora duração e formatação não determinística explicitada
+possam variar em campos excluídos do oracle.
+
+Raw output não entra no Git. Em vez de `/tmp`, ele vai para um
+`EvidenceArtifactStore` privado, content-addressed e retido até o closeout:
+
+- runner usa env scrubbed e scanner fail-closed para impedir segredo ou PII de
+  lead no output retido;
+- object é criado atomicamente por `O_EXCL`, recebe `fsync`, mode read-only e nome
+  pelo SHA-256;
+- manifest externo fixa path, bytes, hash e retention; reviewers reabrem e
+  rehasheiam o object;
+- ausência, mutação, scanner failure ou retenção não comprovada vale zero.
+
+Depois dos RED/GREEN, congela-se o par:
+
+```text
+F = functional candidate commit/tree (code + tests, sem evidence-only envelopes)
+E = filho direto de F contendo somente evidence/quarantine/manifest paths
+```
+
+`E` versiona P, S e envelopes sanitizados que apontam para O; não versiona raw.
+Um validator prova parent(E)==F, diff F→E restrito à allowlist evidence-only e
+ausência de mudança em source/tests/package inputs. Builds, wheels e testes
+funcionais usam F; auditoria usa o par F/E e os objects retidos. Package hash,
+wheel bytes e runtime candidate são fixados ao mesmo par quando aplicável.
+
+Reviews são AND gates no mesmo **F/E pair + package identity**. `Needs fixes`,
+timeout ou summary ausente valem zero. Qualquer mudança material em F, E, wheel,
+package ou evidence object invalida todas as aprovações e exige nova rodada.
 
 ### Slice 0 — Contract lock
 
+- contract-replacement commit/plano/quarantine manifest do Gate 2 já aprovados;
+- scanner prova interfaces antigas históricas e comandos antigos inalcançáveis;
 - testes de estrutura para novos types/ports;
 - RED prova que v0.7.0 não contém projection, proposal, receipt e relay;
 - nenhum runtime change.
@@ -1060,6 +1240,11 @@ aprovações do pacote e exige nova rodada completa das lanes.
 - source event identities, `MayaTurnRequest/Closure/Proposal`;
 - normalized tool/learning proposals, transcript binding e graph/policy/binding
   digests;
+- `EffectiveE2EDeploymentBinding`, `SealedCanaryQualificationBinding`,
+  `BehaviorTransitionReceipt`, `RolloutAuthorization` e
+  `ProductionInitialDeploymentBinding`;
+- qualification/admission states e transformação fechada, com canonical wire,
+  completeness, zero-learning e forbidden-field mutations;
 - public message/receipt/relay types;
 - genesis lookup tri-state e `BoundaryInternalJob` handoff/learning;
 - exact-type, canonical serialization, unknown-field e mutation tests.
@@ -1178,6 +1363,9 @@ aprovações do pacote e exige nova rodada completa das lanes.
 - graph completo sem `None`;
 - graph/capability digests verificados e persistidos;
 - ownership/internal/relay/public/learning workers e reconcilers supervisionados;
+- qualification controller bloqueia admission/normal learning claims antes de
+  drenar, sela por CAS e mantém freeze até rollout/cancel;
+- effective→qualification→authorization→production oracles bilaterais e mutations;
 - historical transcript/target-ingress semantic scan em readiness;
 - memory-learning target receipt atômico e somente pós-commit;
 - roots canary/prod distintos;
@@ -1198,14 +1386,14 @@ aprovações do pacote e exige nova rodada completa das lanes.
 
 - properties/faults/restarts/contention/mutations afetadas;
 - suíte integral upstream única;
-- validator terminal e revisão funcional no mesmo commit/tree;
-- somente depois congelar o commit upstream elegível.
+- validator terminal e revisão funcional no mesmo F/E pair;
+- somente depois congelar o functional commit F e evidence child E elegíveis.
 
 ### Slice 15 — Wheel 0.8.0
 
 - construir nova wheel 0.8.0;
 - RECORD/metadata/wire/schema/hash/bytes autenticados;
-- package review 3/3 no mesmo wheel e upstream commit/tree.
+- package review 3/3 no mesmo wheel e upstream F/E pair.
 
 ### Slice 16 — Runtime candidate e wiring
 
@@ -1218,12 +1406,16 @@ aprovações do pacote e exige nova rodada completa das lanes.
 
 - suíte integral runtime única para o candidato final;
 - startup/restart/crash/worker readiness;
-- revisão funcional/security/packaging 3/3 no mesmo commit/tree/wheel;
+- revisão funcional/security/packaging 3/3 no mesmo source/runtime F/E pairs e
+  wheel;
 - source/runtime live fingerprints reautenticados.
 
 ### Slice 18 — Release contract executável
 
-- corrigir spec/plano/ADR/evidence Phase 8 para child manifest `linux/arm64`;
+- verificar que spec/plano/ADR/evidence já foram substituídos antes do Slice 0 e
+  continuam coerentes com child manifest `linux/arm64`;
+- payload-context manifest, source attestation e external build-input identity
+  sem ciclo; canonical tar + Dockerfile/`.dockerignore` poison tests;
 - registry local immutable-policy, index/child/config/layers e rollback import;
 - chain source→wheel→runtime→OCI→container;
 - graph/profile/config/policy hashes;
@@ -1238,6 +1430,9 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 
 - design não aprovado;
 - timeout de auditor/reviewer sem summary;
+- plano substituto/quarantine não aprovados antes do Slice 0;
+- RED sem U/P/S/O reproduzíveis ou raw object retido;
+- review não está vinculada ao mesmo F/E pair + package identity;
 - DB v7 real descoberto;
 - reply ainda produzida/enfileirada pós-commit;
 - filho consegue injetar observation/fact/proposal fora do transcript pai;
@@ -1248,23 +1443,28 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - command relay sem bundle full-replay/source receipt ou best-effort;
 - receipt/row integrity não é bidirecional;
 - public send sem fence/receipt por chamada ou reconciler;
+- policy/binding/allowlist avaliada somente depois do dispatch fence;
 - UDS sem HMAC/peer/final transcript binding;
 - transcript/proposal/decision não recomputável após restart;
 - plugin filho ainda alcança ToolExecutor/provider/delivery/memory writer;
-- attempt orphan não tem owner-lock/scavenger fail-closed;
+- attempt creation/scavenger não usa staging+root coordination lock+atomic publish;
 - transaction aberta durante LLM/read remoto;
 - write boundary persistido antes de Maya;
-- snapshot legacy não está congelado/revalidado até commit;
+- permit legacy anterior sobrevive a `FROZEN` ou não é revalidado no commit final;
+- snapshot legacy não é relido sob freeze antes da transaction boundary;
 - UoW Phase5/6 target não está no schema novo exato/root novo;
 - relay/internal/public lease machine não fecha pre-target/pre-fence CAS e expiry;
 - memory apply e `LearningReceipt` não são atômicos;
 - `create_app` aceita adapter obrigatório `None`;
 - factory/graph ou capability policy do E2E diferente da promoção;
-- behavior snapshot/transition receipt ou provider/workflow/effect scope diverge
-  entre último E2E e produção inicial;
-- `DeploymentBinding` muda fora do oráculo fechado aprovado;
+- qualification aceita ingress/learning depois do cutoff ou sela antes do drain;
+- effective binding, qualification, transition receipt, rollout authorization ou
+  production binding não formam a transformação fechada aprovada;
 - qualquer ingress mutante bypassa seu boundary;
 - mixed-mode iniciado antes do compatibility guard de migration ownership;
+- payload context/attestation é circular, aceita member não listado ou depende de
+  directory build context mutável;
+- release manifest comum inclui container/instance state;
 - promoção/rollback não fixados ao child manifest digest `linux/arm64`;
 - Slice 14–18 ou review AND gate incompleto;
 - runtime operacional alterado antes da autorização correspondente.
@@ -1272,34 +1472,40 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 ## Gates de aprovação
 
 1. **Design:** Carlos aprova esta arquitetura; ainda sem código.
-2. **Plano:** plano TDD detalhado e revisado; ainda sem build.
-3. **Upstream terminal closeout:** Slice 14 verde no commit exato.
-4. **Wheel:** 0.8.0 autenticada e package review 3/3.
-5. **Runtime wiring terminal:** candidata nova, Slice 17 e review 3/3.
+2. **Plano/quarentena:** plano TDD substituto, quarantine manifest, ADR/page/evidence
+   interfaces corrigidos e review aprovados; só então Slice 0 pode começar.
+3. **Upstream terminal closeout:** Slice 14 verde no source F/E pair exato.
+4. **Wheel:** 0.8.0 autenticada e package review 3/3 no mesmo F/E pair.
+5. **Runtime wiring terminal:** candidata nova, Slice 17 e review 3/3 nos source e
+   runtime F/E pairs exatos.
 6. **Release contract / GO de build:** Slice 18, source/runtime live reautenticados
    e decisão explícita; nenhuma etapa anterior implica build.
 7. **Build:** uma única publicação OCI; index e child manifest arm64 autenticados.
 8. **Dark canary:** reads reais; graph completo; zero provider write/delivery.
 9. **Ingress fechado:** rota/allowlist restritas, outbound fechado, estado limpo.
-10. **Conversation readiness:** mesma imagem/digest; allowlist efetiva com
+10. **Migration ownership readiness:** antes de abrir public delivery para uma
+    identidade possivelmente legacy, compatibility guard, permits/drain e
+    reconciler autenticam todos os ingress/efeitos. Alternativa somente por decisão
+    explícita: identidade `PROVEN_ABSENT` e mecanicamente inalcançável por todo
+    mutator legacy, ou cutover global quiescente.
+11. **Conversation readiness:** mesma imagem/digest; allowlist efetiva com
     cardinalidade exatamente um; a única capability de **efeito externo** aberta é
     public delivery (reads permanecem read-only); learning pode operar apenas na
     memória canary isolada;
     provider/command-relay/payment/handoff effects mecanicamente fechados;
     state/session/outboxes canary limpos; memory baseline autenticada e isolada;
     zero pendência antiga; readiness verde e revisão aprovada.
-11. **Teste humano:** somente agora Carlos é avisado e executa as conversas.
-12. **Migration ownership readiness:** antes de qualquer E2E/mixed-mode sobre lead
-    legacy, compatibility guard e reconciler autenticam todos os ingress/efeitos;
-    alternativa é cutover global quiescente explicitamente escolhido.
-13. **Canary E2E:** autorização separada para provider/workflow/período e policy
-    exatos; drena learning, sela behavior snapshot/transition receipt e bloqueia
-    novos ingress; policy/scopes aprovados são idênticos ao rollout inicial.
-14. **Rollout:** decisão separada, gradual, mesmo child manifest, policy, behavior
-    snapshot/transition receipt e scopes; binding muda só pelo oráculo aprovado.
+12. **Teste humano:** somente agora Carlos é avisado e executa as conversas.
+13. **Canary E2E/qualification:** autorização separada para
+    provider/workflow/período/policy exatos; admission fecha primeiro, drena o
+    conjunto finito, sela behavior por CAS e produz transition receipt +
+    qualification binding. Policy/scopes são os do rollout inicial.
+14. **Rollout:** decisão e `RolloutAuthorization` separadas; gradual, mesmo child
+    manifest/policy/scopes/snapshot selado; production binding nasce somente pela
+    função fechada qualification+authorization.
 15. **Closeout Phase 8:** decisão posterior e separada, com snapshot terminal,
     review 3/3 no mesmo SHA/tree, CI remoto exato, manifests/riscos atualizados,
     rollback por digest preservado e `phase9_started=false`.
 
-Até o Gate 10 completo, não é momento de avisar Carlos para conversar com o
+Até o Gate 11 completo, não é momento de avisar Carlos para conversar com o
 agente. Rollout não implica closeout, e closeout não autoriza a Fase 9.
