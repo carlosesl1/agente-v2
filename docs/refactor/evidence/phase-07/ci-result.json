@@ -1,0 +1,103 @@
+{
+  "artifacts": [
+    {
+      "created_at": "2026-07-21T05:29:25Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:29:24Z",
+      "id": 8484826737,
+      "name": "phase7-faults-73904070dfcb52a3183459bc97abbc87595e1efe",
+      "size_in_bytes": 9195
+    },
+    {
+      "created_at": "2026-07-21T05:29:23Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:29:23Z",
+      "id": 8484826142,
+      "name": "phase7-properties-73904070dfcb52a3183459bc97abbc87595e1efe",
+      "size_in_bytes": 1690573
+    },
+    {
+      "created_at": "2026-07-21T05:29:19Z",
+      "expired": false,
+      "expires_at": "2026-08-20T05:29:18Z",
+      "id": 8484824703,
+      "name": "phase7-mutations-73904070dfcb52a3183459bc97abbc87595e1efe",
+      "size_in_bytes": 889
+    }
+  ],
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "conclusion": "success",
+  "event": "push",
+  "head_sha": "73904070dfcb52a3183459bc97abbc87595e1efe",
+  "jobs": [
+    {
+      "completed_at": "2026-07-21T05:29:25Z",
+      "conclusion": "success",
+      "id": 88551013112,
+      "name": "phase7-properties",
+      "started_at": "2026-07-21T05:29:13Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551013112"
+    },
+    {
+      "completed_at": "2026-07-21T05:29:21Z",
+      "conclusion": "success",
+      "id": 88551013148,
+      "name": "phase7-mutations",
+      "started_at": "2026-07-21T05:29:13Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551013148"
+    },
+    {
+      "completed_at": "2026-07-21T05:31:36Z",
+      "conclusion": "success",
+      "id": 88551013150,
+      "name": "full-suite",
+      "started_at": "2026-07-21T05:29:13Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551013150"
+    },
+    {
+      "completed_at": "2026-07-21T05:29:28Z",
+      "conclusion": "success",
+      "id": 88551013162,
+      "name": "phase7-faults",
+      "started_at": "2026-07-21T05:29:13Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551013162"
+    },
+    {
+      "completed_at": "2026-07-21T05:29:23Z",
+      "conclusion": "success",
+      "id": 88551013171,
+      "name": "static",
+      "started_at": "2026-07-21T05:29:14Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551013171"
+    },
+    {
+      "completed_at": "2026-07-21T05:31:40Z",
+      "conclusion": "success",
+      "id": 88551429286,
+      "name": "gate",
+      "started_at": "2026-07-21T05:31:38Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764/job/88551429286"
+    }
+  ],
+  "live_capabilities_executed": [],
+  "phase": 7,
+  "phase8_started": false,
+  "rollout": "NO-GO",
+  "run_created_at": "2026-07-21T05:29:11Z",
+  "run_id": 29804123764,
+  "run_started_at": "2026-07-21T05:29:11Z",
+  "run_updated_at": "2026-07-21T05:31:41Z",
+  "run_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29804123764",
+  "schema_version": 1,
+  "status": "completed",
+  "terminal_snapshot_commit": "73904070dfcb52a3183459bc97abbc87595e1efe",
+  "terminal_snapshot_tree": "7017fcf9f88c87e89eef2e633904d539649949b0",
+  "workflow_path": ".github/workflows/phase7.yml"
+}

@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **candidato funcional aprovado 3/3; snapshot terminal autocontido em remediação de CI**.
+Status: **Fase 7 tecnicamente fechada; revisão 3/3 e CI terminal autenticado**.
 
 ## Entrada
 
@@ -140,6 +140,13 @@ foi aprovado 3/3, sem findings, no batch `deleg_4f26f158`.
 `review-attempt-9.json`, `review9-raw-reports/` e `review-result.json` vinculam
 o próximo CI exatamente a esse snapshot. O evidence child da aprovação usa
 `[skip ci]`; somente o push temporário do SHA terminal abrirá o novo run.
+
+O run terminal `29804123764` executou exatamente `73904070...` e concluiu
+`success`: static, full-suite, properties, faults, mutations e gate passaram.
+Os três artifacts estão vinculados ao mesmo SHA. `ci-result.json` preserva os
+IDs, URLs, timestamps, jobs e artifacts autenticados. A Fase 7 está tecnicamente
+fechada; merge, aplicação do patch, deploy e rollout continuam decisões
+separadas e não autorizadas por este closeout.
 
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi

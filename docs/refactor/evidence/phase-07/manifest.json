@@ -1,5 +1,5 @@
 {
-  "aggregate_sha256": "3f8f3936415c93ee0827e3894d6d0da9d2c69388c77e558e404be659abe75d05",
+  "aggregate_sha256": "84ac309ce2b27292ec606eb8f9abbdcfd72dab4747509b6872da4694371787c0",
   "file_count": 130,
   "files": [
     {
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "4001f75fb2b0c71a26b11843d0fded5383b970c766e9616868d32435714c293f",
-      "size": 9190
+      "sha256": "495d8aadc8e06492a368e995e3d152611ced1da77a9f239dabf5b0c1c411abfb",
+      "size": 9610
     },
     {
       "path": "docs/refactor/evidence/phase-07/ci-result-invalidated-29787387850.json",
@@ -584,8 +584,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "3ff1447ad9ae105ba7e1c2cb9fb0ebb66f53e7e8374c5c738d7a102556327271",
-      "size": 19666
+      "sha256": "e4108e564bcfefc2fc0850a32f5ae67f8cf85ffd8a6753e0786db76fd6f803d3",
+      "size": 20136
     },
     {
       "path": "tests/test_phase7_coordinator.py",

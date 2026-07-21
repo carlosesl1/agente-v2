@@ -224,26 +224,32 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase8_started"])
 
-    def test_evidence_validator_blocks_only_on_current_ci_after_review(self) -> None:
+    def test_evidence_validator_reflects_current_terminal_artifacts(self) -> None:
         pre = validate_phase7(terminal=False)
         self.assertEqual(pre["result"], "passed")
-        self.assertFalse(pre["terminal_ready"])
         self.assertEqual(pre["live_capabilities_executed"], [])
         self.assertEqual(pre["rollout"], "NO-GO")
         terminal = validate_phase7(terminal=True)
-        self.assertEqual(terminal["result"], "blocked")
-        self.assertTrue(terminal["terminal_blocked"])
-        self.assertEqual(
-            terminal["blockers"],
-            [
-                "missing terminal artifact: ci-result.json",
-            ],
-        )
-        self.assertFalse(terminal["terminal_ready"])
-        self.assertEqual(
-            terminal["missing_terminal_artifacts"],
-            ["ci-result.json"],
-        )
+        if (ROOT / "docs/refactor/evidence/phase-07/ci-result.json").is_file():
+            self.assertTrue(pre["terminal_ready"])
+            self.assertEqual(pre["missing_terminal_artifacts"], [])
+            self.assertEqual(terminal["result"], "passed")
+            self.assertTrue(terminal["terminal_ready"])
+            self.assertEqual(terminal["blockers"], [])
+            self.assertEqual(terminal["missing_terminal_artifacts"], [])
+        else:
+            self.assertFalse(pre["terminal_ready"])
+            self.assertEqual(terminal["result"], "blocked")
+            self.assertTrue(terminal["terminal_blocked"])
+            self.assertEqual(
+                terminal["blockers"],
+                ["missing terminal artifact: ci-result.json"],
+            )
+            self.assertFalse(terminal["terminal_ready"])
+            self.assertEqual(
+                terminal["missing_terminal_artifacts"],
+                ["ci-result.json"],
+            )
 
     def test_terminal_ci_binds_to_reviewed_terminal_snapshot_not_functional_parent(self) -> None:
         source_dir = ROOT / "docs/refactor/evidence/phase-07"
