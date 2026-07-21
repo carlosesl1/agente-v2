@@ -69,6 +69,11 @@ class Phase7FaultHarnessTests(unittest.TestCase):
             replace(report, passed=False)
         with self.assertRaises((TypeError, ValueError)):
             FaultReport(report.faults, True, 10, True, 9)
+        with self.assertRaises(ValueError):
+            replace(report.contention_details[0], detail_hash="0" * 64)
+        forged_catalog = report.contention_details[:-1] + (report.contention_details[0],)
+        with self.assertRaises(ValueError):
+            replace(report, contention_details=forged_catalog)
 
 
 if __name__ == "__main__":

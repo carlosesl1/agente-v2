@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "ec8ac6ae49b1281e1748ae26bc35789a010530ba4e9bbc9d9a7d6079addc08c9",
-  "file_count": 60,
+  "aggregate_sha256": "f52dcfd0207bde79f755993095e070ebb42294bfb70018ea38691493f29192cd",
+  "file_count": 62,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -44,8 +44,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/red-results.json",
-      "sha256": "c929d13e1ba445d00d859502259d1e8f7174604b80b3d2b53219b67da6ebe286",
-      "size": 19031
+      "sha256": "613cc08a8ac270d2ecacde1dd05728bb4d92123236a089871bef35cf681a7f4a",
+      "size": 20868
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
@@ -58,9 +58,19 @@
       "size": 1192
     },
     {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-contention-integrity-test.patch",
+      "sha256": "6d6ac87c023036cc8617dfbc3e7d673e35e2af0b61ff1a12416f52a0474652a4",
+      "size": 784
+    },
+    {
       "path": "docs/refactor/evidence/phase-07/review-remediation-empty-wires.patch",
       "sha256": "dff472ab41514d18eedddc2ff43644a32b066cf38da9d74d379cffac6d033462",
       "size": 42623
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-fault-validator-unfixed.patch",
+      "sha256": "f73b2c8de36e36456fc4ea92a235c891791f456d11ecab08aef75fb73dbc81ff",
+      "size": 8532
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-tests.patch",
@@ -134,8 +144,8 @@
     },
     {
       "path": "reservation_boundary/faults.py",
-      "sha256": "dca361d62d08f594f77e2f97c5393ff646f6381edf87c1e25e9d82ed806e327a",
-      "size": 22437
+      "sha256": "bb7992b490479f432c4cc0c5d933e8741a6853b7566620ca5586d5a97deeebe5",
+      "size": 24201
     },
     {
       "path": "reservation_boundary/legacy_state.py",
@@ -224,8 +234,8 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "548b7bff42737b4d4302d9c1c3d35d82bf5df32e3a20099b1e575a65b69064a4",
-      "size": 12727
+      "sha256": "7c450c9391e1cc3b5fab3738e1e7dd654d86b82ea3d20b11913ee80118111d93",
+      "size": 15343
     },
     {
       "path": "tests/phase7_helpers.py",
@@ -234,8 +244,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "def957a0b5948935c9843451b4c99427123f0897209387a75d744d13af8bb5fa",
-      "size": 10649
+      "sha256": "d861abd4194060d8a27fb3244e098a0fcecf449c4c6e2323ab1e3fefedcad4fa",
+      "size": 12960
     },
     {
       "path": "tests/test_phase7_coordinator.py",
@@ -249,8 +259,8 @@
     },
     {
       "path": "tests/test_phase7_fault_injection.py",
-      "sha256": "ec82393a27316d7f94e470f70828d3e8fe1d8198aeb28d165f019a8ff963d489",
-      "size": 3020
+      "sha256": "38ea30b53a4a9e3cdaf2f6349d1c8c8626df1147fd3beebd331b3d6f942389c4",
+      "size": 3333
     },
     {
       "path": "tests/test_phase7_legacy_state.py",

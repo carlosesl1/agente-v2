@@ -61,6 +61,38 @@ MUTANT_COUNT: Final = 12
 T0: Final = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
 
 
+def _contention_detail_hash(
+    *,
+    domain: str,
+    round_index: int,
+    contenders: int,
+    winners: int,
+    conflicts: int,
+    state_rows: int,
+    event_rows: int,
+    command_rows: int,
+    outbox_rows: int,
+    passed: bool,
+) -> str:
+    material = json.dumps(
+        {
+            "command_rows": command_rows,
+            "conflicts": conflicts,
+            "contenders": contenders,
+            "domain": domain,
+            "event_rows": event_rows,
+            "outbox_rows": outbox_rows,
+            "passed": passed,
+            "round_index": round_index,
+            "state_rows": state_rows,
+            "winners": winners,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class FaultRow:
     name: str
@@ -112,6 +144,20 @@ class ContentionRow:
             raise TypeError("contention passed must be an exact bool")
         if type(self.detail_hash) is not str or re.fullmatch(r"[0-9a-f]{64}", self.detail_hash) is None:
             raise ValueError("contention detail_hash must be a lowercase SHA-256")
+        expected_hash = _contention_detail_hash(
+            domain=self.domain,
+            round_index=self.round_index,
+            contenders=self.contenders,
+            winners=self.winners,
+            conflicts=self.conflicts,
+            state_rows=self.state_rows,
+            event_rows=self.event_rows,
+            command_rows=self.command_rows,
+            outbox_rows=self.outbox_rows,
+            passed=self.passed,
+        )
+        if self.detail_hash != expected_hash:
+            raise ValueError("contention detail_hash must derive from the published row")
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +190,14 @@ class FaultReport:
             or len(self.contention_details) != self.contention_rows
         ):
             raise ValueError("contention rows must reconstruct from exact details")
+        rounds_per_domain = self.contention_rows // len(CONTENTION_DOMAINS)
+        expected_catalog = tuple(
+            (domain, index)
+            for domain in CONTENTION_DOMAINS
+            for index in range(rounds_per_domain)
+        )
+        if tuple((row.domain, row.round_index) for row in self.contention_details) != expected_catalog:
+            raise ValueError("contention details must cover each domain/round exactly once")
         expected_passed = (
             all(row.passed for row in self.faults)
             and self.restarts_passed
@@ -545,19 +599,6 @@ def _contention_round(domain: str, index: int) -> ContentionRow:
             1 if domain == "outbox" else 0,
         )
         passed = winners == 1 and conflicts == 1 and counts == expected
-        material = json.dumps(
-            {
-                "conflicts": conflicts,
-                "counts": counts,
-                "domain": domain,
-                "index": index,
-                "outcomes": outcomes,
-                "passed": passed,
-                "winners": winners,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
         return ContentionRow(
             domain,
             index,
@@ -569,7 +610,18 @@ def _contention_round(domain: str, index: int) -> ContentionRow:
             counts[2],
             counts[3],
             passed,
-            hashlib.sha256(material.encode()).hexdigest(),
+            _contention_detail_hash(
+                domain=domain,
+                round_index=index,
+                contenders=2,
+                winners=winners,
+                conflicts=conflicts,
+                state_rows=counts[0],
+                event_rows=counts[1],
+                command_rows=counts[2],
+                outbox_rows=counts[3],
+                passed=passed,
+            ),
         )
 
 

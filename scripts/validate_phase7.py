@@ -65,6 +65,83 @@ def _loads_json_strict(payload: str) -> object:
     return json.loads(payload, object_pairs_hook=_reject_duplicate_keys)
 
 
+def _fault_gate_is_authentic(payload: dict[str, object]) -> bool:
+    if type(payload) is not dict:
+        return False
+    if (
+        payload.get("passed") is not True
+        or payload.get("restart_schedules") != 2_000
+        or payload.get("restarts_passed") is not True
+        or payload.get("contention_rows") != 200
+        or payload.get("contention_domains")
+        != ["genesis", "event", "command", "outbox"]
+    ):
+        return False
+    faults = payload.get("faults")
+    expected_faults = (
+        "after_state_update",
+        "after_event_insert",
+        "stale_fence",
+        "event_hash_conflict",
+        "genesis_conflict",
+        "state_hash_tamper",
+    )
+    if type(faults) is not list or len(faults) != len(expected_faults):
+        return False
+    for row, name in zip(faults, expected_faults, strict=True):
+        expected_hash = hashlib.sha256(f"phase7:{name}:1".encode()).hexdigest()
+        if (
+            type(row) is not dict
+            or set(row) != {"detail_hash", "name", "passed"}
+            or row.get("name") != name
+            or row.get("passed") is not True
+            or row.get("detail_hash") != expected_hash
+        ):
+            return False
+    details = payload.get("contention_details")
+    if type(details) is not list or len(details) != 200:
+        return False
+    detail_keys = {
+        "command_rows",
+        "conflicts",
+        "contenders",
+        "detail_hash",
+        "domain",
+        "event_rows",
+        "outbox_rows",
+        "passed",
+        "round_index",
+        "state_rows",
+        "winners",
+    }
+    expected_catalog = tuple(
+        (domain, index)
+        for domain in ("genesis", "event", "command", "outbox")
+        for index in range(50)
+    )
+    for row, (domain, index) in zip(details, expected_catalog, strict=True):
+        if type(row) is not dict or set(row) != detail_keys:
+            return False
+        expected_values = {
+            "command_rows": 1 if domain == "command" else 0,
+            "conflicts": 1,
+            "contenders": 2,
+            "domain": domain,
+            "event_rows": 0 if domain == "genesis" else 1,
+            "outbox_rows": 1 if domain == "outbox" else 0,
+            "passed": True,
+            "round_index": index,
+            "state_rows": 1,
+            "winners": 1,
+        }
+        if any(type(row.get(key)) is not type(value) or row.get(key) != value for key, value in expected_values.items()):
+            return False
+        material = json.dumps(expected_values, sort_keys=True, separators=(",", ":"))
+        if row.get("detail_hash") != hashlib.sha256(material.encode()).hexdigest():
+            return False
+    return True
+
+
 def _json(relative: str) -> dict[str, object]:
     payload = _loads_json_strict((ROOT / relative).read_text(encoding="utf-8"))
     if type(payload) is not dict:
@@ -230,7 +307,7 @@ def _terminal_artifact_checks() -> tuple[list[str], list[str]]:
         failures.append("local integration gate failed")
     if properties.get("passed") is not True or properties.get("total") != 20_000:
         failures.append("property gate incomplete")
-    if faults.get("passed") is not True or faults.get("restart_schedules") != 2_000 or faults.get("contention_rows") != 200:
+    if not _fault_gate_is_authentic(faults):
         failures.append("fault/restart/contention gate incomplete")
     if mutations.get("passed") is not True or mutations.get("killed") != 12:
         failures.append("mutation gate incomplete")

@@ -1,0 +1,231 @@
+diff --git a/reservation_boundary/faults.py b/reservation_boundary/faults.py
+index be44f3f..388ac3d 100644
+--- a/reservation_boundary/faults.py
++++ b/reservation_boundary/faults.py
+@@ -61,6 +61,38 @@ MUTANT_COUNT: Final = 12
+ T0: Final = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+ 
+ 
++def _contention_detail_hash(
++    *,
++    domain: str,
++    round_index: int,
++    contenders: int,
++    winners: int,
++    conflicts: int,
++    state_rows: int,
++    event_rows: int,
++    command_rows: int,
++    outbox_rows: int,
++    passed: bool,
++) -> str:
++    material = json.dumps(
++        {
++            "command_rows": command_rows,
++            "conflicts": conflicts,
++            "contenders": contenders,
++            "domain": domain,
++            "event_rows": event_rows,
++            "outbox_rows": outbox_rows,
++            "passed": passed,
++            "round_index": round_index,
++            "state_rows": state_rows,
++            "winners": winners,
++        },
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++    return hashlib.sha256(material.encode()).hexdigest()
++
++
+ @dataclass(frozen=True, slots=True)
+ class FaultRow:
+     name: str
+@@ -112,6 +144,20 @@ class ContentionRow:
+             raise TypeError("contention passed must be an exact bool")
+         if type(self.detail_hash) is not str or re.fullmatch(r"[0-9a-f]{64}", self.detail_hash) is None:
+             raise ValueError("contention detail_hash must be a lowercase SHA-256")
++        expected_hash = _contention_detail_hash(
++            domain=self.domain,
++            round_index=self.round_index,
++            contenders=self.contenders,
++            winners=self.winners,
++            conflicts=self.conflicts,
++            state_rows=self.state_rows,
++            event_rows=self.event_rows,
++            command_rows=self.command_rows,
++            outbox_rows=self.outbox_rows,
++            passed=self.passed,
++        )
++        if self.detail_hash != expected_hash:
++            raise ValueError("contention detail_hash must derive from the published row")
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -144,6 +190,14 @@ class FaultReport:
+             or len(self.contention_details) != self.contention_rows
+         ):
+             raise ValueError("contention rows must reconstruct from exact details")
++        rounds_per_domain = self.contention_rows // len(CONTENTION_DOMAINS)
++        expected_catalog = tuple(
++            (domain, index)
++            for domain in CONTENTION_DOMAINS
++            for index in range(rounds_per_domain)
++        )
++        if tuple((row.domain, row.round_index) for row in self.contention_details) != expected_catalog:
++            raise ValueError("contention details must cover each domain/round exactly once")
+         expected_passed = (
+             all(row.passed for row in self.faults)
+             and self.restarts_passed
+@@ -545,19 +599,6 @@ def _contention_round(domain: str, index: int) -> ContentionRow:
+             1 if domain == "outbox" else 0,
+         )
+         passed = winners == 1 and conflicts == 1 and counts == expected
+-        material = json.dumps(
+-            {
+-                "conflicts": conflicts,
+-                "counts": counts,
+-                "domain": domain,
+-                "index": index,
+-                "outcomes": outcomes,
+-                "passed": passed,
+-                "winners": winners,
+-            },
+-            sort_keys=True,
+-            separators=(",", ":"),
+-        )
+         return ContentionRow(
+             domain,
+             index,
+@@ -569,7 +610,18 @@ def _contention_round(domain: str, index: int) -> ContentionRow:
+             counts[2],
+             counts[3],
+             passed,
+-            hashlib.sha256(material.encode()).hexdigest(),
++            _contention_detail_hash(
++                domain=domain,
++                round_index=index,
++                contenders=2,
++                winners=winners,
++                conflicts=conflicts,
++                state_rows=counts[0],
++                event_rows=counts[1],
++                command_rows=counts[2],
++                outbox_rows=counts[3],
++                passed=passed,
++            ),
+         )
+ 
+ 
+diff --git a/tests/test_phase7_closeout.py b/tests/test_phase7_closeout.py
+index 0124b17..6f2f11e 100644
+--- a/tests/test_phase7_closeout.py
++++ b/tests/test_phase7_closeout.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import copy
++import hashlib
+ import json
+ from pathlib import Path
+ import re
+@@ -17,6 +18,7 @@ from scripts.generate_phase7_manifest import (
+ )
+ from scripts.validate_phase7 import (
+     _claims_are_closed,
++    _fault_gate_is_authentic,
+     _loads_json_strict,
+     _remote_ci_is_authentic,
+     _runtime_source_is_authentic,
+@@ -38,6 +40,53 @@ def read_json(relative: str) -> dict[str, object]:
+     return payload
+ 
+ 
++def valid_fault_payload() -> dict[str, object]:
++    domains = ("genesis", "event", "command", "outbox")
++    details: list[dict[str, object]] = []
++    for domain in domains:
++        for index in range(50):
++            values = {
++                "command_rows": 1 if domain == "command" else 0,
++                "conflicts": 1,
++                "contenders": 2,
++                "domain": domain,
++                "event_rows": 0 if domain == "genesis" else 1,
++                "outbox_rows": 1 if domain == "outbox" else 0,
++                "passed": True,
++                "round_index": index,
++                "state_rows": 1,
++                "winners": 1,
++            }
++            material = json.dumps(values, sort_keys=True, separators=(",", ":"))
++            details.append(
++                {**values, "detail_hash": hashlib.sha256(material.encode()).hexdigest()}
++            )
++    names = (
++        "after_state_update",
++        "after_event_insert",
++        "stale_fence",
++        "event_hash_conflict",
++        "genesis_conflict",
++        "state_hash_tamper",
++    )
++    return {
++        "contention_details": details,
++        "contention_domains": list(domains),
++        "contention_rows": 200,
++        "faults": [
++            {
++                "detail_hash": hashlib.sha256(f"phase7:{name}:1".encode()).hexdigest(),
++                "name": name,
++                "passed": True,
++            }
++            for name in names
++        ],
++        "passed": True,
++        "restart_schedules": 2_000,
++        "restarts_passed": True,
++    }
++
++
+ class Phase7EntryContractTests(unittest.TestCase):
+     def test_entry_pins_base_spec_and_single_heavy_window(self) -> None:
+         phase = read("docs/refactor/phases/phase-07-boundary-migration.md")
+@@ -201,6 +250,21 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         changed["live_capabilities_executed"] = ["synthetic-network"]
+         self.assertFalse(_runtime_source_is_authentic(changed))
+ 
++    def test_fault_gate_reconstructs_every_published_contention_row(self) -> None:
++        payload = valid_fault_payload()
++        self.assertTrue(_fault_gate_is_authentic(payload))
++        changed = copy.deepcopy(payload)
++        changed["contention_details"][0]["detail_hash"] = "0" * 64
++        self.assertFalse(_fault_gate_is_authentic(changed))
++        changed = copy.deepcopy(payload)
++        changed["contention_details"][-1] = copy.deepcopy(
++            changed["contention_details"][0]
++        )
++        self.assertFalse(_fault_gate_is_authentic(changed))
++        changed = copy.deepcopy(payload)
++        changed["contention_details"][50]["command_rows"] = 1
++        self.assertFalse(_fault_gate_is_authentic(changed))
++
+     def test_remote_ci_authentication_rejects_synthetic_or_mismatched_ids(self) -> None:
+         commit = "a" * 40
+         jobs = [
+diff --git a/tests/test_phase7_fault_injection.py b/tests/test_phase7_fault_injection.py
+index 80be8ca..45f8799 100644
+--- a/tests/test_phase7_fault_injection.py
++++ b/tests/test_phase7_fault_injection.py
+@@ -69,6 +69,11 @@ class Phase7FaultHarnessTests(unittest.TestCase):
+             replace(report, passed=False)
+         with self.assertRaises((TypeError, ValueError)):
+             FaultReport(report.faults, True, 10, True, 9)
++        with self.assertRaises(ValueError):
++            replace(report.contention_details[0], detail_hash="0" * 64)
++        forged_catalog = report.contention_details[:-1] + (report.contention_details[0],)
++        with self.assertRaises(ValueError):
++            replace(report, contention_details=forged_catalog)
+ 
+ 
+ if __name__ == "__main__":

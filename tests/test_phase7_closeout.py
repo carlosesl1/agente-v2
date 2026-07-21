@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -17,6 +18,7 @@ from scripts.generate_phase7_manifest import (
 )
 from scripts.validate_phase7 import (
     _claims_are_closed,
+    _fault_gate_is_authentic,
     _loads_json_strict,
     _remote_ci_is_authentic,
     _runtime_source_is_authentic,
@@ -36,6 +38,53 @@ def read_json(relative: str) -> dict[str, object]:
     if type(payload) is not dict:
         raise AssertionError(f"{relative} must contain a JSON object")
     return payload
+
+
+def valid_fault_payload() -> dict[str, object]:
+    domains = ("genesis", "event", "command", "outbox")
+    details: list[dict[str, object]] = []
+    for domain in domains:
+        for index in range(50):
+            values = {
+                "command_rows": 1 if domain == "command" else 0,
+                "conflicts": 1,
+                "contenders": 2,
+                "domain": domain,
+                "event_rows": 0 if domain == "genesis" else 1,
+                "outbox_rows": 1 if domain == "outbox" else 0,
+                "passed": True,
+                "round_index": index,
+                "state_rows": 1,
+                "winners": 1,
+            }
+            material = json.dumps(values, sort_keys=True, separators=(",", ":"))
+            details.append(
+                {**values, "detail_hash": hashlib.sha256(material.encode()).hexdigest()}
+            )
+    names = (
+        "after_state_update",
+        "after_event_insert",
+        "stale_fence",
+        "event_hash_conflict",
+        "genesis_conflict",
+        "state_hash_tamper",
+    )
+    return {
+        "contention_details": details,
+        "contention_domains": list(domains),
+        "contention_rows": 200,
+        "faults": [
+            {
+                "detail_hash": hashlib.sha256(f"phase7:{name}:1".encode()).hexdigest(),
+                "name": name,
+                "passed": True,
+            }
+            for name in names
+        ],
+        "passed": True,
+        "restart_schedules": 2_000,
+        "restarts_passed": True,
+    }
 
 
 class Phase7EntryContractTests(unittest.TestCase):
@@ -200,6 +249,21 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         changed = copy.deepcopy(source)
         changed["live_capabilities_executed"] = ["synthetic-network"]
         self.assertFalse(_runtime_source_is_authentic(changed))
+
+    def test_fault_gate_reconstructs_every_published_contention_row(self) -> None:
+        payload = valid_fault_payload()
+        self.assertTrue(_fault_gate_is_authentic(payload))
+        changed = copy.deepcopy(payload)
+        changed["contention_details"][0]["detail_hash"] = "0" * 64
+        self.assertFalse(_fault_gate_is_authentic(changed))
+        changed = copy.deepcopy(payload)
+        changed["contention_details"][-1] = copy.deepcopy(
+            changed["contention_details"][0]
+        )
+        self.assertFalse(_fault_gate_is_authentic(changed))
+        changed = copy.deepcopy(payload)
+        changed["contention_details"][50]["command_rows"] = 1
+        self.assertFalse(_fault_gate_is_authentic(changed))
 
     def test_remote_ci_authentication_rejects_synthetic_or_mismatched_ids(self) -> None:
         commit = "a" * 40
