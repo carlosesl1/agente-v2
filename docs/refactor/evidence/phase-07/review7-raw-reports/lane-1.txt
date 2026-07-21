@@ -1,0 +1,50 @@
+## Authentication
+
+- Snapshot local autenticado:
+  - commit: `b8540e0bae181b3050bc5af31b4c573cbb81c168`
+  - tree: `d572e548bbd6012646cdde00a58ff755798b1df4`
+  - pai/upstream: `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`
+  - divergência: `0 behind / 1 ahead`
+  - nenhuma branch remota local contém o snapshot.
+- Worktree e index limpos antes e após a revisão; nenhum arquivo criado ou modificado.
+- Candidato funcional autenticado:
+  - commit: `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`
+  - tree: `3a05029f10e9f96ac93d57b71a99f61f686e1971`
+- `local-integration-result.json`, `properties-result.json`, `faults-result.json`, `mutation-result.json` e `review-result.json` permanecem vinculados exatamente ao candidato funcional.
+- RED autenticado:
+  - `docs/refactor/evidence/phase-07/review6-red-reports/ci-snapshot-binding-red.out`
+  - SHA-256: `1d000af8a096b88ca41aa51a785f1d3384fa59aef29d370b935f6830c2f5c87d`
+  - tamanho: `1972` bytes.
+- GREEN/closeout executado: `Ran 19 tests`, `OK`, exit `0`.
+- Pré-terminal atual: `passed`, com somente `ci-result.json` ausente e `terminal_ready=false`.
+
+## Verdict
+
+Needs fixes
+
+## Findings
+
+### Critical
+
+- `scripts/validate_phase7.py:373-384` — o fallback inicializa `expected_ci_head` com o candidato funcional e usa `review.get("terminal_snapshot_commit") is not None`, confundindo campo ausente com campo explicitamente `null`. Testes causais demonstraram que:
+  - campo ausente + CI verde no candidato funcional resulta em `missing=[]`, `failures=[]`;
+  - campo `null` + CI verde no candidato funcional também resulta em `missing=[]`, `failures=[]`, `terminal_ready=True`.
+  
+  Portanto, o closeout ainda pode aceitar CI executado no pai funcional em vez do snapshot terminal revisado, e `null` não falha apesar de ser valor inválido. A ausência deve ser tolerada somente antes da existência de `ci-result.json`; quando CI existir, deve ser obrigatório um `terminal_snapshot_commit` string hex40 exato.
+
+### Important
+
+- Nenhum.
+
+### Minor
+
+- Nenhum.
+
+- `tests/test_phase7_closeout.py:239-281` não cobre os dois casos negativos que expõem o bypass: `terminal_snapshot_commit: null` e campo ausente com `ci-result.json` verde vinculado ao candidato funcional.
+
+## Residual risks
+
+- Sem rede, suíte integral ou gates pesados, conforme o escopo; o estado “não publicado” foi autenticado apenas contra refs remotas locais.
+- Ainda não existe `ci-result.json` para o snapshot terminal.
+- Rollout permanece **NO-GO**.
+- `phase8_started=false`.

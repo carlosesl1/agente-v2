@@ -1,0 +1,57 @@
+{
+  "approved_lanes": 1,
+  "attempt": 7,
+  "batch_id": "deleg_3279cc03",
+  "candidate_commit": "b8540e0bae181b3050bc5af31b4c573cbb81c168",
+  "candidate_tree": "d572e548bbd6012646cdde00a58ff755798b1df4",
+  "causal_red_reports": [
+    {
+      "bytes": 2206,
+      "path": "review7-red-reports/terminal-snapshot-required-red.out",
+      "sha256": "f58bd8417063b96c6fa8a4a40f60eafd38c61f876344d97e60ab2cfc73e907f5"
+    }
+  ],
+  "completed_at": "2026-07-21T04:54:41Z",
+  "conclusive_lanes": 3,
+  "invalidated": true,
+  "lanes": [
+    {
+      "findings": [
+        "terminal snapshot binding could fall back to functional candidate when field absent/null"
+      ],
+      "lane": 1,
+      "report_bytes": 2502,
+      "report_path": "review7-raw-reports/lane-1.txt",
+      "report_sha256": "187f70c2be1ab521c51298e19487a58e9f4c790909c70ee8f2084ad8182a69f3",
+      "verdict": "Needs fixes"
+    },
+    {
+      "findings": [
+        "RED command did not match the authenticated two-test output"
+      ],
+      "lane": 2,
+      "report_bytes": 3399,
+      "report_path": "review7-raw-reports/lane-2.txt",
+      "report_sha256": "91aae55cfbbcdda78e574f68c178d76f765a19589f1214450e13839bc7dd54d1",
+      "verdict": "Needs fixes"
+    },
+    {
+      "findings": [],
+      "lane": 3,
+      "report_bytes": 3398,
+      "report_path": "review7-raw-reports/lane-3.txt",
+      "report_sha256": "7492145c7456455c288ce27b9fdb73d80848e9a633b112937c0188d232953bcc",
+      "verdict": "Approved"
+    }
+  ],
+  "phase": 7,
+  "phase8_started": false,
+  "rejected_lanes": 2,
+  "remediation_scope": [
+    "scripts/validate_phase7.py",
+    "tests/test_phase7_closeout.py",
+    "review7 evidence"
+  ],
+  "result": "Needs fixes",
+  "rollout": "NO-GO"
+}

@@ -370,7 +370,20 @@ def _terminal_artifact_checks(
         or not _claims_are_closed(review)
     ):
         failures.append("review gate incomplete")
-    if ci is not None and not _remote_ci_is_authentic(ci, candidate_commit):
+    expected_ci_head = candidate_commit
+    if ci is not None:
+        terminal_snapshot_commit = (
+            review.get("terminal_snapshot_commit") if review is not None else None
+        )
+        if (
+            type(terminal_snapshot_commit) is not str
+            or HEX40.fullmatch(terminal_snapshot_commit) is None
+        ):
+            failures.append("review terminal snapshot is invalid")
+            expected_ci_head = None
+        else:
+            expected_ci_head = terminal_snapshot_commit
+    if ci is not None and not _remote_ci_is_authentic(ci, expected_ci_head):
         failures.append("remote CI is not green")
     return missing, failures
 

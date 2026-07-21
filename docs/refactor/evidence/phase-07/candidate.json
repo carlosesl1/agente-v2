@@ -18,6 +18,14 @@
     "restarts": 2000
   },
   "index_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "invalidated_ci_runs": [
+    {
+      "failure_class": "ci_executed_functional_parent_before_terminal_evidence_snapshot",
+      "head_sha": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+      "run_id": 29801546771,
+      "run_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771"
+    }
+  ],
   "invalidated_predecessors": [
     {
       "commit": "4eb0495a2296ac76d4b2ab25038b6a822f19ec18",
@@ -85,7 +93,7 @@
     }
   ],
   "live_capabilities_executed": [],
-  "manifest_sha256": "61fc0a19b0b8df5e42cd06d8c61c828655885c85095ab0baf61c1ccf514217f0",
+  "manifest_sha256": "d59d4b66806fcf12fbefb3db746beb058bc44d287a2ddb5750a51dc0c2f91642",
   "package_tests_passed": 3,
   "package_version": "0.7.0",
   "phase": 7,

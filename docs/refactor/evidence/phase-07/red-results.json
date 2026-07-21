@@ -571,6 +571,32 @@
       "tests_failed": 0,
       "tests_in_error": 1,
       "tests_run": 1
+    },
+    {
+      "causal_failure": "terminal CI head was bound to the functional parent, which predates current manifests and terminal evidence",
+      "command": "python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests.test_evidence_validator_blocks_only_on_current_ci_after_review tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_binds_to_reviewed_terminal_snapshot_not_functional_parent -v",
+      "exit_code": 1,
+      "name": "terminal-ci-snapshot-binding",
+      "output_bytes": 1972,
+      "output_path": "review6-red-reports/ci-snapshot-binding-red.out",
+      "output_sha256": "1d000af8a096b88ca41aa51a785f1d3384fa59aef29d370b935f6830c2f5c87d",
+      "task": 17,
+      "tests_failed": 2,
+      "tests_in_error": 0,
+      "tests_run": 2
+    },
+    {
+      "causal_failure": "terminal snapshot binding accepted absent/null terminal_snapshot_commit and could fall back to the functional candidate",
+      "command": "python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding -v",
+      "exit_code": 1,
+      "name": "terminal-snapshot-required",
+      "output_bytes": 2206,
+      "output_path": "review7-red-reports/terminal-snapshot-required-red.out",
+      "output_sha256": "f58bd8417063b96c6fa8a4a40f60eafd38c61f876344d97e60ab2cfc73e907f5",
+      "task": 17,
+      "tests_failed": 2,
+      "tests_in_error": 0,
+      "tests_run": 1
     }
   ],
   "phase": 7,

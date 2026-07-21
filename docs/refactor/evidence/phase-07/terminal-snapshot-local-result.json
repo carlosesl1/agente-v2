@@ -1,0 +1,30 @@
+{
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "completed_at": "2026-07-21T04:46:12Z",
+  "live_capabilities_executed": [],
+  "phase": 7,
+  "phase8_started": false,
+  "rollout": "NO-GO",
+  "terminal_snapshot_parent": "c91b6bd2af3646b1fd0fc45515ce7e859ed17e41",
+  "validation": {
+    "compileall": {
+      "passed": true
+    },
+    "full_suite": {
+      "command": "python3 -B -m unittest discover -s tests -v",
+      "duration_seconds": 241.887,
+      "failed": 0,
+      "passed": 760
+    },
+    "manifest": {
+      "passed": true
+    },
+    "pre_terminal_validator": {
+      "passed": true
+    },
+    "schema": {
+      "passed": true
+    }
+  }
+}

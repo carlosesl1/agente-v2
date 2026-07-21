@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **sexto candidato aprovado 3/3; CI remoto vigente pendente**.
+Status: **candidato funcional aprovado 3/3; snapshot terminal autocontido em remediação de CI**.
 
 ## Entrada
 
@@ -95,7 +95,27 @@ persistência expirou sem summary e valeu zero. A repetição isolada
 `review-attempt-6.json`, `review6-raw-reports/` e `review-result.json` registram
 os três verdicts conclusivos e autenticados. O gate de revisão está fechado;
 `ci-result.json` permanece ausente até uma execução remota real e vinculada ao
-candidato funcional exato.
+snapshot terminal revisado exato.
+
+O run `29801546771` foi aberto para o commit funcional `2c99be11...`, anterior
+ao evidence child que contém os manifests e fingerprints da recaptura. Os jobs
+properties, faults e mutations passaram, mas static/full-suite falharam porque
+o checkout não era o snapshot terminal autocontido; gate falhou por consequência.
+`ci-result-invalidated-29801546771.json` preserva jobs, artifacts e reprodução
+local. A correção separa o commit funcional, ao qual continuam vinculados os
+gates pesados locais, do `terminal_snapshot_commit` revisado que o CI remoto
+deve executar exatamente. O run invalidado nunca pode satisfazer o closeout.
+
+O snapshot `b8540e0...` foi revisado no batch `deleg_3279cc03`. A lane de
+non-drift aprovou, mas as lanes de binding e proveniência retornaram
+`Needs fixes`: o validator ainda podia recuar ao candidato funcional quando
+`terminal_snapshot_commit` estava ausente/nulo, e o comando registrado para o
+RED anterior não listava os dois testes presentes na saída autenticada.
+`review-attempt-7.json`, `review7-raw-reports/` e `review7-red-reports/` retêm
+os pareceres e o novo RED causal. A correção exige um `terminal_snapshot_commit`
+hex40 explícito sempre que `ci-result.json` existir e alinha comando, contagem e
+hash da evidência anterior. O novo snapshot ainda requer revisão conclusiva 3/3
+antes de qualquer push.
 
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi

@@ -18,6 +18,7 @@ from scripts.generate_phase7_manifest import (
     render_sha256sums,
 )
 from scripts.validate_phase7 import (
+    EXPECTED_REMOTE_JOBS,
     _artifact_is_bound,
     _claims_are_closed,
     _fault_gate_is_authentic,
@@ -214,7 +215,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase8_started"])
 
-    def test_evidence_validator_blocks_on_current_review_and_ci(self) -> None:
+    def test_evidence_validator_blocks_only_on_current_ci_after_review(self) -> None:
         pre = validate_phase7(terminal=False)
         self.assertEqual(pre["result"], "passed")
         self.assertFalse(pre["terminal_ready"])
@@ -227,14 +228,107 @@ class Phase7CloseoutContractTests(unittest.TestCase):
             terminal["blockers"],
             [
                 "missing terminal artifact: ci-result.json",
-                "missing terminal artifact: review-result.json",
             ],
         )
         self.assertFalse(terminal["terminal_ready"])
         self.assertEqual(
             terminal["missing_terminal_artifacts"],
-            ["ci-result.json", "review-result.json"],
+            ["ci-result.json"],
         )
+
+    def test_terminal_ci_binds_to_reviewed_terminal_snapshot_not_functional_parent(self) -> None:
+        source_dir = ROOT / "docs/refactor/evidence/phase-07"
+        terminal_snapshot = "c" * 40
+        run_id = 42
+        jobs = [
+            {
+                "conclusion": "success",
+                "id": index + 10,
+                "name": name,
+                "status": "completed",
+                "url": f"https://github.com/example/repo/actions/runs/{run_id}/job/{index + 10}",
+            }
+            for index, name in enumerate(EXPECTED_REMOTE_JOBS)
+        ]
+        ci = {
+            "conclusion": "success",
+            "head_sha": terminal_snapshot,
+            "jobs": jobs,
+            "run_id": run_id,
+            "run_url": f"https://github.com/example/repo/actions/runs/{run_id}",
+            "status": "completed",
+            "workflow_path": ".github/workflows/phase7.yml",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_dir = Path(temporary)
+            for name in (
+                "candidate.json",
+                "local-integration-result.json",
+                "properties-result.json",
+                "faults-result.json",
+                "mutation-result.json",
+                "review-result.json",
+            ):
+                (evidence_dir / name).write_bytes((source_dir / name).read_bytes())
+            review = json.loads((evidence_dir / "review-result.json").read_text())
+            review["terminal_snapshot_commit"] = terminal_snapshot
+            (evidence_dir / "review-result.json").write_text(json.dumps(review))
+            (evidence_dir / "ci-result.json").write_text(json.dumps(ci))
+
+            missing, failures = _terminal_artifact_checks(evidence_dir)
+
+        self.assertEqual(missing, [])
+        self.assertEqual(failures, [])
+
+    def test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding(self) -> None:
+        source_dir = ROOT / "docs/refactor/evidence/phase-07"
+        candidate = read_json("docs/refactor/evidence/phase-07/candidate.json")
+        candidate_commit = candidate["commit"]
+        run_id = 42
+        jobs = [
+            {
+                "conclusion": "success",
+                "id": index + 10,
+                "name": name,
+                "status": "completed",
+                "url": f"https://github.com/example/repo/actions/runs/{run_id}/job/{index + 10}",
+            }
+            for index, name in enumerate(EXPECTED_REMOTE_JOBS)
+        ]
+        ci = {
+            "conclusion": "success",
+            "head_sha": candidate_commit,
+            "jobs": jobs,
+            "run_id": run_id,
+            "run_url": f"https://github.com/example/repo/actions/runs/{run_id}",
+            "status": "completed",
+            "workflow_path": ".github/workflows/phase7.yml",
+        }
+        for terminal_snapshot in (None, "absent"):
+            with self.subTest(terminal_snapshot=terminal_snapshot):
+                with tempfile.TemporaryDirectory() as temporary:
+                    evidence_dir = Path(temporary)
+                    for name in (
+                        "candidate.json",
+                        "local-integration-result.json",
+                        "properties-result.json",
+                        "faults-result.json",
+                        "mutation-result.json",
+                        "review-result.json",
+                    ):
+                        (evidence_dir / name).write_bytes((source_dir / name).read_bytes())
+                    review = json.loads((evidence_dir / "review-result.json").read_text())
+                    if terminal_snapshot is None:
+                        review["terminal_snapshot_commit"] = None
+                    else:
+                        review.pop("terminal_snapshot_commit", None)
+                    (evidence_dir / "review-result.json").write_text(json.dumps(review))
+                    (evidence_dir / "ci-result.json").write_text(json.dumps(ci))
+
+                    missing, failures = _terminal_artifact_checks(evidence_dir)
+
+                self.assertEqual(missing, [])
+                self.assertIn("review terminal snapshot is invalid", failures)
 
     def test_runtime_patch_and_contracts_are_bound_to_integration_tree(self) -> None:
         manifest = read_json(

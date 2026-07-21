@@ -1,0 +1,49 @@
+## Authentication
+
+- Snapshot autenticado por objetos Git: commit `b8540e0bae181b3050bc5af31b4c573cbb81c168`, tree `d572e548bbd6012646cdde00a58ff755798b1df4`, pai direto `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`.
+- Candidato funcional autenticado: `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`, tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`; é ancestral do snapshot.
+- Zero diff confirmado entre candidato funcional e snapshot em:
+  - `reservation_boundary/`
+  - `schemas/phase7/`
+  - `pyproject.toml`
+  - `scripts/build_phase7_wheel.py`
+- Os seis diretórios incluídos no wheel também mantêm os mesmos trees. Reconstrução duas vezes, integralmente em memória e sem importar o builder revisado, produziu bytes idênticos: `214954` bytes, SHA-256 `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`.
+- Blobs dos owners de replay/outbox/FKs/coordinator/deadline/CAS/fencing permaneceram idênticos: `sqlite_store.py`, `coordinator.py`, `dispatch.py`, `schema.py`, ambos os schemas SQL e seus testes focados.
+- Relatórios pesados e raw gzip permaneceram byte-idênticos desde o evidence snapshot revisado. Hashes comprimidos e descomprimidos foram recalculados; properties, faults/restarts/contention e mutations conferem. `SHA256SUMS` passou para os 115 arquivos.
+- `.github/workflows/phase7.yml:3-130`:
+  - trigger exclusivo para push em `phase7-boundary-migration`;
+  - exatamente seis jobs: `static`, `full-suite`, `phase7-properties`, `phase7-faults`, `phase7-mutations`, `gate`;
+  - exatamente três uploads nomeados `phase7-{properties|faults|mutations}-${{ github.sha }}`;
+  - aggregate `gate` depende dos cinco jobs materiais e rejeita qualquer resultado diferente de `success`;
+  - nenhuma credencial, import ou chamada live de negócio; scan AST estático dos 153 arquivos Python rastreados não encontrou imports de rede/provider.
+- O snapshot contém `manifest.json`, `README.md`, `review-result.json` e `ci-result-invalidated-29801546771.json`. O run anterior está marcado `invalidated=true`, `conclusion=failure`, ligado ao SHA funcional anterior; `ci-result.json` vigente permanece corretamente ausente.
+- Estado final Git: `0` staged, `0` unstaged, `0` untracked. `origin/phase7-boundary-migration` local aponta para `c91b6bd...`; HEAD está `0 behind / 1 ahead`. Mensagem `fix(phase7): bind CI to reviewed terminal snapshot`, sem `[skip ci]` ou `[ci skip]`. Portanto, o push exato está localmente elegível para disparar o workflow.
+- Revisão somente leitura: nenhuma rede, suíte integral, gate pesado, banco, container ou capability live executado. Arquivos criados ou modificados: nenhum.
+
+## Verdict
+
+Approved
+
+## Findings
+
+### Critical
+
+- nenhum.
+
+### Important
+
+- nenhum.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- Sem rede, a posição remota real, proteção da branch e habilitação atual do GitHub Actions não foram revalidadas; a prova de `1 ahead` usa o remote-tracking ref local.
+- Elegibilidade estática não prova sucesso remoto: ainda será necessário autenticar o run para `b8540e0...`, os seis jobs e os três artifacts ligados ao mesmo `github.sha`.
+- Suíte integral e gates pesados não foram reexecutados por restrição; sua reutilização é sustentada pelo non-drift de código, schemas, wheel, runners e raw reports.
+- Esta aprovação é somente da lane 3 e não fecha o closeout remoto.
+
+Rollout NO-GO  
+phase8_started=false

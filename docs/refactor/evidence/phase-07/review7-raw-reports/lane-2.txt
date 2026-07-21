@@ -1,0 +1,42 @@
+## Authentication
+
+- Snapshot local autenticado:
+  - commit: `b8540e0bae181b3050bc5af31b4c573cbb81c168`
+  - tree: `d572e548bbd6012646cdde00a58ff755798b1df4`
+  - pai: `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`
+  - tracking ref local `origin/phase7-boundary-migration`: `c91b6bd2af3646b1fd0fc45515ce7e859ed17e41`
+  - branch: `+1/-0`
+  - status inicial e final: zero staged, unstaged ou untracked; `git diff --check HEAD^ HEAD` passou.
+- Sem rede. O “remoto” acima é exclusivamente a ref remota local já existente.
+- `git archive` do commit exato, extraído em diretório temporário e removido ao final:
+  - schema check: exit `0`;
+  - manifest check: exit `0`, 115 arquivos, aggregate `5b1afc87517375706527dc8a26f9d62b391e7d32c4f01dcc26d100e8aaf540c3`;
+  - validator pré-terminal: exit `0`, `result=passed`, faltando somente `ci-result.json`, `terminal_ready=false`;
+  - compileall: exit `0`;
+  - closeout: exit `0`, 19/19 testes.
+- `terminal-snapshot-local-result.json:14-19` registra, sem reexecução nesta revisão, a suíte integral local 760/760 em `241.887s`; o arquivo está coberto pelo manifest/SHA256SUMS.
+- Do candidato funcional `2c99be11…` até o snapshot:
+  - zero mudanças em `reservation_boundary/`;
+  - zero em `schemas/phase7/`;
+  - zero em `pyproject.toml` e `scripts/build_phase7_wheel.py`;
+  - os 14 blobs que compõem o contrato de fontes da wheel são idênticos.
+- O run `29801546771` foi autenticado como invalidado: properties/faults/mutations `success`, static/full-suite/gate `failure`. Copiá-lo sem alteração para `ci-result.json` foi rejeitado por `_terminal_artifact_checks` como `remote CI is not green`.
+- `review-result.json` permanece 3/3 `Approved`, `rejected=0`, ligado ao candidato funcional `2c99be11…`/tree `3a05029f…` e evidence child `6894270e…`/tree `9bc409b…`; bytes e SHA-256 dos três pareceres foram verificados.
+- O contrato futuro aceita CI com `head_sha=b8540e0…` somente quando `terminal_snapshot_commit=b8540e0…`; trocar o campo pelo pai foi rejeitado.
+- Nenhum arquivo foi criado ou modificado no repositório.
+
+## Verdict: Needs fixes
+
+## Findings
+
+- **Critical:** nenhum.
+- **Important — `docs/refactor/evidence/phase-07/red-results.json:577` e `review6-red-reports/ci-snapshot-binding-red.out:1-2`:** o comando versionado seleciona somente `test_terminal_ci_binds_to_reviewed_terminal_snapshot_not_functional_parent`, mas a saída autenticada contém dois testes, enquanto o envelope declara `tests_run=2` e `tests_failed=2` nas linhas 584–586. Portanto, o comando registrado não pode reproduzir a saída, contagem e hash atribuídos a ele. Isso quebra a proveniência exata do novo RED, que é precisamente o artefato causal desta remediação; o snapshot não pode receber aprovação da lane de proveniência enquanto comando e evidência divergirem.
+- **Minor:** nenhum.
+
+## Residual risks
+
+- Não houve rede, execução remota, suíte integral nem gates pesados nesta revisão. A execução 760/760 foi autenticada apenas como evidência versionada, não reexecutada.
+- `ci-result.json` continua ausente e `b8540e0…` ainda não possui CI remoto autenticado.
+- Corrigir o RED produzirá um novo snapshot; ele precisará de nova autenticação/revisão, e o futuro `terminal_snapshot_commit` deverá apontar para esse novo commit exato, não para `b8540e0…`.
+- **Rollout: NO-GO**
+- **phase8_started=false**

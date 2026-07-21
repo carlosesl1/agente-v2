@@ -1,0 +1,24 @@
+test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding) ... 
+  test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding) (terminal_snapshot=None) ... FAIL
+  test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding) (terminal_snapshot='absent') ... FAIL
+
+======================================================================
+FAIL: test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding) (terminal_snapshot=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_closeout.py", line 331, in test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding
+    self.assertIn("review terminal snapshot is invalid", failures)
+AssertionError: 'review terminal snapshot is invalid' not found in []
+
+======================================================================
+FAIL: test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding (tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding) (terminal_snapshot='absent')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_closeout.py", line 331, in test_terminal_ci_requires_explicit_valid_terminal_snapshot_binding
+    self.assertIn("review terminal snapshot is invalid", failures)
+AssertionError: 'review terminal snapshot is invalid' not found in []
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+FAILED (failures=2)

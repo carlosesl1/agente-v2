@@ -1,0 +1,115 @@
+{
+  "artifacts": [
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8483914507/zip",
+      "created_at": "2026-07-21T04:33:10Z",
+      "expired": false,
+      "expires_at": "2026-08-20T04:33:09Z",
+      "id": 8483914507,
+      "name": "phase7-properties-2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+      "size_in_bytes": 1690573
+    },
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8483914478/zip",
+      "created_at": "2026-07-21T04:33:10Z",
+      "expired": false,
+      "expires_at": "2026-08-20T04:33:10Z",
+      "id": 8483914478,
+      "name": "phase7-faults-2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+      "size_in_bytes": 9195
+    },
+    {
+      "archive_download_url": "https://api.github.com/repos/carlosesl1/agente-v2/actions/artifacts/8483912999/zip",
+      "created_at": "2026-07-21T04:33:05Z",
+      "expired": false,
+      "expires_at": "2026-08-20T04:33:04Z",
+      "id": 8483912999,
+      "name": "phase7-mutations-2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+      "size_in_bytes": 889
+    }
+  ],
+  "candidate_commit": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "candidate_tree": "3a05029f10e9f96ac93d57b71a99f61f686e1971",
+  "conclusion": "failure",
+  "failure_class": "ci_executed_functional_parent_before_terminal_evidence_snapshot",
+  "head_sha": "2c99be11b1bdc1b66d14bd7a19c510ec50d502d4",
+  "invalidated": true,
+  "jobs": [
+    {
+      "completed_at": "2026-07-21T04:33:12Z",
+      "conclusion": "success",
+      "id": 88543434778,
+      "name": "phase7-faults",
+      "started_at": "2026-07-21T04:32:58Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543434778"
+    },
+    {
+      "completed_at": "2026-07-21T04:33:07Z",
+      "conclusion": "success",
+      "id": 88543434785,
+      "name": "phase7-mutations",
+      "started_at": "2026-07-21T04:32:59Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543434785"
+    },
+    {
+      "completed_at": "2026-07-21T04:35:21Z",
+      "conclusion": "failure",
+      "id": 88543434801,
+      "name": "full-suite",
+      "started_at": "2026-07-21T04:32:59Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543434801"
+    },
+    {
+      "completed_at": "2026-07-21T04:33:07Z",
+      "conclusion": "failure",
+      "id": 88543434816,
+      "name": "static",
+      "started_at": "2026-07-21T04:32:59Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543434816"
+    },
+    {
+      "completed_at": "2026-07-21T04:33:14Z",
+      "conclusion": "success",
+      "id": 88543434835,
+      "name": "phase7-properties",
+      "started_at": "2026-07-21T04:32:59Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543434835"
+    },
+    {
+      "completed_at": "2026-07-21T04:35:27Z",
+      "conclusion": "failure",
+      "id": 88543754608,
+      "name": "gate",
+      "started_at": "2026-07-21T04:35:24Z",
+      "status": "completed",
+      "url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771/job/88543754608"
+    }
+  ],
+  "local_reproduction": [
+    {
+      "command": "python3 -B scripts/generate_phase7_manifest.py --check",
+      "exit_code": 1,
+      "output_bytes": 16439,
+      "output_sha256": "c9a0e608467c2fa9533d11970262cf1a4b7143a5e6aacdb5bcc8abcaabb8ffe2"
+    },
+    {
+      "command": "python3 -B -m unittest tests.test_phase7_closeout -v",
+      "exit_code": 1,
+      "output_bytes": 5206,
+      "output_sha256": "88ea445866cdbc388abec36c4afd95f99b6c0f46311a439a06468b64518ed6e9"
+    }
+  ],
+  "phase": 7,
+  "phase8_started": false,
+  "remediation": "bind remote CI to a separately reviewed, self-contained terminal snapshot while retaining functional-candidate bindings for local heavy evidence",
+  "rollout": "NO-GO",
+  "run_id": 29801546771,
+  "run_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29801546771",
+  "status": "completed",
+  "workflow_path": ".github/workflows/phase7.yml"
+}
