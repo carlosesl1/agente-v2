@@ -468,6 +468,24 @@
       "unfixed_patch_bytes": 8532,
       "unfixed_patch_sha256": "f73b2c8de36e36456fc4ea92a235c891791f456d11ecab08aef75fb73dbc81ff",
       "unfixed_tree": "522d35dd5fd37445aed20945f1d701f17d592ee4"
+    },
+    {
+      "causal_failure": "terminal validator did not require local/properties/faults/mutations/review artifacts to bind exact candidate commit/tree",
+      "command": "python3 -B -m unittest tests.test_phase7_closeout.Phase7CloseoutContractTests.test_terminal_artifacts_bind_exact_candidate_commit_and_tree -v",
+      "exit_code": 1,
+      "output_bytes": 1012,
+      "output_sha256": "77505d92c2476a36be1f72934d0dd970890e97c387f2892787294c93b112a2c7",
+      "red_kind": "review_remediation_artifact_binding",
+      "sequence": 9,
+      "task": 16,
+      "test_patch": "review-remediation-artifact-binding-test.patch",
+      "test_patch_bytes": 1502,
+      "test_patch_sha256": "45f632eb2283231d921b61e8e55f45d4f3671a896e7d231196ab61839a54add6",
+      "tests_failed": 0,
+      "tests_in_error": 1,
+      "tests_run": 1,
+      "unfixed_commit": "2a0eaf89c5a216b7d51b3a3c18a13e22e8f937fa",
+      "unfixed_tree": "cd7b1057085657edb9fe1bbdaf9d89caf55dd444"
     }
   ],
   "phase": 7,

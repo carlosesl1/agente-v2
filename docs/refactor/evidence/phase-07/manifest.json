@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "f52dcfd0207bde79f755993095e070ebb42294bfb70018ea38691493f29192cd",
-  "file_count": 62,
+  "aggregate_sha256": "f73096511d6ddc1363fecc8d41fa5f30929393dfb623eda1fff0475aea0b838e",
+  "file_count": 63,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -44,13 +44,18 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/red-results.json",
-      "sha256": "613cc08a8ac270d2ecacde1dd05728bb4d92123236a089871bef35cf681a7f4a",
-      "size": 20868
+      "sha256": "fa3064a49635d4e3d6bf90deefeb348d48d428220ab3c731fe5dfda3defc683c",
+      "size": 21833
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
       "sha256": "6e4ba63bd03a195b7798b7012bf06b72161878e2d4cba825866c2f0edb5f13fb",
       "size": 1903
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
+      "sha256": "45f632eb2283231d921b61e8e55f45d4f3671a896e7d231196ab61839a54add6",
+      "size": 1502
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-test.patch",
@@ -234,8 +239,8 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "7c450c9391e1cc3b5fab3738e1e7dd654d86b82ea3d20b11913ee80118111d93",
-      "size": 15343
+      "sha256": "ca23ce1f1a6cdffdbb027d72ff0dd11890b280a6877e05d1d315f73127953732",
+      "size": 16695
     },
     {
       "path": "tests/phase7_helpers.py",
@@ -244,8 +249,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "d861abd4194060d8a27fb3244e098a0fcecf449c4c6e2323ab1e3fefedcad4fa",
-      "size": 12960
+      "sha256": "c2428d12883270eb21d00b62670c9ea04272491116778392a377919d18d1a0b1",
+      "size": 13633
     },
     {
       "path": "tests/test_phase7_coordinator.py",

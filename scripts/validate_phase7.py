@@ -65,6 +65,20 @@ def _loads_json_strict(payload: str) -> object:
     return json.loads(payload, object_pairs_hook=_reject_duplicate_keys)
 
 
+def _artifact_is_bound(
+    payload: dict[str, object], candidate_commit: str, candidate_tree: str
+) -> bool:
+    return (
+        type(payload) is dict
+        and type(candidate_commit) is str
+        and type(candidate_tree) is str
+        and HEX40.fullmatch(candidate_commit) is not None
+        and HEX40.fullmatch(candidate_tree) is not None
+        and payload.get("candidate_commit") == candidate_commit
+        and payload.get("candidate_tree") == candidate_tree
+    )
+
+
 def _fault_gate_is_authentic(payload: dict[str, object]) -> bool:
     if type(payload) is not dict:
         return False
@@ -296,13 +310,31 @@ def _terminal_artifact_checks() -> tuple[list[str], list[str]]:
     review = _json("docs/refactor/evidence/phase-07/review-result.json")
     ci = _json("docs/refactor/evidence/phase-07/ci-result.json")
     candidate_commit = candidate.get("commit")
+    candidate_tree = candidate.get("tree")
     if (
         candidate.get("frozen") is not True
         or type(candidate_commit) is not str
         or HEX40.fullmatch(candidate_commit) is None
+        or type(candidate_tree) is not str
+        or HEX40.fullmatch(candidate_tree) is None
+        or candidate.get("index_tree") != candidate_tree
+        or type(candidate.get("wheel_bytes")) is not int
+        or candidate.get("wheel_bytes", 0) < 1
+        or type(candidate.get("wheel_sha256")) is not str
+        or HEX64.fullmatch(candidate["wheel_sha256"]) is None
         or not _claims_are_closed(candidate)
     ):
         failures.append("candidate not frozen")
+    if type(candidate_commit) is str and type(candidate_tree) is str:
+        for name, payload in (
+            ("local integration", local),
+            ("properties", properties),
+            ("faults", faults),
+            ("mutations", mutations),
+            ("review", review),
+        ):
+            if not _artifact_is_bound(payload, candidate_commit, candidate_tree):
+                failures.append(f"{name} artifact not bound to candidate")
     if local.get("passed") is not True:
         failures.append("local integration gate failed")
     if properties.get("passed") is not True or properties.get("total") != 20_000:

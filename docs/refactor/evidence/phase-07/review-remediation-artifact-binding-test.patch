@@ -1,0 +1,31 @@
+diff --git a/tests/test_phase7_closeout.py b/tests/test_phase7_closeout.py
+index 6f2f11e..49a5ceb 100644
+--- a/tests/test_phase7_closeout.py
++++ b/tests/test_phase7_closeout.py
+@@ -17,6 +17,7 @@ from scripts.generate_phase7_manifest import (
+     render_sha256sums,
+ )
+ from scripts.validate_phase7 import (
++    _artifact_is_bound,
+     _claims_are_closed,
+     _fault_gate_is_authentic,
+     _loads_json_strict,
+@@ -226,6 +227,18 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         with self.assertRaisesRegex(ValueError, "duplicate JSON key: status"):
+             _loads_json_strict('{"status":"completed","status":"success"}')
+ 
++    def test_terminal_artifacts_bind_exact_candidate_commit_and_tree(self) -> None:
++        commit = "a" * 40
++        tree = "b" * 40
++        payload = {"candidate_commit": commit, "candidate_tree": tree}
++        self.assertTrue(_artifact_is_bound(payload, commit, tree))
++        for field, value in (("candidate_commit", "c" * 40), ("candidate_tree", "d" * 40)):
++            with self.subTest(field=field):
++                changed = copy.deepcopy(payload)
++                changed[field] = value
++                self.assertFalse(_artifact_is_bound(changed, commit, tree))
++        self.assertFalse(_artifact_is_bound(payload, commit.upper(), tree))
++
+     def test_runtime_source_authentication_rejects_changed_fingerprints(self) -> None:
+         source = read_json(
+             "docs/refactor/evidence/phase-07/runtime-source-manifest.json"
