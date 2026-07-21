@@ -279,10 +279,12 @@ class RoomDescriptionArguments:
 
 @dataclass(frozen=True, slots=True)
 class ActivityReadArguments:
+    activity_id: str
     activity_date: date
     participants: int
 
     def __post_init__(self) -> None:
+        _require_exact_str(self.activity_id, "ActivityReadArguments.activity_id", identifier=True)
         if type(self.activity_date) is not date:
             raise TypeError("ActivityReadArguments.activity_date must be an exact date")
         _require_exact_int(self.participants, "ActivityReadArguments.participants", minimum=1)

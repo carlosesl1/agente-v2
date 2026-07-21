@@ -56,6 +56,7 @@ CREATE TABLE boundary_events (
     lead_key TEXT NOT NULL CHECK ({ident('lead_key')}),
     event_id TEXT NOT NULL CHECK ({ident('event_id')}),
     event_hash TEXT NOT NULL CHECK ({digest('event_hash')}),
+    commit_hash TEXT NOT NULL CHECK ({digest('commit_hash')}),
     state_version INTEGER NOT NULL CHECK (state_version >= 1),
     occurred_at TEXT NOT NULL CHECK ({stamp('occurred_at')}),
     CONSTRAINT pk_boundary_events PRIMARY KEY (lead_key, event_id),
@@ -78,9 +79,13 @@ CREATE TABLE boundary_commands (
 
 CREATE TABLE boundary_outbox (
     message_id TEXT NOT NULL CONSTRAINT pk_boundary_outbox PRIMARY KEY CHECK ({ident('message_id')}),
+    idempotency_key TEXT NOT NULL CONSTRAINT uq_boundary_outbox_idempotency UNIQUE CHECK ({ident('idempotency_key')}),
     lead_key TEXT NOT NULL CHECK ({ident('lead_key')}),
     event_id TEXT NOT NULL CHECK ({ident('event_id')}),
+    workflow_id TEXT NOT NULL CHECK ({ident('workflow_id')}),
+    command_id TEXT CHECK (command_id IS NULL OR {ident('command_id')}),
     kind TEXT NOT NULL CHECK ({ident('kind')}),
+    template_id TEXT NOT NULL CHECK ({ident('template_id')}),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     payload_hash TEXT NOT NULL CHECK ({digest('payload_hash')}),
     created_at TEXT NOT NULL CHECK ({stamp('created_at')}),
@@ -131,6 +136,7 @@ CREATE TABLE boundary_events (
     lead_key text NOT NULL REFERENCES boundary_state (lead_key),
     event_id text NOT NULL,
     event_hash text NOT NULL CHECK ({hash_check.replace('VALUE', 'event_hash')}),
+    commit_hash text NOT NULL CHECK ({hash_check.replace('VALUE', 'commit_hash')}),
     state_version bigint NOT NULL CHECK (state_version >= 1),
     occurred_at timestamptz NOT NULL,
     PRIMARY KEY (lead_key, event_id),
@@ -150,9 +156,13 @@ CREATE TABLE boundary_commands (
 
 CREATE TABLE boundary_outbox (
     message_id text PRIMARY KEY,
+    idempotency_key text NOT NULL UNIQUE,
     lead_key text NOT NULL,
     event_id text NOT NULL,
+    workflow_id text NOT NULL,
+    command_id text,
     kind text NOT NULL,
+    template_id text NOT NULL,
     payload_json jsonb NOT NULL,
     payload_hash text NOT NULL CHECK ({hash_check.replace('VALUE', 'payload_hash')}),
     created_at timestamptz NOT NULL,

@@ -507,7 +507,7 @@ def _genesis_candidate(index: int, lead_key: str) -> tuple[LegacyLeadSnapshot, I
 
 def _outbox(command, index: int) -> OutboxMessage:
     payload = json.dumps(
-        {"command_id": command.command_id, "round": index},
+        {"round": index, "workflow_id": command.workflow_id},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -515,7 +515,7 @@ def _outbox(command, index: int) -> OutboxMessage:
         message_id=f"outbox-contention-{index:06d}",
         idempotency_key=f"outbox-idem-contention-{index:06d}",
         workflow_id=command.workflow_id,
-        command_id=command.command_id,
+        command_id=None,
         kind=OutboxKind.SUMMARY_PRESENTED,
         template_id=f"template-contention-{index:06d}",
         canonical_payload=payload,
@@ -658,7 +658,9 @@ def run_fault_matrix(
     faults = tuple(rows)
     return FaultReport(
         faults,
-        all(row.passed for row in faults) and restarts_passed,
+        all(row.passed for row in faults)
+        and restarts_passed
+        and all(row.passed for row in contention_details),
         schedules,
         restarts_passed,
         len(contention_details),

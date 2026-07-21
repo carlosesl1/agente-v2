@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "16cd3e4289b9634b543c8dffc32cb78ba521412849b738439e0925f8d38e2966",
-  "file_count": 67,
+  "aggregate_sha256": "b0cbebb3cb24cac141f8b309db4420ea19e7e14d936314869563155889365eb3",
+  "file_count": 80,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -9,8 +9,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "3705adaef1a49dd453a3c663906cc124011622684f7d217ead6961af6d72d9d2",
-      "size": 5370
+      "sha256": "9e8098227d14b60e298d3eb5e8299e2875b3807584754c5af01c598a2ea73a0c",
+      "size": 5566
     },
     {
       "path": "docs/refactor/06-risk-register.md",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "e5a80413541467753861cb491bb52aaddee10c73af9cc156649dcde45a438c40",
-      "size": 4091
+      "sha256": "09c2b17df1c31a2a34a265160e23916c422f80c93a1060e32f1fb560a2d70ed4",
+      "size": 4350
     },
     {
       "path": "docs/refactor/evidence/phase-07/entry-baseline.json",
@@ -44,8 +44,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/red-results.json",
-      "sha256": "fa3064a49635d4e3d6bf90deefeb348d48d428220ab3c731fe5dfda3defc683c",
-      "size": 21833
+      "sha256": "b4a0ee79b8f36006a24cc775aaeff1d5426e6e4176839ff56ec2a3f0b315ab0f",
+      "size": 24320
     },
     {
       "path": "docs/refactor/evidence/phase-07/remediation-faults-result.json",
@@ -71,6 +71,26 @@
       "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
       "sha256": "6e4ba63bd03a195b7798b7012bf06b72161878e2d4cba825866c2f0edb5f13fb",
       "size": 1903
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-2-lane-1.txt",
+      "sha256": "14b71a1ecc8401de34c14423df0d40f4d3cd3d733650f01cce5e2e847fcccb7d",
+      "size": 2993
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-2-lane-2.txt",
+      "sha256": "59f31999b5797a8aaa4c2c9d0e8654a5f1805f5966ceebea8c725a8bc6732215",
+      "size": 4178
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-2-lane-3.txt",
+      "sha256": "7540a2acba547f2c838ce45b8851e35c13edc9cea1505f05cf11c9d7e1ebbb4e",
+      "size": 3271
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-2.json",
+      "sha256": "25ac7ecffcbc424ef41f5787d9f7fb4717c48dfaca3fbeac1f8ed0be3422d896",
+      "size": 2297
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
@@ -103,24 +123,69 @@
       "size": 8790
     },
     {
+      "path": "docs/refactor/evidence/phase-07/review2-core-tests.patch",
+      "sha256": "cb1da70addd8985176b3816415321e3d4b0b56fd226224630797e70254c84ea5",
+      "size": 12088
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/activity-product-binding.txt",
+      "sha256": "c053b28c8136267eedaaacf0127e69c40056d335da39c1f4f1ba77297929a5fe",
+      "size": 1005
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/coordinator-outbox.txt",
+      "sha256": "5cc1c2cb63da3028f9d20a8f29966c2d9f29307c3a3f210bcf2af918862c5ece",
+      "size": 1739
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/deadline-zero-write.txt",
+      "sha256": "69be6f141977197be1ad024fb8b9ef3dc0a2ca97228063b7e3e8d3fc0acd210b",
+      "size": 2972
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/runtime-adapter-contract.txt",
+      "sha256": "3dea9bbb2730a51e30bce5bdbc04435cfb952e6aa7d84c8e7c7ba7c7cc6013f5",
+      "size": 3378
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/sanitization-generic.txt",
+      "sha256": "9753b7d41e4ee7811b1d6d63df99146ab57338ad166675e69a0c78047d859598",
+      "size": 3338
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/store-replay-outbox.txt",
+      "sha256": "fddc3355f208f7ab5e70374b4d848eba8d0f9c369cda0aef990a64e5c1b0ee20",
+      "size": 1819
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-red-outputs/terminal-diagnostic.txt",
+      "sha256": "c8294ff1d0e9867d94104629bc11c41ded5c9022f3199a1dcf0aed325f123fc8",
+      "size": 549
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review2-runtime-tests.patch",
+      "sha256": "1441a556cf352ecf45d34e419799c745ea61e1161170a9e80ba1c5eebff7f12a",
+      "size": 40381
+    },
+    {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",
       "sha256": "817eaa2a2361c2126378f7655762cf548ed3070c8fdb4b075172248230a0c7c6",
       "size": 14541
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration-contract-manifest.json",
-      "sha256": "a927fa7bd780fbaf6fe7f061d37afda74ea8ffa14283a6ec7f897e218ec4f135",
-      "size": 14572
+      "sha256": "1496ddf5e157273d25e74b4634434945166e346f8e45f74ec35d03afdc66110d",
+      "size": 14789
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration-manifest.json",
-      "sha256": "18dddf10e16f71eccc88a9e5a275cccd330f521f38f66d21acc3f67ae8d9577a",
-      "size": 1990
+      "sha256": "3c33905902781c259601e628531a95728cbc34dfb34d49922e1e341a5c381ace",
+      "size": 2175
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration.patch",
-      "sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0",
-      "size": 37500
+      "sha256": "52eeca4e16cd02a2b2b2dafb9ad59ebeb91b898af453179ccacf9c581a70cf6d",
+      "size": 76556
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-source-manifest.json",
@@ -134,8 +199,8 @@
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
-      "sha256": "cd1c7b4cab648c663ee0ef3141e7e9d50d38308663967aeaf2e8a63a4ba4ed26",
-      "size": 7026
+      "sha256": "2bbb1c96e8e0d00410c8179fd89631b28772e15cccb4700d7c156a318b5ca13d",
+      "size": 8022
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-phase-7-boundary-migration.md",
@@ -159,8 +224,8 @@
     },
     {
       "path": "reservation_boundary/coordinator.py",
-      "sha256": "8bfc3031f59b953dbd66cd9c2fefd9ff4aa8d4dca6f94747e26231f25c25d0c7",
-      "size": 10795
+      "sha256": "e3fca0516f17e56b7ed26354e2ea1357d3f39fd30e15e0e7f7f0b8b1948ad965",
+      "size": 12466
     },
     {
       "path": "reservation_boundary/dispatch.py",
@@ -169,8 +234,8 @@
     },
     {
       "path": "reservation_boundary/faults.py",
-      "sha256": "bb7992b490479f432c4cc0c5d933e8741a6853b7566620ca5586d5a97deeebe5",
-      "size": 24201
+      "sha256": "09ba785edc9c2254362c3136f15d3aad6b456ee3644b2570ee5ba0aad0632e90",
+      "size": 24255
     },
     {
       "path": "reservation_boundary/legacy_state.py",
@@ -189,8 +254,8 @@
     },
     {
       "path": "reservation_boundary/schema.py",
-      "sha256": "9b995089e67215398c515f05e38111c1d8ef7487770431d9c5cd80ad7aaef2bf",
-      "size": 7898
+      "sha256": "653a55bba6fb3ddaf3cd5e74882a8c0c2cb35aed449260ae84764b4bb884f136",
+      "size": 8486
     },
     {
       "path": "reservation_boundary/serialization.py",
@@ -204,23 +269,23 @@
     },
     {
       "path": "reservation_boundary/sqlite_store.py",
-      "sha256": "459c39ec8e6bcc03cdf431fd75f401f8d95f9173537602a3ac39cfec5850407d",
-      "size": 19459
+      "sha256": "5b3bd3d80675a2c7b24825d620089ec89f7b3b083cee5ff6af5746ea100844f9",
+      "size": 22257
     },
     {
       "path": "reservation_boundary/types.py",
-      "sha256": "54e78544c2aeae3a87f0c8d3c5f3b79b5aab8db5e27ea0d60ada1b30fd239dcc",
-      "size": 27077
+      "sha256": "d81d0f298466e62d3399d53fd0dcca6c129a33b7a5fdee0cd9f30bc0ed7655cf",
+      "size": 27197
     },
     {
       "path": "schemas/phase7/postgresql.sql",
-      "sha256": "4d74b9775e20ea5012f22d8a84508fab79ba9f351198e692fcb1c438a580629d",
-      "size": 2429
+      "sha256": "d66afd320a54a3d361a9b85f2775dac85078d407e2a7c5cb13dcd664afbd72c7",
+      "size": 2624
     },
     {
       "path": "schemas/phase7/sqlite.sql",
-      "sha256": "18074c5c1f518a85e59c1f303cc8bf39ffd0af5359a25afe92b753fd3e8b565c",
-      "size": 5806
+      "sha256": "073fe8e0081cce44e6e1260962938b028b58a5d6ea89566833e424afb323c8a3",
+      "size": 6469
     },
     {
       "path": "scripts/build_phase7_wheel.py",
@@ -229,13 +294,13 @@
     },
     {
       "path": "scripts/capture_phase7_runtime.py",
-      "sha256": "b9bb89405bbd0b21c3e030c964d03b4eae42e37e94ee6e365262e5ae52f6a590",
-      "size": 33073
+      "sha256": "4505de552e10e8008a3ed11090701ce953c646fffce052c16399463d050ff690",
+      "size": 35464
     },
     {
       "path": "scripts/generate_phase7_manifest.py",
-      "sha256": "c9124e58d8b77ee55ef4d89dfbb9b44b9525b1ea70405620c915c72871ed2073",
-      "size": 5114
+      "sha256": "0168b556e5fca62d241a5a4b9ef25dd4368cfc0c60ff605e61f2b63ea3ff90cb",
+      "size": 5162
     },
     {
       "path": "scripts/generate_phase7_schema.py",
@@ -259,8 +324,8 @@
     },
     {
       "path": "scripts/validate_phase7.py",
-      "sha256": "ca23ce1f1a6cdffdbb027d72ff0dd11890b280a6877e05d1d315f73127953732",
-      "size": 16695
+      "sha256": "08856e947df6b19c1ff4717d9aded28837a8c2a4c8c315d0f9a2aa680140a319",
+      "size": 16968
     },
     {
       "path": "tests/phase7_helpers.py",
@@ -269,18 +334,18 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "b30fcc6cf5a72d62e29df6b3c81763625191e1d164520a82c0ae047ed0650de5",
-      "size": 13624
+      "sha256": "e7c5bc8c8fcb9e98d0581a2092c996fceb2ac1fe3e6e4bebff543b8dc84b5a41",
+      "size": 13934
     },
     {
       "path": "tests/test_phase7_coordinator.py",
-      "sha256": "1d6471ca09d6400179f158f3d8cd50d879f4b913b5979a8e9981d9903aa2fe99",
-      "size": 11738
+      "sha256": "328e034abeee485e687dc1c6e92ee68f0c1b23abdc67aff4c26ff1f01de1b50e",
+      "size": 14192
     },
     {
       "path": "tests/test_phase7_dispatch.py",
-      "sha256": "5b40cb8a9985f9687e9ac2c7403991bec0c5ff14eb085633b9e814441d34ae69",
-      "size": 11785
+      "sha256": "dadf2c1bff69e36124c7f1c9fc804e0ab075a2be400e35a46398d4d025828f5a",
+      "size": 11801
     },
     {
       "path": "tests/test_phase7_fault_injection.py",
@@ -309,13 +374,13 @@
     },
     {
       "path": "tests/test_phase7_runtime_capture.py",
-      "sha256": "98089ea135288cc5521633fdd3456468004334b2c76617287aa1d3750ba1d48e",
-      "size": 18130
+      "sha256": "8d68aa17bbf28e38bafaffcc1976b02ee22d0da9b2e6fb629e2065f350321fda",
+      "size": 18360
     },
     {
       "path": "tests/test_phase7_schema.py",
-      "sha256": "7268e86d801e426a2b52f235e044ce2fb46e16c29a259b47567184d8e71da5ec",
-      "size": 4590
+      "sha256": "730bb55462fc988e8ef889dda597e227d1bead67344d4f3058c85d3d2b098dcd",
+      "size": 4748
     },
     {
       "path": "tests/test_phase7_serialization.py",
@@ -329,8 +394,8 @@
     },
     {
       "path": "tests/test_phase7_sqlite_store.py",
-      "sha256": "cdd2bd5cef50f67c91f2eb9d41ddcba884a55200ac3219a00e66ca2074aaf323",
-      "size": 9040
+      "sha256": "fe88d018275b5d720bfac077574794b7547fe0859e13bdf7db8ae222f95985a2",
+      "size": 11004
     },
     {
       "path": "tests/test_phase7_types.py",

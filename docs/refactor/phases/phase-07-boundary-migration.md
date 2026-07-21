@@ -2,7 +2,7 @@
 
 ## Estado
 
-- Status: **candidato remediado congelado; revisão terminal e CI remoto pendentes**.
+- Status: **segundo candidato invalidado; terceira remediação em freeze local**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
@@ -12,7 +12,7 @@
 - `rollout=NO-GO`.
 - `phase8_started=false`.
 
-## Candidato remediado congelado
+## Segundo candidato invalidado
 
 - Candidato: `f5505b4c8a2ae8aa6990970035e770e539b1f978`.
 - Tree: `67f228abec5582f2ac56b0fdd5a9328961b81804`.
@@ -23,7 +23,24 @@
 - Gates afetados: 20.000/20.000 properties, seis faults, 2.000 restarts,
   200 contentions reconstruíveis, 12/12 mutations e 13 testes de adapters.
 - O workflow agora publica os três reports brutos vinculados ao SHA.
-- Revisão terminal e novo run remoto ainda não executados.
+- Revisão terminal `deleg_39e3d235`: três lanes concluídas e três verdicts
+  `Needs fixes`; o candidato foi invalidado. Nenhum novo run remoto foi feito.
+
+## Terceira remediação
+
+- replay autentica o commit canônico exato e outbox persiste/vincula toda a
+  identidade de workflow/comando;
+- deadline envolve genesis, claim, fence, evento, comandos e outbox na mesma
+  unidade de trabalho rollback-safe;
+- plugin sem contexto falha fechado; as quatro writes atravessam
+  `ToolDispatch` tipado com os schemas ativos;
+- leitura Bókun preserva `tour_product_id`, state commit lê `collected_slots`
+  e pagamento exige recebedor/valor/status/evidência mecânicos;
+- captura rejeita token genérico, e-mail não reservado e número longo não
+  operacional;
+- réplica: `485a2f470be7e40ed27601367e75b7c4a2698c9c`, tree
+  `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`, 964/964 testes locais;
+- novo candidato funcional ainda não congelado.
 
 ## Candidato anterior invalidado
 
@@ -54,8 +71,10 @@ Os REDs vinculados ao evidence commit/tree anterior cobrem:
 - `BoundaryState.schema_version` desconhecida;
 - contention nominal sem contenders concorrentes por domínio.
 
-As correções focused foram congeladas no novo candidato. Ele ainda não foi
-publicado, revisado terminalmente ou validado remotamente.
+As correções focused da primeira revisão foram congeladas e publicadas no
+candidato `f5505b4c8a2ae8aa6990970035e770e539b1f978`; a segunda revisão o
+invalidou antes de qualquer novo run remoto. A terceira remediação está sendo
+congelada separadamente.
 
 O primeiro candidato pre-freeze (`4eb0495a2296ac76d4b2ab25038b6a822f19ec18`)
 foi invalidado por dois erros de collection: a captura removia o package

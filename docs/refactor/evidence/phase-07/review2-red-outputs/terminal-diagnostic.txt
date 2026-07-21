@@ -1,0 +1,11 @@
+Phase7CloseoutTests (unittest.loader._FailedTest.Phase7CloseoutTests) ... ERROR
+
+======================================================================
+ERROR: Phase7CloseoutTests (unittest.loader._FailedTest.Phase7CloseoutTests)
+----------------------------------------------------------------------
+AttributeError: module 'tests.test_phase7_closeout' has no attribute 'Phase7CloseoutTests'. Did you mean: 'Phase7CloseoutContractTests'?
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (errors=1)

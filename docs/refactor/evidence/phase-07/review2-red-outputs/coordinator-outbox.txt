@@ -1,0 +1,24 @@
+test_outbox_must_bind_current_workflow_before_store_commit (tests.test_phase7_coordinator.Phase7CoordinatorTests.test_outbox_must_bind_current_workflow_before_store_commit) ... ERROR
+
+======================================================================
+ERROR: test_outbox_must_bind_current_workflow_before_store_commit (tests.test_phase7_coordinator.Phase7CoordinatorTests.test_outbox_must_bind_current_workflow_before_store_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_coordinator.py", line 380, in test_outbox_must_bind_current_workflow_before_store_commit
+    value.coordinate(envelope())
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/reservation_boundary/coordinator.py", line 284, in coordinate
+    persisted = self._store.commit(
+                ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_coordinator.py", line 154, in commit
+    return self.inner.commit(**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/reservation_boundary/sqlite_store.py", line 392, in commit
+    _validate_outbox_bindings(commit)
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/reservation_boundary/sqlite_store.py", line 134, in _validate_outbox_bindings
+    raise IdentityConflict("outbox does not bind a boundary workflow")
+reservation_boundary.sqlite_store.IdentityConflict: outbox does not bind a boundary workflow
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+FAILED (errors=1)

@@ -51,9 +51,14 @@ _SECRET_PATTERNS: Final = (
     re.compile(r"\b(?:ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(
-        r"(?i)\b(?:api[_-]?key|access[_-]?token|password|private[_-]?key|secret)\b"
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|token|password|private[_-]?key|secret)\b"
         r"\s*[:=]\s*['\"](?P<secret_value>[^'\"\s]{16,})['\"]"
     ),
+)
+_EMAIL_RE: Final = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+(?![A-Za-z0-9.-])"
 )
 _PHONE_RE: Final = re.compile(r"(?<!\d)\+\d{10,15}(?!\d)")
 _FORMATTED_PHONE_RE: Final = re.compile(
@@ -69,6 +74,23 @@ _ALLOWED_SECRET_VALUES: Final = (
     "redacted",
     "changeme",
     "none",
+)
+_SAFE_EMAIL_DOMAINS: Final = frozenset(
+    ("example.com", "example.net", "example.org", "example.invalid")
+)
+_LONG_DIGIT_OPERATIONAL_MARKERS: Final = (
+    "operational_source_id",
+    "product_id",
+    "tour_product_id",
+    "room_type_id",
+    "reservation_id",
+    "bookingcode",
+    "command_id",
+    "workflow_id",
+    "event_id",
+    "message_id",
+    "session_id",
+    "provider_ref",
 )
 
 
@@ -213,11 +235,28 @@ def _synthetic_phone(value: str) -> str:
     return "+" + synthetic_digits if value.lstrip().startswith("+") else synthetic_digits
 
 
+def _synthetic_email(value: str) -> str:
+    digest = hashlib.sha256(value.casefold().encode()).hexdigest()[:16]
+    return f"synthetic-{digest}@example.invalid"
+
+
+def _safe_email(value: str) -> bool:
+    return value.rsplit("@", 1)[-1].casefold() in _SAFE_EMAIL_DOMAINS
+
+
 def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
     count = 0
     literal_map: dict[str, str] = {}
     embedded_literal_map: dict[str, str] = {}
     phone_replacements: set[str] = set()
+
+    for email in sorted(set(_EMAIL_RE.findall(text))):
+        if _safe_email(email):
+            continue
+        replacement = _synthetic_email(email)
+        occurrences = text.count(email)
+        text = text.replace(email, replacement)
+        count += occurrences
 
     def values_for_key(key: str) -> tuple[str, ...]:
         pattern = re.compile(
@@ -420,6 +459,39 @@ def _scan_text(
         ):
             continue
         raise CaptureRejected(f"PII-like literal in capture input: {relative}")
+    for match in _EMAIL_RE.finditer(text):
+        if not _safe_email(match.group(0)):
+            raise CaptureRejected(f"email-like literal in capture input: {relative}")
+    for match in _LONG_DIGITS_RE.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(text)
+        context = text[line_start:line_end].casefold()
+        if (
+            "contact_phone" in context
+            and "e.164" in context
+            and "exemplo" in context
+        ):
+            continue
+        if text[max(0, match.start() - 3):match.start()].casefold() == "ss-":
+            continue
+        if any(marker in context for marker in _LONG_DIGIT_OPERATIONAL_MARKERS):
+            continue
+        if allow_pii_redaction and any(
+            marker in context
+            for marker in (
+                "subscriber_id",
+                "contact_id",
+                "'id'",
+                '"id"',
+                "phone",
+                "telefone",
+                "whatsapp",
+            )
+        ):
+            continue
+        raise CaptureRejected(f"long numeric literal in capture input: {relative}")
     for pattern in _SECRET_PATTERNS:
         for match in pattern.finditer(text):
             value = (

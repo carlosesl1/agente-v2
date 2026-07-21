@@ -1,0 +1,25 @@
+test_same_event_hash_rejects_divergent_commit_payload (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_same_event_hash_rejects_divergent_commit_payload) ... FAIL
+test_outbox_identity_must_bind_current_workflow_and_command (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_outbox_identity_must_bind_current_workflow_and_command) ... FAIL
+
+======================================================================
+FAIL: test_same_event_hash_rejects_divergent_commit_payload (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_same_event_hash_rejects_divergent_commit_payload)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_sqlite_store.py", line 195, in test_same_event_hash_rejects_divergent_commit_payload
+    with self.assertRaises(IdentityConflict):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: IdentityConflict not raised
+
+======================================================================
+FAIL: test_outbox_identity_must_bind_current_workflow_and_command (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_outbox_identity_must_bind_current_workflow_and_command)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_sqlite_store.py", line 212, in test_outbox_identity_must_bind_current_workflow_and_command
+    with self.assertRaises(IdentityConflict):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: IdentityConflict not raised
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.035s
+
+FAILED (failures=2)

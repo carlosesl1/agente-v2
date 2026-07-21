@@ -385,7 +385,7 @@ def validate_phase7(*, terminal: bool) -> dict[str, object]:
     source = _json("docs/refactor/evidence/phase-07/runtime-source-manifest.json")
     checks["runtime_source"] = _runtime_source_is_authentic(source)
     red = _json("docs/refactor/evidence/phase-07/red-results.json")
-    checks["red_coverage"] = {row["task"] for row in red["entries"]} == set(range(1, 17))
+    checks["red_coverage"] = {row["task"] for row in red["entries"]} == set(range(1, 18))
     workflow = (ROOT / ".github/workflows/phase7.yml").read_text()
     checks["workflow_scope"] = (
         "- phase7-boundary-migration" in workflow
@@ -398,11 +398,20 @@ def validate_phase7(*, terminal: bool) -> dict[str, object]:
     missing, terminal_failures = _terminal_artifact_checks()
     terminal_ready = not missing and not terminal_failures
     failures = sorted(name for name, passed in checks.items() if not passed)
+    blockers: list[str] = []
     if terminal:
         failures.extend(terminal_failures)
-        failures.extend(f"missing terminal artifact: {name}" for name in missing)
-    result = "passed" if not failures else "failed"
+        blockers.extend(f"missing terminal artifact: {name}" for name in missing)
+    terminal_blocked = terminal and bool(blockers) and not failures
+    result = (
+        "blocked"
+        if terminal_blocked
+        else "passed"
+        if not failures and not blockers
+        else "failed"
+    )
     return {
+        "blockers": blockers,
         "checks": checks,
         "failures": failures,
         "live_capabilities_executed": [],
@@ -412,6 +421,7 @@ def validate_phase7(*, terminal: bool) -> dict[str, object]:
         "result": result,
         "rollout": "NO-GO",
         "terminal": terminal,
+        "terminal_blocked": terminal_blocked,
         "terminal_ready": terminal_ready,
     }
 

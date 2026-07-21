@@ -12,8 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — candidato remediado congelado; revisão terminal e CI
-  remoto pendentes**.
+- Fase ativa: **Fase 7 — segundo candidato invalidado pela revisão terminal;
+  terceira remediação em freeze local**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -40,12 +40,14 @@ Contrato central:
   candidato `ef5dd46c27ccb72e977b333f526521a5f6b0225c` passou 963 testes
   locais e o run remoto `29787387850` ficou 6/6 verde, mas foi invalidado por
   findings de identidade/import/store/contention na revisão terminal. O novo
-  candidato é `f5505b4c8a2ae8aa6990970035e770e539b1f978`, com os findings
-  corrigidos e gates afetados verdes; não há aprovação terminal nem novo run
-  remoto ainda.
+  candidato `f5505b4c8a2ae8aa6990970035e770e539b1f978` também foi
+  invalidado pelo batch `deleg_39e3d235`, que concluiu 3/3 com `Needs fixes`.
+  As novas correções fecham replay/outbox, deadline zero-write, dispatch tipado,
+  fallback legado e sanitização genérica; o terceiro candidato ainda não foi
+  congelado nem executado remotamente.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
-  `e2e1570757c2afe3d0b1d25a1ef94cd2c709d674`.
+  `485a2f470be7e40ed27601367e75b7c4a2698c9c`.
 - Implementação funcional concluída localmente: domínio, lookups, boundary puro
   de resumo/confirmação e execução durável no novo repositório.
 - Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem

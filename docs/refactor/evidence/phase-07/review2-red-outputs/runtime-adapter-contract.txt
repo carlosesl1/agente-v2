@@ -1,0 +1,69 @@
+F..F..F.                                                                 [100%]
+=================================== FAILURES ===================================
+_______ test_all_five_reads_become_typed_requests_without_provider_call ________
+
+    def test_all_five_reads_become_typed_requests_without_provider_call():
+        context = phase7_context()
+        for name, arguments in READ_REQUESTS.items():
+            result = dispatch_native_tool(name, arguments, context=context, now=T0)
+            assert result["operation"] == name
+>           assert result["status"] == "phase7_read_request"
+E           AssertionError: assert 'phase7_inval...ndary_context' == 'phase7_read_request'
+E             
+E             - phase7_read_request
+E             + phase7_invalid_boundary_context
+
+tests/test_phase7_tool_dispatch_adapter.py:70: AssertionError
+____________ test_state_commit_returns_only_whitelisted_typed_facts ____________
+
+    def test_state_commit_returns_only_whitelisted_typed_facts():
+        result = dispatch_native_tool(
+            "chapada_commit_state",
+            {
+                "desired_services": ["hostel"],
+                "collected_slots": {"language": "pt-BR", "adults": 2},
+                "selected_offer_id": "must-not-become-a-fact",
+                "payment_confirmed": True,
+            },
+            context=phase7_context(),
+            now=T0,
+        )
+        assert result["status"] == "phase7_state_commit"
+        assert result["runtime_category"] == "state_commit"
+        assert result["provider_call_executed"] is False
+>       assert set(result["fact_names"]) == {"adults", "language", "service"}
+E       AssertionError: assert {'service'} == {'adults', 'l...e', 'service'}
+E         
+E         Extra items in the right set:
+E         'language'
+E         'adults'
+E         Use -v to get more diff
+
+tests/test_phase7_tool_dispatch_adapter.py:116: AssertionError
+________ test_no_boundary_context_fails_closed_without_legacy_executor _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffffaa6203b0>
+
+    def test_no_boundary_context_fails_closed_without_legacy_executor(monkeypatch):
+        import domain.chapada_native_tools as legacy
+        import domain.tool_dispatch_adapter as adapter_module
+    
+        calls = []
+        monkeypatch.setattr(adapter_module, "load_native_tool_context", lambda: {})
+        monkeypatch.setattr(
+            legacy,
+            "execute_hermes_native_tool",
+            lambda name, arguments: calls.append((name, arguments)) or json.dumps({"status": "legacy"}),
+        )
+        missing = json.loads(dispatch_hermes_native_tool("cerebro_consultar", {"query": "x"}))
+>       assert missing["status"] == "phase7_boundary_context_required"
+E       AssertionError: assert 'legacy' == 'phase7_bound...text_required'
+E         
+E         - phase7_boundary_context_required
+E         + legacy
+
+tests/test_phase7_tool_dispatch_adapter.py:160: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_all_five_reads_become_typed_requests_without_provider_call
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_state_commit_returns_only_whitelisted_typed_facts
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_no_boundary_context_fails_closed_without_legacy_executor

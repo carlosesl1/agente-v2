@@ -135,7 +135,7 @@ class Phase7DispatchTests(unittest.TestCase):
             ),
             (
                 "bokun_consultar_passeio_v2",
-                ActivityReadArguments(date(2026, 8, 1), 2),
+                ActivityReadArguments("activity-001", date(2026, 8, 1), 2),
             ),
             (
                 "bokun_consultar_descricao",

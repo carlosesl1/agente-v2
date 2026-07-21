@@ -1,0 +1,36 @@
+test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) ... 
+  test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='generic_token') ... FAIL
+  test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='email') ... FAIL
+  test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='long_digits') ... FAIL
+
+======================================================================
+FAIL: test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='generic_token')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_runtime_capture.py", line 331, in test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed
+    with self.assertRaises(CaptureRejected):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: CaptureRejected not raised
+
+======================================================================
+FAIL: test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='email')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_runtime_capture.py", line 331, in test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed
+    with self.assertRaises(CaptureRejected):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: CaptureRejected not raised
+
+======================================================================
+FAIL: test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed (tests.test_phase7_runtime_capture.Phase7RuntimeCaptureTests.test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed) (name='long_digits')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_runtime_capture.py", line 331, in test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed
+    with self.assertRaises(CaptureRejected):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: CaptureRejected not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.830s
+
+FAILED (failures=3)

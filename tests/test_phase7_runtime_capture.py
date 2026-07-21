@@ -305,6 +305,9 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
     def test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed(self) -> None:
         cases = (
             ("secret", "TOKEN='\x67\x68\x70\x5f\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x31\x32\x33\x34\x35\x36'\n", False),
+            ("generic_token", "TOKEN='highentropy0123456789abcdefXYZ'\n", False),
+            ("email", "OWNER='private.person@private-domain.test'\n", False),
+            ("long_digits", "REFERENCE='1234567890123456'\n", False),
             ("phone", "CONTACT='\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32'\n", False),
             ("unallowlisted", "safe = True\n", False),
             ("symlink", "", True),

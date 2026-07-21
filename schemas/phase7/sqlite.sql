@@ -12,6 +12,7 @@ CREATE TABLE boundary_events (
     lead_key TEXT NOT NULL CHECK (length(lead_key) BETWEEN 1 AND 256 AND instr(lead_key, char(0)) = 0),
     event_id TEXT NOT NULL CHECK (length(event_id) BETWEEN 1 AND 256 AND instr(event_id, char(0)) = 0),
     event_hash TEXT NOT NULL CHECK (length(event_hash) = 64 AND event_hash = lower(event_hash) AND event_hash NOT GLOB '*[^0-9a-f]*'),
+    commit_hash TEXT NOT NULL CHECK (length(commit_hash) = 64 AND commit_hash = lower(commit_hash) AND commit_hash NOT GLOB '*[^0-9a-f]*'),
     state_version INTEGER NOT NULL CHECK (state_version >= 1),
     occurred_at TEXT NOT NULL CHECK (length(occurred_at) BETWEEN 25 AND 32 AND substr(occurred_at, 11, 1) = 'T' AND substr(occurred_at, -6) = '+00:00' AND instr(occurred_at, char(0)) = 0),
     CONSTRAINT pk_boundary_events PRIMARY KEY (lead_key, event_id),
@@ -34,9 +35,13 @@ CREATE TABLE boundary_commands (
 
 CREATE TABLE boundary_outbox (
     message_id TEXT NOT NULL CONSTRAINT pk_boundary_outbox PRIMARY KEY CHECK (length(message_id) BETWEEN 1 AND 256 AND instr(message_id, char(0)) = 0),
+    idempotency_key TEXT NOT NULL CONSTRAINT uq_boundary_outbox_idempotency UNIQUE CHECK (length(idempotency_key) BETWEEN 1 AND 256 AND instr(idempotency_key, char(0)) = 0),
     lead_key TEXT NOT NULL CHECK (length(lead_key) BETWEEN 1 AND 256 AND instr(lead_key, char(0)) = 0),
     event_id TEXT NOT NULL CHECK (length(event_id) BETWEEN 1 AND 256 AND instr(event_id, char(0)) = 0),
+    workflow_id TEXT NOT NULL CHECK (length(workflow_id) BETWEEN 1 AND 256 AND instr(workflow_id, char(0)) = 0),
+    command_id TEXT CHECK (command_id IS NULL OR length(command_id) BETWEEN 1 AND 256 AND instr(command_id, char(0)) = 0),
     kind TEXT NOT NULL CHECK (length(kind) BETWEEN 1 AND 256 AND instr(kind, char(0)) = 0),
+    template_id TEXT NOT NULL CHECK (length(template_id) BETWEEN 1 AND 256 AND instr(template_id, char(0)) = 0),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64 AND payload_hash = lower(payload_hash) AND payload_hash NOT GLOB '*[^0-9a-f]*'),
     created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 25 AND 32 AND substr(created_at, 11, 1) = 'T' AND substr(created_at, -6) = '+00:00' AND instr(created_at, char(0)) = 0),

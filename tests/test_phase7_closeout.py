@@ -183,6 +183,10 @@ class Phase7CloseoutContractTests(unittest.TestCase):
             "docs/refactor/evidence/phase-07/runtime-integration.patch", paths
         )
         self.assertIn(".github/workflows/phase7.yml", paths)
+        self.assertIn(
+            "docs/refactor/evidence/phase-07/review2-red-outputs/store-replay-outbox.txt",
+            paths,
+        )
         self.assertNotIn("docs/refactor/evidence/phase-07/ci-result.json", paths)
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase8_started"])
@@ -194,7 +198,11 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(pre["live_capabilities_executed"], [])
         self.assertEqual(pre["rollout"], "NO-GO")
         terminal = validate_phase7(terminal=True)
-        self.assertEqual(terminal["result"], "failed")
+        self.assertEqual(terminal["result"], "blocked")
+        self.assertTrue(terminal["terminal_blocked"])
+        self.assertEqual(
+            terminal["blockers"], ["missing terminal artifact: review-result.json"]
+        )
         self.assertFalse(terminal["terminal_ready"])
         self.assertEqual(
             terminal["missing_terminal_artifacts"], ["review-result.json"]
@@ -207,7 +215,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertTrue(manifest["patch_applies"])
         self.assertEqual(
             manifest["integration_tree"],
-            "8dc9aed8092661b701104bd89dedf865cd4d94b6",
+            "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
         )
         self.assertEqual(
             manifest["changed_file_count"], len(manifest["changed_files"])
@@ -220,7 +228,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         evidence = read("docs/refactor/evidence/phase-07/README.md")
         self.assertIn("phase8_started=false", phase)
         self.assertIn("rollout=NO-GO", phase)
-        self.assertIn("candidato remediado congelado", evidence)
+        self.assertIn("review-attempt-2.json", evidence)
         self.assertNotIn("rollout autorizado", (phase + evidence).lower())
 
     def test_duplicate_json_keys_are_rejected(self) -> None:

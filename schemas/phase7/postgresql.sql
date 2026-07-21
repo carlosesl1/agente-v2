@@ -12,6 +12,7 @@ CREATE TABLE boundary_events (
     lead_key text NOT NULL REFERENCES boundary_state (lead_key),
     event_id text NOT NULL,
     event_hash text NOT NULL CHECK (event_hash ~ '^[0-9a-f]{64}$'),
+    commit_hash text NOT NULL CHECK (commit_hash ~ '^[0-9a-f]{64}$'),
     state_version bigint NOT NULL CHECK (state_version >= 1),
     occurred_at timestamptz NOT NULL,
     PRIMARY KEY (lead_key, event_id),
@@ -31,9 +32,13 @@ CREATE TABLE boundary_commands (
 
 CREATE TABLE boundary_outbox (
     message_id text PRIMARY KEY,
+    idempotency_key text NOT NULL UNIQUE,
     lead_key text NOT NULL,
     event_id text NOT NULL,
+    workflow_id text NOT NULL,
+    command_id text,
     kind text NOT NULL,
+    template_id text NOT NULL,
     payload_json jsonb NOT NULL,
     payload_hash text NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
     created_at timestamptz NOT NULL,

@@ -53,6 +53,7 @@ def _paths() -> tuple[str, ...]:
         "schemas/phase7/*",
         "tests/test_phase7_*.py",
         "docs/refactor/evidence/phase-07/*",
+        "docs/refactor/evidence/phase-07/**/*",
     ):
         for path in ROOT.glob(pattern):
             if not path.is_file():

@@ -1,0 +1,40 @@
+## Authentication
+
+- Repositório limpo, sem modificações:
+  - evidence commit: `b27706bca3d2dba3e564c9176702fc4504050bb3`
+  - evidence tree: `d6b4cc14549e4f2a3cac4a732385f8dd1ae44a5a`
+  - pai funcional: `f5505b4c8a2ae8aa6990970035e770e539b1f978`
+  - tree funcional: `67f228abec5582f2ac56b0fdd5a9328961b81804`
+  - subject contém `[skip ci]`.
+- Wheel reconstruído duas vezes, byte a byte idêntico: SHA-256 `c419a7b402682b98ee0d371ce08ef81a216be3315a880fb52a6f54e421d3c357`, `213663` bytes.
+- Source operacional autenticada localmente: HEAD/tree/status/diff/86 entradas coincidem exatamente com `runtime-source-manifest.json`. Recaptura reproduziu os manifests e preservou a source sem drift.
+- Patch SHA-256 `f06d3b…d5c0`, `37500` bytes: apply e reverse-check passaram; baseline `3da1f4…`/`72c190…` reproduziu exatamente a tree `8dc9aed8092661b701104bd89dedf865cd4d94b6`.
+- Comparator em `shadow.py` é independente, usa tipos e conjuntos fechados e eleva qualquer campo autorizativo divergente a crítico.
+- Quatro evidências `remediation-*` estão vinculadas exatamente ao candidato/tree. As 200 rows de contention cobrem 4×50 combinações, têm 200 hashes únicos e todos foram reconstruídos.
+- Workflow contém três `upload-artifact@v4`, nomes com `${{ github.sha }}` e `if-no-files-found: error`. Não há claim de CI novo: docs distinguem o run histórico invalidado `29787387850` e dizem que o novo run está pendente.
+- Checks leves: manifest e validator pré-terminal passaram; 33 testes focused passaram. Validator terminal falha, corretamente, pois falta `review-result.json`.
+
+## Verdict
+
+Needs fixes
+
+## Findings
+
+### Critical
+
+nenhum
+
+### Important
+
+- `scripts/capture_phase7_runtime.py:49-63,371-431,681-699` — sanitização fail-open para classes proibidas. Probes sintéticos confirmaram que e-mail, `TOKEN` genérico de alta entropia e número longo não associado às chaves conhecidas são aceitos sem alteração; `_LONG_DIGITS_RE` é definido, mas nunca aplicado, e não existe detector de e-mail ou de `TOKEN` simples. Isso impede afirmar ausência garantida de PII/secrets na réplica e pode preservar material sensível em testes capturados.
+
+### Minor
+
+- `scripts/validate_phase7.py:300-304` e `tests/test_phase7_closeout.py:190-201` — se qualquer artefato terminal estiver ausente, o validator retorna antes de examinar os presentes. Hoje `--terminal` informa apenas `review-result.json` ausente e oculta que os artefatos canônicos local/properties/faults/mutations/CI ainda pertencem ao candidato histórico `ef5dd46…`, não a `f5505b4…`. Não é fail-open — o fechamento continua bloqueado —, mas o diagnóstico de closeout fica incompleto.
+
+## Residual risks
+
+- Nenhum run remoto novo ocorreu para `f5505b4…`; portanto a publicação real dos três raw reports ainda não está autenticada. Somente o workflow que fará o upload foi verificado.
+- Os raw reports locais referenciados por caminho/hash não estão disponíveis; seus hashes não puderam ser recalculados. As 200 rows de contention, porém, estão integralmente versionadas e foram reconstruídas.
+- `rollout=NO-GO`, `phase8_started=false` e terminal closeout pendente permanecem corretos.
+- Nenhum arquivo foi criado ou modificado no repositório.

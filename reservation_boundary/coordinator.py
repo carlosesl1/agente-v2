@@ -79,6 +79,12 @@ class BoundaryStorePort(Protocol):
 
     def load_state(self, lead_key: str) -> VersionedBoundaryState: ...
 
+    def turn_transaction(
+        self,
+        *,
+        deadline_guard: object,
+    ) -> AbstractContextManager[None]: ...
+
     def import_genesis(
         self,
         snapshot: LegacyLeadSnapshot,
@@ -153,6 +159,29 @@ def _validate_decision(
                 raise InvalidKernelDecision("payment command does not bind current payment")
         else:
             raise InvalidKernelDecision("command is outside BoundaryCommand")
+    workflow_ids = {
+        payment.meta.workflow_id for payment in state.payments
+    }
+    if state.workflow is not None:
+        workflow_ids.add(state.workflow.meta.workflow_id)
+    command_workflows: dict[str, str] = {}
+    for command in decision.commands:
+        if type(command) is ReservationCommand:
+            command_workflows[command.command_id] = command.workflow_id
+        else:
+            matches = tuple(
+                payment
+                for payment in state.payments
+                if payment.subject.payment_id == command.payment_id
+            )
+            if len(matches) != 1:
+                raise InvalidKernelDecision("payment command does not bind one workflow")
+            command_workflows[command.settlement_command_id] = matches[0].meta.workflow_id
+    for message in decision.outbox:
+        if message.workflow_id not in workflow_ids:
+            raise InvalidKernelDecision("outbox does not bind current workflow")
+        if message.command_id is not None and command_workflows.get(message.command_id) != message.workflow_id:
+            raise InvalidKernelDecision("outbox command does not bind current workflow")
     return decision
 
 
@@ -248,57 +277,60 @@ class TurnCoordinator:
                     TurnPlanReason.DUPLICATE,
                 )
 
-            current = self._load_or_import(envelope, claimed_at=started_at)
-            current, fencing_token = self._store.acquire_fence(envelope.lead_key)
-            _before_deadline(self._clock.now(), envelope.deadline)
-            request = IntentRequest(
-                current.state,
-                envelope.message,
-                envelope.event_id,
-                envelope.deadline,
-            )
-            intent = self._intent.interpret(request)
-            if type(intent) is not ConversationIntent or intent.source_event_id != envelope.event_id:
-                raise InvalidIntent("intent does not bind the source event")
-            decision = _validate_decision(
-                current,
-                envelope.event_id,
-                self._kernel.reduce(current.state, intent),
-            )
-            commit_time = self._clock.now()
-            _before_deadline(commit_time, envelope.deadline)
-            next_state = replace(
-                decision.state,
-                version=current.version + 1,
-                processed_event_ids=(
-                    *decision.state.processed_event_ids,
+            guard = lambda: _before_deadline(self._clock.now(), envelope.deadline)
+            with self._store.turn_transaction(deadline_guard=guard):
+                current = self._load_or_import(envelope, claimed_at=started_at)
+                current, fencing_token = self._store.acquire_fence(envelope.lead_key)
+                _before_deadline(self._clock.now(), envelope.deadline)
+                request = IntentRequest(
+                    current.state,
+                    envelope.message,
                     envelope.event_id,
-                ),
-            )
-            boundary_commit = BoundaryCommit(
-                next_state,
-                decision.commands,
-                decision.outbox,
-                (),
-            )
-            persisted = self._store.commit(
-                event_id=envelope.event_id,
-                event_hash=event_hash,
-                expected_version=current.version,
-                fencing_token=fencing_token,
-                commit=boundary_commit,
-                committed_at=commit_time,
-            )
-            if persisted.state != next_state:
-                raise InvalidKernelDecision("store returned a divergent committed state")
-            return TurnPlan(
-                persisted.state,
-                (),
-                decision.commands,
-                decision.outbox,
-                False,
-                TurnPlanReason.COMPLETED,
-            )
+                    envelope.deadline,
+                )
+                intent = self._intent.interpret(request)
+                if type(intent) is not ConversationIntent or intent.source_event_id != envelope.event_id:
+                    raise InvalidIntent("intent does not bind the source event")
+                decision = _validate_decision(
+                    current,
+                    envelope.event_id,
+                    self._kernel.reduce(current.state, intent),
+                )
+                commit_time = self._clock.now()
+                _before_deadline(commit_time, envelope.deadline)
+                next_state = replace(
+                    decision.state,
+                    version=current.version + 1,
+                    processed_event_ids=(
+                        *decision.state.processed_event_ids,
+                        envelope.event_id,
+                    ),
+                )
+                boundary_commit = BoundaryCommit(
+                    next_state,
+                    decision.commands,
+                    decision.outbox,
+                    (),
+                )
+                persisted = self._store.commit(
+                    event_id=envelope.event_id,
+                    event_hash=event_hash,
+                    expected_version=current.version,
+                    fencing_token=fencing_token,
+                    commit=boundary_commit,
+                    committed_at=commit_time,
+                )
+                if persisted.state != next_state:
+                    raise InvalidKernelDecision("store returned a divergent committed state")
+                plan = TurnPlan(
+                    persisted.state,
+                    (),
+                    decision.commands,
+                    decision.outbox,
+                    False,
+                    TurnPlanReason.COMPLETED,
+                )
+            return plan
 
 
 __all__ = (

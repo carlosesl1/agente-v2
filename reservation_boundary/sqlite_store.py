@@ -107,6 +107,35 @@ def _command_record(command: object) -> tuple[str, str, str]:
     raise TypeError("command must be an exact BoundaryCommand member")
 
 
+def _validate_outbox_bindings(commit: BoundaryCommit) -> None:
+    workflow_ids: set[str] = set()
+    command_workflows: dict[str, str] = {}
+    if commit.state.workflow is not None:
+        workflow_id = commit.state.workflow.meta.workflow_id
+        workflow_ids.add(workflow_id)
+    for payment in commit.state.payments:
+        workflow_ids.add(payment.meta.workflow_id)
+    for command in commit.commands:
+        if type(command) is ReservationCommand:
+            command_workflows[command.command_id] = command.workflow_id
+        elif type(command) is PaymentSettlementCommand:
+            matches = tuple(
+                payment
+                for payment in commit.state.payments
+                if payment.subject.payment_id == command.payment_id
+            )
+            if len(matches) != 1:
+                raise IdentityConflict("payment command does not bind one boundary payment")
+            command_workflows[command.settlement_command_id] = matches[0].meta.workflow_id
+    for message in commit.outbox:
+        if type(message) is not OutboxMessage:
+            raise TypeError("outbox must contain exact OutboxMessage values")
+        if message.workflow_id not in workflow_ids:
+            raise IdentityConflict("outbox does not bind a boundary workflow")
+        if message.command_id is not None and command_workflows.get(message.command_id) != message.workflow_id:
+            raise IdentityConflict("outbox command does not bind its boundary workflow")
+
+
 class SQLiteBoundaryStore:
     """One in-memory-capable SQLite boundary unit of work."""
 
@@ -120,6 +149,7 @@ class SQLiteBoundaryStore:
             raise TypeError("SQLiteBoundaryStore must be created by a factory")
         self._connection = connection
         self._closed = False
+        self._savepoint_counter = 0
 
     @classmethod
     def open_memory(cls) -> "SQLiteBoundaryStore":
@@ -184,6 +214,19 @@ class SQLiteBoundaryStore:
     @contextmanager
     def _transaction(self) -> Iterator[None]:
         self._ensure_open()
+        if self._connection.in_transaction:
+            self._savepoint_counter += 1
+            savepoint = f"boundary_sp_{self._savepoint_counter}"
+            self._connection.execute(f"SAVEPOINT {savepoint}")
+            try:
+                yield
+            except BaseException:
+                self._connection.execute(f"ROLLBACK TO {savepoint}")
+                self._connection.execute(f"RELEASE {savepoint}")
+                raise
+            else:
+                self._connection.execute(f"RELEASE {savepoint}")
+            return
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             yield
@@ -192,6 +235,19 @@ class SQLiteBoundaryStore:
             raise
         else:
             self._connection.execute("COMMIT")
+
+    @contextmanager
+    def turn_transaction(
+        self,
+        *,
+        deadline_guard: Callable[[], None],
+    ) -> Iterator[None]:
+        if not callable(deadline_guard):
+            raise TypeError("deadline_guard must be callable")
+        with self._transaction():
+            deadline_guard()
+            yield
+            deadline_guard()
 
     def close(self) -> None:
         if not self._closed:
@@ -359,6 +415,8 @@ class SQLiteBoundaryStore:
         instant = _utc_text(committed_at, "committed_at")
         state_json = to_wire_json(commit.state)
         state_hash = semantic_hash(commit.state)
+        commit_hash = semantic_hash(commit)
+        _validate_outbox_bindings(commit)
 
         def fault(stage: str) -> None:
             if fault_hook is not None:
@@ -367,12 +425,13 @@ class SQLiteBoundaryStore:
         try:
             with self._transaction():
                 existing_event = self._connection.execute(
-                    "SELECT event_hash FROM boundary_events WHERE lead_key=? AND event_id=?",
+                    "SELECT event_hash, commit_hash, state_version FROM boundary_events "
+                    "WHERE lead_key=? AND event_id=?",
                     (lead_key, exact_event_id),
                 ).fetchone()
                 if existing_event is not None:
-                    if existing_event[0] != exact_event_hash:
-                        raise IdentityConflict("event_id was reused with divergent hash")
+                    if existing_event != (exact_event_hash, commit_hash, commit.state.version):
+                        raise IdentityConflict("event_id replay diverged from the durable commit")
                     return self._load_state_in_transaction(lead_key)
                 if commit.state.version != expected + 1:
                     raise ValueError("commit state version must equal expected_version + 1")
@@ -402,12 +461,13 @@ class SQLiteBoundaryStore:
                 fault("after_state_update")
                 self._connection.execute(
                     "INSERT INTO boundary_events "
-                    "(lead_key, event_id, event_hash, state_version, occurred_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "(lead_key, event_id, event_hash, commit_hash, state_version, occurred_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         lead_key,
                         exact_event_id,
                         exact_event_hash,
+                        commit_hash,
                         commit.state.version,
                         instant,
                     ),
@@ -434,17 +494,20 @@ class SQLiteBoundaryStore:
                     )
                     fault("after_command_insert")
                 for message in commit.outbox:
-                    if type(message) is not OutboxMessage:
-                        raise TypeError("outbox must contain exact OutboxMessage values")
                     self._connection.execute(
                         "INSERT INTO boundary_outbox "
-                        "(message_id, lead_key, event_id, kind, payload_json, payload_hash, created_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        "(message_id, idempotency_key, lead_key, event_id, workflow_id, command_id, "
+                        "kind, template_id, payload_json, payload_hash, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             message.message_id,
+                            message.idempotency_key,
                             lead_key,
                             exact_event_id,
+                            message.workflow_id,
+                            message.command_id,
                             message.kind.value,
+                            message.template_id,
                             message.canonical_payload,
                             message.payload_hash,
                             instant,

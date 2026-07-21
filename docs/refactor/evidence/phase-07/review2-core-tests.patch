@@ -1,0 +1,281 @@
+diff --git a/tests/test_phase7_closeout.py b/tests/test_phase7_closeout.py
+index 450c6a1..68627ca 100644
+--- a/tests/test_phase7_closeout.py
++++ b/tests/test_phase7_closeout.py
+@@ -183,6 +183,10 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+             "docs/refactor/evidence/phase-07/runtime-integration.patch", paths
+         )
+         self.assertIn(".github/workflows/phase7.yml", paths)
++        self.assertIn(
++            "docs/refactor/evidence/phase-07/review2-red-outputs/store-replay-outbox.txt",
++            paths,
++        )
+         self.assertNotIn("docs/refactor/evidence/phase-07/ci-result.json", paths)
+         self.assertEqual(manifest["rollout"], "NO-GO")
+         self.assertFalse(manifest["phase8_started"])
+@@ -194,7 +198,11 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         self.assertEqual(pre["live_capabilities_executed"], [])
+         self.assertEqual(pre["rollout"], "NO-GO")
+         terminal = validate_phase7(terminal=True)
+-        self.assertEqual(terminal["result"], "failed")
++        self.assertEqual(terminal["result"], "blocked")
++        self.assertTrue(terminal["terminal_blocked"])
++        self.assertEqual(
++            terminal["blockers"], ["missing terminal artifact: review-result.json"]
++        )
+         self.assertFalse(terminal["terminal_ready"])
+         self.assertEqual(
+             terminal["missing_terminal_artifacts"], ["review-result.json"]
+@@ -207,7 +215,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         self.assertTrue(manifest["patch_applies"])
+         self.assertEqual(
+             manifest["integration_tree"],
+-            "8dc9aed8092661b701104bd89dedf865cd4d94b6",
++            "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
+         )
+         self.assertEqual(
+             manifest["changed_file_count"], len(manifest["changed_files"])
+@@ -220,7 +228,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
+         evidence = read("docs/refactor/evidence/phase-07/README.md")
+         self.assertIn("phase8_started=false", phase)
+         self.assertIn("rollout=NO-GO", phase)
+-        self.assertIn("candidato remediado congelado", evidence)
++        self.assertIn("review-attempt-2.json", evidence)
+         self.assertNotIn("rollout autorizado", (phase + evidence).lower())
+ 
+     def test_duplicate_json_keys_are_rejected(self) -> None:
+diff --git a/tests/test_phase7_coordinator.py b/tests/test_phase7_coordinator.py
+index b3651b3..e069797 100644
+--- a/tests/test_phase7_coordinator.py
++++ b/tests/test_phase7_coordinator.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ 
+ from contextlib import contextmanager
+ from datetime import datetime, timedelta, timezone
++import hashlib
+ import sqlite3
+ import unittest
+ 
+@@ -27,6 +28,8 @@ from reservation_boundary.types import (
+     TurnEnvelope,
+     TurnPlanReason,
+ )
++from reservation_execution import OutboxMessage
++from reservation_execution.types import OutboxKind
+ from tests.test_phase2_serialization import complete_flow
+ from tests.test_phase7_legacy_state import snapshot
+ 
+@@ -90,9 +93,17 @@ class FakeIntent:
+ 
+ 
+ class FakeKernel:
+-    def __init__(self, trace: list[str], *, command=None, read_request=None) -> None:
++    def __init__(
++        self,
++        trace: list[str],
++        *,
++        command=None,
++        outbox=None,
++        read_request=None,
++    ) -> None:
+         self.trace = trace
+         self.command = command
++        self.outbox = outbox
+         self.read_request = read_request
+         self.calls = 0
+ 
+@@ -100,8 +111,9 @@ class FakeKernel:
+         self.calls += 1
+         self.trace.append("reduce")
+         commands = () if self.command is None else (self.command,)
++        outbox = () if self.outbox is None else (self.outbox,)
+         reads = () if self.read_request is None else ()
+-        decision = KernelDecision(state, commands, (), reads, ())
++        decision = KernelDecision(state, commands, outbox, reads, ())
+         if self.read_request is not None:
+             object.__setattr__(decision, "read_requests", (self.read_request,))
+         return decision
+@@ -122,6 +134,9 @@ class TracingStore:
+         self.trace.append("event_lookup")
+         return self.inner.event_hash(lead_key, event_id)
+ 
++    def turn_transaction(self, *, deadline_guard):
++        return self.inner.turn_transaction(deadline_guard=deadline_guard)
++
+     def load_state(self, lead_key: str):
+         self.loads += 1
+         self.trace.append("load_new")
+@@ -254,6 +269,36 @@ class Phase7CoordinatorTests(unittest.TestCase):
+             0,
+         )
+ 
++    def test_deadline_expiry_at_any_precommit_boundary_leaves_zero_durable_rows(self) -> None:
++        for values in (
++            (T0, T0 + timedelta(minutes=1)),
++            (T0, T0, T0 + timedelta(minutes=1)),
++            (T0, T0, T0, T0 + timedelta(minutes=1)),
++            (T0, T0, T0, T0, T0 + timedelta(minutes=1)),
++        ):
++            with self.subTest(values=values):
++                trace: list[str] = []
++                value, store, _, _, _, _ = coordinator(
++                    trace,
++                    clock=FakeClock(values),
++                )
++                self.keep(store)
++                with self.assertRaises(TurnDeadlineExceeded):
++                    value.coordinate(envelope(deadline=T0 + timedelta(seconds=30)))
++                counts = tuple(
++                    store.inner._connection.execute(
++                        f"SELECT count(*) FROM {table}"
++                    ).fetchone()[0]
++                    for table in (
++                        "boundary_state",
++                        "boundary_events",
++                        "boundary_commands",
++                        "boundary_outbox",
++                        "legacy_import_claims",
++                    )
++                )
++                self.assertEqual(counts, (0, 0, 0, 0, 0))
++
+     def test_post_commit_replay_skips_load_legacy_intent_reduce_and_commit(self) -> None:
+         trace: list[str] = []
+         value, store, _, legacy, intent, kernel = coordinator(trace)
+@@ -345,6 +390,29 @@ class Phase7CoordinatorTests(unittest.TestCase):
+                 value.coordinate(envelope())
+             self.assertEqual(store.commits, 0)
+ 
++    def test_outbox_must_bind_current_workflow_before_store_commit(self) -> None:
++        payload = '{"status":"queued"}'
++        foreign = OutboxMessage(
++            "outbox:foreign",
++            "outbox:foreign:idem",
++            "workflow-foreign",
++            None,
++            OutboxKind.SUMMARY_PRESENTED,
++            "template:foreign",
++            payload,
++            hashlib.sha256(payload.encode()).hexdigest(),
++            T0,
++        )
++        trace: list[str] = []
++        value, store, _, _, _, _ = coordinator(
++            trace,
++            kernel=FakeKernel(trace, outbox=foreign),
++        )
++        self.keep(store)
++        with self.assertRaises(InvalidKernelDecision):
++            value.coordinate(envelope())
++        self.assertEqual(store.commits, 0)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_phase7_dispatch.py b/tests/test_phase7_dispatch.py
+index 4f4ec95..733401d 100644
+--- a/tests/test_phase7_dispatch.py
++++ b/tests/test_phase7_dispatch.py
+@@ -135,7 +135,7 @@ class Phase7DispatchTests(unittest.TestCase):
+             ),
+             (
+                 "bokun_consultar_passeio_v2",
+-                ActivityReadArguments(date(2026, 8, 1), 2),
++                ActivityReadArguments("activity-001", date(2026, 8, 1), 2),
+             ),
+             (
+                 "bokun_consultar_descricao",
+diff --git a/tests/test_phase7_runtime_capture.py b/tests/test_phase7_runtime_capture.py
+index 1dd93ac..11277be 100644
+--- a/tests/test_phase7_runtime_capture.py
++++ b/tests/test_phase7_runtime_capture.py
+@@ -305,6 +305,9 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
+     def test_hostile_secret_pii_symlink_unallowlisted_and_existing_output_fail_closed(self) -> None:
+         cases = (
+             ("secret", "TOKEN='\x67\x68\x70\x5f\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x31\x32\x33\x34\x35\x36'\n", False),
++            ("generic_token", "TOKEN='highentropy0123456789abcdefXYZ'\n", False),
++            ("email", "OWNER='private.person@private-domain.test'\n", False),
++            ("long_digits", "REFERENCE='1234567890123456'\n", False),
+             ("phone", "CONTACT='\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32'\n", False),
+             ("unallowlisted", "safe = True\n", False),
+             ("symlink", "", True),
+diff --git a/tests/test_phase7_schema.py b/tests/test_phase7_schema.py
+index 90d3b6e..19fa5cd 100644
+--- a/tests/test_phase7_schema.py
++++ b/tests/test_phase7_schema.py
+@@ -70,6 +70,7 @@ class Phase7SchemaTests(unittest.TestCase):
+                 "lead_key",
+                 "event_id",
+                 "event_hash",
++                "commit_hash",
+                 "state_version",
+                 "occurred_at",
+             ),
+@@ -84,9 +85,13 @@ class Phase7SchemaTests(unittest.TestCase):
+             ),
+             "boundary_outbox": (
+                 "message_id",
++                "idempotency_key",
+                 "lead_key",
+                 "event_id",
++                "workflow_id",
++                "command_id",
+                 "kind",
++                "template_id",
+                 "payload_json",
+                 "payload_hash",
+                 "created_at",
+diff --git a/tests/test_phase7_sqlite_store.py b/tests/test_phase7_sqlite_store.py
+index 0b19cab..946737d 100644
+--- a/tests/test_phase7_sqlite_store.py
++++ b/tests/test_phase7_sqlite_store.py
+@@ -177,6 +177,49 @@ class Phase7SingleWriteStoreTests(unittest.TestCase):
+             )
+         self.assertEqual(self.counts(), (1, 1, 0, 0, 1, 0))
+ 
++    def test_same_event_hash_rejects_divergent_commit_payload(self) -> None:
++        source, imported, command = queued_import()
++        self.store.import_genesis(source, imported, claimed_at=T0)
++        current, token = self.store.acquire_fence(source.raw_fields["lead_key"])
++        state = replace(current.state, version=1, processed_event_ids=("event-replay",))
++        first = BoundaryCommit(state, (), (), ())
++        self.store.commit(
++            event_id="event-replay",
++            event_hash="e" * 64,
++            expected_version=0,
++            fencing_token=token,
++            commit=first,
++            committed_at=T0,
++        )
++        divergent = BoundaryCommit(state, (command,), (outbox_for(command),), ())
++        with self.assertRaises(IdentityConflict):
++            self.store.commit(
++                event_id="event-replay",
++                event_hash="e" * 64,
++                expected_version=1,
++                fencing_token=token,
++                commit=divergent,
++                committed_at=T0,
++            )
++        self.assertEqual(self.counts(), (1, 1, 0, 0, 1, 0))
++
++    def test_outbox_identity_must_bind_current_workflow_and_command(self) -> None:
++        source, imported, command = queued_import()
++        self.store.import_genesis(source, imported, claimed_at=T0)
++        current, token = self.store.acquire_fence(source.raw_fields["lead_key"])
++        state = replace(current.state, version=1, processed_event_ids=("event-outbox",))
++        foreign = replace(outbox_for(command), workflow_id="workflow-foreign")
++        with self.assertRaises(IdentityConflict):
++            self.store.commit(
++                event_id="event-outbox",
++                event_hash="f" * 64,
++                expected_version=0,
++                fencing_token=token,
++                commit=BoundaryCommit(state, (command,), (foreign,), ()),
++                committed_at=T0,
++            )
++        self.assertEqual(self.counts(), (1, 0, 0, 0, 1, 0))
++
+     def test_state_command_and_outbox_commit_atomically(self) -> None:
+         source, imported, command = queued_import()
+         self.store.import_genesis(source, imported, claimed_at=T0)

@@ -177,6 +177,49 @@ class Phase7SingleWriteStoreTests(unittest.TestCase):
             )
         self.assertEqual(self.counts(), (1, 1, 0, 0, 1, 0))
 
+    def test_same_event_hash_rejects_divergent_commit_payload(self) -> None:
+        source, imported, command = queued_import()
+        self.store.import_genesis(source, imported, claimed_at=T0)
+        current, token = self.store.acquire_fence(source.raw_fields["lead_key"])
+        state = replace(current.state, version=1, processed_event_ids=("event-replay",))
+        first = BoundaryCommit(state, (), (), ())
+        self.store.commit(
+            event_id="event-replay",
+            event_hash="e" * 64,
+            expected_version=0,
+            fencing_token=token,
+            commit=first,
+            committed_at=T0,
+        )
+        divergent = BoundaryCommit(state, (command,), (outbox_for(command),), ())
+        with self.assertRaises(IdentityConflict):
+            self.store.commit(
+                event_id="event-replay",
+                event_hash="e" * 64,
+                expected_version=1,
+                fencing_token=token,
+                commit=divergent,
+                committed_at=T0,
+            )
+        self.assertEqual(self.counts(), (1, 1, 0, 0, 1, 0))
+
+    def test_outbox_identity_must_bind_current_workflow_and_command(self) -> None:
+        source, imported, command = queued_import()
+        self.store.import_genesis(source, imported, claimed_at=T0)
+        current, token = self.store.acquire_fence(source.raw_fields["lead_key"])
+        state = replace(current.state, version=1, processed_event_ids=("event-outbox",))
+        foreign = replace(outbox_for(command), workflow_id="workflow-foreign")
+        with self.assertRaises(IdentityConflict):
+            self.store.commit(
+                event_id="event-outbox",
+                event_hash="f" * 64,
+                expected_version=0,
+                fencing_token=token,
+                commit=BoundaryCommit(state, (command,), (foreign,), ()),
+                committed_at=T0,
+            )
+        self.assertEqual(self.counts(), (1, 0, 0, 0, 1, 0))
+
     def test_state_command_and_outbox_commit_atomically(self) -> None:
         source, imported, command = queued_import()
         self.store.import_genesis(source, imported, claimed_at=T0)

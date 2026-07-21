@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **candidato remediado congelado; revisão terminal e CI remoto pendentes**.
+Status: **segundo candidato invalidado; terceira remediação em freeze local**.
 
 ## Entrada
 
@@ -14,8 +14,10 @@ Status: **candidato remediado congelado; revisão terminal e CI remoto pendentes
 - zero capability live;
 - rollout `NO-GO` e `phase8_started=false`.
 
-`red-results.json` cobre Tasks 1–16 com envelopes sanitizados: task, comando,
-exit, classe causal, SHA-256 e bytes. Raw outputs permanecem em `/tmp`.
+`red-results.json` cobre Tasks 1–17 com envelopes sanitizados: task, comando,
+exit, classe causal, SHA-256 e bytes. Os outputs RED da segunda revisão estão
+retidos em `review2-red-outputs/`; referências históricas anteriores a `/tmp`
+continuam explicitamente marcadas como limitações de proveniência.
 
 ## Runtime isolado
 
@@ -25,7 +27,7 @@ exit, classe causal, SHA-256 e bytes. Raw outputs permanecem em `/tmp`.
 - `runtime-integration-manifest.json`: commits/trees/wheel/testes focused;
 - `runtime-integration-contract-manifest.json`: contrato após integração.
 
-O patch reproduz a tree `8dc9aed8092661b701104bd89dedf865cd4d94b6`.
+O patch reproduz a tree `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`.
 O source operacional permaneceu no HEAD `57408d8b2040399bc25ee7957505208079458884`.
 O pre-flight registrou 80 entradas locais; o manifesto de captura fixa as 86
 entradas observadas posteriormente e seus hashes exatos. A Fase 7 autentica o
@@ -47,7 +49,7 @@ diffs da árvore suja.
 ## Candidato e validação terminal
 
 - `candidate.json`: commit/tree/wheel/patch do candidato congelado;
-- `local-integration-result.json`: 963/963 na réplica instalada do wheel;
+- `local-integration-result.json`: histórico do candidato invalidado;
 - `runtime-validation-result.json`: patch apply/reverse, source e runtime;
 - `properties-result.json`: job remoto 20.000/20.000;
 - `faults-result.json`: seis faults, 2.000 restarts e contention 200;
@@ -65,9 +67,11 @@ artifacts nomeados com `${{ github.sha }}` e falha se o report estiver ausente.
 Esse novo workflow ainda não foi executado remotamente.
 
 `review-attempt-1.json` registra a lane 1 `Needs fixes` e os dois timeouts que
-valem zero. `review-remediation-tests.patch` torna os novos REDs reconstruíveis
-sobre o evidence commit anterior. `review-result.json` permanece ausente até o
-candidato remediado obter os três verdicts terminais válidos.
+valem zero. `review-attempt-2.json` retém os três pareceres conclusivos
+`Needs fixes` do batch `deleg_39e3d235`, com hashes e summaries integrais. Os
+REDs da segunda remediação e seus patches test-only também estão retidos.
+`review-result.json` permanece ausente até um novo candidato obter três
+verdicts terminais válidos.
 
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi

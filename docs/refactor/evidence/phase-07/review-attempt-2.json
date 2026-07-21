@@ -1,0 +1,59 @@
+{
+  "accepted_findings": [
+    "outbox identity was not bound to the persisted workflow/command",
+    "event replay authenticated only event_hash, not the exact commit payload",
+    "deadline expiry could leave genesis/fence writes",
+    "runtime plugin could execute the legacy provider path without Phase 7 context",
+    "four durable writes bypassed typed ToolDispatch argument validation",
+    "active Bokun read and state-commit schemas were translated incorrectly",
+    "generic token/email/long-number probes were not fail-closed",
+    "terminal validator did not distinguish a missing review precondition from a failed gate"
+  ],
+  "batch_id": "deleg_39e3d235",
+  "candidate_commit": "f5505b4c8a2ae8aa6990970035e770e539b1f978",
+  "candidate_tree": "67f228abec5582f2ac56b0fdd5a9328961b81804",
+  "evidence_commit": "b27706bca3d2dba3e564c9176702fc4504050bb3",
+  "evidence_tree": "d6b4cc14549e4f2a3cac4a732385f8dd1ae44a5a",
+  "functional_candidate_invalidated": true,
+  "lanes": [
+    {
+      "critical": 2,
+      "important": 0,
+      "lane": "identity/import/store/fencing",
+      "minor": 0,
+      "path": "review-attempt-2-lane-1.txt",
+      "status": "completed",
+      "summary_bytes": 2993,
+      "summary_sha256": "14b71a1ecc8401de34c14423df0d40f4d3cd3d733650f01cce5e2e847fcccb7d",
+      "verdict": "Needs fixes"
+    },
+    {
+      "critical": 1,
+      "important": 3,
+      "lane": "coordinator/dispatch/deadlines/side-effects",
+      "minor": 0,
+      "path": "review-attempt-2-lane-2.txt",
+      "status": "completed",
+      "summary_bytes": 4178,
+      "summary_sha256": "59f31999b5797a8aaa4c2c9d0e8654a5f1805f5966ceebea8c725a8bc6732215",
+      "verdict": "Needs fixes"
+    },
+    {
+      "critical": 0,
+      "important": 1,
+      "lane": "replica/provenance/sanitization/workflow/CI/closeout",
+      "minor": 1,
+      "path": "review-attempt-2-lane-3.txt",
+      "status": "completed",
+      "summary_bytes": 3271,
+      "summary_sha256": "7540a2acba547f2c838ce45b8851e35c13edc9cea1505f05cf11c9d7e1ebbb4e",
+      "verdict": "Needs fixes"
+    }
+  ],
+  "live_capabilities_executed": [],
+  "phase": 7,
+  "phase8_started": false,
+  "policy": "all three exact verdicts were consumed; completion did not imply approval",
+  "reviewed_at": "2026-07-21T01:26:14Z",
+  "rollout": "NO-GO"
+}

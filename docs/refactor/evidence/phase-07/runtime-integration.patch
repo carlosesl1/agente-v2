@@ -1,5 +1,5 @@
 diff --git a/.hermes/plugins/chapada_leads_tools/__init__.py b/.hermes/plugins/chapada_leads_tools/__init__.py
-index aeece2532e70035345d5f9b9e078678b5d8b9a67..155f979e91b457d3e2904cc266cbba3b6a7e2595 100644
+index aeece25..155f979 100644
 --- a/.hermes/plugins/chapada_leads_tools/__init__.py
 +++ b/.hermes/plugins/chapada_leads_tools/__init__.py
 @@ -18,11 +18,11 @@ from typing import Any
@@ -17,7 +17,7 @@ index aeece2532e70035345d5f9b9e078678b5d8b9a67..155f979e91b457d3e2904cc266cbba3b
  
  
 diff --git a/app.py b/app.py
-index cc77eae555a527100751ea95c25a22ca9c8881b5..11c4d99023b7e3339997932024562c2d1172c8eb 100644
+index cc77eae..11c4d99 100644
 --- a/app.py
 +++ b/app.py
 @@ -61,6 +61,7 @@ from domain.security_guardrails import (
@@ -75,10 +75,10 @@ index cc77eae555a527100751ea95c25a22ca9c8881b5..11c4d99023b7e3339997932024562c2d
      state = (
 diff --git a/domain/tool_dispatch_adapter.py b/domain/tool_dispatch_adapter.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3d27ea56e
+index 0000000..7cd9b52
 --- /dev/null
 +++ b/domain/tool_dispatch_adapter.py
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,382 @@
 +"""Explicit Phase 7 ToolDispatch seam with legacy fallback outside boundary context."""
 +
 +from __future__ import annotations
@@ -90,13 +90,18 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +
 +from reservation_boundary import (
 +    ActivityDescriptionArguments,
++    ActivityPaymentArguments,
 +    ActivityReadArguments,
++    ActivityReservationArguments,
 +    BoundaryState,
 +    DateSlot,
++    DecimalSlot,
 +    DispatchKind,
 +    FaqReadArguments,
 +    IntegerSlot,
 +    LodgingReadArguments,
++    LodgingPaymentArguments,
++    LodgingReservationArguments,
 +    RoomDescriptionArguments,
 +    StateCommitArguments,
 +    StringSlot,
@@ -199,7 +204,8 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +            for key in ("adults", "children", "youth", "infants", "seniors")
 +        )
 +        return ActivityReadArguments(
-+            _date(arguments.get("on_date") or arguments.get("date"), "date"),
++            _exact_text(arguments.get("tour_product_id"), "tour_product_id"),
++            _date(arguments.get("date_start"), "date_start"),
 +            max(1, participants),
 +        )
 +    if name == "bokun_consultar_descricao":
@@ -214,23 +220,92 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +
 +def _state_commit_arguments(arguments: Mapping[str, object]) -> StateCommitArguments:
 +    facts: list[TypedFact] = []
-+    language = arguments.get("language")
++    slots = arguments.get("collected_slots")
++    if slots is None:
++        slots = {}
++    if not isinstance(slots, Mapping):
++        raise TypeError("collected_slots must be a mapping")
++    language = slots.get("language")
 +    if type(language) is str and language.strip():
 +        facts.append(TypedFact("language", StringSlot(language.strip())))
 +    services = arguments.get("desired_services")
 +    if type(services) in (list, tuple) and services and type(services[0]) is str:
 +        facts.append(TypedFact("service", StringSlot(services[0].strip())))
 +    for key in ("adults", "children"):
-+        value = arguments.get(key)
++        value = slots.get(key)
 +        if type(value) is int:
 +            facts.append(TypedFact(key, IntegerSlot(value)))
 +    for source, target in (("check_in", "start_date"), ("check_out", "end_date")):
-+        value = arguments.get(source)
++        value = slots.get(source)
 +        if type(value) is str and value:
 +            facts.append(TypedFact(target, DateSlot(date.fromisoformat(value))))
 +    if not facts:
 +        raise TypeError("state commit contains no whitelisted facts")
 +    return StateCommitArguments(tuple(facts))
++
++
++def _canonical_amount(value: object) -> DecimalSlot:
++    text = _exact_text(value, "proof_amount")
++    amount = Decimal(text)
++    if not amount.is_finite() or amount <= 0:
++        raise ValueError("proof_amount must be finite and positive")
++    return DecimalSlot(format(amount.quantize(Decimal("0.01")), "f"))
++
++
++def _typed_command_arguments(
++    name: str,
++    arguments: Mapping[str, object],
++    state: BoundaryState,
++):
++    if name in {"cloudbeds_criar_reserva_v2", "bokun_agendar_passeio_v2"}:
++        option = arguments.get("option")
++        answers = arguments.get("answers")
++        if not isinstance(option, Mapping) or not isinstance(answers, Mapping):
++            raise TypeError("reservation option and answers must be mappings")
++        offer_id = _exact_text(option.get("option_id"), "option.option_id")
++        workflow = state.workflow
++        command = getattr(workflow, "command", None)
++        version = getattr(command, "draft_version", None)
++        signature = getattr(command, "subject_signature", None)
++        if type(version) is not int or type(signature) is not str:
++            raise ValueError("reservation command binding is unavailable")
++        argument_type = (
++            LodgingReservationArguments
++            if name == "cloudbeds_criar_reserva_v2"
++            else ActivityReservationArguments
++        )
++        return argument_type(offer_id, version, signature)
++
++    if arguments.get("confirmation_by_lead") is not True:
++        raise ValueError("payment requires exact lead confirmation")
++    if arguments.get("payment_proof_received") is not True:
++        raise ValueError("payment requires proof receipt")
++    method = arguments.get("payment_method")
++    if method is not None and str(method).casefold() != "pix":
++        raise ValueError("settlement adapter accepts only the active Pix schema")
++    status = _exact_text(arguments.get("proof_payment_status"), "proof_payment_status").casefold()
++    if status not in {"paid", "completed", "concluido", "concluído", "approved", "success"}:
++        raise ValueError("payment proof status is not mechanically completed")
++    _exact_text(arguments.get("proof_receiver_name"), "proof_receiver_name")
++    anchor_key = "reservation_id" if name.startswith("cloudbeds") else "confirmation_code"
++    anchor_id = _exact_text(arguments.get(anchor_key), anchor_key)
++    evidence_id = _exact_text(arguments.get("transaction_id"), "transaction_id")
++    amount = _canonical_amount(arguments.get("proof_amount") or arguments.get("amount"))
++    expected_unit = "hostel" if name.startswith("cloudbeds") else "agency"
++    matches = tuple(
++        payment
++        for payment in state.payments
++        if payment.subject.confirmed_reservation_anchor.payment_target_id == anchor_id
++        and payment.subject.confirmed_reservation_anchor.business_unit.value == expected_unit
++    )
++    if len(matches) != 1:
++        raise ValueError("payment target does not bind one boundary workflow")
++    argument_type = (
++        LodgingPaymentArguments
++        if name.startswith("cloudbeds")
++        else ActivityPaymentArguments
++    )
++    return argument_type(anchor_id, evidence_id, amount, matches[0].subject.currency)
 +
 +
 +def _deadline(context: Mapping[str, object]) -> datetime:
@@ -251,30 +326,6 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +    if state.lead_key != lead_key:
 +        raise ValueError("phase7 lead binding mismatch")
 +    return state
-+
-+
-+def _authorized_command_id(name: str, state: BoundaryState) -> str | None:
-+    if name in {"cloudbeds_criar_reserva_v2", "bokun_agendar_passeio_v2"}:
-+        workflow = state.workflow
-+        command = getattr(workflow, "command", None)
-+        operation = str(getattr(getattr(command, "operation", None), "value", ""))
-+        expected = "reserve_lodging" if name.startswith("cloudbeds") else "book_activity"
-+        if operation == expected:
-+            return str(getattr(command, "command_id", "")) or None
-+        return None
-+    expected_unit = "hostel" if name.startswith("cloudbeds") else "agency"
-+    for payment in state.payments:
-+        command = getattr(payment, "settlement_command", None)
-+        unit = str(
-+            getattr(
-+                getattr(payment.subject.confirmed_reservation_anchor, "business_unit", None),
-+                "value",
-+                "",
-+            )
-+        )
-+        if command is not None and unit == expected_unit:
-+            return str(getattr(command, "settlement_command_id", "")) or None
-+    return None
 +
 +
 +def dispatch_native_tool(
@@ -315,26 +366,11 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +                category=category,
 +                manual_review=True,
 +            )
-+        if name in _DURABLE_WRITES:
-+            command_id = _authorized_command_id(name, state)
-+            if not command_id:
-+                return _base_result(
-+                    name,
-+                    status="phase7_authorization_missing",
-+                    category=category,
-+                    manual_review=True,
-+                )
-+            result = _base_result(
-+                name,
-+                status="phase7_command_authorized",
-+                category=category,
-+            )
-+            result["command_id"] = command_id
-+            result["command_persisted"] = True
-+            return result
 +        typed_arguments = (
 +            _state_commit_arguments(clean_arguments)
 +            if contract.kind is DispatchKind.STATE_COMMIT
++            else _typed_command_arguments(name, clean_arguments, state)
++            if name in _DURABLE_WRITES
 +            else _typed_read_arguments(name, clean_arguments)
 +        )
 +        request = ToolDispatchRequest(
@@ -355,6 +391,23 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +                status="phase7_read_request",
 +                category=category,
 +            )
++        if dispatch_result.kind is DispatchKind.COMMAND:
++            if len(dispatch_result.commands) != 1:
++                raise ValueError("durable write did not resolve one exact command")
++            command = dispatch_result.commands[0]
++            command_id = getattr(command, "command_id", None) or getattr(
++                command,
++                "settlement_command_id",
++                None,
++            )
++            result = _base_result(
++                name,
++                status="phase7_command_authorized",
++                category=category,
++            )
++            result["command_id"] = _exact_text(command_id, "command_id")
++            result["command_persisted"] = True
++            return result
 +        result = _base_result(
 +            name,
 +            status="phase7_state_commit",
@@ -379,9 +432,22 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +) -> str:
 +    context = load_native_tool_context()
 +    if not context.get("phase7_boundary_state_wire"):
-+        from domain.chapada_native_tools import execute_hermes_native_tool
-+
-+        return execute_hermes_native_tool(str(tool_name or ""), arguments)
++        name = str(tool_name or "").strip()
++        contract = CATALOG.get(name)
++        category = (
++            "unknown"
++            if contract is None
++            else "write"
++            if contract.kind is DispatchKind.COMMAND
++            else contract.kind.value
++        )
++        result = _base_result(
++            name or "unknown",
++            status="phase7_boundary_context_required",
++            category=category,
++            manual_review=contract is not None and contract.kind is DispatchKind.COMMAND,
++        )
++        return json.dumps(result, ensure_ascii=False, sort_keys=True)
 +    result = dispatch_native_tool(
 +        tool_name,
 +        arguments,
@@ -397,7 +463,7 @@ index 0000000000000000000000000000000000000000..21d1a77a4f316b75364f984060026bf3
 +)
 diff --git a/domain/turn_coordinator_adapter.py b/domain/turn_coordinator_adapter.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..461e89150c83e1a0aee2e1f00ee60539b3027514
+index 0000000..461e891
 --- /dev/null
 +++ b/domain/turn_coordinator_adapter.py
 @@ -0,0 +1,99 @@
@@ -500,12 +566,44 @@ index 0000000000000000000000000000000000000000..461e89150c83e1a0aee2e1f00ee60539
 +    "TurnCoordinatorAdapterProtocol",
 +    "TurnCoordinatorProtocol",
 +)
+diff --git a/tests/fixtures/phase7_boundary_states.json b/tests/fixtures/phase7_boundary_states.json
+new file mode 100644
+index 0000000..d2799b3
+--- /dev/null
++++ b/tests/fixtures/phase7_boundary_states.json
+@@ -0,0 +1,26 @@
++{
++  "activity_reservation": {
++    "command_id": "cmd:bfbf649d1a0702114e57dbc61cda283a",
++    "offer_id": "offer-serializer",
++    "wire": "{\"data\":{\"handoff\":null,\"lead_key\":\"lead-synthetic-001\",\"payments\":[],\"processed_event_ids\":[],\"schema_version\":7,\"version\":0,\"workflow\":{\"$type\":\"reservation_domain_state\",\"wire\":\"{\\\"data\\\":{\\\"command\\\":{\\\"command_id\\\":\\\"cmd:bfbf649d1a0702114e57dbc61cda283a\\\",\\\"created_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"draft_id\\\":\\\"draft-serializer\\\",\\\"draft_version\\\":1,\\\"idempotency_key\\\":\\\"idem:bfbf649d1a0702114e57dbc61cda283aa0b845ba55e3fbd46082a7c6ff437599\\\",\\\"operation\\\":\\\"book_activity\\\",\\\"payload\\\":{\\\"components\\\":[{\\\"available\\\":true,\\\"end_date\\\":null,\\\"lookup_id\\\":\\\"lookup-serializer\\\",\\\"offer_id\\\":\\\"offer-serializer\\\",\\\"party\\\":{\\\"adults\\\":2,\\\"children\\\":0},\\\"provider_ref\\\":\\\"provider-activity-alpha\\\",\\\"public_label\\\":\\\"Passeio sint\u00e9tico\\\",\\\"service\\\":\\\"activity\\\",\\\"start_date\\\":\\\"2026-10-10\\\",\\\"start_time\\\":\\\"08:00\\\",\\\"total\\\":{\\\"amount\\\":\\\"500.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"customer\\\":{\\\"country_code\\\":\\\"ZZ\\\",\\\"customer_ref\\\":\\\"customer-serializer\\\",\\\"email\\\":\\\"serializer.person@example.invalid\\\",\\\"full_name\\\":\\\"Synthetic Serializer Person\\\",\\\"phone_e164\\\":\\\"+99900000002\\\"},\\\"terms\\\":{\\\"add_ons\\\":[{\\\"code\\\":\\\"equipment\\\",\\\"quantity\\\":2,\\\"unit_price\\\":{\\\"amount\\\":\\\"25.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"payment_method\\\":\\\"pix\\\"}},\\\"subject_signature\\\":\\\"01abc1e0aeb9cecfd6d39969eff7e542922a4a58088e0d0d14f9f8fb53ea3f8b\\\",\\\"workflow_id\\\":\\\"workflow-serializer\\\"},\\\"confirmation\\\":{\\\"confirmation_event_id\\\":\\\"confirmation-serializer\\\",\\\"decided_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"decision\\\":\\\"accept\\\",\\\"subject_signature\\\":\\\"01abc1e0aeb9cecfd6d39969eff7e542922a4a58088e0d0d14f9f8fb53ea3f8b\\\",\\\"target_draft_version\\\":1},\\\"draft\\\":{\\\"components\\\":[{\\\"available\\\":true,\\\"end_date\\\":null,\\\"lookup_id\\\":\\\"lookup-serializer\\\",\\\"offer_id\\\":\\\"offer-serializer\\\",\\\"party\\\":{\\\"adults\\\":2,\\\"children\\\":0},\\\"provider_ref\\\":\\\"provider-activity-alpha\\\",\\\"public_label\\\":\\\"Passeio sint\u00e9tico\\\",\\\"service\\\":\\\"activity\\\",\\\"start_date\\\":\\\"2026-10-10\\\",\\\"start_time\\\":\\\"08:00\\\",\\\"total\\\":{\\\"amount\\\":\\\"500.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"created_at\\\":\\\"2026-10-01T12:00:04+00:00\\\",\\\"customer\\\":{\\\"country_code\\\":\\\"ZZ\\\",\\\"customer_ref\\\":\\\"customer-serializer\\\",\\\"email\\\":\\\"serializer.person@example.invalid\\\",\\\"full_name\\\":\\\"Synthetic Serializer Person\\\",\\\"phone_e164\\\":\\\"+99900000002\\\"},\\\"draft_id\\\":\\\"draft-serializer\\\",\\\"subject_signature\\\":\\\"01abc1e0aeb9cecfd6d39969eff7e542922a4a58088e0d0d14f9f8fb53ea3f8b\\\",\\\"terms\\\":{\\\"add_ons\\\":[{\\\"code\\\":\\\"equipment\\\",\\\"quantity\\\":2,\\\"unit_price\\\":{\\\"amount\\\":\\\"25.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"payment_method\\\":\\\"pix\\\"},\\\"version\\\":1},\\\"meta\\\":{\\\"command_ids\\\":[\\\"cmd:bfbf649d1a0702114e57dbc61cda283a\\\"],\\\"last_event_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"revision\\\":6,\\\"seen_event_hashes\\\":[\\\"37e0f9c94e0e791aa85697a62a95ed426b3c064f24dc2e302dd2bf5cc588ef26\\\",\\\"6434cc2fb0a1b0c60c014a20d4cebfe2517c5dfb3c2cf5c984bfc2cd695a0ab8\\\",\\\"95219708296e7b555bca42e1ae925798dc0f92ac4d3a79eb45cd971561f6c80b\\\",\\\"30d6adb38083e0380b071cb6c783641b30c0cd0b5ca0ccf12929b80027c3e8df\\\",\\\"406528e9cf5e758f6be0f7737186ad1fbf26129d194026606a4736ba051cec6f\\\",\\\"a0ed20e0c8fa1e605535f09cfd62d2f169b4916ec0c86b7b4963a236765fed05\\\"],\\\"seen_event_ids\\\":[\\\"event-serializer-1\\\",\\\"event-serializer-2\\\",\\\"event-serializer-3\\\",\\\"event-serializer-4\\\",\\\"event-serializer-5\\\",\\\"event-serializer-6\\\"],\\\"workflow_id\\\":\\\"workflow-serializer\\\"},\\\"summary\\\":{\\\"draft_id\\\":\\\"draft-serializer\\\",\\\"draft_version\\\":1,\\\"outbox_message_id\\\":\\\"outbox-serializer\\\",\\\"presented_at\\\":\\\"2026-10-01T12:00:05+00:00\\\",\\\"subject_signature\\\":\\\"01abc1e0aeb9cecfd6d39969eff7e542922a4a58088e0d0d14f9f8fb53ea3f8b\\\",\\\"summary_event_id\\\":\\\"summary-serializer\\\"}},\\\"schema_version\\\":1,\\\"type\\\":\\\"execution_queued\\\"}\"}},\"schema_version\":1,\"type\":\"boundary_state\"}"
++  },
++  "agency_payment": {
++    "amount": "125.00",
++    "anchor_id": "target:booking:synthetic:1",
++    "command_id": "settlement:d4ed4b5048aec98ef5719c96c3b2c676",
++    "evidence_id": "pix:E1234567820270201ABCDEF12345",
++    "wire": "{\"data\":{\"handoff\":null,\"lead_key\":\"lead-synthetic-001\",\"payments\":[{\"$type\":\"phase6_payment_workflow\",\"wire\":\"{\\\"data\\\":{\\\"cancellation\\\":null,\\\"confirmation\\\":{\\\"confirmation_id\\\":\\\"payment:confirmation:agency:1\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:03+00:00\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"event_id\\\":\\\"payment:event:confirmation:agency:1\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1,\\\"summary_hash\\\":\\\"5bbd32ab19d8107887447059b5a9796a9c1f1eddbc0893548ddb490cdbf8ba51\\\"},\\\"evidence_record\\\":{\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"event_id\\\":\\\"payment:event:evidence:agency:1\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1,\\\"recorded_at\\\":\\\"2027-02-01T12:00:04+00:00\\\",\\\"trust\\\":{\\\"pix_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"stripe_account_profile_id\\\":\\\"stripe-account:profile:synthetic:1\\\",\\\"wise_account_profile_id\\\":\\\"wise-account:profile:synthetic:1\\\",\\\"wise_signer_profile_id\\\":\\\"wise-signer:profile:synthetic:1\\\"}},\\\"expiration\\\":null,\\\"history\\\":[{\\\"event_id\\\":\\\"payment:event:method:agency:1\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"selected_at\\\":\\\"2027-02-01T12:00:01+00:00\\\"},{\\\"event_id\\\":\\\"payment:event:summary:agency:1\\\",\\\"recorded_at\\\":\\\"2027-02-01T12:00:02+00:00\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:agency:synthetic:1\\\",\\\"service\\\":\\\"activity\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary_hash\\\":\\\"5bbd32ab19d8107887447059b5a9796a9c1f1eddbc0893548ddb490cdbf8ba51\\\"},{\\\"confirmation_id\\\":\\\"payment:confirmation:agency:1\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:03+00:00\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"event_id\\\":\\\"payment:event:confirmation:agency:1\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1,\\\"summary_hash\\\":\\\"5bbd32ab19d8107887447059b5a9796a9c1f1eddbc0893548ddb490cdbf8ba51\\\"},{\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"event_id\\\":\\\"payment:event:evidence:agency:1\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1,\\\"recorded_at\\\":\\\"2027-02-01T12:00:04+00:00\\\",\\\"trust\\\":{\\\"pix_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"stripe_account_profile_id\\\":\\\"stripe-account:profile:synthetic:1\\\",\\\"wise_account_profile_id\\\":\\\"wise-account:profile:synthetic:1\\\",\\\"wise_signer_profile_id\\\":\\\"wise-signer:profile:synthetic:1\\\"}}],\\\"policy\\\":{\\\"booking_form\\\":\\\"disabled\\\",\\\"customer_payment_confirmation\\\":\\\"required\\\",\\\"internal_payment_email\\\":\\\"disabled\\\",\\\"paid_state_transition\\\":\\\"required\\\"},\\\"settlement_command\\\":{\\\"canonical_payload\\\":\\\"{\\\\\\\"amount_minor\\\\\\\":12500,\\\\\\\"business_unit\\\\\\\":\\\\\\\"agency\\\\\\\",\\\\\\\"currency\\\\\\\":\\\\\\\"BRL\\\\\\\",\\\\\\\"economic_signature\\\\\\\":\\\\\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\\\\\",\\\\\\\"evidence_claim_key\\\\\\\":\\\\\\\"pix:E1234567820270201ABCDEF12345\\\\\\\",\\\\\\\"evidence_hash\\\\\\\":\\\\\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"pix\\\\\\\",\\\\\\\"operation\\\\\\\":\\\\\\\"register_and_confirm\\\\\\\",\\\\\\\"payment_id\\\\\\\":\\\\\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\\\\\",\\\\\\\"payment_target_id\\\\\\\":\\\\\\\"target:booking:synthetic:1\\\\\\\",\\\\\\\"payment_version\\\\\\\":1,\\\\\\\"receiver_profile_id\\\\\\\":\\\\\\\"receiver:profile:synthetic:1\\\\\\\",\\\\\\\"schema_version\\\\\\\":1}\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"evidence_claim_key\\\":\\\"pix:E1234567820270201ABCDEF12345\\\",\\\"idempotency_key\\\":\\\"payment-idem:c2b453718c8286db98cd0a27ee62efa8\\\",\\\"operation\\\":\\\"register_and_confirm\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1,\\\"settlement_command_id\\\":\\\"settlement:d4ed4b5048aec98ef5719c96c3b2c676\\\"},\\\"settlement_finish\\\":null,\\\"settlement_start\\\":null,\\\"status\\\":\\\"settlement_queued\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:agency:synthetic:1\\\",\\\"service\\\":\\\"activity\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary\\\":{\\\"event_id\\\":\\\"payment:event:summary:agency:1\\\",\\\"recorded_at\\\":\\\"2027-02-01T12:00:02+00:00\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"agency\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:agency:synthetic:1\\\",\\\"service\\\":\\\"activity\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_target_id\\\":\\\"target:booking:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary_hash\\\":\\\"5bbd32ab19d8107887447059b5a9796a9c1f1eddbc0893548ddb490cdbf8ba51\\\"},\\\"verified_evidence\\\":{\\\"claim_key\\\":\\\"pix:E1234567820270201ABCDEF12345\\\",\\\"economic_signature\\\":\\\"789545f0579c9695f1be75962de0ca212f9cd26cc8f022f169e6d820b0340759\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:966d0d3b5af3757171f74bf49a361d5e\\\",\\\"payment_version\\\":1}},\\\"schema_version\\\":1,\\\"type\\\":\\\"payment_workflow\\\"}\"}],\"processed_event_ids\":[],\"schema_version\":7,\"version\":0,\"workflow\":null},\"schema_version\":1,\"type\":\"boundary_state\"}"
++  },
++  "hostel_payment": {
++    "amount": "125.00",
++    "anchor_id": "target:reservation:synthetic:1",
++    "command_id": "settlement:e1f2c09405b47c9ffdb77f49822090a9",
++    "evidence_id": "pix:E1234567820270201ABCDEF12345",
++    "wire": "{\"data\":{\"handoff\":null,\"lead_key\":\"lead-synthetic-001\",\"payments\":[{\"$type\":\"phase6_payment_workflow\",\"wire\":\"{\\\"data\\\":{\\\"cancellation\\\":null,\\\"confirmation\\\":{\\\"confirmation_id\\\":\\\"payment:confirmation:synthetic:1\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:03+00:00\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"event_id\\\":\\\"payment:event:confirmation:synthetic:1\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1,\\\"summary_hash\\\":\\\"bdcaaf4649f0f7bd281f0f8dd12ba70ad38d91a1289da0324cc5c8f0f14d918b\\\"},\\\"evidence_record\\\":{\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"event_id\\\":\\\"payment:event:evidence:synthetic:1\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1,\\\"recorded_at\\\":\\\"2027-02-01T12:00:04+00:00\\\",\\\"trust\\\":{\\\"pix_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"stripe_account_profile_id\\\":\\\"stripe-account:profile:synthetic:1\\\",\\\"wise_account_profile_id\\\":\\\"wise-account:profile:synthetic:1\\\",\\\"wise_signer_profile_id\\\":\\\"wise-signer:profile:synthetic:1\\\"}},\\\"expiration\\\":null,\\\"history\\\":[{\\\"event_id\\\":\\\"payment:event:method:synthetic:1\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"selected_at\\\":\\\"2027-02-01T12:00:01+00:00\\\"},{\\\"event_id\\\":\\\"payment:event:summary:synthetic:1\\\",\\\"recorded_at\\\":\\\"2027-02-01T12:00:02+00:00\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:reservation:synthetic:1\\\",\\\"service\\\":\\\"lodging\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary_hash\\\":\\\"bdcaaf4649f0f7bd281f0f8dd12ba70ad38d91a1289da0324cc5c8f0f14d918b\\\"},{\\\"confirmation_id\\\":\\\"payment:confirmation:synthetic:1\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:03+00:00\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"event_id\\\":\\\"payment:event:confirmation:synthetic:1\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1,\\\"summary_hash\\\":\\\"bdcaaf4649f0f7bd281f0f8dd12ba70ad38d91a1289da0324cc5c8f0f14d918b\\\"},{\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"event_id\\\":\\\"payment:event:evidence:synthetic:1\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1,\\\"recorded_at\\\":\\\"2027-02-01T12:00:04+00:00\\\",\\\"trust\\\":{\\\"pix_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"stripe_account_profile_id\\\":\\\"stripe-account:profile:synthetic:1\\\",\\\"wise_account_profile_id\\\":\\\"wise-account:profile:synthetic:1\\\",\\\"wise_signer_profile_id\\\":\\\"wise-signer:profile:synthetic:1\\\"}}],\\\"policy\\\":{\\\"booking_form\\\":\\\"disabled\\\",\\\"customer_payment_confirmation\\\":\\\"required\\\",\\\"internal_payment_email\\\":\\\"disabled\\\",\\\"paid_state_transition\\\":\\\"required\\\"},\\\"settlement_command\\\":{\\\"canonical_payload\\\":\\\"{\\\\\\\"amount_minor\\\\\\\":12500,\\\\\\\"business_unit\\\\\\\":\\\\\\\"hostel\\\\\\\",\\\\\\\"currency\\\\\\\":\\\\\\\"BRL\\\\\\\",\\\\\\\"economic_signature\\\\\\\":\\\\\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\\\\\",\\\\\\\"evidence_claim_key\\\\\\\":\\\\\\\"pix:E1234567820270201ABCDEF12345\\\\\\\",\\\\\\\"evidence_hash\\\\\\\":\\\\\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"pix\\\\\\\",\\\\\\\"operation\\\\\\\":\\\\\\\"register_and_confirm\\\\\\\",\\\\\\\"payment_id\\\\\\\":\\\\\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\\\\\",\\\\\\\"payment_target_id\\\\\\\":\\\\\\\"target:reservation:synthetic:1\\\\\\\",\\\\\\\"payment_version\\\\\\\":1,\\\\\\\"receiver_profile_id\\\\\\\":\\\\\\\"receiver:profile:synthetic:1\\\\\\\",\\\\\\\"schema_version\\\\\\\":1}\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"evidence_claim_key\\\":\\\"pix:E1234567820270201ABCDEF12345\\\",\\\"idempotency_key\\\":\\\"payment-idem:320a00ff2d2f44112cccf425e9785798\\\",\\\"operation\\\":\\\"register_and_confirm\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1,\\\"settlement_command_id\\\":\\\"settlement:e1f2c09405b47c9ffdb77f49822090a9\\\"},\\\"settlement_finish\\\":null,\\\"settlement_start\\\":null,\\\"status\\\":\\\"settlement_queued\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:reservation:synthetic:1\\\",\\\"service\\\":\\\"lodging\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary\\\":{\\\"event_id\\\":\\\"payment:event:summary:synthetic:1\\\",\\\"recorded_at\\\":\\\"2027-02-01T12:00:02+00:00\\\",\\\"subject\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_reservation_anchor\\\":{\\\"amount_minor\\\":12500,\\\"business_unit\\\":\\\"hostel\\\",\\\"confirmed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"currency\\\":\\\"BRL\\\",\\\"payment_deadline\\\":\\\"2027-02-03T12:00:00+00:00\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\",\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"reservation_command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"reservation_outcome\\\":{\\\"certainty\\\":\\\"effect_confirmed\\\",\\\"command_id\\\":\\\"command:reservation:synthetic:1\\\",\\\"evidence\\\":[\\\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\\\"],\\\"normalized_status\\\":\\\"reservation_created\\\",\\\"provider_reference\\\":\\\"provider:reservation:synthetic:1\\\"},\\\"reservation_outcome_hash\\\":\\\"c06893e777f0d8cbe377fe8afb9ef110b812ad7f7ac971a62aa674279c06092d\\\",\\\"reservation_subject_signature\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"reservation_workflow_id\\\":\\\"workflow:reservation:synthetic:1\\\",\\\"service\\\":\\\"lodging\\\"},\\\"currency\\\":\\\"BRL\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_target_id\\\":\\\"target:reservation:synthetic:1\\\",\\\"payment_version\\\":1,\\\"receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\"},\\\"summary_hash\\\":\\\"bdcaaf4649f0f7bd281f0f8dd12ba70ad38d91a1289da0324cc5c8f0f14d918b\\\"},\\\"verified_evidence\\\":{\\\"claim_key\\\":\\\"pix:E1234567820270201ABCDEF12345\\\",\\\"economic_signature\\\":\\\"9474c681909529cdc58ee743860dcaf0d5a4b1a14b74f30948104b2b815feefb\\\",\\\"evidence\\\":{\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"extractor_id\\\":\\\"extractor:synthetic:pix:1\\\",\\\"extractor_version\\\":\\\"extractor-version:synthetic:1\\\",\\\"normalized_e2e\\\":\\\"E1234567820270201ABCDEF12345\\\",\\\"observed_at\\\":\\\"2027-02-01T12:00:00+00:00\\\",\\\"proof_amount_minor\\\":12500,\\\"proof_currency\\\":\\\"BRL\\\",\\\"proof_receiver_profile_id\\\":\\\"receiver:profile:synthetic:1\\\",\\\"proof_status\\\":\\\"paid\\\"},\\\"evidence_hash\\\":\\\"794c39a0610b1aef31d32649a9ed8a1b541e0b1e8230b049807b94749135d935\\\",\\\"method\\\":\\\"pix\\\",\\\"payment_id\\\":\\\"payment:44a4bb6c6cb9fb122d1eb74238777dd5\\\",\\\"payment_version\\\":1}},\\\"schema_version\\\":1,\\\"type\\\":\\\"payment_workflow\\\"}\"}],\"processed_event_ids\":[],\"schema_version\":7,\"version\":0,\"workflow\":null},\"schema_version\":1,\"type\":\"boundary_state\"}"
++  },
++  "lodging_reservation": {
++    "command_id": "cmd:7ec00ab9dcff3e510818c96e1e437e46",
++    "offer_id": "offer-lodging",
++    "wire": "{\"data\":{\"handoff\":null,\"lead_key\":\"lead-synthetic-001\",\"payments\":[],\"processed_event_ids\":[],\"schema_version\":7,\"version\":0,\"workflow\":{\"$type\":\"reservation_domain_state\",\"wire\":\"{\\\"data\\\":{\\\"command\\\":{\\\"command_id\\\":\\\"cmd:7ec00ab9dcff3e510818c96e1e437e46\\\",\\\"created_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"draft_id\\\":\\\"draft-lodge\\\",\\\"draft_version\\\":1,\\\"idempotency_key\\\":\\\"idem:7ec00ab9dcff3e510818c96e1e437e461c53f64aaa6925b968394f4a8edf0ec3\\\",\\\"operation\\\":\\\"reserve_lodging\\\",\\\"payload\\\":{\\\"components\\\":[{\\\"available\\\":true,\\\"end_date\\\":\\\"2026-10-12\\\",\\\"lookup_id\\\":\\\"lookup-lodging\\\",\\\"offer_id\\\":\\\"offer-lodging\\\",\\\"party\\\":{\\\"adults\\\":2,\\\"children\\\":0},\\\"provider_ref\\\":\\\"provider-lodging-alpha\\\",\\\"public_label\\\":\\\"Hospedagem sint\u00e9tica\\\",\\\"service\\\":\\\"lodging\\\",\\\"start_date\\\":\\\"2026-10-10\\\",\\\"start_time\\\":null,\\\"total\\\":{\\\"amount\\\":\\\"500.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"customer\\\":{\\\"country_code\\\":\\\"ZZ\\\",\\\"customer_ref\\\":\\\"customer-lodging\\\",\\\"email\\\":\\\"lodge.person@example.invalid\\\",\\\"full_name\\\":\\\"Synthetic Lodge Person\\\",\\\"phone_e164\\\":\\\"+999000000003\\\"},\\\"terms\\\":{\\\"add_ons\\\":[{\\\"code\\\":\\\"breakfast\\\",\\\"quantity\\\":2,\\\"unit_price\\\":{\\\"amount\\\":\\\"25.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"payment_method\\\":\\\"pix\\\"}},\\\"subject_signature\\\":\\\"003568fbac590ac89474ec106e247a180ba5ba34ae1c6f2ee3b62caa282f4dbd\\\",\\\"workflow_id\\\":\\\"workflow-lodging\\\"},\\\"confirmation\\\":{\\\"confirmation_event_id\\\":\\\"confirmation-lodge\\\",\\\"decided_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"decision\\\":\\\"accept\\\",\\\"subject_signature\\\":\\\"003568fbac590ac89474ec106e247a180ba5ba34ae1c6f2ee3b62caa282f4dbd\\\",\\\"target_draft_version\\\":1},\\\"draft\\\":{\\\"components\\\":[{\\\"available\\\":true,\\\"end_date\\\":\\\"2026-10-12\\\",\\\"lookup_id\\\":\\\"lookup-lodging\\\",\\\"offer_id\\\":\\\"offer-lodging\\\",\\\"party\\\":{\\\"adults\\\":2,\\\"children\\\":0},\\\"provider_ref\\\":\\\"provider-lodging-alpha\\\",\\\"public_label\\\":\\\"Hospedagem sint\u00e9tica\\\",\\\"service\\\":\\\"lodging\\\",\\\"start_date\\\":\\\"2026-10-10\\\",\\\"start_time\\\":null,\\\"total\\\":{\\\"amount\\\":\\\"500.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"created_at\\\":\\\"2026-10-01T12:00:04+00:00\\\",\\\"customer\\\":{\\\"country_code\\\":\\\"ZZ\\\",\\\"customer_ref\\\":\\\"customer-lodging\\\",\\\"email\\\":\\\"lodge.person@example.invalid\\\",\\\"full_name\\\":\\\"Synthetic Lodge Person\\\",\\\"phone_e164\\\":\\\"+999000000003\\\"},\\\"draft_id\\\":\\\"draft-lodge\\\",\\\"subject_signature\\\":\\\"003568fbac590ac89474ec106e247a180ba5ba34ae1c6f2ee3b62caa282f4dbd\\\",\\\"terms\\\":{\\\"add_ons\\\":[{\\\"code\\\":\\\"breakfast\\\",\\\"quantity\\\":2,\\\"unit_price\\\":{\\\"amount\\\":\\\"25.00\\\",\\\"currency\\\":\\\"BRL\\\"}}],\\\"payment_method\\\":\\\"pix\\\"},\\\"version\\\":1},\\\"meta\\\":{\\\"command_ids\\\":[\\\"cmd:7ec00ab9dcff3e510818c96e1e437e46\\\"],\\\"last_event_at\\\":\\\"2026-10-01T12:00:06+00:00\\\",\\\"revision\\\":6,\\\"seen_event_hashes\\\":[\\\"169998494efab7fbcc05d214b1a194a09997e1be4b1b9a4647e0679b4a29317a\\\",\\\"07b1f37c8abf6d9baf0a8515a78d67cec74452714e0e23073df4c58ceb8bb3f4\\\",\\\"8111e87bda87857757badf835995fdc2a5a506b1e9ec7f6bd8d4fb9880fa0928\\\",\\\"a7a796d8cfe8e053398b18b734bd4c7b5aee11e2d5f267daa26f9e1d103c2692\\\",\\\"b8ded4128c9d024662b3340e5d7b5f02e2bd54347235556ba6bdda9e1bdf54fa\\\",\\\"8c81bf105809f547b49c5bd1af9327707a17c57cd9099211f272e990b9085bef\\\"],\\\"seen_event_ids\\\":[\\\"event-lodge-1\\\",\\\"event-lodge-2\\\",\\\"event-lodge-3\\\",\\\"event-lodge-4\\\",\\\"event-lodge-5\\\",\\\"event-lodge-6\\\"],\\\"workflow_id\\\":\\\"workflow-lodging\\\"},\\\"summary\\\":{\\\"draft_id\\\":\\\"draft-lodge\\\",\\\"draft_version\\\":1,\\\"outbox_message_id\\\":\\\"outbox-lodge\\\",\\\"presented_at\\\":\\\"2026-10-01T12:00:05+00:00\\\",\\\"subject_signature\\\":\\\"003568fbac590ac89474ec106e247a180ba5ba34ae1c6f2ee3b62caa282f4dbd\\\",\\\"summary_event_id\\\":\\\"summary-lodge\\\"}},\\\"schema_version\\\":1,\\\"type\\\":\\\"execution_queued\\\"}\"}},\"schema_version\":1,\"type\":\"boundary_state\"}"
++  }
++}
 diff --git a/tests/test_phase7_tool_dispatch_adapter.py b/tests/test_phase7_tool_dispatch_adapter.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d87acffe74
+index 0000000..bf4344b
 --- /dev/null
 +++ b/tests/test_phase7_tool_dispatch_adapter.py
-@@ -0,0 +1,193 @@
+@@ -0,0 +1,255 @@
 +"""Phase 7 runtime ToolDispatch seam for all 13 active tools."""
 +
 +from __future__ import annotations
@@ -528,6 +626,9 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +
 +T0 = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
 +ROOT = Path(__file__).resolve().parents[1]
++BOUNDARY_FIXTURES = json.loads(
++    (ROOT / "tests/fixtures/phase7_boundary_states.json").read_text()
++)
 +
 +READ_REQUESTS = {
 +    "cerebro_consultar": {"query": "Qual é o horário?", "language": "pt-BR"},
@@ -539,7 +640,8 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +    },
 +    "cloudbeds_descrever_quartos": {"room_type_id": "room-synthetic-001"},
 +    "bokun_consultar_passeio_v2": {
-+        "date": "2026-08-21",
++        "tour_product_id": "activity-synthetic-001",
++        "date_start": "2026-08-21",
 +        "adults": 2,
 +        "children": 0,
 +    },
@@ -558,12 +660,14 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +}
 +
 +
-+def phase7_context():
++def phase7_context(fixture=None):
 +    state = import_legacy_state(synthetic_collecting_snapshot()).state
 +    assert state is not None
++    wire = to_wire_json(state) if fixture is None else BOUNDARY_FIXTURES[fixture]["wire"]
++    lead_key = state.lead_key if fixture is None else "lead-synthetic-001"
 +    return {
-+        "phase7_boundary_state_wire": to_wire_json(state),
-+        "phase7_lead_key": state.lead_key,
++        "phase7_boundary_state_wire": wire,
++        "phase7_lead_key": lead_key,
 +        "phase7_event_id": "event-runtime-dispatch-001",
 +        "phase7_deadline": datetime(2099, 7, 20, 12, 1, tzinfo=timezone.utc).isoformat(),
 +    }
@@ -586,11 +690,66 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +    for name in DURABLE_WRITES:
 +        result = dispatch_native_tool(name, {}, context=context, now=T0)
 +        assert result["operation"] == name
-+        assert result["status"] == "phase7_authorization_missing"
++        assert result["status"] == "phase7_invalid_boundary_context"
 +        assert result["runtime_category"] == "write"
 +        assert result["provider_call_executed"] is False
 +        assert result["side_effect_executed"] is False
 +        assert result["requires_manual_review"] is True
++
++
++def test_four_durable_writes_cross_typed_dispatch_with_active_schemas():
++    for name, fixture in (
++        ("cloudbeds_criar_reserva_v2", "lodging_reservation"),
++        ("bokun_agendar_passeio_v2", "activity_reservation"),
++    ):
++        data = BOUNDARY_FIXTURES[fixture]
++        result = dispatch_native_tool(
++            name,
++            {"option": {"option_id": data["offer_id"]}, "answers": {}},
++            context=phase7_context(fixture),
++            now=T0,
++        )
++        assert result["status"] == "phase7_command_authorized"
++        assert result["command_id"] == data["command_id"]
++        assert result["command_persisted"] is True
++        forged = dispatch_native_tool(
++            name,
++            {"option": {"option_id": "offer-forged"}, "answers": {}},
++            context=phase7_context(fixture),
++            now=T0,
++        )
++        assert forged["status"] == "phase7_invalid_boundary_context"
++
++    for name, fixture, anchor_key in (
++        ("cloudbeds_lancar_pagamento_confirmar_reserva", "hostel_payment", "reservation_id"),
++        ("bokun_lancar_pagamento_confirmar_reserva", "agency_payment", "confirmation_code"),
++    ):
++        data = BOUNDARY_FIXTURES[fixture]
++        arguments = {
++            "confirmation_by_lead": True,
++            "payment_proof_received": True,
++            "payment_method": "pix",
++            anchor_key: data["anchor_id"],
++            "transaction_id": data["evidence_id"],
++            "proof_amount": data["amount"],
++            "proof_receiver_name": "Synthetic Receiver",
++            "proof_payment_status": "completed",
++        }
++        result = dispatch_native_tool(
++            name,
++            arguments,
++            context=phase7_context(fixture),
++            now=T0,
++        )
++        assert result["status"] == "phase7_command_authorized"
++        assert result["command_id"] == data["command_id"]
++        forged = dispatch_native_tool(
++            name,
++            {**arguments, "proof_amount": "999.99"},
++            context=phase7_context(fixture),
++            now=T0,
++        )
++        assert forged["status"] == "phase7_invalid_boundary_context"
 +
 +
 +def test_three_unmigrated_writes_are_explicit_manual_review():
@@ -609,9 +768,8 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +    result = dispatch_native_tool(
 +        "chapada_commit_state",
 +        {
-+            "language": "pt-BR",
 +            "desired_services": ["hostel"],
-+            "adults": 2,
++            "collected_slots": {"language": "pt-BR", "adults": 2},
 +            "selected_offer_id": "must-not-become-a-fact",
 +            "payment_confirmed": True,
 +        },
@@ -653,7 +811,7 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +    assert subprocess_code.count("dispatch_hermes_native_tool") == 2
 +
 +
-+def test_no_boundary_context_uses_legacy_fallback_but_phase7_never_does(monkeypatch):
++def test_no_boundary_context_fails_closed_without_legacy_executor(monkeypatch):
 +    import domain.chapada_native_tools as legacy
 +    import domain.tool_dispatch_adapter as adapter_module
 +
@@ -664,8 +822,10 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +        "execute_hermes_native_tool",
 +        lambda name, arguments: calls.append((name, arguments)) or json.dumps({"status": "legacy"}),
 +    )
-+    assert json.loads(dispatch_hermes_native_tool("cerebro_consultar", {"query": "x"}))["status"] == "legacy"
-+    assert calls == [("cerebro_consultar", {"query": "x"})]
++    missing = json.loads(dispatch_hermes_native_tool("cerebro_consultar", {"query": "x"}))
++    assert missing["status"] == "phase7_boundary_context_required"
++    assert missing["provider_call_executed"] is False
++    assert calls == []
 +
 +    monkeypatch.setattr(adapter_module, "load_native_tool_context", phase7_context)
 +    calls.clear()
@@ -701,10 +861,10 @@ index 0000000000000000000000000000000000000000..7b2f6ea9707bcc7aaa79ed79031688d8
 +    assert not any(name.startswith(("services", "tools", "subprocess", "requests")) for name in imported)
 diff --git a/tests/test_phase7_turn_coordinator_adapter.py b/tests/test_phase7_turn_coordinator_adapter.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..c1b0680ae2dc09fe122b5a9d2c813868e0679a1d
+index 0000000..2818b51
 --- /dev/null
 +++ b/tests/test_phase7_turn_coordinator_adapter.py
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,339 @@
 +"""Phase 7 runtime adapter seam over the installed boundary wheel."""
 +
 +from __future__ import annotations
@@ -821,6 +981,9 @@ index 0000000000000000000000000000000000000000..c1b0680ae2dc09fe122b5a9d2c813868
 +    def load_state(self, *args):
 +        self.trace.append("typed_load")
 +        return self.inner.load_state(*args)
++
++    def turn_transaction(self, *, deadline_guard):
++        return self.inner.turn_transaction(deadline_guard=deadline_guard)
 +
 +    def import_genesis(self, *args, **kwargs):
 +        self.genesis += 1

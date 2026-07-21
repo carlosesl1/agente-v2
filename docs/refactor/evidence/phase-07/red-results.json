@@ -486,6 +486,78 @@
       "tests_run": 1,
       "unfixed_commit": "2a0eaf89c5a216b7d51b3a3c18a13e22e8f937fa",
       "unfixed_tree": "cd7b1057085657edb9fe1bbdaf9d89caf55dd444"
+    },
+    {
+      "exit_code": 1,
+      "name": "store-replay-outbox",
+      "output_bytes": 1819,
+      "output_path": "review2-red-outputs/store-replay-outbox.txt",
+      "output_sha256": "fddc3355f208f7ab5e70374b4d848eba8d0f9c369cda0aef990a64e5c1b0ee20",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "coordinator-outbox",
+      "output_bytes": 1739,
+      "output_path": "review2-red-outputs/coordinator-outbox.txt",
+      "output_sha256": "5cc1c2cb63da3028f9d20a8f29966c2d9f29307c3a3f210bcf2af918862c5ece",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "deadline-zero-write",
+      "output_bytes": 2972,
+      "output_path": "review2-red-outputs/deadline-zero-write.txt",
+      "output_sha256": "69be6f141977197be1ad024fb8b9ef3dc0a2ca97228063b7e3e8d3fc0acd210b",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "activity-product-binding",
+      "output_bytes": 1005,
+      "output_path": "review2-red-outputs/activity-product-binding.txt",
+      "output_sha256": "c053b28c8136267eedaaacf0127e69c40056d335da39c1f4f1ba77297929a5fe",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "runtime-adapter-contract",
+      "output_bytes": 3378,
+      "output_path": "review2-red-outputs/runtime-adapter-contract.txt",
+      "output_sha256": "3dea9bbb2730a51e30bce5bdbc04435cfb952e6aa7d84c8e7c7ba7c7cc6013f5",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "sanitization-generic",
+      "output_bytes": 3338,
+      "output_path": "review2-red-outputs/sanitization-generic.txt",
+      "output_sha256": "9753b7d41e4ee7811b1d6d63df99146ab57338ad166675e69a0c78047d859598",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "terminal-diagnostic",
+      "output_bytes": 549,
+      "output_path": "review2-red-outputs/terminal-diagnostic.txt",
+      "output_sha256": "c8294ff1d0e9867d94104629bc11c41ded5c9022f3199a1dcf0aed325f123fc8",
+      "task": 17
+    },
+    {
+      "exit_code": 1,
+      "name": "core-tests",
+      "task": 17,
+      "unfixed_patch": "review2-core-tests.patch",
+      "unfixed_patch_bytes": 12088,
+      "unfixed_patch_sha256": "cb1da70addd8985176b3816415321e3d4b0b56fd226224630797e70254c84ea5"
+    },
+    {
+      "exit_code": 1,
+      "name": "runtime-tests",
+      "task": 17,
+      "unfixed_patch": "review2-runtime-tests.patch",
+      "unfixed_patch_bytes": 40381,
+      "unfixed_patch_sha256": "1441a556cf352ecf45d34e419799c745ea61e1161170a9e80ba1c5eebff7f12a"
     }
   ],
   "phase": 7,

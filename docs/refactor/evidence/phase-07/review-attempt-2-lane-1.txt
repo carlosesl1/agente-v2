@@ -1,0 +1,32 @@
+## Authentication
+
+- **Evidence:** `b27706bca3d2dba3e564c9176702fc4504050bb3`, tree `d6b4cc14549e4f2a3cac4a732385f8dd1ae44a5a`; branch sincronizada com `origin/phase7-boundary-migration`; worktree limpa.
+- **Funcional:** pai direto `f5505b4c8a2ae8aa6990970035e770e539b1f978`, tree `67f228abec5582f2ac56b0fdd5a9328961b81804`. Produção, schemas e testes desta lane são idênticos entre candidato e evidence child. O child altera evidências/documentação e uma asserção textual em `tests/test_phase7_closeout.py`.
+- **Pacote:** wheel reconstruída localmente em diretório temporário: `chapada-reservation-kernel` `0.7.0`, **213663 bytes**, SHA-256 `c419a7b402682b98ee0d371ce08ef81a216be3315a880fb52a6f54e421d3c357`; ZIP/RECORD íntegros e 54 fontes byte a byte iguais ao candidato funcional.
+- **Execução fresca:** 9 testes causais e 3 testes de pacote passaram. Confirmados os reparos anteriores para snapshot cross-lead antes de genesis, `phase6_payment_wires` vazio/malformado, status/timestamps contraditórios, identidade embutida trocada e `schema_version != 7`.
+- **Evidência histórica:** quatro `remediation-*.json` vinculam exatamente candidato/tree; 200 rows de contenção — 50 por `genesis`, `event`, `command`, `outbox` — foram reconstruídas, inclusive todos os hashes. `rollout=NO-GO`; `phase8_started=false`.
+
+## Verdict
+
+Needs fixes
+
+## Findings
+
+### Critical
+
+- `reservation_boundary/coordinator.py:146-156` e `reservation_boundary/sqlite_store.py:436-452` — não há binding do `OutboxMessage.workflow_id/command_id` ao workflow, comandos ou identidade do estado atual. Probe causal persistiu, sob `lead-synthetic-001`/workflow `workflow-synthetic-001`, um outbox pertencente a `workflow-serializer`. **Impacto:** mensagem de outro workflow/lead pode receber atribuição durável incorreta e posteriormente ser entregue, violando identidade canônica e isolamento de comunicação.
+
+### Important
+
+- `reservation_boundary/sqlite_store.py:369-376` — replay com mesmo `event_id`/`event_hash` retorna sucesso antes de comparar estado, comandos e outbox propostos com os artefatos persistidos. Probe causal submeteu replay divergente com um comando e um outbox; foi aceito, mas ambas as tabelas permaneceram com zero rows. **Impacto:** divergência determinística ou perda de efeitos pode ser silenciosamente mascarada como idempotência bem-sucedida.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- Não foi executada suíte integral, rede, CI remoto ou rollout, conforme restrição.
+- Outputs RED brutos referenciados em `/tmp` não estão retidos; commits/trees, patches, comandos, tamanhos e hashes estão autenticados, mas os REDs históricos não foram reexecutados nos commits não corrigidos.
+- Contenção fresca limitada ao modo focused; a evidência integral comprometida usa SQLite file-backed, conexões concorrentes e barreira, com rows/hashes reconstruíveis.
+- Arquivos criados ou modificados: **nenhum**; artefatos temporários foram removidos.

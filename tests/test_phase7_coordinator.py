@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import sqlite3
 import unittest
 
@@ -27,6 +28,8 @@ from reservation_boundary.types import (
     TurnEnvelope,
     TurnPlanReason,
 )
+from reservation_execution import OutboxMessage
+from reservation_execution.types import OutboxKind
 from tests.test_phase2_serialization import complete_flow
 from tests.test_phase7_legacy_state import snapshot
 
@@ -90,9 +93,17 @@ class FakeIntent:
 
 
 class FakeKernel:
-    def __init__(self, trace: list[str], *, command=None, read_request=None) -> None:
+    def __init__(
+        self,
+        trace: list[str],
+        *,
+        command=None,
+        outbox=None,
+        read_request=None,
+    ) -> None:
         self.trace = trace
         self.command = command
+        self.outbox = outbox
         self.read_request = read_request
         self.calls = 0
 
@@ -100,8 +111,9 @@ class FakeKernel:
         self.calls += 1
         self.trace.append("reduce")
         commands = () if self.command is None else (self.command,)
+        outbox = () if self.outbox is None else (self.outbox,)
         reads = () if self.read_request is None else ()
-        decision = KernelDecision(state, commands, (), reads, ())
+        decision = KernelDecision(state, commands, outbox, reads, ())
         if self.read_request is not None:
             object.__setattr__(decision, "read_requests", (self.read_request,))
         return decision
@@ -121,6 +133,9 @@ class TracingStore:
     def event_hash(self, lead_key: str, event_id: str):
         self.trace.append("event_lookup")
         return self.inner.event_hash(lead_key, event_id)
+
+    def turn_transaction(self, *, deadline_guard):
+        return self.inner.turn_transaction(deadline_guard=deadline_guard)
 
     def load_state(self, lead_key: str):
         self.loads += 1
@@ -254,6 +269,36 @@ class Phase7CoordinatorTests(unittest.TestCase):
             0,
         )
 
+    def test_deadline_expiry_at_any_precommit_boundary_leaves_zero_durable_rows(self) -> None:
+        for values in (
+            (T0, T0 + timedelta(minutes=1)),
+            (T0, T0, T0 + timedelta(minutes=1)),
+            (T0, T0, T0, T0 + timedelta(minutes=1)),
+            (T0, T0, T0, T0, T0 + timedelta(minutes=1)),
+        ):
+            with self.subTest(values=values):
+                trace: list[str] = []
+                value, store, _, _, _, _ = coordinator(
+                    trace,
+                    clock=FakeClock(values),
+                )
+                self.keep(store)
+                with self.assertRaises(TurnDeadlineExceeded):
+                    value.coordinate(envelope(deadline=T0 + timedelta(seconds=30)))
+                counts = tuple(
+                    store.inner._connection.execute(
+                        f"SELECT count(*) FROM {table}"
+                    ).fetchone()[0]
+                    for table in (
+                        "boundary_state",
+                        "boundary_events",
+                        "boundary_commands",
+                        "boundary_outbox",
+                        "legacy_import_claims",
+                    )
+                )
+                self.assertEqual(counts, (0, 0, 0, 0, 0))
+
     def test_post_commit_replay_skips_load_legacy_intent_reduce_and_commit(self) -> None:
         trace: list[str] = []
         value, store, _, legacy, intent, kernel = coordinator(trace)
@@ -344,6 +389,29 @@ class Phase7CoordinatorTests(unittest.TestCase):
             with self.assertRaises(InvalidKernelDecision):
                 value.coordinate(envelope())
             self.assertEqual(store.commits, 0)
+
+    def test_outbox_must_bind_current_workflow_before_store_commit(self) -> None:
+        payload = '{"status":"queued"}'
+        foreign = OutboxMessage(
+            "outbox:foreign",
+            "outbox:foreign:idem",
+            "workflow-foreign",
+            None,
+            OutboxKind.SUMMARY_PRESENTED,
+            "template:foreign",
+            payload,
+            hashlib.sha256(payload.encode()).hexdigest(),
+            T0,
+        )
+        trace: list[str] = []
+        value, store, _, _, _, _ = coordinator(
+            trace,
+            kernel=FakeKernel(trace, outbox=foreign),
+        )
+        self.keep(store)
+        with self.assertRaises(InvalidKernelDecision):
+            value.coordinate(envelope())
+        self.assertEqual(store.commits, 0)
 
 
 if __name__ == "__main__":
