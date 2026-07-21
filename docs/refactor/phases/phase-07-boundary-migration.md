@@ -2,7 +2,7 @@
 
 ## Estado
 
-- Status: **segundo candidato invalidado; terceira remediação em freeze local**.
+- Status: **terceiro candidato congelado; revisão terminal e CI remoto pendentes**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
@@ -40,7 +40,14 @@
   operacional;
 - réplica: `485a2f470be7e40ed27601367e75b7c4a2698c9c`, tree
   `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`, 964/964 testes locais;
-- novo candidato funcional ainda não congelado.
+- candidato funcional: `2881256125cea3381dde943aa8b2d3713422af72`,
+  tree `69b4089837c2dc200a204b0e103ef4d4d5afae34`;
+- wheel SHA-256
+  `7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1`,
+  214.568 bytes;
+- gates afetados na tree exata: properties 20.000/20.000, faults 6/6,
+  restarts 2.000/2.000, contention 200/200 e mutations 12/12;
+- revisão terminal e CI remoto permanecem pendentes.
 
 ## Candidato anterior invalidado
 

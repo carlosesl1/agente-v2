@@ -1,17 +1,20 @@
 {
-  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
-  "candidate_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
-  "completed_at": "2026-07-20T23:30:11Z",
-  "evidence_basis": "successful GitHub job on exact head SHA plus versioned command and closed runner constants; raw /tmp report was not uploaded",
-  "job_id": 88501797025,
-  "job_url": "https://github.com/carlosesl1/agente-v2/actions/runs/29787387850/job/88501797025",
+  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
+  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
+  "completed_at": "2026-07-21T01:37:53Z",
+  "compressed_bytes": 1788085,
+  "compressed_sha256": "0114fd2d10ba9fdd4608e720dba256634275611aa58283d4315214f5117ef105",
+  "execution_scope": "local affected integral rerun on exact frozen tree",
   "live_capabilities_executed": [],
   "passed": true,
   "phase": 7,
   "phase8_started": false,
+  "raw_report_bytes": 5816868,
+  "raw_report_compression": "gzip-mtime-0",
+  "raw_report_path": "review2-raw-reports/properties.json.gz",
+  "raw_report_sha256": "cf366dec395abe0716d1e698f6213180523bd57347af0977394bdb822f95955d",
   "report_artifact_uploaded": false,
   "rollout": "NO-GO",
-  "run_id": 29787387850,
   "scenario_counts": {
     "blocked_dispatch": 5000,
     "importer": 5000,
@@ -19,6 +22,5 @@
     "wire": 5000
   },
   "seed": 2026072007,
-  "started_at": "2026-07-20T23:30:00Z",
   "total": 20000
 }

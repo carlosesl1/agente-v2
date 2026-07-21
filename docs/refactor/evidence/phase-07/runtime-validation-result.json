@@ -1,28 +1,27 @@
 {
-  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
-  "focused_sanitized_surface": {
-    "output_bytes": 932,
-    "output_sha256": "c45f086f483173d08aa8522bb9dc33ff34f24be21e6d89ea0534ec9260f5409a",
+  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
+  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
+  "focused_core": {
     "passed": true,
-    "tests": 421
+    "tests": 96
   },
   "live_capabilities_executed": [],
   "patch_apply_reverse": {
     "baseline_tree": "72c19010aaa6e1263384c20315cb7f4d8eeb111e",
-    "integration_tree": "8dc9aed8092661b701104bd89dedf865cd4d94b6",
+    "integration_tree": "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
     "passed": true,
-    "patch_sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0"
+    "patch_sha256": "52eeca4e16cd02a2b2b2dafb9ad59ebeb91b898af453179ccacf9c581a70cf6d"
   },
   "phase": 7,
   "phase8_started": false,
   "rollout": "NO-GO",
   "runtime_full": {
-    "duration_seconds": 33,
+    "duration_seconds": 34,
     "output_bytes": 1572,
-    "output_sha256": "f42594f77a2f16191a02508b5a01956a90e75edf783ae9cb204e9c0cb93a9395",
+    "output_sha256": "02ef6540926dbbffa784746edd9038023a71d28958bfb2653a0070f91aa6e356",
     "passed": true,
-    "tests": 963
+    "tests": 964
   },
   "source_unchanged": true,
-  "wheel_sha256": "663734180622f53d4ec89305ac91209a5e301e27308dc9e410b1a52b6351f177"
+  "wheel_sha256": "7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1"
 }

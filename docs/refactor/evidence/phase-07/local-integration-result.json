@@ -1,36 +1,19 @@
 {
-  "candidate_commit": "ef5dd46c27ccb72e977b333f526521a5f6b0225c",
-  "candidate_tree": "ceced389dfc73ebd41ac499fa20660890dc86035",
-  "duration_seconds": 33,
-  "finished_at": "2026-07-20T23:29:17Z",
+  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
+  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
+  "duration_seconds": 34,
+  "finished_at": "2026-07-21T01:31:34Z",
   "live_capabilities_executed": [],
   "output_bytes": 1572,
-  "output_path": "/tmp/phase7-candidate4-runtime-full.out",
-  "output_sha256": "f42594f77a2f16191a02508b5a01956a90e75edf783ae9cb204e9c0cb93a9395",
+  "output_path": "retained by hash; pytest text is non-authoritative compared with the deterministic test count",
+  "output_sha256": "02ef6540926dbbffa784746edd9038023a71d28958bfb2653a0070f91aa6e356",
   "passed": true,
   "phase": 7,
   "phase8_started": false,
-  "previous_invalid_attempts": [
-    {
-      "candidate_commit": "4eb0495a2296ac76d4b2ab25038b6a822f19ec18",
-      "failure_class": "collection",
-      "reexecuted": false
-    },
-    {
-      "candidate_commit": "76f56f07d9e2a8a9ee49a12b65b918ac5b4b0591",
-      "failure_class": "capture_fidelity",
-      "reexecuted": false
-    },
-    {
-      "candidate_commit": "d710ff6908b811270c6f60cbf27312a77d3ade1f",
-      "failure_class": "sanitized_oracle_relationship",
-      "reexecuted": false
-    }
-  ],
   "rollout": "NO-GO",
-  "runtime_integration_commit": "e2e1570757c2afe3d0b1d25a1ef94cd2c709d674",
-  "runtime_integration_tree": "8dc9aed8092661b701104bd89dedf865cd4d94b6",
-  "runtime_tests": 963,
+  "runtime_integration_commit": "485a2f470be7e40ed27601367e75b7c4a2698c9c",
+  "runtime_integration_tree": "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
+  "runtime_tests": 964,
   "source_after": {
     "diff_sha256": "7f5248f9b98425be3a1ee53985d83af89c7f687e88991f9c30e993394adaae69",
     "head": "57408d8b2040399bc25ee7957505208079458884",
@@ -45,8 +28,8 @@
     "status_sha256": "e299a15f0336646ef62d5e88a4989d46ef46d6865c5d3163e092969fa9a8ef7a",
     "tree": "67b5fe18d4685281778e41cd61cd584dd063ea60"
   },
-  "started_at": "2026-07-20T23:28:44Z",
-  "wheel_bytes": 210582,
-  "wheel_install_mode": "pip --no-index --no-deps --target",
-  "wheel_sha256": "663734180622f53d4ec89305ac91209a5e301e27308dc9e410b1a52b6351f177"
+  "started_at": "2026-07-21T01:31:00Z",
+  "wheel_bytes": 214568,
+  "wheel_install_mode": "stdlib zipfile extractall of pure-Python wheel into isolated target",
+  "wheel_sha256": "7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1"
 }

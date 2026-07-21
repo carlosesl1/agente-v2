@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **segundo candidato invalidado; terceira remediação em freeze local**.
+Status: **terceiro candidato congelado; revisão terminal e CI remoto pendentes**.
 
 ## Entrada
 
@@ -60,6 +60,10 @@ diffs da árvore suja.
 - `remediation-properties-result.json`: 20.000/20.000 com hash do raw report;
 - `remediation-faults-result.json`: 200 rows concorrentes integralmente retidas;
 - `remediation-mutations-result.json`: 12/12 com rows retidas.
+- `review2-remediation-result.json`: terceiro candidato, wheel, réplica,
+  96 testes focused, 31 closeout, 964 runtime e gates integrais afetados;
+- `review2-raw-reports/*.json.gz`: relatórios brutos determinísticos, com hash
+  do JSON descomprimido e do gzip registrado nos resultados terminais.
 
 O run remoto invalidado não publicou os JSONs de `/tmp` como artifacts. O
 workflow do candidato remediado publica properties, faults e mutations em três

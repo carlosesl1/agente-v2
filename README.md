@@ -12,8 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — segundo candidato invalidado pela revisão terminal;
-  terceira remediação em freeze local**.
+- Fase ativa: **Fase 7 — terceiro candidato congelado; revisão terminal e CI
+  remoto pendentes**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -43,8 +43,10 @@ Contrato central:
   candidato `f5505b4c8a2ae8aa6990970035e770e539b1f978` também foi
   invalidado pelo batch `deleg_39e3d235`, que concluiu 3/3 com `Needs fixes`.
   As novas correções fecham replay/outbox, deadline zero-write, dispatch tipado,
-  fallback legado e sanitização genérica; o terceiro candidato ainda não foi
-  congelado nem executado remotamente.
+  fallback legado e sanitização genérica. O terceiro candidato congelado é
+  `2881256125cea3381dde943aa8b2d3713422af72`, tree
+  `69b4089837c2dc200a204b0e103ef4d4d5afae34`; ainda não foi revisado nem
+  executado remotamente.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
   `485a2f470be7e40ed27601367e75b7c4a2698c9c`.

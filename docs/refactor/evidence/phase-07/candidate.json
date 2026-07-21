@@ -1,18 +1,22 @@
 {
   "base_commit": "4169c6149f76e8bf4f30a26ee9d0bfbc43a58984",
   "branch": "phase7-boundary-migration",
-  "candidate_diff_bytes": 737530,
-  "candidate_diff_path": "/tmp/phase7-terminal-candidate.diff",
-  "candidate_diff_sha256": "8e88cd8d38abfa8914b61b830c24df80fc778468f627f4340c516e0b0da9d6e2",
+  "candidate_diff_bytes": 969365,
+  "candidate_diff_command": "git diff --binary 4169c6149f76e8bf4f30a26ee9d0bfbc43a58984..2881256125cea3381dde943aa8b2d3713422af72",
+  "candidate_diff_sha256": "fa6bb69de4fc2212953a8c5e751b91b5580459596ec76c6b043fc530ef5db3e6",
   "candidate_exact_closeout_tests_passed": 31,
-  "candidate_exact_package_build": true,
-  "commit": "f5505b4c8a2ae8aa6990970035e770e539b1f978",
-  "focused_functional_parent_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
-  "focused_functional_parent_tree": "e1db1211f0010452f70ded131f4343592f11e7ce",
-  "focused_tests_passed": 106,
+  "commit": "2881256125cea3381dde943aa8b2d3713422af72",
+  "focused_tests_passed": 96,
   "frozen": true,
-  "frozen_at": "2026-07-21T00:36:14Z",
-  "index_tree": "67f228abec5582f2ac56b0fdd5a9328961b81804",
+  "frozen_at": "2026-07-21T01:37:53Z",
+  "heavy_gates": {
+    "contention_rows": 200,
+    "faults": 6,
+    "mutations": 12,
+    "properties": 20000,
+    "restarts": 2000
+  },
+  "index_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
   "invalidated_predecessors": [
     {
       "commit": "4eb0495a2296ac76d4b2ab25038b6a822f19ec18",
@@ -45,19 +49,29 @@
       "review_attempt": "review-attempt-1.json",
       "review_batch": "deleg_005406ed",
       "tree": "ceced389dfc73ebd41ac499fa20660890dc86035"
+    },
+    {
+      "commit": "f5505b4c8a2ae8aa6990970035e770e539b1f978",
+      "failure_class": "terminal_review_store_deadline_dispatch_sanitization_findings",
+      "reexecuted": false,
+      "review_attempt": "review-attempt-2.json",
+      "review_batch": "deleg_39e3d235",
+      "tree": "67f228abec5582f2ac56b0fdd5a9328961b81804"
     }
   ],
   "live_capabilities_executed": [],
-  "manifest_sha256": "ab47e21205124125195b0e98dfdbee5b4d668d2caaa85f045228d1ba1e73e917",
+  "manifest_sha256": "66d262089f0f99e235d38ec245f1a0bf8d7beced8c5acf2a2298908a89dda2bf",
   "package_version": "0.7.0",
   "phase": 7,
   "phase8_started": false,
   "rollout": "NO-GO",
-  "runtime_integration_commit": "e2e1570757c2afe3d0b1d25a1ef94cd2c709d674",
-  "runtime_integration_patch_sha256": "f06d3bd1a43e986ed66bb9ee3737e055e15986e9ca7522dfac88c6b4b034d5c0",
-  "runtime_integration_tree": "8dc9aed8092661b701104bd89dedf865cd4d94b6",
-  "tree": "67f228abec5582f2ac56b0fdd5a9328961b81804",
-  "wheel_bytes": 213663,
-  "wheel_path": "/tmp/phase7-terminal-wheel.Ffhc5S/chapada_reservation_kernel-0.7.0-py3-none-any.whl",
-  "wheel_sha256": "c419a7b402682b98ee0d371ce08ef81a216be3315a880fb52a6f54e421d3c357"
+  "runtime_integration_commit": "485a2f470be7e40ed27601367e75b7c4a2698c9c",
+  "runtime_integration_patch_bytes": 76556,
+  "runtime_integration_patch_sha256": "52eeca4e16cd02a2b2b2dafb9ad59ebeb91b898af453179ccacf9c581a70cf6d",
+  "runtime_integration_tree": "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
+  "runtime_tests_passed": 964,
+  "tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
+  "wheel_bytes": 214568,
+  "wheel_filename": "chapada_reservation_kernel-0.7.0-py3-none-any.whl",
+  "wheel_sha256": "7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1"
 }
