@@ -1,5 +1,5 @@
 {
-  "aggregate_sha256": "84ac309ce2b27292ec606eb8f9abbdcfd72dab4747509b6872da4694371787c0",
+  "aggregate_sha256": "9abc993cf89cceb8db03bb2d291c1e6b9f335b06e583ca3f666b198ecd74a09e",
   "file_count": 130,
   "files": [
     {
@@ -9,23 +9,23 @@
     },
     {
       "path": "README.md",
-      "sha256": "ba8ff88f87419b87dc76c254abf49d7e61ef80e82787e6af975e3989fba14003",
-      "size": 5654
+      "sha256": "dfd65f3138cee11dfd588901341748cbe849224e6a164a9c36fed941fd124533",
+      "size": 5065
     },
     {
       "path": "docs/refactor/06-risk-register.md",
-      "sha256": "5caeb3a5d4b6622711228dc5e777f980373801d0e4f3e1a035b11cfd08b82630",
-      "size": 15306
+      "sha256": "d05d6a52820a997d334be6f3cab6c8788a5482a0211f5d77220a82de8c4a60a2",
+      "size": 16471
     },
     {
       "path": "docs/refactor/README.md",
-      "sha256": "d31468f38a2d974c06f4954935cb4a61c6e1b4a2b9d727f9d3953878470dc33c",
-      "size": 2572
+      "sha256": "6227aa650d2959deaa0e20144948b4c7d24ec4709fc8a3c96d520ce1bd0624cd",
+      "size": 2628
     },
     {
       "path": "docs/refactor/evidence/README.md",
-      "sha256": "fe574591c027f5d28eeaf8886db9dce17eec5b6216c12a07f58737ff4f0a97eb",
-      "size": 5667
+      "sha256": "d4ac7e522a8772381c4d328537cbfeebb5607669084d9f4b29d447ca30a980fd",
+      "size": 6477
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
@@ -449,8 +449,8 @@
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
-      "sha256": "2a30e39be45bf57e49489d91fba6a86eb593e5b19d07df8a87344a34d309aa66",
-      "size": 8382
+      "sha256": "010c1801d2a150aa32cbc80845acaf2359d4c8bb6fa93234197741b6c40d75aa",
+      "size": 9300
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-phase-7-boundary-migration.md",
@@ -624,8 +624,8 @@
     },
     {
       "path": "tests/test_phase7_runtime_capture.py",
-      "sha256": "31368151a2ee54b5efdf434c10cc4a5165dc11459cef24a88fa18312389d280e",
-      "size": 20439
+      "sha256": "fc6e9003ed8890c6462c4ca0eb1e427311ab8efe35e49e66bf08377538105c63",
+      "size": 20468
     },
     {
       "path": "tests/test_phase7_schema.py",

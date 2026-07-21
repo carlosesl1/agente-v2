@@ -1,0 +1,40 @@
+{
+  "entries": [
+    {
+      "causal_failure": "entry-baseline.json absent and phase index stale (Phase 7 pre-freeze; Phase 8 blocked)",
+      "command": "python3 -B -m unittest tests.test_phase8_entry -v",
+      "exit_code": 1,
+      "functional_red": true,
+      "output_bytes": 4815,
+      "output_sha256": "0903fcef46d98f9f95ac6d61ea540b242803c2fc6aeda0892a86ef9cc2169c51",
+      "raw_output_versioned": false,
+      "task": 1,
+      "tests_failed": 1,
+      "tests_in_error": 1,
+      "tests_run": 2
+    },
+    {
+      "causal_failure": "Phase 0 secret/PII scanner self-incriminated on a hostile email fixture literal added by Phase 7",
+      "command": "python3 -B scripts/validate_phase0.py",
+      "exit_code": 1,
+      "functional_red": true,
+      "output_bytes": 282,
+      "output_sha256": "61e4428d09ce4ce16ce8a1be249e02377822ad8a37cc8257552a3a3969764d63",
+      "raw_output_versioned": false,
+      "task": 1
+    },
+    {
+      "causal_failure": "Phase 1 retained the pre-Phase-8 risk-register checksum; Phase 2 used the same legacy shared hash",
+      "command": "python3 -B scripts/validate_phase1.py",
+      "exit_code": 1,
+      "functional_red": true,
+      "output_bytes": 839,
+      "output_sha256": "2a0c0f90ce981f60b0f34534c5099a744c4b7c6eb88dced7e07e5b7b8058ba7a",
+      "raw_output_versioned": false,
+      "task": 1
+    }
+  ],
+  "historical_plan_command_diagnostics_are_functional_red": false,
+  "phase": 8,
+  "schema_version": 1
+}

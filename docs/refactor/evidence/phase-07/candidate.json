@@ -99,7 +99,7 @@
     }
   ],
   "live_capabilities_executed": [],
-  "manifest_sha256": "84ac309ce2b27292ec606eb8f9abbdcfd72dab4747509b6872da4694371787c0",
+  "manifest_sha256": "9abc993cf89cceb8db03bb2d291c1e6b9f335b06e583ca3f666b198ecd74a09e",
   "package_tests_passed": 3,
   "package_version": "0.7.0",
   "phase": 7,

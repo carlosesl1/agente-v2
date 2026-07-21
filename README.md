@@ -12,8 +12,7 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — terceiro candidato congelado; revisão terminal e CI
-  remoto pendentes**.
+- Fase ativa: **Fase 8 — design/plano publicados e entrada autenticada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -26,35 +25,27 @@ Contrato central:
   `9199b2c70fb3a26d9f12949b25d135f625b2317d`; seis workflows remotos verdes,
   sem Docker, PostgreSQL, Supabase, provider ou delivery live.
 - Fase 6: **concluída e publicada** no commit
-  `8f23a8376f1d226f2ada5d80a45cbb930a79429e`; aberta no commit-base terminal da Fase 5
-  `6c65c2612aefce4b217dcd0308e33dd68e1dc7db`; design separa
-  `HandoffWorkflow` e `PaymentWorkflow`, sem integração live. Properties,
-  faults/restarts/contention, mutations, manifests, validator e suíte terminal
-  passaram; o gate corrigido preservou 20.000 properties em 857,092 s, abaixo
-  do budget de 900 s. O validator de pureza foi fechado contra execução de
-  processos; os sete workflows remotos e os seis jobs da Fase 6 ficaram verdes.
-- Fase 7: **em fechamento técnico** na branch `phase7-boundary-migration`, com
-  `LegacyStateImporter`, `TurnCoordinator`, `ToolDispatch` e
-  `DecisionComparator` como fronteiras únicas. Quatro writes têm command owner
-  nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. O
-  candidato `ef5dd46c27ccb72e977b333f526521a5f6b0225c` passou 963 testes
-  locais e o run remoto `29787387850` ficou 6/6 verde, mas foi invalidado por
-  findings de identidade/import/store/contention na revisão terminal. O novo
-  candidato `f5505b4c8a2ae8aa6990970035e770e539b1f978` também foi
-  invalidado pelo batch `deleg_39e3d235`, que concluiu 3/3 com `Needs fixes`.
-  As novas correções fecham replay/outbox, deadline zero-write, dispatch tipado,
-  fallback legado e sanitização genérica. O terceiro candidato congelado é
-  `2881256125cea3381dde943aa8b2d3713422af72`, tree
-  `69b4089837c2dc200a204b0e103ef4d4d5afae34`; ainda não foi revisado nem
-  executado remotamente.
-- Runtime atual: apenas fonte de evidência; a árvore operacional permanece
-  somente leitura. A réplica sanitizada foi integrada no commit local
-  `485a2f470be7e40ed27601367e75b7c4a2698c9c`.
-- Implementação funcional concluída localmente: domínio, lookups, boundary puro
-  de resumo/confirmação e execução durável no novo repositório.
-- Rollout comercial: **NO-GO**; Fase 7 foi explicitamente iniciada sem
-  capability live. Shadow live/canary pertencem à Fase 8, que permanece
-  bloqueada.
+  `8f23a8376f1d226f2ada5d80a45cbb930a79429e`; seus sete workflows remotos,
+  properties, faults/restarts/contention, mutations, manifests, validator e
+  suíte terminal ficaram verdes, sem capability live.
+- Fase 7: **concluída e publicada** no closeout
+  `93682024b4867d3e313324339a7060d5351dcd3d`, tree
+  `b779e35c671f3050d056c6ef3c8c0700f5b13f35`. O candidato funcional
+  `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4` foi autenticado pelo snapshot
+  terminal `73904070dfcb52a3183459bc97abbc87595e1efe`, revisão 3/3 e run remoto
+  `29804123764` com seis jobs verdes. A integração pós-merge passou 762/762.
+- Fase 8: **ativa** desde 2026-07-21 sobre o closeout da Fase 7. A spec
+  `0dbc9cb9722762dfc4f24a3ea73bfce974835a84`, o plano corrigido
+  `49b4930d5c5df48eb85cb58c73d5ceded876259a` e a entrada autenticada abrem a
+  escada controlada até o gate conversacional, sem antecipar provider write,
+  rollout ou Fase 9.
+- Runtime atual: somente fonte de evidência read-only no HEAD
+  `57408d8b2040399bc25ee7957505208079458884`, tree
+  `67b5fe18d4685281778e41cd61cd584dd063ea60`. A réplica limpa aprovada está em
+  `183fb41d645e1bb04e237c986988309a28e42b34`, tree
+  `e546e9d88093c09a245502bcca3d119e2e450672`.
+- Rollout comercial: **NO-GO**. A Fase 8 está iniciada, mas build, canaries,
+  provider write, promoção e Fase 9 continuam bloqueados pelos gates próprios.
 
 ## Navegação
 
@@ -74,6 +65,7 @@ Contrato central:
 - [Execução da Fase 5](docs/refactor/phases/phase-05-durable-command-execution.md)
 - [Execução da Fase 6](docs/refactor/phases/phase-06-handoff-and-payments.md)
 - [Execução da Fase 7](docs/refactor/phases/phase-07-boundary-migration.md)
+- [Execução da Fase 8](docs/refactor/phases/phase-08-shadow-canary-rollout.md)
 
 ## Regras de execução
 
@@ -96,7 +88,7 @@ python3 scripts/validate_phase4.py
 python3 scripts/validate_phase5.py
 python3 scripts/validate_phase6.py
 python3 scripts/generate_phase7_manifest.py --check
-python3 scripts/validate_phase7.py
+python3 scripts/validate_phase7.py --terminal
 ```
 
-O rollout permanece `NO-GO`; `phase7_started=true` e `phase8_started=false`.
+O rollout permanece `NO-GO`; `phase8_started=true` e `phase9_started=false`.

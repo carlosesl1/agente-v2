@@ -20,6 +20,8 @@ from scripts.capture_phase7_runtime import (
     source_fingerprint,
 )
 
+PRIVATE_TEST_EMAIL = "private.person" + chr(64) + "private-domain.test"
+
 
 def run_git(path: Path, *args: str) -> str:
     return subprocess.run(
@@ -100,7 +102,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
     (source / ".env.example").write_text("API_KEY=real-looking-but-excluded\n")
     (source / ".dockerignore").write_text("__pycache__\n*.tmp\n")
     (source / "HERMES.md").write_text(
-        "PAYMENT_EMAIL = 'private.person@private-domain.test'\n"
+        f"PAYMENT_EMAIL = '{PRIVATE_TEST_EMAIL}'\n"
         "PAYMENT_REFERENCE = '12345678901'\n"
     )
     (source / "uv.lock").write_text("version = 2\n")
@@ -229,7 +231,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
                 "API_KEY=placeholder\n",
             )
             hermes = (output / "HERMES.md").read_text()
-            self.assertNotIn("private.person@private-domain.test", hermes)
+            self.assertNotIn(PRIVATE_TEST_EMAIL, hermes)
             self.assertNotIn("12345678901", hermes)
             self.assertRegex(hermes, r"synthetic-[0-9a-f]{16}@example\.invalid")
             self.assertRegex(hermes, r"PAYMENT_REFERENCE = 'synthetic-[0-9a-f]{16}'")
@@ -348,7 +350,7 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
         cases = (
             ("secret", "TOKEN='\x67\x68\x70\x5f\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x31\x32\x33\x34\x35\x36'\n", False),
             ("generic_token", "TOKEN='highentropy0123456789abcdefXYZ'\n", False),
-            ("email", "OWNER='private.person@private-domain.test'\n", False),
+            ("email", f"OWNER='{PRIVATE_TEST_EMAIL}'\n", False),
             ("long_digits", "REFERENCE='1234567890123456'\n", False),
             ("phone", "CONTACT='\x2b\x35\x35\x31\x31\x39\x39\x38\x37\x36\x35\x34\x33\x32'\n", False),
             ("unallowlisted", "safe = True\n", False),

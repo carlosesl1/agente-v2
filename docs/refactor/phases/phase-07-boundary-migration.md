@@ -2,15 +2,27 @@
 
 ## Estado
 
-- Status: **terceiro candidato congelado; revisão terminal e CI remoto pendentes**.
+- Status: **concluída e publicada; revisão terminal 3/3 e CI remoto verde**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
 - Plano aprovado: `81204c46ad89e11ce2320ac30a0fcdeb828454d6`.
 - Branch: `phase7-boundary-migration`.
+- Candidato funcional final: `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`,
+  tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`.
+- Snapshot terminal: `73904070dfcb52a3183459bc97abbc87595e1efe`, tree
+  `7017fcf9f88c87e89eef2e633904d539649949b0`.
+- Revisão terminal: 3/3 `Approved`, sem findings.
+- CI terminal: run `29804123764`, seis jobs `completed/success`.
+- Closeout publicado: `93682024b4867d3e313324339a7060d5351dcd3d`, tree
+  `b779e35c671f3050d056c6ef3c8c0700f5b13f35`.
+- Runtime operacional: intocado no HEAD `57408d8b2040399bc25ee7957505208079458884`,
+  tree `67b5fe18d4685281778e41cd61cd584dd063ea60`, 86 entradas e fingerprints
+  autenticados.
+- Fase 8 autorizada separadamente em 2026-07-21, após este closeout.
 - Rollout: **NO-GO**.
 - `rollout=NO-GO`.
-- `phase8_started=false`.
+- `phase8_started=false` no snapshot terminal da Fase 7.
 
 ## Segundo candidato invalidado
 
@@ -26,7 +38,7 @@
 - Revisão terminal `deleg_39e3d235`: três lanes concluídas e três verdicts
   `Needs fixes`; o candidato foi invalidado. Nenhum novo run remoto foi feito.
 
-## Terceira remediação
+## Candidato funcional final
 
 - replay autentica o commit canônico exato e outbox persiste/vincula toda a
   identidade de workflow/comando;
@@ -38,16 +50,17 @@
   e pagamento exige recebedor/valor/status/evidência mecânicos;
 - captura rejeita token genérico, e-mail não reservado e número longo não
   operacional;
-- réplica: `485a2f470be7e40ed27601367e75b7c4a2698c9c`, tree
-  `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`, 964/964 testes locais;
-- candidato funcional: `2881256125cea3381dde943aa8b2d3713422af72`,
-  tree `69b4089837c2dc200a204b0e103ef4d4d5afae34`;
+- réplica final: `183fb41d645e1bb04e237c986988309a28e42b34`, tree
+  `e546e9d88093c09a245502bcca3d119e2e450672`, 965 testes autenticados;
+- candidato funcional final: `2c99be11b1bdc1b66d14bd7a19c510ec50d502d4`,
+  tree `3a05029f10e9f96ac93d57b71a99f61f686e1971`;
 - wheel SHA-256
-  `7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1`,
-  214.568 bytes;
+  `be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd`,
+  214.954 bytes;
 - gates afetados na tree exata: properties 20.000/20.000, faults 6/6,
   restarts 2.000/2.000, contention 200/200 e mutations 12/12;
-- revisão terminal e CI remoto permanecem pendentes.
+- snapshot terminal `73904070...` aprovado 3/3 e CI remoto `29804123764`
+  verde; o closeout foi publicado em `93682024...`.
 
 ## Candidato anterior invalidado
 
@@ -198,4 +211,5 @@ A fase só fecha com:
 - revisão terminal do mesmo candidato;
 - branch publicado e CI remoto verde;
 - runtime operacional intocado;
-- rollout `NO-GO` e `phase8_started=false`.
+- rollout `NO-GO` e `phase8_started=false` no snapshot de fechamento. A Fase 8
+  foi autorizada somente depois, em 2026-07-21.

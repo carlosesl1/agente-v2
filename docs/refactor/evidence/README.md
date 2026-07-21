@@ -147,11 +147,31 @@ focused 14/14, os validators verdes, as versões locais e o runtime observado
 somente leitura. `phase-07/red-results.json` registra REDs sanitizados sem raw
 output.
 
-A fase opera com RED/GREEN focused e regressão por blast radius. Existe uma
-janela pesada por candidato congelado: runtime privado local e um ciclo remoto
-não sobreposto. Nenhuma capability live foi executada; rollout `NO-GO` e
-`phase8_started=false`.
+A Fase 7 está concluída e publicada no closeout
+`93682024b4867d3e313324339a7060d5351dcd3d`. O candidato funcional
+`2c99be11b1bdc1b66d14bd7a19c510ec50d502d4` foi autenticado pelo snapshot
+terminal `73904070dfcb52a3183459bc97abbc87595e1efe`, revisão 3/3 e CI remoto
+`29804123764` com seis jobs verdes. Nenhuma capability live foi executada e o
+runtime operacional permaneceu somente leitura. O snapshot terminal da Fase 7
+fechou com rollout `NO-GO` e `phase8_started=false`; a Fase 8 foi autorizada
+separadamente em 2026-07-21 após o closeout.
 
-As Tasks 1–14 produziram wheel, contratos, store/coordinator/dispatch/comparator,
-réplica sanitizada e patch autenticado. O estado atual é pre-freeze: manifests e
-validator existem, mas artifacts integrais, revisão e CI ainda não existem.
+Para verificar o closeout publicado:
+
+```bash
+python3 scripts/generate_phase7_manifest.py --check
+python3 scripts/validate_phase7.py --terminal
+```
+
+## Fase 8
+
+`phase-08/entry-baseline.json` autentica base/spec/plano, candidato e snapshot
+terminal da Fase 7, revisão/CI, réplica limpa, fingerprints read-only do runtime,
+imagem/release live de rollback e o output pós-merge 762/762.
+`phase-08/red-results.json` registra somente o envelope do RED funcional da Task
+1; o output bruto permanece fora do Git.
+
+A Fase 8 está ativa no gate de entrada. Build, dark canary, ingress, teste
+conversacional, canary E2E e rollout não foram iniciados. Nenhum provider write,
+Docker, ManyChat ou rede foi executado nesta entrada; rollout `NO-GO` e
+`phase9_started=false`.

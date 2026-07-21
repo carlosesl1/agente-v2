@@ -9,7 +9,7 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R03 | Kernel novo replica bugs do legado | 3 | 5 | testes portados literalmente | testes por invariantes e incidentes, não implementação | QA/domain | aberto |
 | R04 | Provider chamado duas vezes após crash | 3 | 5 | attempt > 1 | comando durável + ledger + outcome incerto; restart/contention bilateral | execution | mitigado |
 | R05 | Label volta a controlar identidade | 3 | 4 | matching por nome | `offer_id` opaco, seleção exata e tests metamórficos/mutantes | lookup | mitigado |
-| R06 | Canary não corresponde ao deploy | 4 | 5 | rebuild/diff de hash | promover mesmo digest e manifesto | release | aberto |
+| R06 | Canary não corresponde ao deploy | 4 | 5 | rebuild, manifest digest OCI, image ID ou archive hash divergente | build único; promover pelo mesmo manifest digest OCI; image ID/archive são evidências suplementares | release | aberto |
 | R07 | Segredo/PII entra no novo repo | 2 | 5 | scanners/grep | `.gitignore`, validator e revisão | security | aberto |
 | R08 | Outbox perde mensagem após efeito comercial | 3 | 5 | backlog/stuck lease | store durável, lease/recovery, fault injection e receipt idempotente | messaging | mitigado |
 | R09 | E-mail opcional bloqueia handoff | 3 | 3 | tag aplicada sem reply | matriz required/optional por configuração | handoff | aberto |
@@ -75,6 +75,10 @@ Escala: probabilidade e impacto de 1 (baixo) a 5 (crítico).
 | R69 | Package testado por checkout diverge do wheel | 2 | 4 | import resolve source local | wheel stdlib duplo, install target e checkout fora do `sys.path` | release | aberto |
 | R70 | Validação pesada repete sem nova evidência | 4 | 3 | full/properties rerodam no mesmo tree | uma janela por candidato e matriz de blast radius | QA/release | aberto |
 | R71 | Tool ativa não possui command durável publicado | 4 | 5 | Wise/link Stripe alcança executor ad hoc | `BLOCKED_UNMIGRATED`, manual review e rollout `NO-GO` | payments/runtime | aberto |
+| R72 | Entry da Fase 8 usa status stale ou predecessor não publicado | 2 | 5 | índice ativo diverge de closeout/review/CI | pins exatos de commit/tree/run, RED de índice único e validators 0–7 | release/QA | mitigado |
+| R73 | Canary herda env, perfil, estado ou volume live | 3 | 5 | segredo/gate/mount live aparece na configuração efetiva | allowlist fechada, clone mínimo efêmero e auditoria de mounts/estado | release/security | aberto |
+| R74 | Gate humano ou canary E2E é tratado como autorização implícita | 3 | 5 | provider/workflow/contato/janela têm default ou write abre antes da aprovação | Carlos obrigatório no gate conversacional; autorização E2E posterior, explícita e sem defaults | product/release | aberto |
+| R75 | Artefato OCI de rollback perde identidade ou disponibilidade | 2 | 5 | referência resolve outro manifest digest ou artefato não autentica | reter referência por manifest digest OCI e registrar image ID/layers/archive SHA como evidência; rollback sem rebuild | release/operations | aberto |
 
 ## Processo
 
