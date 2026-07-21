@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import tempfile
 import tomllib
 import unittest
 
@@ -23,6 +24,7 @@ from scripts.validate_phase7 import (
     _loads_json_strict,
     _remote_ci_is_authentic,
     _runtime_source_is_authentic,
+    _terminal_artifact_checks,
     validate_phase7,
 )
 
@@ -116,6 +118,27 @@ class Phase7EntryContractTests(unittest.TestCase):
         self.assertEqual(reservation_boundary.__version__, "0.7.0")
 
 class Phase7CloseoutContractTests(unittest.TestCase):
+    def test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing(self) -> None:
+        source_dir = ROOT / "docs/refactor/evidence/phase-07"
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_dir = Path(temporary)
+            for name in (
+                "candidate.json",
+                "local-integration-result.json",
+                "properties-result.json",
+                "faults-result.json",
+                "mutation-result.json",
+            ):
+                (evidence_dir / name).write_bytes((source_dir / name).read_bytes())
+            (evidence_dir / "ci-result.json").write_bytes(
+                (source_dir / "ci-result-invalidated-29787387850.json").read_bytes()
+            )
+
+            missing, failures = _terminal_artifact_checks(evidence_dir)
+
+        self.assertEqual(missing, ["review-result.json"])
+        self.assertIn("remote CI is not green", failures)
+
     def test_workflow_triggers_only_frozen_phase7_branch(self) -> None:
         workflow = read(".github/workflows/phase7.yml")
         self.assertIn("name: phase-7-boundary-migration", workflow)
@@ -191,7 +214,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase8_started"])
 
-    def test_evidence_validator_passes_with_only_review_gate_open(self) -> None:
+    def test_evidence_validator_blocks_on_current_review_and_ci(self) -> None:
         pre = validate_phase7(terminal=False)
         self.assertEqual(pre["result"], "passed")
         self.assertFalse(pre["terminal_ready"])
@@ -201,11 +224,16 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(terminal["result"], "blocked")
         self.assertTrue(terminal["terminal_blocked"])
         self.assertEqual(
-            terminal["blockers"], ["missing terminal artifact: review-result.json"]
+            terminal["blockers"],
+            [
+                "missing terminal artifact: ci-result.json",
+                "missing terminal artifact: review-result.json",
+            ],
         )
         self.assertFalse(terminal["terminal_ready"])
         self.assertEqual(
-            terminal["missing_terminal_artifacts"], ["review-result.json"]
+            terminal["missing_terminal_artifacts"],
+            ["ci-result.json", "review-result.json"],
         )
 
     def test_runtime_patch_and_contracts_are_bound_to_integration_tree(self) -> None:

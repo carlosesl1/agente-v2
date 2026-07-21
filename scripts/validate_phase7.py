@@ -297,21 +297,36 @@ def _closed_imports() -> bool:
     return True
 
 
-def _terminal_artifact_checks() -> tuple[list[str], list[str]]:
-    missing = sorted(name for name in TERMINAL_ARTIFACTS if not (EVIDENCE_DIR / name).is_file())
+def _terminal_artifact_checks(
+    evidence_dir: Path = EVIDENCE_DIR,
+) -> tuple[list[str], list[str]]:
+    if not isinstance(evidence_dir, Path):
+        raise TypeError("evidence_dir must be a pathlib.Path")
+    missing = sorted(
+        name for name in TERMINAL_ARTIFACTS if not (evidence_dir / name).is_file()
+    )
     failures: list[str] = []
-    if missing:
-        return missing, failures
-    candidate = _json("docs/refactor/evidence/phase-07/candidate.json")
-    local = _json("docs/refactor/evidence/phase-07/local-integration-result.json")
-    properties = _json("docs/refactor/evidence/phase-07/properties-result.json")
-    faults = _json("docs/refactor/evidence/phase-07/faults-result.json")
-    mutations = _json("docs/refactor/evidence/phase-07/mutation-result.json")
-    review = _json("docs/refactor/evidence/phase-07/review-result.json")
-    ci = _json("docs/refactor/evidence/phase-07/ci-result.json")
-    candidate_commit = candidate.get("commit")
-    candidate_tree = candidate.get("tree")
-    if (
+
+    def load_existing(name: str) -> dict[str, object] | None:
+        path = evidence_dir / name
+        if not path.is_file():
+            return None
+        payload = _loads_json_strict(path.read_text(encoding="utf-8"))
+        if type(payload) is not dict:
+            raise TypeError(f"{name} must contain an object")
+        return payload
+
+    candidate = load_existing("candidate.json")
+    local = load_existing("local-integration-result.json")
+    properties = load_existing("properties-result.json")
+    faults = load_existing("faults-result.json")
+    mutations = load_existing("mutation-result.json")
+    review = load_existing("review-result.json")
+    ci = load_existing("ci-result.json")
+
+    candidate_commit = candidate.get("commit") if candidate is not None else None
+    candidate_tree = candidate.get("tree") if candidate is not None else None
+    if candidate is not None and (
         candidate.get("frozen") is not True
         or type(candidate_commit) is not str
         or HEX40.fullmatch(candidate_commit) is None
@@ -333,23 +348,29 @@ def _terminal_artifact_checks() -> tuple[list[str], list[str]]:
             ("mutations", mutations),
             ("review", review),
         ):
-            if not _artifact_is_bound(payload, candidate_commit, candidate_tree):
+            if payload is not None and not _artifact_is_bound(
+                payload, candidate_commit, candidate_tree
+            ):
                 failures.append(f"{name} artifact not bound to candidate")
-    if local.get("passed") is not True:
+    if local is not None and local.get("passed") is not True:
         failures.append("local integration gate failed")
-    if properties.get("passed") is not True or properties.get("total") != 20_000:
+    if properties is not None and (
+        properties.get("passed") is not True or properties.get("total") != 20_000
+    ):
         failures.append("property gate incomplete")
-    if not _fault_gate_is_authentic(faults):
+    if faults is not None and not _fault_gate_is_authentic(faults):
         failures.append("fault/restart/contention gate incomplete")
-    if mutations.get("passed") is not True or mutations.get("killed") != 12:
+    if mutations is not None and (
+        mutations.get("passed") is not True or mutations.get("killed") != 12
+    ):
         failures.append("mutation gate incomplete")
-    if (
+    if review is not None and (
         review.get("approved") != 3
         or review.get("rejected") != 0
         or not _claims_are_closed(review)
     ):
         failures.append("review gate incomplete")
-    if not _remote_ci_is_authentic(ci, candidate_commit):
+    if ci is not None and not _remote_ci_is_authentic(ci, candidate_commit):
         failures.append("remote CI is not green")
     return missing, failures
 
