@@ -156,8 +156,15 @@ untouched and Phase 8 authorization date. Do not rewrite historical invalidation
 
 - [ ] **Step 5: Regenerate shared manifests in dependency order**
 
+Phase 3 does not checksum any Task 1 input, so it is validated but not rewritten.
+Phase 4 owns a legacy explicit-output interface; Phases 5–7 use `--write`:
+
 ```bash
-for n in 3 4 5 6 7; do
+python3 -B scripts/generate_phase4_manifest.py \
+  --package-manifest docs/refactor/evidence/phase-04/package-manifest.json \
+  --fixture-manifest docs/refactor/evidence/phase-04/fixture-manifest.json \
+  --sums docs/refactor/evidence/phase-04/SHA256SUMS
+for n in 5 6 7; do
   python3 -B "scripts/generate_phase${n}_manifest.py" --write
  done
 python3 - <<'PY'
@@ -169,13 +176,14 @@ manifest = json.loads(Path("docs/refactor/evidence/phase-07/manifest.json").read
 candidate["manifest_sha256"] = manifest["aggregate_sha256"]
 p.write_text(json.dumps(candidate, indent=2, sort_keys=True) + "\n")
 PY
-python3 -B scripts/generate_phase7_manifest.py --check
+for n in 5 6 7; do python3 -B "scripts/generate_phase${n}_manifest.py" --check; done
 for n in 0 1 2 3 4 5 6; do python3 -B "scripts/validate_phase${n}.py"; done
 python3 -B scripts/validate_phase7.py --terminal
 ```
 
-If a validator identifies a different shared-owner dependency, update that
-owner's generated artifact; never weaken a validator.
+`validate_phase3.py` and `validate_phase4.py` are the check interfaces for their
+legacy generators. If a validator identifies a different shared-owner dependency,
+update that owner's generated artifact; never weaken a validator.
 
 - [ ] **Step 6: Run GREEN and commit**
 
