@@ -220,7 +220,7 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         evidence = read("docs/refactor/evidence/phase-07/README.md")
         self.assertIn("phase8_started=false", phase)
         self.assertIn("rollout=NO-GO", phase)
-        self.assertIn("remediação terminal focused em curso", evidence)
+        self.assertIn("candidato remediado congelado", evidence)
         self.assertNotIn("rollout autorizado", (phase + evidence).lower())
 
     def test_duplicate_json_keys_are_rejected(self) -> None:

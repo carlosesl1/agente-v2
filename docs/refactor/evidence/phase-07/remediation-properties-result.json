@@ -1,0 +1,39 @@
+{
+  "candidate_commit": "f5505b4c8a2ae8aa6990970035e770e539b1f978",
+  "candidate_delta_from_functional_parent": [
+    ".github/workflows/phase7.yml",
+    "docs/refactor/evidence/phase-07/SHA256SUMS",
+    "docs/refactor/evidence/phase-07/manifest.json",
+    "docs/refactor/evidence/phase-07/red-results.json",
+    "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-artifact-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-contention-integrity-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-fault-validator-unfixed.patch",
+    "reservation_boundary/faults.py",
+    "scripts/validate_phase7.py",
+    "tests/test_phase7_closeout.py",
+    "tests/test_phase7_fault_injection.py"
+  ],
+  "candidate_tree": "67f228abec5582f2ac56b0fdd5a9328961b81804",
+  "executed_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
+  "executed_tree": "e1db1211f0010452f70ded131f4343592f11e7ce",
+  "functional_parent_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
+  "functional_parent_tree": "e1db1211f0010452f70ded131f4343592f11e7ce",
+  "gate_scope_equivalent": true,
+  "live_capabilities_executed": [],
+  "passed": true,
+  "phase": 7,
+  "phase8_started": false,
+  "raw_report_bytes": 5816868,
+  "raw_report_path": "/tmp/phase7-remediated-properties.json",
+  "raw_report_sha256": "cf366dec395abe0716d1e698f6213180523bd57347af0977394bdb822f95955d",
+  "rollout": "NO-GO",
+  "scenario_counts": {
+    "blocked_dispatch": 5000,
+    "importer": 5000,
+    "shadow": 5000,
+    "wire": 5000
+  },
+  "seed": 2026072007,
+  "total": 20000
+}

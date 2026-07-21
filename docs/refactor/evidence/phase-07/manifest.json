@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "f73096511d6ddc1363fecc8d41fa5f30929393dfb623eda1fff0475aea0b838e",
-  "file_count": 63,
+  "aggregate_sha256": "16cd3e4289b9634b543c8dffc32cb78ba521412849b738439e0925f8d38e2966",
+  "file_count": 67,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -9,8 +9,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "f632e778c51b42d968a09126fa647391f371b066b2d8a9e6510cf8906dfd7125",
-      "size": 5229
+      "sha256": "3705adaef1a49dd453a3c663906cc124011622684f7d217ead6961af6d72d9d2",
+      "size": 5370
     },
     {
       "path": "docs/refactor/06-risk-register.md",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/README.md",
-      "sha256": "46104ed7769941e76212717b73283f0ff8a96f638f07f0c90b7e5e5d19afa29d",
-      "size": 3718
+      "sha256": "e5a80413541467753861cb491bb52aaddee10c73af9cc156649dcde45a438c40",
+      "size": 4091
     },
     {
       "path": "docs/refactor/evidence/phase-07/entry-baseline.json",
@@ -46,6 +46,26 @@
       "path": "docs/refactor/evidence/phase-07/red-results.json",
       "sha256": "fa3064a49635d4e3d6bf90deefeb348d48d428220ab3c731fe5dfda3defc683c",
       "size": 21833
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/remediation-faults-result.json",
+      "sha256": "8d270bfed2b59459b98406f2744423e25b6a099f720f4b0bdeb178c84ee910fb",
+      "size": 69803
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/remediation-local-result.json",
+      "sha256": "5fc03972d63ebb86d89358cc704270b94f59af41d96edac03add11a4e667001b",
+      "size": 2580
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/remediation-mutations-result.json",
+      "sha256": "001f2d502971fe3fe32d44d17bd4aa57def2ba567e5aebaf7234a29a9d9bb3bc",
+      "size": 3457
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/remediation-properties-result.json",
+      "sha256": "021d03512b0473a0c816de848049eae3f50412f256e69db3cc7ca732577f83ce",
+      "size": 1639
     },
     {
       "path": "docs/refactor/evidence/phase-07/review-attempt-1.json",
@@ -114,8 +134,8 @@
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
-      "sha256": "8e575aadf75d75bbb67062976297bd0ce13bb2fa651d13b8f613f7e14596d3fd",
-      "size": 6350
+      "sha256": "cd1c7b4cab648c663ee0ef3141e7e9d50d38308663967aeaf2e8a63a4ba4ed26",
+      "size": 7026
     },
     {
       "path": "docs/superpowers/plans/2026-07-20-phase-7-boundary-migration.md",
@@ -249,8 +269,8 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "c2428d12883270eb21d00b62670c9ea04272491116778392a377919d18d1a0b1",
-      "size": 13633
+      "sha256": "b30fcc6cf5a72d62e29df6b3c81763625191e1d164520a82c0ae047ed0650de5",
+      "size": 13624
     },
     {
       "path": "tests/test_phase7_coordinator.py",

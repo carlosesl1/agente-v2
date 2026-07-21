@@ -1,6 +1,6 @@
 # Evidências — Fase 7
 
-Status: **candidato anterior invalidado; remediação terminal focused em curso**.
+Status: **candidato remediado congelado; revisão terminal e CI remoto pendentes**.
 
 ## Entrada
 
@@ -54,15 +54,20 @@ diffs da árvore suja.
 - `mutation-result.json`: 12/12;
 - `ci-result.json`: run real `29787387850`, 6/6 jobs verdes;
 - `performance-result.json`: tempos local e remoto.
+- `remediation-local-result.json`: wheel, focused/closeout e adapters remediados;
+- `remediation-properties-result.json`: 20.000/20.000 com hash do raw report;
+- `remediation-faults-result.json`: 200 rows concorrentes integralmente retidas;
+- `remediation-mutations-result.json`: 12/12 com rows retidas.
 
-O workflow não publicou os JSONs de `/tmp` como artifacts. Os resumos remotos
-são vinculados ao job real `success`, ao SHA exato, ao comando versionado e às
-constantes fechadas dos runners; não houve rerun local substituto.
+O run remoto invalidado não publicou os JSONs de `/tmp` como artifacts. O
+workflow do candidato remediado publica properties, faults e mutations em três
+artifacts nomeados com `${{ github.sha }}` e falha se o report estiver ausente.
+Esse novo workflow ainda não foi executado remotamente.
 
 `review-attempt-1.json` registra a lane 1 `Needs fixes` e os dois timeouts que
 valem zero. `review-remediation-tests.patch` torna os novos REDs reconstruíveis
-sobre o evidence commit anterior. `review-result.json` permanece ausente até um
-novo candidato obter os três verdicts terminais válidos.
+sobre o evidence commit anterior. `review-result.json` permanece ausente até o
+candidato remediado obter os três verdicts terminais válidos.
 
 O RED semântico histórico da Task 6 tinha hash de output, mas não commit/tree
 unfixed. Essa limitação é preservada explicitamente; nenhuma proveniência foi

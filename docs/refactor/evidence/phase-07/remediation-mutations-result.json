@@ -1,0 +1,97 @@
+{
+  "candidate_commit": "f5505b4c8a2ae8aa6990970035e770e539b1f978",
+  "candidate_delta_from_functional_parent": [
+    ".github/workflows/phase7.yml",
+    "docs/refactor/evidence/phase-07/SHA256SUMS",
+    "docs/refactor/evidence/phase-07/manifest.json",
+    "docs/refactor/evidence/phase-07/red-results.json",
+    "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-artifact-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-contention-integrity-test.patch",
+    "docs/refactor/evidence/phase-07/review-remediation-fault-validator-unfixed.patch",
+    "reservation_boundary/faults.py",
+    "scripts/validate_phase7.py",
+    "tests/test_phase7_closeout.py",
+    "tests/test_phase7_fault_injection.py"
+  ],
+  "candidate_tree": "67f228abec5582f2ac56b0fdd5a9328961b81804",
+  "executed_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
+  "executed_tree": "e1db1211f0010452f70ded131f4343592f11e7ce",
+  "functional_parent_commit": "3f515a65ea151f4f5f9f4fc4acdcb3b0b6f08f86",
+  "functional_parent_tree": "e1db1211f0010452f70ded131f4343592f11e7ce",
+  "gate_scope_equivalent": true,
+  "killed": 12,
+  "live_capabilities_executed": [],
+  "mutation_process_probe_excludes_faults_module": true,
+  "passed": true,
+  "phase": 7,
+  "phase8_started": false,
+  "raw_report_bytes": 1943,
+  "raw_report_path": "/tmp/phase7-remediated-mutations.json",
+  "raw_report_sha256": "97c3ce3871f2fe179ff5e107c02165c7e19d036ad8a31544c6e5e8897f4319a8",
+  "rollout": "NO-GO",
+  "rows": [
+    {
+      "killed": true,
+      "name": "id_inference",
+      "probe_hash": "8292fb22523393bf2a29e9feba00749b162cc9bdcaf9895ba03fd73958b5dc84"
+    },
+    {
+      "killed": true,
+      "name": "dual_write",
+      "probe_hash": "8db4410010d147fcb15fdeb516dc3db3a298184a771268619b50e64d4105baee"
+    },
+    {
+      "killed": true,
+      "name": "bool_as_int",
+      "probe_hash": "37c46ece857887316e31b6f96712c04616cd7d7a8ab2369f8e4bc7c2a1262512"
+    },
+    {
+      "killed": true,
+      "name": "stale_confirmation",
+      "probe_hash": "8b3a4c7015aae39d190d59093ee312eb283fec3c621f08b177f02cb3a6ce9af6"
+    },
+    {
+      "killed": true,
+      "name": "command_in_turn",
+      "probe_hash": "0a6770814471d03e7db0f8a79253c6687ab508dc74462137cd6c7bf61d722cbf"
+    },
+    {
+      "killed": true,
+      "name": "alias_escalation",
+      "probe_hash": "e00a87daef816d0e2247a51db72353d23c485e764810481149723211328ef1ed"
+    },
+    {
+      "killed": true,
+      "name": "deadline_write",
+      "probe_hash": "01bffff52626b833ecae4c4de81570fda53728da423babdf7d5916629bd85204"
+    },
+    {
+      "killed": true,
+      "name": "cas_bypass",
+      "probe_hash": "924256163511c1cddb388e85f0b93361cabae018539b388648002e8d86d13b72"
+    },
+    {
+      "killed": true,
+      "name": "comparator_downgrade",
+      "probe_hash": "0ec3dd3900c847085ff7950ad0290471ff2702a27973403ce3bdc199287bdeb3"
+    },
+    {
+      "killed": true,
+      "name": "plugin_business_guard",
+      "probe_hash": "35956898a8661bc183935d48099a67c501d7f71b879e2af4b1dc0e23f51af014"
+    },
+    {
+      "killed": true,
+      "name": "process_execution",
+      "probe_hash": "1798a46496b0dc100cd567d19809cc69f462f314d0f1ccf98b327f551a6cd399"
+    },
+    {
+      "killed": true,
+      "name": "duplicate_json",
+      "probe_hash": "b9c58f5b1b483f56e11cc5cd39dc6f1669fc96ee22ecc5ab6618710e31b7ca08"
+    }
+  ],
+  "survived": 0,
+  "total": 12
+}

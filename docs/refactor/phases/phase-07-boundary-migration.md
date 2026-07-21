@@ -2,7 +2,7 @@
 
 ## Estado
 
-- Status: **candidato congelado anterior invalidado; remediação focused em curso**.
+- Status: **candidato remediado congelado; revisão terminal e CI remoto pendentes**.
 - Commit de entrada: `4169c6149f76e8bf4f30a26ee9d0bfbc43a58984`.
 - Tree de entrada: `b2ce9d0b35924db2b2a387d0aa7a5ba92490bce4`.
 - Spec corrigida: `580b1da3602308c16c8a45af694fe6c804ce7ffb`.
@@ -12,7 +12,20 @@
 - `rollout=NO-GO`.
 - `phase8_started=false`.
 
-## Candidato congelado invalidado
+## Candidato remediado congelado
+
+- Candidato: `f5505b4c8a2ae8aa6990970035e770e539b1f978`.
+- Tree: `67f228abec5582f2ac56b0fdd5a9328961b81804`.
+- Wheel SHA-256:
+  `c419a7b402682b98ee0d371ce08ef81a216be3315a880fb52a6f54e421d3c357`.
+- RED/GREEN focused: binding cross-lead, payment/status/timestamps fail-closed,
+  identidade embutida, schema exato, contention real e autenticação terminal.
+- Gates afetados: 20.000/20.000 properties, seis faults, 2.000 restarts,
+  200 contentions reconstruíveis, 12/12 mutations e 13 testes de adapters.
+- O workflow agora publica os três reports brutos vinculados ao SHA.
+- Revisão terminal e novo run remoto ainda não executados.
+
+## Candidato anterior invalidado
 
 - `agente-v2`: `d0ba3f7b062d61a2b95f500e18badd6fdb8772ae`.
 - Candidato: `ef5dd46c27ccb72e977b333f526521a5f6b0225c`.
@@ -41,8 +54,8 @@ Os REDs vinculados ao evidence commit/tree anterior cobrem:
 - `BoundaryState.schema_version` desconhecida;
 - contention nominal sem contenders concorrentes por domínio.
 
-As correções focused estão em desenvolvimento. Nenhum novo candidato foi
-congelado, publicado ou validado remotamente.
+As correções focused foram congeladas no novo candidato. Ele ainda não foi
+publicado, revisado terminalmente ou validado remotamente.
 
 O primeiro candidato pre-freeze (`4eb0495a2296ac76d4b2ab25038b6a822f19ec18`)
 foi invalidado por dois erros de collection: a captura removia o package
@@ -62,8 +75,8 @@ passou 421 testes focused sobre todas as superfícies sanitizadas e consumidores
 
 O RED semântico original da Task 6 não registra commit/tree unfixed e não é
 retroativamente apresentado como reconstruível. A remediação terminal usa
-`review-remediation-tests.patch`, vinculado ao commit/tree anterior e aos quatro
-outputs RED autenticados.
+`review-remediation-*.patch`, vinculado aos commits/trees unfixed e aos outputs
+RED autenticados.
 
 ## Objetivo
 

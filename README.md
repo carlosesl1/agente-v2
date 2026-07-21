@@ -12,8 +12,8 @@ Contrato central:
 
 ## Estado
 
-- Fase ativa: **Fase 7 — primeiro candidato congelado invalidado pela revisão;
-  remediação focused em preparação para novo freeze**.
+- Fase ativa: **Fase 7 — candidato remediado congelado; revisão terminal e CI
+  remoto pendentes**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -39,7 +39,10 @@ Contrato central:
   nas Fases 5/6; três permanecem `BLOCKED_UNMIGRATED` e bloqueiam rollout. O
   candidato `ef5dd46c27ccb72e977b333f526521a5f6b0225c` passou 963 testes
   locais e o run remoto `29787387850` ficou 6/6 verde, mas foi invalidado por
-  findings de identidade/import/store/contention na revisão terminal.
+  findings de identidade/import/store/contention na revisão terminal. O novo
+  candidato é `f5505b4c8a2ae8aa6990970035e770e539b1f978`, com os findings
+  corrigidos e gates afetados verdes; não há aprovação terminal nem novo run
+  remoto ainda.
 - Runtime atual: apenas fonte de evidência; a árvore operacional permanece
   somente leitura. A réplica sanitizada foi integrada no commit local
   `e2e1570757c2afe3d0b1d25a1ef94cd2c709d674`.
