@@ -311,23 +311,56 @@ publicação, sem janela `mkdir→owner.lock`. O root privado contém
    `renameat2(RENAME_NOREPLACE, .staging/id, active/id)` e faz `fsync` dos dirs;
 5. libera `coord.lock`, mas mantém o fd/lock de owner até o fim da tentativa.
 
+O staging protocol usa **um único marker canônico** `attempt.meta`. Durante criação,
+o universo permitido é uma destas gramáticas de prefixo, em ordem:
+
+```text
+S0 = {}                                  # mkdir concluído
+S1 = {owner.lock}                        # lock file criado
+S2 = {owner.lock, attempt.meta.tmp}      # write possivelmente parcial
+S3 = {owner.lock, attempt.meta}          # metadata publicada e válida
+```
+
+`attempt.meta.tmp` nunca é interpretado; por estar em staging não publicado, pode
+ser removido mesmo parcial. O creator publica `attempt.meta` por temp+fsync+
+rename-no-replace+dir-fsync e remove qualquer temp antes do rename do diretório.
+`active/id` exige `owner.lock` + `attempt.meta` válidos. O metadata enumera um set
+fechado de runtime member names; enquanto vivo, o owner pode materializar/remover
+esses members. Depois de crash, o conjunto observado pode ser qualquer **subconjunto
+desse allowlist** — inclusive socket ainda ausente ou temp parcial explicitamente
+nomeado — e continua sendo órfão removível. Member desconhecido, symlink ou nome
+fora do allowlist falha readiness. Assim, crash logo após publish não vira falso
+`malformed`, mas conteúdo inesperado nunca é apagado por adivinhação.
+
 O scavenger capability-free também segura `coord.lock` durante scan/remoção. Como
 nenhum creator solta esse lock antes do publish, qualquer staging entry observada
 sob o lock foi deixada por crash. O scavenger:
 
-- abre roots/entries por dirfd/no-follow e rejeita symlink, path escape,
-  owner/mode ou marker inválido;
-- em `.staging`, exige universo fechado, adquire `owner.lock` e remove apenas
-  tentativa abandonada; entry malformada falha readiness;
+- abre roots/entries por dirfd/no-follow e rejeita symlink, path escape ou
+  owner/mode inválido;
+- em `.staging`, aceita **somente** S0–S3; em S1–S3 adquire `owner.lock`, e então
+  remove o prefixo abandonado sem exigir metadata completa;
+- entry staging fora de S0–S3 falha readiness, nunca é apagada por adivinhação;
 - em `active`, nunca remove diretório cujo `owner.lock` não consegue adquirir;
-- adquire o owner lock de órfão antes de apagar somente o conteúdo fechado;
+- com owner lock adquirido, exige metadata/hash e que todos os members observados
+  pertençam ao allowlist fechado antes de apagar; desconhecido/divergente falha
+  readiness;
 - faz `fsync` após unlink/rmdir e antes de liberar `coord.lock`;
-- prova barreiras em cada fronteira create→lock→markers→rename, além de limpeza
-  após `SIGKILL`, `os._exit`, power loss simulado e restart real.
+- prova barreiras em cada fronteira create→lock→temp→metadata→rename, além de
+  limpeza após `SIGKILL`, `os._exit`, power loss simulado e restart real.
+
+Cleanup normal não desmonta files enquanto a tentativa ainda está publicada. O
+owner primeiro encerra filho/socket e para toda mutação, depois libera/fecha
+`owner.lock`; em seguida adquire `coord.lock`, reabre `active/id`, adquire o owner
+lock agora livre, valida o universo fechado e remove tudo. Se o scavenger venceu a
+corrida e o diretório já não existe, cleanup termina idempotentemente. A ordem
+global é sempre `coord.lock → owner.lock`; não existe caminho owner→coord, evitando
+deadlock e falso `malformed` durante teardown.
 
 Attempt roots jamais são pesquisados para retomar sessão ou estado canônico.
 Startup só fica ready depois de adquirir `coord.lock`, resolver staging/active e
-provar zero órfão; o scanner periódico usa o mesmo protocolo.
+provar zero órfão; o scanner periódico e o cleanup normal usam a mesma gramática,
+ordem de locks e semântica idempotente.
 
 O processo filho recebe **um plugin novo e mínimo de boundary client**, além das
 tools protocolares. Esse plugin contém somente schemas e cliente UDS. Terminal,
@@ -539,7 +572,7 @@ Mesmo aggregate/source event ID com hash diferente continua
 
 ### 10. Boundary schema v8
 
-Universo mínimo proposto de dez tabelas:
+Universo mínimo proposto de onze tabelas:
 
 1. `boundary_state`;
 2. `boundary_events` — passa a armazenar `turn_receipt_json/hash`;
@@ -550,8 +583,9 @@ Universo mínimo proposto de dez tabelas:
 6. `boundary_command_relays`;
 7. `boundary_outbox` — jobs internos fechados;
 8. `boundary_public_outbox` — uma row por chamada externa/chunk;
-9. `legacy_import_claims`;
-10. `decision_comparisons`.
+9. `boundary_dispatch_authority` — geração durável de policy/binding;
+10. `legacy_import_claims`;
+11. `decision_comparisons`.
 
 `boundary_turn_artifacts` usa PK `(lead_key, aggregate_turn_id, artifact_index)` e
 kind fechado:
@@ -569,6 +603,15 @@ artifact ID, kind/index e frame reference duplicados/divergentes.
 
 `boundary_commands` e `boundary_public_outbox` são inseridas na mesma transação de
 estado/event/receipt.
+
+`boundary_dispatch_authority` possui uma row histórica por
+`(authority_id, generation)` com generation monotônica, state `open|closed`,
+capability-policy digest, stage-binding digest, opened-at e closed-at. No máximo
+uma generation por authority fica open. Abertura insere nova generation; revogação
+fecha a atual por CAS no boundary DB, sem apagar histórico. Cada public row tem FK
+para a generation usada. Semantic scan prova `fenced_at` dentro da janela
+opened/closed e digests idênticos. Configuração em memória/env nunca é autoridade
+para fence.
 
 O receipt contém contagens e aggregate hashes, mas SQL mantém FKs explícitas de
 event/source/artifact/command/relay/internal-outbox/public-chunk. `ON DELETE` não pode
@@ -754,11 +797,18 @@ Não usar `JsonPublicMessageOutbox` como autoridade da rota Phase 8.
 
 - target/channel binding privado;
 - bytes/hash exatos, índice total e predecessor do chunk;
-- idempotency key derivada de aggregate turn ID + chunk index + artifact hash,
-  nunca do receipt hash;
+- idempotency key com domínio `phase8-public-v1`, release child digest,
+  `lead_key_hash`, target-binding hash, channel ID, aggregate turn ID, chunk index e
+  artifact hash, nunca do receipt hash nem de texto/PII bruto;
 - status `pending|leased|dispatch_fenced|delivered|manual_review`;
 - owner/token/lease/claim-count, preparation-failures e dispatch-slots-consumed;
+- dispatch authority ID/generation + policy/stage-binding digests esperados;
 - source turn receipt backlink, delivery receipt hash e timestamps.
+
+O target-binding hash inclui deterministicamente recipient/contact binding,
+channel/account binding e route, com domínio/release. Unicidade externa não depende
+de aggregate/source IDs serem globais; duas leads ou canais distintos nunca
+compartilham idempotency key.
 
 Máquina fechada:
 
@@ -782,18 +832,30 @@ chamada ManyChat:
 1. claim;
 2. prepara request sem side effect e valida role, capability, binding e allowlist;
 3. produz `DispatchPermit` canônico contendo row/chunk/request hash, lease owner e
-   token, target binding hash, capability-policy digest, deployment-binding digest
-   e validade limitada pela lease/deadline;
-4. `fence_dispatch` revalida todos esses campos e a policy/binding corrente no CAS
-   `leased→dispatch_fenced`; permit negado/stale nunca consome slot;
-5. somente depois do CAS consome permanentemente o único dispatch slot e chama
-   ManyChat exatamente uma vez;
-6. grava receipt de exatamente uma chamada externa.
+   token, target binding hash, authority ID/generation, capability-policy digest,
+   stage-binding digest e validade limitada pela lease/deadline;
+4. `fence_dispatch` executa uma única transaction no boundary DB: revalida a row e
+   exige que `boundary_dispatch_authority` esteja `open` com exatamente a mesma
+   generation/digests; somente então faz CAS `leased→dispatch_fenced` e consome o
+   slot. Permit negado/stale nunca consome slot;
+5. adquire `dispatch-exec/<row-id>.lock` por dirfd/no-follow e `flock` exclusivo;
+6. sob esse lock, relê a row e exige o mesmo `dispatch_fenced`, owner/token, slot e
+   authority generation capturada no fence; se um reconciler já terminalizou, não
+   envia;
+7. chama ManyChat exatamente uma vez mantendo o execution lock até persistir o
+   delivery receipt ou encerrar por crash;
+8. grava receipt por full-tuple CAS e somente então libera o execution lock.
 
 Policy/allowlist denial é preparation failure terminal ou requeue conforme o
 motivo fechado, sempre com slot 0; jamais vira resultado externo incerto. Mudança
 de policy/binding entre prepare e fence invalida o permit e rejeita o CAS. Dark
 mode nega claim e, por defesa em profundidade, também prepare/fence/send.
+
+Um fence confirmado é uma autorização irrevogável para **essa única chamada**;
+revogação posterior incrementa generation/fecha a authority e bloqueia novos
+fences, mas não tenta desfazer slot já consumido. Expiry da lease, sozinha, não
+revoga o executor que mantém o execution lock; enquanto ele está vivo, reconciler
+não pode declarar resultado terminal desconhecido.
 
 Falha/crash depois do fence e antes de receipt deixa a row representavelmente
 `dispatch_fenced`. Um **reconciler sem capability de send** varre leases vencidas
@@ -803,11 +865,16 @@ chunks anteriores `delivered`; o chunk incerto e os posteriores nunca são envia
 automaticamente. Corridas worker/reconciler, close/reopen e restart precisam de
 prova.
 
-O reconciler recebe estruturalmente somente store+clock; não recebe ManyChat,
-credentials ou send port. Ele distingue `leased` expirada (reclaim pre-fence) de
-`dispatch_fenced` expirada (manual-review pós-fence). Testes cobrem morte após
-claim, durante/depois de prepare, antes/depois do fence, depois do send e antes do
-receipt, stale worker versus reconciler e budgets terminais.
+O reconciler recebe estruturalmente somente store+clock+execution-lock factory;
+não recebe ManyChat, credentials ou send port. Ele distingue `leased` expirada
+(reclaim pre-fence) de `dispatch_fenced` expirada. Para esta última, precisa
+primeiro adquirir o mesmo execution lock; sob o lock, relê full tuple e somente
+então faz CAS para `manual_review`. Se não consegue adquirir, não altera a row e
+readiness sinaliza dispatch em voo. Depois que terminaliza e libera o lock, worker
+antigo pode até adquiri-lo, mas a releitura obrigatória vê `manual_review` e não
+envia. Testes com barreiras cobrem worker pausado antes/depois de fence/lock,
+reconciler concorrente, lease vencida com lock vivo, morte depois do send e antes
+do receipt, stale worker e budgets terminais.
 
 Dark canary e primeiro ingress gate constroem e supervisionam esse worker, mas a
 policy nega claim/fence/send; os gates provam zero dispatch slot e zero chamada.
@@ -831,8 +898,10 @@ A factory constrói e autentica:
 - attempt-root scavenger;
 - kernel adapter;
 - command relay e boundary-internal-job workers;
-- public delivery worker + capability-free reconciler;
+- durable dispatch authority + public delivery worker/execution-lock factory +
+  capability-free reconciler;
 - memory authority/learning target;
+- qualification journal/controller;
 - coordinator + runtime adapter;
 - routes e lifespan.
 
@@ -847,6 +916,10 @@ O graph inclui explicitamente ownership reconciler, attempt scavenger,
 plugin filho mínimo faz parte do manifest. O semantic scan de readiness recompõe
 transcript commitments, canonical proposal/decision, target ingress receipts e
 todos os source acknowledgements.
+
+O qualification controller/journal também integra o graph, embora capabilities
+permaneçam fechadas antes do Gate 13. A dispatch authority e execution-lock root
+são obrigatórias sempre que o public worker é construído.
 
 Memória aprendida não contamina esse digest estrutural. Um
 `BehaviorStateSnapshot` canônico contém schema/version/hash da memória dinâmica;
@@ -885,30 +958,134 @@ Roots são classes fechadas, validadas contra mounts reais; paths concretos não
 entram em hashes de comportamento.
 
 Dark/ingress fechado exercitam o graph completo com capabilities negadas, não
-omitem classes. Depois do último turno E2E pretendido, um qualification controller
-executa esta ordem obrigatória:
+omitem classes. Antes de abrir a canary E2E, a autorização humana cria um
+`E2EQualificationContract` canônico e imutável. Ele contém uma lista **não vazia**
+de `E2EScenarioContract`, cada uma com:
 
-1. CAS `admission OPEN→QUALIFYING`, incrementa qualification epoch e bloqueia
-   **primeiro** novos turn admissions e claims normais de learning;
-2. fixa a lista de turnos já admitidos/in-flight no cutoff e aguarda todos os
-   receipts terminais;
-3. recompõe dos receipts o conjunto finito e completo de learning jobs desses
-   turnos; um drainer de qualificação pode claimar somente esse conjunto;
-4. aguarda completion/ack de jobs leased e drena os pending do conjunto; qualquer
-   extra, ausente, divergente ou `manual_review` falha a qualificação;
-5. a memory authority executa CAS
-   `seal(expected_version, expected_hash, qualification_epoch, admitted_set_hash)`
-   e retorna um `SealedBehaviorStateSnapshot`; nenhuma nova mutation/claim entra;
-6. constrói `BehaviorTransitionReceipt` sobre cutoff, ordered turn receipts, todos
-   os effective-binding digests, todos os learning job/receipt IDs e a cadeia
-   contínua before→after até o snapshot selado;
-7. mantém admission/memory congelados até rollout ou cancelamento explícito.
+```text
+scenario_id + deterministic turn/source identities
+lead/target/channel hashes e allowlist binding
+provider/workflow/effect scopes + janela
+expected command/relay kinds e cardinalidades exatas
+expected target-ingress receipt kinds/cardinalidades
+expected provider-effect outcome kinds/cardinalidades
+expected public chunk/delivery cardinalidades
+expected compensation/cancellation receipts, quando aplicável
+expected final state/economic hashes
+external-effect budget exato
+```
 
-Zero learning é representado por conjunto vazio + before==after, nunca por campo
-omitido. O transition scan é bilateral: todo turno/job no cutoff aparece uma vez e
-todo item do receipt pertence ao cutoff; pending/leased/manual-review ou quebra na
-cadeia invalida o gate. Injeções em cada fronteira devem provar que nenhum turno ou
-job posterior ao cutoff é aceito e que nenhum anterior é omitido.
+O contrato global exige `scenario_count >= 1`, pelo menos um provider-write outcome
+terminal e pelo menos uma public delivery terminal. Zero cenários, somente reads,
+somente turn receipts ou budgets externos zero **não** podem qualificar rollout.
+Cada turno E2E carrega `scenario_id/contract_hash`; ingress fora do contrato é
+negado e qualquer efeito extra é finding terminal.
+
+`ProviderEffectOutcomeReceipt` é um tipo fechado, persistido pelo worker owner do
+provider/UoW, que liga command, target-ingress receipt, provider operation,
+idempotency key, before/after ou economic hash, resultado terminal e eventual
+compensation. Um `TurnReceipt` sozinho prova somente commit do turno; nunca prova
+relay, provider outcome ou delivery.
+
+Ele não cria ledger concorrente. Para reserva, referencia/recompõe exatamente
+`execution_ledger.outcome_json/hash` e command/workflow rows do Phase5-v6; para
+settlement, referencia/recompõe `payment_ledger.outcome_*`; handoff/payment
+deliveries usam as receipt rows Phase6-v2. O qualification journal guarda uma cópia
+canônica + source row IDs/hashes para scan, mas a autoridade continua no UoW/worker
+owner. Outcome sem source row terminal byte-idêntica é inválido.
+
+Antes de selar, o qualification controller exige igualdade bilateral e
+cardinalidade exata entre o contrato e:
+
+- turn receipts admitidos;
+- command relays `acked` e target-ingress receipts terminais;
+- provider-effect outcome receipts `succeeded` e compensation receipts requeridos;
+- public rows `delivered` com delivery receipts exatos;
+- final states/hashes esperados.
+
+Qualquer item `pending|leased|dispatch_fenced|manual_review`, receipt ausente,
+extra, duplicado, divergente, cenário não executado ou efeito fora do budget falha
+a qualificação. O scan inclui source e target stores; não aceita contagem derivada
+somente do boundary receipt.
+
+A recuperação usa `QualificationJournal`, um SQLite root isolado com schema/table
+universe exato:
+
+1. `qualification_admission` — singleton com state `OPEN|QUALIFYING|FROZEN`, epoch,
+   active turn IDs/count e qualification ID opcional;
+2. `qualification_runs` — qualification ID, contract bytes/hash, admission epoch,
+   cutoff, status, expected CAS fields e hashes dos artifacts terminais;
+3. `qualification_scenarios` — uma row por scenario ID/contract hash, com os
+   aggregates e terminal verification receipt;
+4. `qualification_artifacts` — IDs/kinds/hashes/bytes canônicos de turn, target
+   ingress, provider outcome, delivery, compensation, learning, seal, transition e
+   binding receipts.
+
+Esse journal é também a autoridade de admission da canary E2E: todo ingress faz
+CAS/registro de active turn na mesma DB antes de entrar no coordinator e fecha esse
+registro por target-commit/journal-ack depois de persistir o boundary turn receipt.
+Crash nessa janela é recuperado por reconciler que encontra o receipt pelo
+deterministic turn ID e faz ack idempotente. Registro sem boundary receipt nunca é
+silenciosamente apagado: retry conclui o turno ou um `AdmissionAbortReceipt` prova
+zero boundary/provider/delivery effect; cenário abortado falha a qualificação.
+Assim não existe janela entre bloquear admission e criar a run de qualification.
+
+Status fechados:
+
+```text
+OPEN → QUALIFYING → EFFECTS_VERIFIED → LEARNING_DRAINED → MEMORY_SEALED
+     → TRANSITION_RECORDED → QUALIFIED
+     ↘ CANCELLED | MANUAL_REVIEW
+```
+
+`qualification_id` deriva de contract hash + release/graph/policy digests +
+admission epoch. Toda transição é full-tuple CAS e persiste canonical receipt/hash;
+duplicate byte-idêntica retorna os mesmos bytes, identidade divergente falha.
+Restart abre o journal, executa scan bilateral e retoma da última transição
+confirmada, sem repetir provider ou public effects.
+
+Fechar claims normais de learning também possui operation ID estável por
+qualification. A memory authority retorna `LearningClaimsClosedReceipt`
+byte-idêntico em retry; o journal o persiste em `qualification_artifacts`. Estado
+`QUALIFYING` sem esse receipt sempre repete/consulta a mesma operação antes de
+avançar para effects scan.
+
+Quando o gate solicita qualificação, o controller executa esta ordem obrigatória:
+
+1. numa única transaction do journal, insere `qualification_runs` e faz CAS
+   `qualification_admission OPEN→QUALIFYING`, incrementa epoch e fixa
+   qualification ID; o commit bloqueia **primeiro** novos turn admissions. Depois,
+   a authority de learning é fechada para claims normais com target-commit/journal-
+   ack idempotente antes de continuar;
+2. fixa a lista de turnos já admitidos/in-flight no cutoff e aguarda todos os turn
+   receipts, target ingress, provider outcome, compensation e delivery receipts
+   exigidos pelo contrato;
+3. executa o scan E2E bilateral acima; só então persiste `EFFECTS_VERIFIED`;
+4. recompõe dos receipts o conjunto finito e completo de learning jobs; um drainer
+   de qualificação pode claimar somente esse conjunto;
+5. aguarda completion/ack de jobs leased e drena os pending; qualquer extra,
+   ausente, divergente ou `manual_review` falha; persiste `LEARNING_DRAINED`;
+6. chama a memory authority por operação idempotente
+   `seal(qualification_id, expected_version, expected_hash, epoch, admitted_set_hash)`;
+   ela persiste seal+snapshot receipt atomicamente e duplicate retorna os mesmos
+   bytes. O journal grava esse receipt por CAS e chega a `MEMORY_SEALED`;
+7. constrói/persiste deterministicamente `BehaviorTransitionReceipt`, então faz
+   CAS para `TRANSITION_RECORDED`;
+8. constrói/persiste deterministicamente `SealedCanaryQualificationBinding`, faz
+   CAS para `QUALIFIED` e mantém admission/memory congelados até rollout/cancel.
+
+Crash depois do seal na memory authority e antes do journal ack é recuperado
+chamando o mesmo `seal` e recebendo o receipt byte-idêntico. Crashes entre
+transition/binding write e status CAS recompõem os mesmos bytes e completam o CAS;
+nenhum passo é best-effort. Zero learning é conjunto vazio + before==after, nunca
+campo omitido.
+
+Cancelamento antes de `MEMORY_SEALED` pode encerrar o journal e reabrir admission
+somente em novo epoch. Depois de `MEMORY_SEALED`, snapshot não é “deselado”:
+cancelamento marca a qualification `CANCELLED`; reabrir canary exige clone
+byte-idêntico para nova memory authority/root e novo epoch, invalidando toda
+qualification/authorization anterior. Injeções em cada fronteira provam retry,
+ausência de cenário vacuamente verde e nenhum item omitido/extra.
 
 `SealedCanaryQualificationBinding` é criado **depois** do seal e contém:
 
@@ -916,6 +1093,8 @@ job posterior ao cutoff é aceito e que nenhum anterior é omitido.
 release + graph + capability policy digests
 provider/workflow/effect scopes
 qualification epoch + cutoff/admitted-set hash
+E2E qualification-contract hash + nonempty scenario count
+ordered scenario terminal-verification receipt aggregate hash
 ordered effective-E2E-binding aggregate hash
 sealed behavior snapshot digest
 behavior transition receipt hash
@@ -926,7 +1105,10 @@ Ele não finge ser o binding usado nos turnos. `RolloutAuthorization` é outro
 artefato canônico e independente: referencia o qualification-binding digest e
 fixa target role, allowlist digest/cardinality, traffic stage, production root
 class, instance constraints, janela e approver identity. Seu digest esperado é
-registrado antes de criar produção.
+registrado antes de criar produção. Só pode ser criado quando o journal está
+`QUALIFIED` e um scan fresco recompõe exatamente contract/scenarios/artifacts,
+transition receipt, sealed snapshot e qualification binding; status anterior,
+`CANCELLED` ou `MANUAL_REVIEW` rejeitam autorização.
 
 Uma função fechada
 `derive_production_initial_binding(qualification, authorization)` produz
@@ -989,6 +1171,7 @@ Startup falha antes do `lifespan yield` quando houver:
 - qualquer port obrigatória ausente;
 - outbox não durável para uma role que permite delivery;
 - worker/capability incoerente;
+- dispatch authority generation/digests ou execution-lock root incoerentes;
 - provider write habilitado sem worker boundary correspondente;
 - helper/route legado alcançável no graph promovível;
 - plugin filho alcança import/capability proibida;
@@ -996,6 +1179,8 @@ Startup falha antes do `lifespan yield` quando houver:
 - semantic scan receipt↔sources↔transcript/artifacts↔commands↔relays↔target
   receipts↔outboxes divergente;
 - behavior snapshot/binding/transition receipt não satisfaz o stage atual;
+- qualification journal/schema/scenario/artifact scan divergente para stage
+  `QUALIFYING|QUALIFIED`;
 - reconciler obrigatório ausente ou morto.
 
 Semântica:
@@ -1202,8 +1387,16 @@ Raw output não entra no Git. Em vez de `/tmp`, ele vai para um
 
 - runner usa env scrubbed e scanner fail-closed para impedir segredo ou PII de
   lead no output retido;
-- object é criado atomicamente por `O_EXCL`, recebe `fsync`, mode read-only e nome
-  pelo SHA-256;
+- runner cria um temp random `0600` em staging privado por
+  `openat(O_CREAT|O_EXCL|O_NOFOLLOW)`, escreve enquanto calcula hash/bytes, faz
+  `fsync`, reabre/no-follow e confirma o digest esperado;
+- somente depois aplica mode final read-only e publica no namespace SHA-256 por
+  `renameat2(RENAME_NOREPLACE)` ou `linkat` no-replace, seguido de directory
+  `fsync`; reviewer nunca observa o nome final antes dos bytes completos;
+- se o nome final já existe, o publisher reabre/no-follow, valida mode/owner,
+  rehasheia bytes e aceita apenas igualdade exata; conteúdo parcial/divergente
+  bloqueia o gate, nunca é sobrescrito. Temp órfão é scavenged por gramática
+  fechada e não impede retry idempotente;
 - manifest externo fixa path, bytes, hash e retention; reviewers reabrem e
   rehasheiam o object;
 - ausência, mutação, scanner failure ou retenção não comprovada vale zero.
@@ -1243,6 +1436,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - `EffectiveE2EDeploymentBinding`, `SealedCanaryQualificationBinding`,
   `BehaviorTransitionReceipt`, `RolloutAuthorization` e
   `ProductionInitialDeploymentBinding`;
+- `E2EQualificationContract/E2EScenarioContract`,
+  `ProviderEffectOutcomeReceipt`, terminal scenario verification e effect budgets;
 - qualification/admission states e transformação fechada, com canonical wire,
   completeness, zero-learning e forbidden-field mutations;
 - public message/receipt/relay types;
@@ -1258,7 +1453,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 
 ### Slice 3 — Schema/store v8
 
-- dez boundary tables exatas, incluindo turn artifacts, e FKs bidirecionais;
+- onze boundary tables exatas, incluindo turn artifacts e dispatch authority, com
+  FKs bidirecionais;
 - Phase5 schema v6 com `reservation_boundary_ingress_receipts`;
 - Phase6 schema v2 com handoff/payment boundary ingress receipts;
 - roots novos obrigatórios; schemas antigos/universos extras fail-closed;
@@ -1313,7 +1509,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - primeiro evento `StateNotFound → FOUND/importer | PROVEN_ABSENT/empty genesis`
   somente em memória;
 - `UNAVAILABLE`/timeout do legado nunca vira empty genesis;
-- ownership `LEGACY_OWNED→FROZEN→BOUNDARY_OWNED` e reconciler de crash;
+- ownership `LEGACY_OWNED→FREEZING→FROZEN→BOUNDARY_OWNED`, permit drain e
+  reconciler de crash;
 - legacy snapshot A alterado para B durante Maya aborta sem gênese/import claim;
 - nenhum write/flush/callback legacy passa enquanto `FROZEN`;
 - gênese/import claim persistidos apenas no commit final;
@@ -1351,6 +1548,12 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 
 - uma row/fence/receipt por chunk/chamada externa e ordering por predecessor;
 - leased pre-fence exact expiry/reclaim, preparation release/budget e stale CAS;
+- idempotency key isola release+lead+target+channel;
+- dispatch authority generation/policy/binding participa da mesma transaction de
+  fence;
+- execution lock exclui worker stale versus reconciler pós-fence;
+- policy revocation concorrente, worker pausado com/sem execution lock e
+  reconciler não produzem send após terminalização nem segundo send;
 - crash pós-fence fica representado e reconciler capability-free promove manual
   review sem segundo send;
 - prefixo parcial/successors bloqueados;
@@ -1365,6 +1568,10 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
 - ownership/internal/relay/public/learning workers e reconcilers supervisionados;
 - qualification controller bloqueia admission/normal learning claims antes de
   drenar, sela por CAS e mantém freeze até rollout/cancel;
+- `E2EQualificationContract` não vazio, cardinalidade/effect budgets exatos e scan
+  bilateral de turn/target/provider/delivery/compensation receipts;
+- QualificationJournal crash-idempotente até `QUALIFIED`, incluindo seal orphan e
+  cancel/reopen por novo epoch/root;
 - effective→qualification→authorization→production oracles bilaterais e mutations;
 - historical transcript/target-ingress semantic scan em readiness;
 - memory-learning target receipt atômico e somente pós-commit;
@@ -1431,7 +1638,7 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - design não aprovado;
 - timeout de auditor/reviewer sem summary;
 - plano substituto/quarantine não aprovados antes do Slice 0;
-- RED sem U/P/S/O reproduzíveis ou raw object retido;
+- RED sem U/P/S/R/O reproduzíveis ou raw object publicado/retido atomicamente;
 - review não está vinculada ao mesmo F/E pair + package identity;
 - DB v7 real descoberto;
 - reply ainda produzida/enfileirada pós-commit;
@@ -1444,6 +1651,10 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - receipt/row integrity não é bidirecional;
 - public send sem fence/receipt por chamada ou reconciler;
 - policy/binding/allowlist avaliada somente depois do dispatch fence;
+- dispatch fence não usa authority generation no mesmo CAS;
+- idempotency key pública não isola release/lead/target/channel;
+- reconciler pode terminalizar sem adquirir execution lock ou worker stale pode
+  enviar depois da terminalização;
 - UDS sem HMAC/peer/final transcript binding;
 - transcript/proposal/decision não recomputável após restart;
 - plugin filho ainda alcança ToolExecutor/provider/delivery/memory writer;
@@ -1458,12 +1669,16 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - `create_app` aceita adapter obrigatório `None`;
 - factory/graph ou capability policy do E2E diferente da promoção;
 - qualification aceita ingress/learning depois do cutoff ou sela antes do drain;
+- qualification aceita zero cenário, ausência/extra, item não terminal ou apenas
+  turn receipts sem target/provider/delivery outcomes;
+- qualification seal/transition/binding não têm journal/CAS/retry byte-idêntico;
 - effective binding, qualification, transition receipt, rollout authorization ou
   production binding não formam a transformação fechada aprovada;
 - qualquer ingress mutante bypassa seu boundary;
 - mixed-mode iniciado antes do compatibility guard de migration ownership;
 - payload context/attestation é circular, aceita member não listado ou depende de
   directory build context mutável;
+- evidence object usa nome SHA final antes de write+fsync+rehash completos;
 - release manifest comum inclui container/instance state;
 - promoção/rollback não fixados ao child manifest digest `linux/arm64`;
 - Slice 14–18 ou review AND gate incompleto;
@@ -1497,9 +1712,12 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
     zero pendência antiga; readiness verde e revisão aprovada.
 12. **Teste humano:** somente agora Carlos é avisado e executa as conversas.
 13. **Canary E2E/qualification:** autorização separada para
-    provider/workflow/período/policy exatos; admission fecha primeiro, drena o
-    conjunto finito, sela behavior por CAS e produz transition receipt +
-    qualification binding. Policy/scopes são os do rollout inicial.
+    contrato não vazio de cenários, provider/workflow/período/policy/effect budgets
+    exatos. Admission fecha primeiro; qualification exige igualdade bilateral de
+    turn, target-ingress, provider-outcome, delivery e compensation receipts
+    terminais; então drena learning, sela behavior por CAS/journal e produz
+    transition receipt + qualification binding. Policy/scopes são os do rollout
+    inicial.
 14. **Rollout:** decisão e `RolloutAuthorization` separadas; gradual, mesmo child
     manifest/policy/scopes/snapshot selado; production binding nasce somente pela
     função fechada qualification+authorization.
