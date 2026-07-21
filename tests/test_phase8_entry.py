@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,11 @@ def _manifest() -> dict[str, object]:
 def _git_blob_sha1(payload: bytes) -> str:
     header = f"blob {len(payload)}\0".encode("ascii")
     return hashlib.sha1(header + payload).hexdigest()
+
+
+def _read_scanned_text(path: Path) -> str:
+    """Decode every covered file strictly; decode failure blocks the gate."""
+    return path.read_text(encoding="utf-8", errors="strict")
 
 
 class Phase8EntryTests(unittest.TestCase):
@@ -261,12 +267,46 @@ class Phase8EntryTests(unittest.TestCase):
                 relative = path.relative_to(ROOT).as_posix()
                 if relative in exclusions or path.suffix.lower() not in extensions:
                     continue
-                try:
-                    text = path.read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    continue
+                text = _read_scanned_text(path)
                 for token in forbidden:
                     self.assertNotIn(token, text, f"{relative}: {token}")
+
+    def test_scanner_rejects_non_utf8_covered_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.md"
+            path.write_bytes(b"\xfflegacy-phase8-turn-adapter")
+            with self.assertRaises(UnicodeDecodeError):
+                _read_scanned_text(path)
+
+    def test_active_scan_exclusions_are_truthfully_classified(self) -> None:
+        manifest = _manifest()
+        active = set(manifest["active_authority_paths"])
+        exclusions = {
+            item["path"]: item["reason"]
+            for item in manifest["scan_exclusions"]
+        }
+        active_exclusions = active.intersection(exclusions)
+
+        self.assertEqual(
+            active_exclusions,
+            {
+                "docs/refactor/04-phased-delivery-plan.md",
+                "docs/refactor/05-validation-and-rollout.md",
+                "docs/refactor/06-risk-register.md",
+                "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
+                "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
+            },
+        )
+        for relative in active_exclusions:
+            self.assertEqual(
+                exclusions[relative],
+                "active reconciled authority scanned separately before global scan",
+            )
+
+    def test_evidence_index_counts_all_ten_replaced_identities(self) -> None:
+        index = (ROOT / "docs/refactor/evidence/README.md").read_text(encoding="utf-8")
+        self.assertIn("dez identidades rejeitadas", index)
+        self.assertNotIn("nove identidades rejeitadas", index)
 
     def test_phase_index_keeps_slice_zero_and_rollout_closed(self) -> None:
         text = (ROOT / "docs/refactor/README.md").read_text(encoding="utf-8")

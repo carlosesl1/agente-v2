@@ -314,11 +314,11 @@
     {
       "classification": "HISTORICAL-NON-EXECUTABLE",
       "current_state": {
-        "bytes": 12903,
+        "bytes": 14611,
         "classification": "ACTIVE-RECONCILED",
-        "lines": 280,
+        "lines": 320,
         "replacement": "tests/test_phase8_entry.py",
-        "sha256": "15ac0a19aae22e87e7c939c843494662f6525b959cfe27b742b2e32dbe501728"
+        "sha256": "e4093c8e6660ee0ae0b79e3e502c87a84f78d34f057ee79a80e8c5b7d2ef28dd"
       },
       "path": "tests/test_phase8_entry.py",
       "pre_quarantine_head_identity": {
@@ -370,23 +370,23 @@
     },
     {
       "path": "docs/refactor/decisions/0006-promote-identical-oci-digest.md",
-      "reason": "historical bytes or historical evidence"
+      "reason": "active reconciled authority scanned separately before global scan"
     },
     {
       "path": "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
-      "reason": "historical bytes or historical evidence"
+      "reason": "active reconciled authority scanned separately before global scan"
     },
     {
       "path": "docs/refactor/04-phased-delivery-plan.md",
-      "reason": "historical bytes or historical evidence"
+      "reason": "active reconciled authority scanned separately before global scan"
     },
     {
       "path": "docs/refactor/05-validation-and-rollout.md",
-      "reason": "historical bytes or historical evidence"
+      "reason": "active reconciled authority scanned separately before global scan"
     },
     {
       "path": "docs/refactor/06-risk-register.md",
-      "reason": "historical bytes or historical evidence"
+      "reason": "active reconciled authority scanned separately before global scan"
     },
     {
       "path": "docs/refactor/evidence/phase-08/entry-baseline.json",

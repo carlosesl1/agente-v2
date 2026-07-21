@@ -167,7 +167,7 @@ python3 scripts/validate_phase7.py --terminal
 
 `phase-08/entry-baseline.json` e `red-results.json` preservam a entrada histórica e
 seus envelopes sanitizados, sem reescrita. `phase-08/quarantine-manifest.json`
-registra as nove identidades rejeitadas fixadas pela spec, os bytes pré-quarentena e
+registra as dez identidades rejeitadas fixadas pela spec, os bytes pré-quarentena e
 as autoridades documentais substitutas.
 
 O design upstream está aprovado 3/3 e por Carlos. O plano/quarentena é ainda um
