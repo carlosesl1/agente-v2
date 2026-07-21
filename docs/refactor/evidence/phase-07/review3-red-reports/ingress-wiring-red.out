@@ -1,0 +1,75 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______ test_app_seam_is_explicit_injection_and_short_circuits_legacy_path ______
+
+    def test_app_seam_is_explicit_injection_and_short_circuits_legacy_path():
+        sentinel = (object(), object())
+    
+        class Adapter:
+            def __init__(self):
+                self.calls = []
+    
+            def process_event(self, event):
+                self.calls.append(event)
+                return sentinel
+    
+        injected = Adapter()
+        event = object()
+        result = app_module._process_event(
+            event,
+            settings=None,
+            lead_repository=None,
+            shadow_log=None,
+            manychat_client=None,
+            email_notifier=None,
+            agent_config=None,
+            phase7_turn_adapter=injected,
+        )
+        assert result is sentinel
+        assert injected.calls == [event]
+    
+        with pytest.raises(RuntimeError, match="phase7 turn adapter is required"):
+>           app_module._process_event(
+                event,
+                settings=None,
+                lead_repository=None,
+                shadow_log=None,
+                manychat_client=None,
+                email_notifier=None,
+                agent_config=None,
+            )
+
+tests/test_phase7_turn_coordinator_adapter.py:337: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+event = <object object at 0xffffb655ade0>
+
+    def _process_event(
+        event: InboundEvent,
+        *,
+        settings: Settings,
+        lead_repository: InMemoryLeadStateRepository | JsonLeadStateRepository | SupabaseLeadStateRepository,
+        shadow_log: InMemoryShadowLog,
+        manychat_client: ManyChatClient,
+        email_notifier: HandoffEmailNotifier,
+        agent_config: LeadsAgentConfig,
+        planner: ConversationPlannerProtocol | None = None,
+        phase7_turn_adapter: TurnCoordinatorAdapterProtocol | None = None,
+        public_message_outbox: InMemoryPublicMessageOutbox | JsonPublicMessageOutbox | None = None,
+        source_idempotency_keys: Sequence[str] = (),
+    ):
+        if phase7_turn_adapter is not None:
+            return phase7_turn_adapter.process_event(event)
+        if public_message_outbox is None:
+            public_message_outbox = InMemoryPublicMessageOutbox()
+        state = (
+>           lead_repository.get_by_lead_key(event.lead_key)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            or lead_repository.get_by_phone(event.phone)
+            or LeadState.from_event(event)
+        )
+E       AttributeError: 'NoneType' object has no attribute 'get_by_lead_key'
+
+app.py:2171: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_phase7_turn_coordinator_adapter.py::test_app_seam_is_explicit_injection_and_short_circuits_legacy_path

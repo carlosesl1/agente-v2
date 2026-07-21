@@ -1,0 +1,15 @@
+test_payment_write_returns_existing_settlement_command_only (tests.test_phase7_dispatch.Phase7DispatchTests.test_payment_write_returns_existing_settlement_command_only) ... ERROR
+
+======================================================================
+ERROR: test_payment_write_returns_existing_settlement_command_only (tests.test_phase7_dispatch.Phase7DispatchTests.test_payment_write_returns_existing_settlement_command_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_dispatch.py", line 211, in test_payment_write_returns_existing_settlement_command_only
+    arguments = LodgingPaymentArguments(
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: LodgingPaymentArguments.__init__() takes 5 positional arguments but 7 were given
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+FAILED (errors=1)

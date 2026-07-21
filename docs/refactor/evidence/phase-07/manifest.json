@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "9194ea01290a98c65285b23f20bd31a79f86c0e016c930f9d83dac911e4eac9b",
-  "file_count": 84,
+  "aggregate_sha256": "2ba98849b442e34282908156e415af4c835df5a6ec9a500e48105ce55d968b10",
+  "file_count": 96,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -93,6 +93,11 @@
       "size": 2297
     },
     {
+      "path": "docs/refactor/evidence/phase-07/review-attempt-3.json",
+      "sha256": "435796d09795a24cde2ddd04ec28d84c1f0cc5bd5d6e3aa2b4190ccb4bb508f8",
+      "size": 4128
+    },
+    {
       "path": "docs/refactor/evidence/phase-07/review-remediation-artifact-binding-test.patch",
       "sha256": "45f632eb2283231d921b61e8e55f45d4f3671a896e7d231196ab61839a54add6",
       "size": 1502
@@ -129,8 +134,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/review2-raw-reports/faults.json.gz",
-      "sha256": "6880c7287f6326c355d8aeee132cafa724be9527c955c4c7550965d07147921b",
-      "size": 9431
+      "sha256": "8ddf594c4a0ce08b4ebfed55771dc3cc9a425327bda962345ceecc99163fd80a",
+      "size": 9453
     },
     {
       "path": "docs/refactor/evidence/phase-07/review2-raw-reports/mutations.json.gz",
@@ -139,8 +144,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/review2-raw-reports/properties.json.gz",
-      "sha256": "0114fd2d10ba9fdd4608e720dba256634275611aa58283d4315214f5117ef105",
-      "size": 1788085
+      "sha256": "9520145b52262fc6eed2c413ef65b624846a7a8933fe815798a5a3212e2bd807",
+      "size": 1795969
     },
     {
       "path": "docs/refactor/evidence/phase-07/review2-red-outputs/activity-product-binding.txt",
@@ -188,24 +193,79 @@
       "size": 40381
     },
     {
+      "path": "docs/refactor/evidence/phase-07/review3-raw-reports/lane-1.txt",
+      "sha256": "306595a34cccefbef00a63762b128795141e6c4dea87bf5fbdb4fb3cceeafdb4",
+      "size": 3113
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-raw-reports/lane-2.txt",
+      "sha256": "d83b87f724fd9625cd98f35f1cbf0bc6aaf0e8a0ead6ae46ab2b383dae628fcb",
+      "size": 4154
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-raw-reports/lane-3.txt",
+      "sha256": "0c253a3a0c01939453268d404049b157170110c98dad7b2bc708c25ba751e1a6",
+      "size": 3357
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/ingress-wiring-red.out",
+      "sha256": "98718ad4cece17bbe12cb5b8d8e5beb6c1cb6dc8fda9d246bc6a92f9d3e89f6a",
+      "size": 2981
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/payment-binding-red.out",
+      "sha256": "fae37b1574318dcb7a634945c636d1e47832e1c733b0f8f73e7f28c6efbf4974",
+      "size": 992
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/persisted-command-red.out",
+      "sha256": "849c2e06593468afa9f78abe353b92ecb7b8bf629f23ff32a122db193d68b32a",
+      "size": 944
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/runtime-persistence-payment-red.out",
+      "sha256": "944891cb86da3bb4c55c08e72918d86b21b3e6b57759f47c69087619d521ed66",
+      "size": 14552
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/schema-property-red.out",
+      "sha256": "ce7bf3a26e2442fb44746717080f6f6623789af53c9dd115603ae9875ef47074",
+      "size": 1143
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/state-category-red.out",
+      "sha256": "1444deae2cb6a578ecdf3ca2375ab423e0befba36339b5ec3a3262831cf69122",
+      "size": 750
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/store-schema-red.out",
+      "sha256": "e43bbf00c52b9b353f0aee6545699d19b3c14f2f08d160d347d318b62a28d29d",
+      "size": 2023
+    },
+    {
+      "path": "docs/refactor/evidence/phase-07/review3-red-reports/synthetic-phone-red.out",
+      "sha256": "cbe1e3a14abf1f2b96e1787f54cb72045537bf0a9dd32d65c4ebcdbc03f9497d",
+      "size": 1001
+    },
+    {
       "path": "docs/refactor/evidence/phase-07/runtime-contract-manifest.json",
-      "sha256": "817eaa2a2361c2126378f7655762cf548ed3070c8fdb4b075172248230a0c7c6",
-      "size": 14541
+      "sha256": "0f5a5b683d4956f9430fabdcd8ec1bbe447422760687e749d45a614e2924ff03",
+      "size": 14610
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration-contract-manifest.json",
-      "sha256": "1496ddf5e157273d25e74b4634434945166e346f8e45f74ec35d03afdc66110d",
-      "size": 14789
+      "sha256": "9d39f84a5ac81910741e9dccfaf6d23159b32c2359efaba38ccba9ee366a927c",
+      "size": 14641
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration-manifest.json",
-      "sha256": "3c33905902781c259601e628531a95728cbc34dfb34d49922e1e341a5c381ace",
-      "size": 2175
+      "sha256": "3110794f3071edfb7c99906b5baf7fca70951711a011a4c699f2dfeaee690077",
+      "size": 2857
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-integration.patch",
-      "sha256": "52eeca4e16cd02a2b2b2dafb9ad59ebeb91b898af453179ccacf9c581a70cf6d",
-      "size": 76556
+      "sha256": "08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789",
+      "size": 93625
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-source-manifest.json",
@@ -214,8 +274,8 @@
     },
     {
       "path": "docs/refactor/evidence/phase-07/runtime-validation-result.json",
-      "sha256": "7ca555fd642e1ab192dbf2a80d18845bb1fd54a9f56ba1992086ad6220858824",
-      "size": 884
+      "sha256": "e15a4c7f62a535cf930089318c2663d830975e9e9a9246b501f36b2c4abacd4e",
+      "size": 909
     },
     {
       "path": "docs/refactor/phases/phase-07-boundary-migration.md",
@@ -249,8 +309,8 @@
     },
     {
       "path": "reservation_boundary/dispatch.py",
-      "sha256": "afbc123cc47f3d0ee8c24c33f8b80bf54a1b8e7bf7227a0f5b15e9f886a891ef",
-      "size": 14073
+      "sha256": "10d38a82897e099ffeda05503c9d51dfd9aa42085346cad05a6769b52be5e38b",
+      "size": 14381
     },
     {
       "path": "reservation_boundary/faults.py",
@@ -274,8 +334,8 @@
     },
     {
       "path": "reservation_boundary/schema.py",
-      "sha256": "653a55bba6fb3ddaf3cd5e74882a8c0c2cb35aed449260ae84764b4bb884f136",
-      "size": 8486
+      "sha256": "e24c536f198d34f14a07adc92cdfbc0d4b1084c4cfafb039034d59a966bb2e08",
+      "size": 8892
     },
     {
       "path": "reservation_boundary/serialization.py",
@@ -289,23 +349,23 @@
     },
     {
       "path": "reservation_boundary/sqlite_store.py",
-      "sha256": "5b3bd3d80675a2c7b24825d620089ec89f7b3b083cee5ff6af5746ea100844f9",
-      "size": 22257
+      "sha256": "a43c6ed5c3de0e04a5b47ee95f280ea59b18dbb2c8bb45b6b59519ded84ce560",
+      "size": 24456
     },
     {
       "path": "reservation_boundary/types.py",
-      "sha256": "d81d0f298466e62d3399d53fd0dcca6c129a33b7a5fdee0cd9f30bc0ed7655cf",
-      "size": 27197
+      "sha256": "052760a491f74d66f66cbc2a9b87a61fdcb3dd0fb78d28bd6ecf1c92bedc993f",
+      "size": 27768
     },
     {
       "path": "schemas/phase7/postgresql.sql",
-      "sha256": "d66afd320a54a3d361a9b85f2775dac85078d407e2a7c5cb13dcd664afbd72c7",
-      "size": 2624
+      "sha256": "745f05b9e1f7de50953cb9d55c74dcb42317897926241a1c082c1c94ba46a7d8",
+      "size": 2789
     },
     {
       "path": "schemas/phase7/sqlite.sql",
-      "sha256": "073fe8e0081cce44e6e1260962938b028b58a5d6ea89566833e424afb323c8a3",
-      "size": 6469
+      "sha256": "640a95a344c5839861982d28cf95ee8ee2c857e9a744a4fe955903e6e1f2cff5",
+      "size": 6710
     },
     {
       "path": "scripts/build_phase7_wheel.py",
@@ -314,8 +374,8 @@
     },
     {
       "path": "scripts/capture_phase7_runtime.py",
-      "sha256": "4505de552e10e8008a3ed11090701ce953c646fffce052c16399463d050ff690",
-      "size": 35464
+      "sha256": "be14bce961eb5d6c25e0f8ae9e694a80a72759dfa00343a844e2000b37feddbf",
+      "size": 35915
     },
     {
       "path": "scripts/generate_phase7_manifest.py",
@@ -354,7 +414,7 @@
     },
     {
       "path": "tests/test_phase7_closeout.py",
-      "sha256": "e7c5bc8c8fcb9e98d0581a2092c996fceb2ac1fe3e6e4bebff543b8dc84b5a41",
+      "sha256": "3a3d8f253e193f3bf45508051f69037f5f9b886ebf3cf7e85c67c9931d017c87",
       "size": 13934
     },
     {
@@ -364,8 +424,8 @@
     },
     {
       "path": "tests/test_phase7_dispatch.py",
-      "sha256": "dadf2c1bff69e36124c7f1c9fc804e0ab075a2be400e35a46398d4d025828f5a",
-      "size": 11801
+      "sha256": "1adb64876718e817e5813f6ff303ced164f8a2a8fefe86a6a080441d2e9d48bc",
+      "size": 12573
     },
     {
       "path": "tests/test_phase7_fault_injection.py",
@@ -394,13 +454,13 @@
     },
     {
       "path": "tests/test_phase7_runtime_capture.py",
-      "sha256": "8d68aa17bbf28e38bafaffcc1976b02ee22d0da9b2e6fb629e2065f350321fda",
-      "size": 18360
+      "sha256": "1ccfda2b98d5c6f596393c7b4c382e9e37bb1c3d642a73b1ce23c90ef22765cd",
+      "size": 19702
     },
     {
       "path": "tests/test_phase7_schema.py",
-      "sha256": "730bb55462fc988e8ef889dda597e227d1bead67344d4f3058c85d3d2b098dcd",
-      "size": 4748
+      "sha256": "3c59ec564eccb50ec703fc4b2d1c0b7b65ff5d7f9994bcad482d3827b6165b88",
+      "size": 5156
     },
     {
       "path": "tests/test_phase7_serialization.py",
@@ -414,8 +474,8 @@
     },
     {
       "path": "tests/test_phase7_sqlite_store.py",
-      "sha256": "fe88d018275b5d720bfac077574794b7547fe0859e13bdf7db8ae222f95985a2",
-      "size": 11004
+      "sha256": "5d5021209266f11f3052aa27cf420195e7eb049586824166434e36f31dc971a4",
+      "size": 13559
     },
     {
       "path": "tests/test_phase7_types.py",

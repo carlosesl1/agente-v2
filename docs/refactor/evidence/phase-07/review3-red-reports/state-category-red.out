@@ -1,0 +1,14 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_state_commit_has_authoritative_runtime_category _____________
+
+    def test_state_commit_has_authoritative_runtime_category():
+>       assert tool_runtime_category("chapada_commit_state") == "state_commit"
+E       AssertionError: assert 'unknown' == 'state_commit'
+E         
+E         - state_commit
+E         + unknown
+
+tests/test_phase7_tool_dispatch_adapter.py:300: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_state_commit_has_authoritative_runtime_category

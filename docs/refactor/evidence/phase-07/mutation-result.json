@@ -1,7 +1,7 @@
 {
-  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
-  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
-  "completed_at": "2026-07-21T01:37:53Z",
+  "candidate_commit": "42687095fd06225092b4a26f1423d06d3373ab13",
+  "candidate_tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99",
+  "completed_at": "2026-07-21T03:03:06Z",
   "compressed_bytes": 762,
   "compressed_sha256": "4d8b19b9fcafab289c4b04f8967df53b468bd66aeb5e619b0adb3b37c926c959",
   "execution_scope": "local affected integral rerun on exact frozen tree",
@@ -93,5 +93,7 @@
     }
   ],
   "survived": 0,
-  "total": 12
+  "total": 12,
+  "wheel_bytes": 214954,
+  "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"
 }

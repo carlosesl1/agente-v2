@@ -1,0 +1,15 @@
+test_state_command_and_outbox_commit_atomically (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_state_command_and_outbox_commit_atomically) ... ERROR
+
+======================================================================
+ERROR: test_state_command_and_outbox_commit_atomically (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_state_command_and_outbox_commit_atomically)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_sqlite_store.py", line 264, in test_state_command_and_outbox_commit_atomically
+    self.store.command_is_persisted(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'SQLiteBoundaryStore' object has no attribute 'command_is_persisted'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.029s
+
+FAILED (errors=1)

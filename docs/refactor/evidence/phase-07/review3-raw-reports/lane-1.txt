@@ -1,0 +1,40 @@
+## Authentication
+
+- Repositório autenticado e limpo: `HEAD d4dab83cd877ec842d34d05df2e7bc4f0b4da7e3`, tree `01d2d28be1763e60a1294819fccc91d25ff90ddd`.
+- Pai funcional direto autenticado: `2881256125cea3381dde943aa8b2d3713422af72`, tree `69b4089837c2dc200a204b0e103ef4d4d5afae34`.
+- O evidence child não altera `reservation_boundary/` nem os testes desta lane.
+- Wheel reconstruída deterministicamente em diretório temporário: SHA-256 `7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1`, 214568 bytes; temporário removido.
+- Report bruto de faults autenticado pelo SHA-256 `6880c7287f6326c355d8aeee132cafa724be9527c955c4c7550965d07147921b`. As 200 linhas integrais foram reconstruídas: quatro domínios × 50 rounds, 200/200 hashes válidos, um winner e um conflict por round.
+- Execução fresca: 18 testes causais passaram em 2,591 s. Replay canônico, binding de workflow/comando, CAS/fencing, deadline e focused contention ficaram verdes.
+- Probe adicional confirmou que o guard final reverte, na mesma unidade, genesis, claim, fence, evento, comando e outbox; zero linhas remanescentes e nenhuma transação aberta.
+
+## Verdict
+
+Needs fixes
+
+## Findings
+
+### Critical
+
+- nenhum.
+
+### Important
+
+- `reservation_boundary/sqlite_store.py:496-514` — a coluna `boundary_outbox.created_at` recebe `committed_at` (`instant`, linha 513), não `OutboxMessage.created_at`. Probe com horários distintos mostrou todos os demais campos idênticos, mas `created_at` persistido como `12:00:19` em vez do valor canônico `12:00:07`. **Impacto:** nem toda a identidade do `OutboxMessage` é persistida fielmente; reconstrução, auditoria e políticas baseadas na idade da mensagem observam identidade temporal divergente. Os testes em `tests/test_phase7_sqlite_store.py:51-67,223-257` mascaram isso usando o mesmo `T0` nos dois campos.
+- `reservation_boundary/schema.py:80-94,157-170` — `boundary_outbox.command_id` não possui FK para `boundary_commands`; as únicas FKs do outbox ligam `(lead_key, event_id)` ao evento. **Impacto:** o DDL aceita ligação durável a comando inexistente ou pertencente a outro evento/lead; o binding depende exclusivamente de `_validate_outbox_bindings()` e não é uma invariável do banco. `tests/test_phase7_schema.py:39-53` apenas confirma que FKs estão habilitadas, sem autenticar essa aresta.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- Suíte integral, gates pesados, rede, providers e capabilities live não foram executados, conforme restrição.
+- A contenção integral não foi reexecutada; suas 200 linhas e hashes retidos foram autenticados. Somente o modo focused foi executado novamente.
+- PostgreSQL permaneceu sob inspeção de DDL estático, sem conexão real.
+- `rollout=NO-GO` e `phase8_started=false` permanecem.
+- Arquivos criados ou modificados: nenhum; worktree continuou limpa.
+
+## Resumo
+
+A atomicidade, replay canônico, CAS/fencing, savepoints e contenção apresentaram evidência satisfatória, mas o candidato não pode ser aprovado: perde o `created_at` canônico do outbox e não garante por FK a ligação opcional ao comando.

@@ -1,0 +1,292 @@
+FFFFFF.F.                                                                [100%]
+=================================== FAILURES ===================================
+_______ test_all_five_reads_become_typed_requests_without_provider_call ________
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_all_five_reads_become_typ0')
+
+    def test_all_five_reads_become_typed_requests_without_provider_call(tmp_path):
+>       context = phase7_context(tmp_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase7_tool_dispatch_adapter.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_all_five_reads_become_typ0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+_________ test_four_durable_writes_require_existing_authorized_command _________
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_four_durable_writes_requi0')
+
+    def test_four_durable_writes_require_existing_authorized_command(tmp_path):
+>       context = phase7_context(tmp_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase7_tool_dispatch_adapter.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_four_durable_writes_requi0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+______ test_four_durable_writes_cross_typed_dispatch_with_active_schemas _______
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_four_durable_writes_cross0')
+
+    def test_four_durable_writes_cross_typed_dispatch_with_active_schemas(tmp_path):
+        for name, fixture in (
+            ("cloudbeds_criar_reserva_v2", "lodging_reservation"),
+            ("bokun_agendar_passeio_v2", "activity_reservation"),
+        ):
+            data = BOUNDARY_FIXTURES[fixture]
+            result = dispatch_native_tool(
+                name,
+                {"option": {"option_id": data["offer_id"]}, "answers": {}},
+                context=phase7_context(tmp_path, fixture),
+                now=T0,
+            )
+            assert result["status"] == "phase7_command_authorized"
+            assert result["command_id"] == data["command_id"]
+            assert result["command_persisted"] is True
+            forged = dispatch_native_tool(
+                name,
+                {"option": {"option_id": "offer-forged"}, "answers": {}},
+                context=phase7_context(tmp_path, fixture),
+                now=T0,
+            )
+            assert forged["status"] == "phase7_invalid_boundary_context"
+            missing_row = phase7_context(tmp_path, fixture)
+            store = SQLiteBoundaryStore.open_path(Path(missing_row["phase7_store_path"]))
+            store._connection.execute("DELETE FROM boundary_commands")
+            store.close()
+            unpersisted = dispatch_native_tool(
+                name,
+                {"option": {"option_id": data["offer_id"]}, "answers": {}},
+                context=missing_row,
+                now=T0,
+            )
+>           assert unpersisted["status"] == "phase7_invalid_boundary_context"
+E           AssertionError: assert 'phase7_command_authorized' == 'phase7_inval...ndary_context'
+E             
+E             - phase7_invalid_boundary_context
+E             + phase7_command_authorized
+
+tests/test_phase7_tool_dispatch_adapter.py:184: AssertionError
+___________ test_three_unmigrated_writes_are_explicit_manual_review ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_three_unmigrated_writes_a0')
+
+    def test_three_unmigrated_writes_are_explicit_manual_review(tmp_path):
+>       context = phase7_context(tmp_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase7_tool_dispatch_adapter.py:239: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_three_unmigrated_writes_a0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+____________ test_state_commit_returns_only_whitelisted_typed_facts ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_state_commit_returns_only0')
+
+    def test_state_commit_returns_only_whitelisted_typed_facts(tmp_path):
+        result = dispatch_native_tool(
+            "chapada_commit_state",
+            {
+                "desired_services": ["hostel"],
+                "collected_slots": {"language": "pt-BR", "adults": 2},
+                "selected_offer_id": "must-not-become-a-fact",
+                "payment_confirmed": True,
+            },
+>           context=phase7_context(tmp_path),
+                    ^^^^^^^^^^^^^^^^^^^^^^^^
+            now=T0,
+        )
+
+tests/test_phase7_tool_dispatch_adapter.py:259: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_state_commit_returns_only0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+_____________ test_unknown_alias_and_expired_deadline_fail_closed ______________
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_unknown_alias_and_expired0')
+
+    def test_unknown_alias_and_expired_deadline_fail_closed(tmp_path):
+>       context = phase7_context(tmp_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase7_tool_dispatch_adapter.py:271: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_unknown_alias_and_expired0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+________ test_no_boundary_context_fails_closed_without_legacy_executor _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff936a4410>
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_no_boundary_context_fails0')
+
+    def test_no_boundary_context_fails_closed_without_legacy_executor(monkeypatch, tmp_path):
+        import domain.chapada_native_tools as legacy
+        import domain.tool_dispatch_adapter as adapter_module
+    
+        calls = []
+        monkeypatch.setattr(adapter_module, "load_native_tool_context", lambda: {})
+        monkeypatch.setattr(
+            legacy,
+            "execute_hermes_native_tool",
+            lambda name, arguments: calls.append((name, arguments)) or json.dumps({"status": "legacy"}),
+        )
+        missing = json.loads(dispatch_hermes_native_tool("cerebro_consultar", {"query": "x"}))
+        assert missing["status"] == "phase7_boundary_context_required"
+        assert missing["provider_call_executed"] is False
+        assert calls == []
+    
+        monkeypatch.setattr(adapter_module, "load_native_tool_context", lambda: phase7_context(tmp_path))
+        calls.clear()
+>       result = json.loads(dispatch_hermes_native_tool("cerebro_consultar", READ_REQUESTS["cerebro_consultar"]))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase7_tool_dispatch_adapter.py:315: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+domain/tool_dispatch_adapter.py:352: in dispatch_hermes_native_tool
+    context = load_native_tool_context()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_phase7_tool_dispatch_adapter.py:313: in <lambda>
+    monkeypatch.setattr(adapter_module, "load_native_tool_context", lambda: phase7_context(tmp_path))
+                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/tmp/pytest-of-hermeswebui/pytest-58/test_no_boundary_context_fails0')
+fixture = None
+
+    def phase7_context(tmp_path, fixture=None):
+        state = import_legacy_state(synthetic_collecting_snapshot()).state
+        assert state is not None
+        if fixture is not None:
+            state = from_wire_json(BOUNDARY_FIXTURES[fixture]["wire"], BoundaryState)
+        event_id = "event-runtime-dispatch-001"
+        state = replace(state, version=1, processed_event_ids=(event_id,))
+        store_path = tmp_path / f"phase7-{fixture or 'collecting'}-{len(tuple(tmp_path.glob('*.db')))}.db"
+        store = SQLiteBoundaryStore.open_path(store_path)
+        command = (
+            state.workflow.command
+>           if state.workflow is not None and state.workflow.command is not None
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+            else state.payments[0].settlement_command
+            if state.payments
+            else None
+        )
+E       AttributeError: 'CollectingState' object has no attribute 'command'
+
+tests/test_phase7_tool_dispatch_adapter.py:78: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_all_five_reads_become_typed_requests_without_provider_call
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_four_durable_writes_require_existing_authorized_command
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_four_durable_writes_cross_typed_dispatch_with_active_schemas
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_three_unmigrated_writes_are_explicit_manual_review
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_state_commit_returns_only_whitelisted_typed_facts
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_unknown_alias_and_expired_deadline_fail_closed
+FAILED tests/test_phase7_tool_dispatch_adapter.py::test_no_boundary_context_fails_closed_without_legacy_executor

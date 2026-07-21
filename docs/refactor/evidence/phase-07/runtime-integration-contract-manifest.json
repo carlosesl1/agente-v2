@@ -80,12 +80,10 @@
   "schema_version": 1,
   "source_hashes": {
     ".hermes/plugins/chapada_leads_tools/__init__.py": "9337cf06803a344b0ac08d93851c3f392202dcbfcb590faa649e196ff7859a24",
-    "app.py": "76804f4d554161cbbe7aef7757a70499d03400111802d8cc5da3c0138da4eaed",
+    "app.py": "159cedd4291b987af04377506e294b76d712ea19cfba5f3890709b51b4f36dc3",
     "domain/chapada_native_tools.py": "fa865cd7aca62a6369b94f7b89d8ae0ead1b8198544be28913cc4cea087942d4",
     "domain/hermes_native_runner.py": "1030ac1641f8230ca976a46d737cd2e1ac56f4720e4d20564a0bc7743427b6de",
-    "domain/tool_dispatch_adapter.py": "eb6ce2dfc27abfcfd6a4e8baf020fa1cc850983f8ad7f606e00ba63f9b4cc87f",
-    "domain/tool_executor.py": "2d3ed3430747f3e16c0461b0e400f18db6bee9b38b2430b13c7212573f5d2a88",
-    "domain/turn_coordinator_adapter.py": "0ae0208cf8ef4011fa613b733c94b410a3dbd9ed61a61ca101e1b0f741227113"
+    "domain/tool_executor.py": "ae24bc534decd3ec3c55be8392ccff8012da4046082d18ab437ecc8d80041bb7"
   },
   "tools": [
     {
@@ -520,6 +518,9 @@
           "contact_phone": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "payment_method": {
             "enum": [
               "pix"
@@ -554,7 +555,7 @@
         ],
         "type": "object"
       },
-      "schema_hash": "97fcd64f4fa79bf2247647d028e5e6e52dd01c5f4d47a378051cc679b18cea36"
+      "schema_hash": "6e6fdfcb8e3459c2cb9e6ccd223950f624839451a1b2bf4a0732cb3952f072be"
     },
     {
       "category": "write",

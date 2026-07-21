@@ -1,9 +1,9 @@
 {
-  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
-  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
-  "completed_at": "2026-07-21T01:37:53Z",
-  "compressed_bytes": 1788085,
-  "compressed_sha256": "0114fd2d10ba9fdd4608e720dba256634275611aa58283d4315214f5117ef105",
+  "candidate_commit": "42687095fd06225092b4a26f1423d06d3373ab13",
+  "candidate_tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99",
+  "completed_at": "2026-07-21T03:03:06Z",
+  "compressed_bytes": 1795969,
+  "compressed_sha256": "9520145b52262fc6eed2c413ef65b624846a7a8933fe815798a5a3212e2bd807",
   "execution_scope": "local affected integral rerun on exact frozen tree",
   "live_capabilities_executed": [],
   "passed": true,
@@ -22,5 +22,7 @@
     "wire": 5000
   },
   "seed": 2026072007,
-  "total": 20000
+  "total": 20000,
+  "wheel_bytes": 214954,
+  "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"
 }

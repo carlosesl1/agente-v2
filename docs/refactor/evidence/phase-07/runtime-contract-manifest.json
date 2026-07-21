@@ -517,6 +517,9 @@
           "contact_phone": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "payment_method": {
             "enum": [
               "pix"
@@ -551,7 +554,7 @@
         ],
         "type": "object"
       },
-      "schema_hash": "97fcd64f4fa79bf2247647d028e5e6e52dd01c5f4d47a378051cc679b18cea36"
+      "schema_hash": "6e6fdfcb8e3459c2cb9e6ccd223950f624839451a1b2bf4a0732cb3952f072be"
     },
     {
       "category": "write",

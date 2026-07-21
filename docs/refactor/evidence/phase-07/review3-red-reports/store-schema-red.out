@@ -1,0 +1,25 @@
+test_state_command_and_outbox_commit_atomically (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_state_command_and_outbox_commit_atomically) ... ok
+test_outbox_command_foreign_key_binds_same_lead_and_event (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_outbox_command_foreign_key_binds_same_lead_and_event) ... FAIL
+test_sqlite_has_exact_six_strict_tables_and_foreign_keys (tests.test_phase7_schema.Phase7SchemaTests.test_sqlite_has_exact_six_strict_tables_and_foreign_keys) ... FAIL
+
+======================================================================
+FAIL: test_outbox_command_foreign_key_binds_same_lead_and_event (tests.test_phase7_sqlite_store.Phase7SingleWriteStoreTests.test_outbox_command_foreign_key_binds_same_lead_and_event)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_sqlite_store.py", line 284, in test_outbox_command_foreign_key_binds_same_lead_and_event
+    with self.assertRaises(sqlite3.IntegrityError):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: IntegrityError not raised
+
+======================================================================
+FAIL: test_sqlite_has_exact_six_strict_tables_and_foreign_keys (tests.test_phase7_schema.Phase7SchemaTests.test_sqlite_has_exact_six_strict_tables_and_foreign_keys)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/agente-v2/.worktrees/phase7-boundary-migration/tests/test_phase7_schema.py", line 58, in test_sqlite_has_exact_six_strict_tables_and_foreign_keys
+    self.assertIn(
+AssertionError: [('lead_key', 'lead_key'), ('event_id', 'event_id'), ('command_id', 'command_id')] not found in dict_values([[('lead_key', 'lead_key'), ('event_id', 'event_id')]])
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.044s
+
+FAILED (failures=2)

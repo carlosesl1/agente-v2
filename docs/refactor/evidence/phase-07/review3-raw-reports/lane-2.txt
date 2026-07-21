@@ -1,0 +1,40 @@
+## Authentication
+
+- **Evidence:** `d4dab83cd877ec842d34d05df2e7bc4f0b4da7e3`, tree `01d2d28be1763e60a1294819fccc91d25ff90ddd`.
+- **Pai funcional direto:** `2881256125cea3381dde943aa8b2d3713422af72`, tree `69b4089837c2dc200a204b0e103ef4d4d5afae34`.
+- O evidence child altera somente documentação/evidências; não altera produção, testes, schemas ou scripts.
+- **Réplica:** `485a2f470be7e40ed27601367e75b7c4a2698c9c`, tree `e2f7c321654ab0ae4501da8de7ec3c118b62bbe6`.
+- **Patch:** 76.556 bytes, SHA-256 `52eeca4e16cd02a2b2b2dafb9ad59ebeb91b898af453179ccacf9c581a70cf6d`; igualdade byte a byte confirmada com `git diff --binary 3da1f411... 485a2f47...`.
+- **Wheel autenticado:** 214.568 bytes, SHA-256 `7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1`.
+- **Testes fresh:** os dois arquivos focused de adapters passaram, 14 itens em `[100%]`, usando o wheel autenticado. As quatro fixtures queued reais foram exercitadas.
+- Catálogos por **nome**: core, runtime ativo e dois manifests/patch possuem os mesmos 13 nomes.
+- Worktrees principal e réplica permaneceram limpas antes e depois.
+- Nenhuma rede, provider/capability live ou suíte integral foi executada.
+
+## Verdict: Needs fixes
+
+## Findings
+
+### Critical
+
+- `app.py:140-160,210-237,305-332,462-490,2152-2185` — `create_app()` aceita `phase7_turn_adapter`, mas não o coloca no `AppContext`; `_auto_flush_loop` referencia um nome não definido e o fluxo normal chega a `_process_event()` com `None`. Nesse caso, o código continua pelo planner/runtime legado, persistência antiga e rotas provider-capable. Portanto, a fronteira Phase 7 é apenas uma injeção opcional de teste, não o default de produção, e ausência de contexto ainda reabre o fallback proibido. O fail-closed do plugin em `domain/tool_dispatch_adapter.py:348-375` está correto isoladamente, mas não fecha o ingress principal.
+
+### Important
+
+- `domain/tool_dispatch_adapter.py:198-227` e `reservation_boundary/dispatch.py:256-289` — o adapter exige apenas que `proof_receiver_name` seja texto não vazio e que o status pertença a uma whitelist; ambos são descartados antes do DTO tipado. Probe causal com `FORGED RECEIVER` autorizou os dois settlements e devolveu os command IDs existentes. Assim, receiver/status não ficam vinculados à evidência canônica como requerido.
+
+- `domain/tool_dispatch_adapter.py:238-247,295-329` — o estado queued vem de `phase7_boundary_state_wire` fornecido pelo contexto, sem leitura do store ou prova de row durável, mas o resultado declara `command_persisted=True`. As quatro fixtures são estados de domínio válidos, porém não demonstram persistência. Um wire queued sintaticamente válido pode ser anunciado como comando persistido/autorizado sem vínculo a uma row autoritativa.
+
+- `docs/refactor/evidence/phase-07/runtime-contract-manifest.json:87-593`, `docs/refactor/evidence/phase-07/runtime-integration-contract-manifest.json:90-595` e `tests/test_phase7_tool_dispatch_adapter.py:27-43,70-80` — os 13 nomes coincidem, mas a comparação fresh dos objetos `parameters` de `native_tool_schemas()` com ambos os manifests foi exata em apenas 2/13 tools; `chapada_commit_state` também é classificado como `unknown` pelo runtime, contra `state_commit` no manifesto. Logo, a igualdade dos schemas ativos não está autenticada e os testes diretos do adapter podem passar sem atravessar o schema efetivamente registrado pelo plugin.
+
+### Minor
+
+- nenhum.
+
+## Residual risks
+
+- `rollout=NO-GO` e `phase8_started=false` reduzem exposição imediata, mas não rebaixam o fallback crítico.
+- Os 964 testes da réplica e gates pesados permanecem evidência histórica; não foram rerodados nesta lane.
+- O primeiro teste local encontrou um wheel temporário antigo com nome semelhante e hash divergente. Ele foi descartado; a execução final usou exclusivamente o wheel autenticado acima.
+- Aliases, unknown e deadline falham fechados no adapter; Bókun preserva `tour_product_id/date_start`; state commit lê `collected_slots/desired_services`; as três writes bloqueadas continuam em manual review.
+- Arquivos criados ou modificados: **nenhum**.

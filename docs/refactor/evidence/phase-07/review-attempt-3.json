@@ -1,0 +1,107 @@
+{
+  "approved_lanes": 0,
+  "attempt": 3,
+  "batch_id": "deleg_b0435b2f",
+  "candidate_commit": "2881256125cea3381dde943aa8b2d3713422af72",
+  "candidate_tree": "69b4089837c2dc200a204b0e103ef4d4d5afae34",
+  "causal_red_reports": [
+    {
+      "bytes": 2981,
+      "path": "review3-red-reports/ingress-wiring-red.out",
+      "sha256": "98718ad4cece17bbe12cb5b8d8e5beb6c1cb6dc8fda9d246bc6a92f9d3e89f6a"
+    },
+    {
+      "bytes": 992,
+      "path": "review3-red-reports/payment-binding-red.out",
+      "sha256": "fae37b1574318dcb7a634945c636d1e47832e1c733b0f8f73e7f28c6efbf4974"
+    },
+    {
+      "bytes": 944,
+      "path": "review3-red-reports/persisted-command-red.out",
+      "sha256": "849c2e06593468afa9f78abe353b92ecb7b8bf629f23ff32a122db193d68b32a"
+    },
+    {
+      "bytes": 14552,
+      "path": "review3-red-reports/runtime-persistence-payment-red.out",
+      "sha256": "944891cb86da3bb4c55c08e72918d86b21b3e6b57759f47c69087619d521ed66"
+    },
+    {
+      "bytes": 1143,
+      "path": "review3-red-reports/schema-property-red.out",
+      "sha256": "ce7bf3a26e2442fb44746717080f6f6623789af53c9dd115603ae9875ef47074"
+    },
+    {
+      "bytes": 750,
+      "path": "review3-red-reports/state-category-red.out",
+      "sha256": "1444deae2cb6a578ecdf3ca2375ab423e0befba36339b5ec3a3262831cf69122"
+    },
+    {
+      "bytes": 2023,
+      "path": "review3-red-reports/store-schema-red.out",
+      "sha256": "e43bbf00c52b9b353f0aee6545699d19b3c14f2f08d160d347d318b62a28d29d"
+    },
+    {
+      "bytes": 1001,
+      "path": "review3-red-reports/synthetic-phone-red.out",
+      "sha256": "cbe1e3a14abf1f2b96e1787f54cb72045537bf0a9dd32d65c4ebcdbc03f9497d"
+    }
+  ],
+  "completed_at": "2026-07-21T01:53:57Z",
+  "conclusive_lanes": 3,
+  "evidence_commit": "d4dab83cd877ec842d34d05df2e7bc4f0b4da7e3",
+  "evidence_tree": "01d2d28be1763e60a1294819fccc91d25ff90ddd",
+  "invalidated": true,
+  "lanes": [
+    {
+      "findings": [
+        "Outbox created_at was replaced by commit time",
+        "Optional command_id lacked composite FK to the same lead/event command"
+      ],
+      "lane": 1,
+      "report_path": "review3-raw-reports/lane-1.txt",
+      "report_sha256": "306595a34cccefbef00a63762b128795141e6c4dea87bf5fbdb4fb3cceeafdb4",
+      "verdict": "Needs fixes"
+    },
+    {
+      "findings": [
+        "Ingress dropped the injected turn adapter and absence reopened legacy provider path",
+        "Payment receiver/status were not bound to typed evidence",
+        "command_persisted was asserted without durable-store proof",
+        "schema-shape capture dropped a real property named description",
+        "chapada_commit_state was classified unknown"
+      ],
+      "lane": 2,
+      "report_path": "review3-raw-reports/lane-2.txt",
+      "report_sha256": "d83b87f724fd9625cd98f35f1cbf0bc6aaf0e8a0ead6ae46ab2b383dae628fcb",
+      "verdict": "Needs fixes"
+    },
+    {
+      "findings": [
+        "Sanitized fixture was rejected by its own phone scanner",
+        "Forward patch check was inconclusive in the reviewer workspace"
+      ],
+      "lane": 3,
+      "report_path": "review3-raw-reports/lane-3.txt",
+      "report_sha256": "0c253a3a0c01939453268d404049b157170110c98dad7b2bc708c25ba751e1a6",
+      "verdict": "Needs fixes"
+    }
+  ],
+  "phase": 7,
+  "phase8_started": false,
+  "remediation_candidate": {
+    "commit": "42687095fd06225092b4a26f1423d06d3373ab13",
+    "patch_bytes": 93625,
+    "patch_sha256": "08ce18d15894b404b3cdfcc303e6bfffcfbf5f9f0b1bf7fe099f07e2ef8f8789",
+    "runtime_integration_commit": "7ccb8c58235c0fc3780bf9d3fde244924158a35e",
+    "runtime_integration_tree": "922608a044c0e65e65eafadce3c77451e32547d9",
+    "tree": "f9fa5d9077ef996f0e95c84187626f8758d50c99",
+    "wheel_bytes": 214954,
+    "wheel_sha256": "be1bed664f9eb0a9f0af06b31bd55688e4041c81411ee1cc22416282270446dd"
+  },
+  "result": "Needs fixes",
+  "rollout": "NO-GO",
+  "runtime_integration_commit": "485a2f470be7e40ed27601367e75b7c4a2698c9c",
+  "runtime_integration_tree": "e2f7c321654ab0ae4501da8de7ec3c118b62bbe6",
+  "wheel_bytes": 214568,
+  "wheel_sha256": "7f6cae4bd71d0fd6e526e8330bb976bca2becc17f746c3e148900ed4276799d1"
+}
