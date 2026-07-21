@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import sqlite3
@@ -255,6 +255,66 @@ class Phase7SingleWriteStoreTests(unittest.TestCase):
         )
         self.assertEqual(persisted.state, next_state)
         self.assertEqual(self.counts(), (1, 1, 1, 1, 1, 0))
+        row = self.store._connection.execute(
+            "SELECT created_at FROM boundary_outbox WHERE message_id=?",
+            (outbox.message_id,),
+        ).fetchone()
+        self.assertEqual(row, (outbox.created_at.isoformat(),))
+        self.assertTrue(
+            self.store.command_is_persisted(
+                lead_key=source.raw_fields["lead_key"],
+                event_id="event-queued-001",
+                command=command,
+            )
+        )
+        self.assertFalse(
+            self.store.command_is_persisted(
+                lead_key=source.raw_fields["lead_key"],
+                event_id="event-other",
+                command=command,
+            )
+        )
+
+    def test_outbox_command_foreign_key_binds_same_lead_and_event(self) -> None:
+        source, imported, command = queued_import()
+        self.store.import_genesis(source, imported, claimed_at=T0)
+        current, token = self.store.acquire_fence(source.raw_fields["lead_key"])
+        outbox = replace(outbox_for(command), created_at=T0 + timedelta(seconds=7))
+        state = replace(current.state, version=1, processed_event_ids=("event-fk",))
+        self.store.commit(
+            event_id="event-fk",
+            event_hash="9" * 64,
+            expected_version=0,
+            fencing_token=token,
+            commit=BoundaryCommit(state, (command,), (outbox,), ()),
+            committed_at=T0 + timedelta(seconds=19),
+        )
+        foreign = replace(
+            outbox,
+            message_id="outbox:phase7:synthetic:foreign",
+            idempotency_key="outbox:idem:phase7:synthetic:foreign",
+            command_id="command:phase7:missing",
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store._connection.execute(
+                "INSERT INTO boundary_outbox "
+                "(message_id,idempotency_key,lead_key,event_id,workflow_id,command_id,"
+                "kind,template_id,payload_json,payload_hash,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    foreign.message_id,
+                    foreign.idempotency_key,
+                    source.raw_fields["lead_key"],
+                    "event-fk",
+                    foreign.workflow_id,
+                    foreign.command_id,
+                    foreign.kind.value,
+                    foreign.template_id,
+                    foreign.canonical_payload,
+                    foreign.payload_hash,
+                    foreign.created_at.isoformat(),
+                ),
+            )
 
     def test_invalid_exact_scalars_fail_before_transaction(self) -> None:
         source, imported = collecting_import()

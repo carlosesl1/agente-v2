@@ -73,6 +73,7 @@ CREATE TABLE boundary_commands (
     command_json TEXT NOT NULL CHECK (json_valid(command_json)),
     command_hash TEXT NOT NULL CHECK ({digest('command_hash')}),
     created_at TEXT NOT NULL CHECK ({stamp('created_at')}),
+    CONSTRAINT uq_boundary_commands_event UNIQUE (lead_key, event_id, command_id),
     CONSTRAINT fk_boundary_commands_event FOREIGN KEY (lead_key, event_id)
         REFERENCES boundary_events (lead_key, event_id)
 ) STRICT;
@@ -89,6 +90,8 @@ CREATE TABLE boundary_outbox (
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     payload_hash TEXT NOT NULL CHECK ({digest('payload_hash')}),
     created_at TEXT NOT NULL CHECK ({stamp('created_at')}),
+    CONSTRAINT fk_boundary_outbox_command FOREIGN KEY (lead_key, event_id, command_id)
+        REFERENCES boundary_commands (lead_key, event_id, command_id),
     CONSTRAINT fk_boundary_outbox_event FOREIGN KEY (lead_key, event_id)
         REFERENCES boundary_events (lead_key, event_id)
 ) STRICT;
@@ -151,6 +154,7 @@ CREATE TABLE boundary_commands (
     command_json jsonb NOT NULL,
     command_hash text NOT NULL CHECK ({hash_check.replace('VALUE', 'command_hash')}),
     created_at timestamptz NOT NULL,
+    UNIQUE (lead_key, event_id, command_id),
     FOREIGN KEY (lead_key, event_id) REFERENCES boundary_events (lead_key, event_id)
 );
 
@@ -166,6 +170,8 @@ CREATE TABLE boundary_outbox (
     payload_json jsonb NOT NULL,
     payload_hash text NOT NULL CHECK ({hash_check.replace('VALUE', 'payload_hash')}),
     created_at timestamptz NOT NULL,
+    FOREIGN KEY (lead_key, event_id, command_id)
+        REFERENCES boundary_commands (lead_key, event_id, command_id),
     FOREIGN KEY (lead_key, event_id) REFERENCES boundary_events (lead_key, event_id)
 );
 

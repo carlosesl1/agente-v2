@@ -213,6 +213,8 @@ class Phase7DispatchTests(unittest.TestCase):
             command.evidence_claim_key,
             DecimalSlot("125.00"),
             anchor.currency,
+            payment.verified_evidence.evidence.proof_receiver_profile_id,
+            payment.verified_evidence.evidence.proof_status.value,
         )
         result = self.dispatch.dispatch(
             request("cloudbeds_lancar_pagamento_confirmar_reserva", arguments),
@@ -225,6 +227,17 @@ class Phase7DispatchTests(unittest.TestCase):
             CommandMigrationDisposition.PAYMENT_SETTLEMENT,
         )
 
+        for forged in (
+            replace(arguments, receiver_profile_id="receiver:profile:forged"),
+            replace(arguments, proof_status="forged"),
+        ):
+            with self.subTest(forged=forged), self.assertRaises(DispatchRejected):
+                self.dispatch.dispatch(
+                    request("cloudbeds_lancar_pagamento_confirmar_reserva", forged),
+                    current_state=state,
+                    now=NOW,
+                )
+
         with self.assertRaises(DispatchRejected):
             self.dispatch.dispatch(
                 request(
@@ -234,6 +247,8 @@ class Phase7DispatchTests(unittest.TestCase):
                         command.evidence_claim_key,
                         DecimalSlot("125.00"),
                         anchor.currency,
+                        payment.verified_evidence.evidence.proof_receiver_profile_id,
+                        payment.verified_evidence.evidence.proof_status.value,
                     ),
                 ),
                 current_state=state,

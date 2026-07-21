@@ -29,6 +29,7 @@ CREATE TABLE boundary_commands (
     command_json TEXT NOT NULL CHECK (json_valid(command_json)),
     command_hash TEXT NOT NULL CHECK (length(command_hash) = 64 AND command_hash = lower(command_hash) AND command_hash NOT GLOB '*[^0-9a-f]*'),
     created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 25 AND 32 AND substr(created_at, 11, 1) = 'T' AND substr(created_at, -6) = '+00:00' AND instr(created_at, char(0)) = 0),
+    CONSTRAINT uq_boundary_commands_event UNIQUE (lead_key, event_id, command_id),
     CONSTRAINT fk_boundary_commands_event FOREIGN KEY (lead_key, event_id)
         REFERENCES boundary_events (lead_key, event_id)
 ) STRICT;
@@ -45,6 +46,8 @@ CREATE TABLE boundary_outbox (
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64 AND payload_hash = lower(payload_hash) AND payload_hash NOT GLOB '*[^0-9a-f]*'),
     created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 25 AND 32 AND substr(created_at, 11, 1) = 'T' AND substr(created_at, -6) = '+00:00' AND instr(created_at, char(0)) = 0),
+    CONSTRAINT fk_boundary_outbox_command FOREIGN KEY (lead_key, event_id, command_id)
+        REFERENCES boundary_commands (lead_key, event_id, command_id),
     CONSTRAINT fk_boundary_outbox_event FOREIGN KEY (lead_key, event_id)
         REFERENCES boundary_events (lead_key, event_id)
 ) STRICT;

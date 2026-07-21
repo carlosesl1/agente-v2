@@ -324,9 +324,18 @@ class LodgingPaymentArguments:
     evidence_id: str
     amount: DecimalSlot
     currency: str
+    receiver_profile_id: str
+    proof_status: str
 
     def __post_init__(self) -> None:
-        _require_payment_arguments(self.anchor_id, self.evidence_id, self.amount, self.currency)
+        _require_payment_arguments(
+            self.anchor_id,
+            self.evidence_id,
+            self.amount,
+            self.currency,
+            self.receiver_profile_id,
+            self.proof_status,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,9 +344,18 @@ class ActivityPaymentArguments:
     evidence_id: str
     amount: DecimalSlot
     currency: str
+    receiver_profile_id: str
+    proof_status: str
 
     def __post_init__(self) -> None:
-        _require_payment_arguments(self.anchor_id, self.evidence_id, self.amount, self.currency)
+        _require_payment_arguments(
+            self.anchor_id,
+            self.evidence_id,
+            self.amount,
+            self.currency,
+            self.receiver_profile_id,
+            self.proof_status,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,12 +443,16 @@ def _require_payment_arguments(
     evidence_id: object,
     amount: object,
     currency: object,
+    receiver_profile_id: object,
+    proof_status: object,
 ) -> None:
     _require_exact_str(anchor_id, "anchor_id", identifier=True)
     _require_exact_str(evidence_id, "evidence_id", identifier=True)
     if type(amount) is not DecimalSlot:
         raise TypeError("amount must be an exact DecimalSlot")
     _require_currency(currency)
+    _require_exact_str(receiver_profile_id, "receiver_profile_id", identifier=True)
+    _require_exact_str(proof_status, "proof_status", identifier=True)
 
 
 def _require_unique_fact_names(facts: tuple[TypedFact, ...]) -> None:

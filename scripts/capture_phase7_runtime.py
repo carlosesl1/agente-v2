@@ -90,6 +90,7 @@ _LONG_DIGIT_OPERATIONAL_MARKERS: Final = (
     "event_id",
     "message_id",
     "session_id",
+    "evidence_id",
     "provider_ref",
 )
 
@@ -230,9 +231,12 @@ def _synthetic_phone(value: str) -> str:
     source_digits = "".join(character for character in value if character.isdigit())
     digest = hashlib.sha256(source_digits.encode()).digest()
     tail = "".join(str(byte % 10) for byte in digest)
-    country_prefix = source_digits[:2] if len(source_digits) >= 12 else "55"
-    synthetic_digits = country_prefix + tail[:11]
+    synthetic_digits = "999" + tail[:10]
     return "+" + synthetic_digits if value.lstrip().startswith("+") else synthetic_digits
+
+
+def _reserved_synthetic_phone(value: str) -> bool:
+    return value.lstrip().startswith("+999")
 
 
 def _synthetic_email(value: str) -> str:
@@ -363,7 +367,7 @@ def _sanitize_allowlisted_test(text: str) -> tuple[str, int]:
         if len(digit_sets) != 1:
             return block
         digits = next(iter(digit_sets))
-        if len(digits) != 13 or not digits.startswith("55"):
+        if len(digits) != 13 or not digits.startswith("999"):
             return block
         replacement = "+" + digits
 
@@ -437,6 +441,8 @@ def _scan_text(
     if allow_pii_redaction:
         text, redactions = _sanitize_allowlisted_test(text)
     for match in _PHONE_RE.finditer(text):
+        if _reserved_synthetic_phone(match.group(0)):
+            continue
         if (
             allow_pii_redaction
         ):
@@ -463,6 +469,8 @@ def _scan_text(
         if not _safe_email(match.group(0)):
             raise CaptureRejected(f"email-like literal in capture input: {relative}")
     for match in _LONG_DIGITS_RE.finditer(text):
+        if _reserved_synthetic_phone(text[max(0, match.start() - 1):match.end()]):
+            continue
         line_start = text.rfind("\n", 0, match.start()) + 1
         line_end = text.find("\n", match.end())
         if line_end < 0:
@@ -632,15 +640,19 @@ _SCHEMA_COPY_KEYS: Final = frozenset(
 )
 
 
-def _schema_shape(value: object) -> object:
+def _schema_shape(value: object, *, property_map: bool = False) -> object:
     if type(value) is dict:
         if any(type(key) is not str for key in value):
             raise CaptureRejected("runtime JSON schema keys must be exact strings")
-        return {
-            key: _schema_shape(item)
-            for key, item in sorted(value.items())
-            if key not in _SCHEMA_COPY_KEYS
-        }
+        shaped: dict[str, object] = {}
+        for key, item in sorted(value.items()):
+            if not property_map and key in _SCHEMA_COPY_KEYS:
+                continue
+            shaped[key] = _schema_shape(
+                item,
+                property_map=key == "properties",
+            ) if not property_map else _schema_shape(item)
+        return shaped
     if type(value) in (list, tuple):
         return [_schema_shape(item) for item in value]
     if value is None or type(value) in (bool, int, str):

@@ -27,6 +27,7 @@ CREATE TABLE boundary_commands (
     command_json jsonb NOT NULL,
     command_hash text NOT NULL CHECK (command_hash ~ '^[0-9a-f]{64}$'),
     created_at timestamptz NOT NULL,
+    UNIQUE (lead_key, event_id, command_id),
     FOREIGN KEY (lead_key, event_id) REFERENCES boundary_events (lead_key, event_id)
 );
 
@@ -42,6 +43,8 @@ CREATE TABLE boundary_outbox (
     payload_json jsonb NOT NULL,
     payload_hash text NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
     created_at timestamptz NOT NULL,
+    FOREIGN KEY (lead_key, event_id, command_id)
+        REFERENCES boundary_commands (lead_key, event_id, command_id),
     FOREIGN KEY (lead_key, event_id) REFERENCES boundary_events (lead_key, event_id)
 );
 

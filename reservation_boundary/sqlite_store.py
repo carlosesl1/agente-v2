@@ -207,6 +207,42 @@ class SQLiteBoundaryStore:
             connection.close()
             raise
 
+    @classmethod
+    def open_readonly(cls, path: Path) -> "SQLiteBoundaryStore":
+        if not isinstance(path, Path):
+            raise TypeError("path must be a pathlib.Path")
+        if not path.is_file():
+            raise ValueError("read-only SQLite path must be an existing file")
+        connection = sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro",
+            uri=True,
+            isolation_level=None,
+            timeout=5.0,
+        )
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if names != set(TABLE_NAMES):
+                raise DataCorruption("SQLite table universe is not exact")
+            strict = {
+                row[1]: row[5]
+                for row in connection.execute("PRAGMA table_list")
+                if row[1] in names
+            }
+            if strict != {name: 1 for name in TABLE_NAMES}:
+                raise DataCorruption("SQLite tables are not all STRICT")
+            if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+                raise DataCorruption("SQLite foreign keys are disabled")
+            return cls(connection, _factory_token=_FACTORY_TOKEN)
+        except BaseException:
+            connection.close()
+            raise
+
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("SQLiteBoundaryStore is closed")
@@ -303,6 +339,24 @@ class SQLiteBoundaryStore:
             return _require_hash(row[0], "stored event_hash")
         except ValueError as exc:
             raise DataCorruption("stored event hash is invalid") from exc
+
+    def command_is_persisted(
+        self,
+        *,
+        lead_key: str,
+        event_id: str,
+        command: object,
+    ) -> bool:
+        self._ensure_open()
+        exact_lead_key = _require_id(lead_key, "lead_key")
+        exact_event_id = _require_id(event_id, "event_id")
+        command_id, command_type, command_json = _command_record(command)
+        row = self._connection.execute(
+            "SELECT command_type, command_json, command_hash FROM boundary_commands "
+            "WHERE lead_key=? AND event_id=? AND command_id=?",
+            (exact_lead_key, exact_event_id, command_id),
+        ).fetchone()
+        return row == (command_type, command_json, _sha(command_json))
 
     def import_genesis(
         self,
@@ -510,7 +564,7 @@ class SQLiteBoundaryStore:
                             message.template_id,
                             message.canonical_payload,
                             message.payload_hash,
-                            instant,
+                            _utc_text(message.created_at, "message.created_at"),
                         ),
                     )
                     fault("after_outbox_insert")

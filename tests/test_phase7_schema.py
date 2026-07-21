@@ -51,6 +51,14 @@ class Phase7SchemaTests(unittest.TestCase):
         self.assertEqual(set(actual.values()), {1})
         self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
         self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        outbox_fks = connection.execute("PRAGMA foreign_key_list(boundary_outbox)").fetchall()
+        grouped: dict[int, list[tuple[str, str]]] = {}
+        for row in outbox_fks:
+            grouped.setdefault(row[0], []).append((row[3], row[4]))
+        self.assertIn(
+            [("lead_key", "lead_key"), ("event_id", "event_id"), ("command_id", "command_id")],
+            grouped.values(),
+        )
 
     def test_columns_and_primary_keys_are_closed(self) -> None:
         connection = sqlite3.connect(":memory:")

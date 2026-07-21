@@ -277,6 +277,10 @@ def _payment_command(
     if len(matches) != 1:
         raise DispatchRejected("payment command is not uniquely authorized")
     payment, command, anchor = matches[0]
+    verified = payment.verified_evidence
+    if verified is None:
+        raise DispatchRejected("payment command lacks verified evidence")
+    proof = verified.evidence
     amount_minor = int(Decimal(arguments.amount.value) * 100)
     if (
         command.evidence_claim_key != arguments.evidence_id
@@ -284,6 +288,8 @@ def _payment_command(
         or anchor.amount_minor != amount_minor
         or payment.subject.currency != arguments.currency
         or anchor.currency != arguments.currency
+        or proof.proof_receiver_profile_id != arguments.receiver_profile_id
+        or proof.proof_status.value != arguments.proof_status
     ):
         raise DispatchRejected("tool arguments do not bind settlement command")
     return command

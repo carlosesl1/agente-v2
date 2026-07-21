@@ -12,7 +12,9 @@ import unittest
 
 from scripts.capture_phase7_runtime import (
     CaptureRejected,
+    _scan_text,
     _sanitize_allowlisted_test,
+    _synthetic_phone,
     build_runtime_contract_manifest,
     capture_runtime,
     source_fingerprint,
@@ -44,7 +46,7 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
             "MAYA_VISIBLE_READONLY_NATIVE_TOOL_NAMES = ('read_tool',)\n"
             "MAYA_VISIBLE_WRITE_TOOL_NAMES = ('write_tool',)\n"
             "_NATIVE_TOOL_SCHEMAS = (\n"
-            "  {'name': 'read_tool', 'description': 'read', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string', 'description': 'copy-only detail', 'default': 'example'}}}},\n"
+            "  {'name': 'read_tool', 'description': 'read', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string', 'description': 'copy-only detail', 'default': 'example'}, 'description': {'type': 'string', 'description': 'real argument copy'}}}},\n"
             "  {'name': 'write_tool', 'description': 'write', 'parameters': {'type': 'object', 'properties': {}}},\n"
             "  {'name': CHAPADA_COMMIT_STATE_TOOL, 'description': 'state', 'parameters': {'type': 'object', 'properties': {}}},\n"
             ")\n"
@@ -136,6 +138,21 @@ def synthetic_runtime(root: Path) -> tuple[Path, str]:
 
 
 class Phase7RuntimeCaptureTests(unittest.TestCase):
+    def test_synthetic_phone_uses_reserved_non_e164_namespace_and_fixture_rescans(self) -> None:
+        value = _synthetic_phone("+5575999992939")
+        self.assertTrue(value.startswith("+999"))
+        self.assertFalse(value.startswith("+55"))
+        fixture = Path(
+            "/home/ubuntu/workspace/agente-v2-phase7-runtime-candidate4b/"
+            "tests/fixtures/phase7_boundary_states.json"
+        )
+        payload, redactions = _scan_text(
+            fixture,
+            "tests/fixtures/phase7_boundary_states.json",
+        )
+        self.assertGreater(len(payload), 0)
+        self.assertEqual(redactions, 0)
+
     def test_sanitizer_preserves_non_contact_operational_ids(self) -> None:
         source = "OPERATIONAL_SOURCE_ID = 'ss-960889123456'\n"
         sanitized, redactions = _sanitize_allowlisted_test(source)
@@ -222,34 +239,34 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             self.assertIn("Synthetic Lead", redacted)
             self.assertIn("'name': 'cloudbeds_criar_reserva_v2'", redacted)
             self.assertIn("OPERATIONAL_SOURCE_ID = 'ss-960889123456'", redacted)
-            self.assertRegex(redacted, r"'whatsapp_phone': '\+55\d{11}'")
-            self.assertRegex(redacted, r"'phone_number': '55\d{11}'")
-            self.assertRegex(redacted, r"'telefone': '54\d{11}'")
-            raw_phone = re.search(r"'phone_number': '(55\d{11})'", redacted)
-            expected_phone = re.search(r"EXPECTED_PHONE = '(\+55\d{11})'", redacted)
+            self.assertRegex(redacted, r"'whatsapp_phone': '\+999\d{10}'")
+            self.assertRegex(redacted, r"'phone_number': '999\d{10}'")
+            self.assertRegex(redacted, r"'telefone': '999\d{10}'")
+            raw_phone = re.search(r"'phone_number': '(999\d{10})'", redacted)
+            expected_phone = re.search(r"EXPECTED_PHONE = '(\+999\d{10})'", redacted)
             self.assertIsNotNone(raw_phone)
             self.assertIsNotNone(expected_phone)
             self.assertEqual("+" + raw_phone.group(1), expected_phone.group(1))
             relation = re.search(
-                r"def test_parser_phone_relation\(\):.*?phone_number': '(55\d{11})'.*?"
-                r"assert event\.phone == '(\+55\d{11})'",
+                r"def test_parser_phone_relation\(\):.*?phone_number': '(999\d{10})'.*?"
+                r"assert event\.phone == '(\+999\d{10})'",
                 redacted,
                 re.DOTALL,
             )
             self.assertIsNotNone(relation)
             self.assertEqual("+" + relation.group(1), relation.group(2))
             prompt_phone = re.search(
-                r"def test_parser_phone_relation\(\):.*?telefone=(\+55\d{11})",
+                r"def test_parser_phone_relation\(\):.*?telefone=(\+999\d{10})",
                 redacted,
                 re.DOTALL,
             )
             self.assertIsNotNone(prompt_phone)
             self.assertEqual(relation.group(2), prompt_phone.group(1))
             provider_test = (output / "tests/test_bokun_v2_tools.py").read_text()
-            self.assertRegex(provider_test, r"'whatsapp_phone': '\+55\d{11}'")
+            self.assertRegex(provider_test, r"'whatsapp_phone': '\+999\d{10}'")
             self.assertNotIn("\x2b\x35\x35\x32\x32\x37\x37\x37\x37\x37\x36\x36\x36\x36", provider_test)
-            first_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", redacted)
-            second_phone = re.search(r"'whatsapp_phone': '(\+55\d{11})'", provider_test)
+            first_phone = re.search(r"'whatsapp_phone': '(\+999\d{10})'", redacted)
+            second_phone = re.search(r"'whatsapp_phone': '(\+999\d{10})'", provider_test)
             self.assertIsNotNone(first_phone)
             self.assertIsNotNone(second_phone)
             self.assertNotEqual(first_phone.group(1), second_phone.group(1))
@@ -278,7 +295,15 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
                 [tool["name"] for tool in contract_doc["tools"]],
                 ["chapada_commit_state", "read_tool", "write_tool"],
             )
-            self.assertNotIn("description", json.dumps(contract_doc))
+            read_parameters = next(
+                row["parameters"] for row in contract_doc["tools"] if row["name"] == "read_tool"
+            )
+            self.assertEqual(
+                read_parameters["properties"]["description"],
+                {"type": "string"},
+            )
+            self.assertNotIn("copy-only detail", json.dumps(contract_doc))
+            self.assertNotIn("real argument copy", json.dumps(contract_doc))
 
     def test_contract_manifest_is_deterministic_and_contains_only_schema_hashes_and_shapes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="phase7-contract-test-") as directory:
@@ -287,7 +312,11 @@ class Phase7RuntimeCaptureTests(unittest.TestCase):
             second = build_runtime_contract_manifest(source)
             self.assertEqual(first, second)
             serialized = json.dumps(first, sort_keys=True)
-            for forbidden in ("description", "default", "example", "examples", "title", "$comment"):
+            read_parameters = next(
+                row["parameters"] for row in first["tools"] if row["name"] == "read_tool"
+            )
+            self.assertEqual(read_parameters["properties"]["description"], {"type": "string"})
+            for forbidden in ("default", "example", "examples", "title", "$comment"):
                 self.assertNotIn(f'"{forbidden}"', serialized)
             for tool in first["tools"]:
                 self.assertEqual(set(tool), {"category", "name", "parameters", "schema_hash"})
