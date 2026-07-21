@@ -1630,7 +1630,7 @@ universe exato:
    `(artifact_kind, artifact_id)` e hashes/bytes canônicos
    de turn, target ingress, allocation installation/closure, provider outcome, delivery,
    child-allocation decision, compensation, learning, cancel-start/cancel-terminal,
-   memory preparation/ack/abandon, reopen, seal, transition e
+   memory preparation/ack/abandon-start/abandon-terminal, reopen, seal, transition e
    binding receipts.
 
 Constraints/semantic scan exigem cached active count igual ao número de admissions
@@ -1848,17 +1848,23 @@ old/new qualification + epoch
 attempt + UNIQUE(old qualification, old epoch, attempt)
 source snapshot kind/hash
 target root ID/path/device/inode + content hash
-state PREPARING|PREPARED|ACKED|ABANDONED|MANUAL_REVIEW
+deterministic tombstone path + parent device/inode
+state PREPARING|PREPARED|ABANDONING|ABANDONED|ACKED|MANUAL_REVIEW
 preparation receipt bytes/hash
 journal reopen receipt hash nullable
 preparation ACK receipt bytes/hash nullable
+abandon operation/request/start-receipt hashes nullable
 abandon receipt bytes/hash nullable
-revision + prepared/acked/abandoned timestamps
+revision + prepared/abandon-started/acked/abandoned timestamps
 ```
 
 Checks all-null/all-present e semantic scan ligam `ACKED` a exatamente um journal
-reopen receipt + ACK artifact; `ABANDONED` exige zero reopen receipt e exatamente um
-journal intent/receipt `ABANDONED`. Target root é exclusivo do operation ID;
+reopen receipt + ACK artifact. `ABANDONING` exige start receipt do journal e permite
+somente um payload em `temp|final|tombstone`; `ABANDONED` exige zero payload em todos
+esses paths, zero reopen receipt e exatamente um target abandon receipt. O pair
+transitório target `ABANDONED` + journal `ABANDONING` é recuperável, não ready; journal
+`ABANDONED` exige o mesmo target receipt persistido. Target root é exclusivo do
+operation ID;
 não usa hardlink/inode compartilhado com memory antiga. Como SQLite registry e
 filesystem não têm commit atômico conjunto, `prepare` usa protocolo explícito:
 
@@ -1868,9 +1874,9 @@ filesystem não têm commit atômico conjunto, `prepare` usa protocolo explícit
 4. transaction target verifica path/device/inode/content e faz
    `PREPARING→PREPARED` + `MemoryPreparationReceipt`.
 
-Duplicate em qualquer estado usa o mesmo operation lock: `PREPARING` é retomado ou
-scavenged conforme a gramática abaixo; `PREPARED|ACKED` retorna receipt idêntico;
-request divergente é identity conflict.
+Duplicate em qualquer estado usa o mesmo operation lock: `PREPARING` retoma prepare;
+`PREPARED|ACKED` retorna receipt idêntico; `ABANDONING` retoma somente abandono;
+`ABANDONED` retorna o abandon receipt idêntico. Request divergente é identity conflict.
 
 `memory_preparation_operation_id = H("phase8-memory-preparation-v1",
 reopen_operation_id, source snapshot hash, new qualification, new epoch)`. O
@@ -1910,11 +1916,34 @@ mesmo old tuple convergem para o único intent antes de target side effect. Inte
 válido nunca é abandonado só por idade; crash é retomado pelo mesmo operation ID.
 Abandono exige operação administrativa explícita `abandon_reopen_intent`, sob CAS do
 old run ainda `CANCELLED`, zero journal reopen receipt e mesmo execution lock. Ela
-primeiro faz intent `PREPARING→ABANDONING`, depois chama
-`abandon_preparation`, persiste `MemoryPreparationAbandonReceipt`, faz target
-`PREPARING|PREPARED→ABANDONED`, fsync/cleanup e finalmente old intent
-`ABANDONING→ABANDONED`. Crash em qualquer fronteira retoma essa mesma ordem; somente
-então um novo attempt monotônico pode ser reservado.
+primeiro faz intent `PREPARING→ABANDONING` e persiste
+`ReopenIntentAbandonStartReceipt`. Depois, ainda sob o lock, chama
+`begin_abandon_preparation`: target `NOT_FOUND|PREPARING|PREPARED→ABANDONING` numa
+transaction **antes** de tocar filesystem, armazenando abandon operation/request/start
+receipt e o tombstone path determinístico. `NOT_FOUND` só pode inserir `ABANDONING`
+após zero-scan de row/temp/final/tombstone para esse operation ID.
+
+Com target `ABANDONING`, a limpeza é uma máquina retomável:
+
+1. se há `temp` ou `final`, faz rename-no-replace atômico do único payload para o
+   tombstone path no mesmo filesystem e fsync dos diretórios origem/destino;
+2. remove recursivamente somente o tombstone operation-local, fsyncando cada diretório
+   alterado; crash parcial deixa o mesmo tombstone path, nunca um payload live;
+3. prova zero-scan de `temp|final|tombstone`, path/device/inode e ausência de reopen
+   receipt; somente então uma target transaction faz `ABANDONING→ABANDONED` e persiste
+   `MemoryPreparationAbandonReceipt` canônico;
+4. o journal relê esse receipt e faz old intent `ABANDONING→ABANDONED`, persistindo
+   `ReopenIntentAbandonReceipt` com o mesmo hash.
+
+Target `ABANDONED` nunca coexiste validamente com payload residual. Crash após target
+`ABANDONED` e antes do CAS do journal deixa um pair recuperável explícito: o worker
+verifica zero payload/receipt exato e conclui somente o journal. Crash antes/durante o
+rename, fsync, unlink, target CAS ou journal CAS retoma a fase observada sob o mesmo
+lock. Live+tombstone, temp+final, path escape, target `ABANDONED` com payload ou receipt
+divergente entram em `MANUAL_REVIEW`, sem delete adicional. Somente depois do journal
+`ABANDONED` um novo attempt monotônico pode ser reservado. O operation lock permanece
+retido de `begin_abandon_preparation` até journal `ABANDONED` ou `MANUAL_REVIEW`; não
+há janela de outro controller/recovery entre rename, cleanup e os dois CAS terminais.
 
 `MemoryPreparationRecoveryWorker` tem apenas os ports fechados
 `lookup|resume_exact|ack|abandon` dessa FSM — nunca learning genérico, provider ou
@@ -1925,23 +1954,44 @@ side-effect-free:
 - `PREPARING` sem payload válido + journal intent `PREPARING` → retoma preparação;
 - matching reopen receipt → `PREPARED→ACKED` pelo receipt exato e persiste o ACK no
   journal se ainda ausente;
-- journal intent `ABANDONING|ABANDONED` + zero reopen receipt → completa
-  `PREPARING|PREPARED→ABANDONED`, tombstone fsync e cleanup do root exclusivo;
+- journal intent `ABANDONING` + zero reopen receipt → inicia/retoma target
+  `ABANDONING`, rename para tombstone, cleanup+fsync, target
+  `ABANDONING→ABANDONED` e journal `ABANDONING→ABANDONED`;
+- journal intent `ABANDONING` + target `ABANDONED`/zero payload/receipt exato → conclui
+  somente o journal; journal `ABANDONED` exige target `ABANDONED` e os mesmos bytes;
+- journal intent `ABANDONED` + target ainda `ABANDONING` é divergência impossível e
+  entra em `MANUAL_REVIEW`, nunca cleanup implícito;
 - journal intent ausente para row/root existente → `MANUAL_REVIEW`; não inventa
   intent nem remove payload;
 - backlink parcial, target/journal divergente, root ausente/malformado ou lookup
   indisponível → `MANUAL_REVIEW`, nunca delete.
 
-`ACKED` nunca é removido; `ABANDONED` retém operation/request/root hashes e receipt,
-mesmo depois do payload cleanup. Readiness falha com row/root órfão, `PREPARED`
-vencido sem recovery worker, backlink divergente, symlink/path escape ou lock identity
-distinta entre controller/worker.
+`ACKED` nunca é removido; `ABANDONED` é um registry tombstone que retém
+operation/request/root/tombstone hashes e receipt, mas possui zero payload. Readiness
+permanece false, sem promover a `MANUAL_REVIEW`, enquanto um pair reconhecido
+`ABANDONING` aguarda o recovery worker. Falha terminalmente com row/root órfão,
+`PREPARED` vencido sem recovery worker, backlink divergente, symlink/path escape ou
+lock identity distinta entre controller/worker.
 
-A gramática após crash é fechada: `S0={}`; `S1={PREPARING row}`;
+A gramática após crash é fechada. Preparação: `S0={}`; `S1={PREPARING row}`;
 `S2={PREPARING row,temp}`; `S3={PREPARING row,final}`;
-`S4={PREPARED row,final}`; `S5={ACKED row+ACK receipt,final}`;
-`S6={ABANDONED tombstone}`. Qualquer combinação extra (root sem row, temp+final,
-ACKED sem final, inode/hash divergente) é `MANUAL_REVIEW`, nunca remoção heurística.
+`S4={PREPARED row,final}`; `S5={ACKED row+ACK receipt,final}`. Abandono:
+`A0={ABANDONING row}`; `A1={ABANDONING row,temp}`;
+`A2={ABANDONING row,final}`; `A3={ABANDONING row,tombstone parcial ou inteiro}`;
+`A4={ABANDONED registry tombstone+receipt, zero payload}`. `A0` também representa
+cleanup concluído antes do target CAS. Journal `ABANDONING` pode acompanhar
+`S0–S4|A0–A4`; journal `ABANDONED` aceita somente `A4` com receipt igual. Qualquer
+combinação extra (root sem row/intent, temp+final, live+tombstone, ACKED sem final,
+ABANDONED com payload ou inode/hash divergente) é `MANUAL_REVIEW`, nunca remoção
+heurística.
+
+Fault tests de abandono param em cada barreira: journal `ABANDONING`; target
+`ABANDONING`; antes/depois do rename; antes/depois de cada directory fsync; no meio do
+unlink recursivo; após zero-scan; após target `ABANDONED`; e antes/depois do journal
+`ABANDONED`. Para cada `S0–S4|A0–A4`, restart repetido converge ao mesmo target+journal
+receipt, zero payload e no máximo um novo attempt posterior. Power-loss probes aceitam
+somente live **ou** tombstone após rename não sincronizado; ambos, path inesperado ou
+inode divergente entram em `MANUAL_REVIEW` sem remoção.
 
 Crash antes do journal final deixa intent `PREPARING` + target S0–S4 e é retomado,
 não scavenged como perdedor. Crash depois do commit deixa intent `COMMITTED`, nova run
@@ -1963,10 +2013,10 @@ turn_id = H("phase8-e2e-turn-v1", new_qualification_id, new_epoch,
 Assim o `UNIQUE turn_id` global das memberships append-only não colide quando o
 mesmo contrato lógico é autorizado em outro epoch. Source identities externas
 continuam sujeitas aos conflict guards normais; elas não são reescritas para forçar
-replay. Fault tests param depois de cada journal/install/ack/open boundary e provam
+replay. Os fault tests param depois de cada journal/install/ack/open boundary e provam
 recovery byte-idêntico, reserva concorrente antes de qualquer segundo preparation,
-crash intent/prepare/journal/ACK, abandono explícito/scavenge seguro, rejeição de old
-ACK e ausência de admission durante `INSTALLING`.
+crash intent/prepare/journal/ACK, abandono explícito por A0–A4, cleanup/tombstone
+retomável, rejeição de old ACK e ausência de admission durante `INSTALLING`.
 
 `SealedCanaryQualificationBinding` é criado **depois** do seal e contém:
 
@@ -2054,7 +2104,8 @@ Startup falha antes do `lifespan yield` quando houver:
 - migration-ownership-v1 root/schema/hash/device/inode inválido ou diferente entre
   processos mutators;
 - memory-preparation-v1 table universe/DDL/root/lock identity inválido, preparation
-  grammar fora de S0–S6 ou PREPARED sem journal intent/recovery worker elegível;
+  grammar fora de S0–S5/A0–A4, ABANDONED com payload, ou PREPARED/ABANDONING sem
+  journal intent/recovery worker elegível;
 - lock dir/socket dir indisponível;
 - attempt root malformado, symlink/path escape ou orphan não scavenged;
 - qualquer port obrigatória ausente;
@@ -2404,7 +2455,8 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   receipts e `followup_e2e_effect_authority` para
   `settlement_provider|handoff_delivery|payment_delivery`;
 - memory-preparation-v1 possui uma tabela exata, estados
-  `PREPARING|PREPARED|ACKED|ABANDONED|MANUAL_REVIEW` e grammar S0–S6;
+  `PREPARING|PREPARED|ABANDONING|ABANDONED|ACKED|MANUAL_REVIEW` e grammar
+  S0–S5/A0–A4;
 - authority header/allocation row-kind checks, immutable generation, composite FKs,
   header tombstone e transition/ledger backlinks exatos;
 - roots novos obrigatórios; schemas antigos/universos extras fail-closed;
@@ -2591,8 +2643,14 @@ package ou evidence object invalida todas as aprovações e exige nova rodada.
   operation ID/lock/registry,
   faz CAS old `CANCELLED`→new `INSTALLING`, cria run/scenarios/reopen receipt numa
   transaction e ACKa preparation; chamadas concorrentes convergem antes de um segundo
-  clone, crash/abandon/recovery S0–S6 é retomável, target installs seguem até `OPEN`,
-  old ACK falha e turn IDs incluem new qualification+epoch;
+  clone, crash/recovery S0–S5/A0–A4 é retomável, abandono usa target
+  `ABANDONING`→rename tombstone→cleanup→`ABANDONED` antes do journal terminal, target
+  installs seguem até `OPEN`, old ACK falha e turn IDs incluem new
+  qualification+epoch;
+- fault matrix de abandono pausa em journal/target ABANDONING, rename, directory fsync,
+  unlink parcial, zero-scan, target ABANDONED e journal ABANDONED; prova receipt
+  byte-idêntico, zero payload, retry do mesmo abandon operation e nenhum novo attempt
+  antes do terminal bilateral;
 - effective→qualification→authorization→production oracles bilaterais e mutations;
 - historical transcript/target-ingress semantic scan em readiness;
 - memory-learning target receipt atômico e somente pós-commit;
@@ -2749,7 +2807,8 @@ Qualquer item abaixo mantém build/rollout em NO-GO:
 - reopen pós-seal reutiliza memory root antiga em vez de clone/root novo autenticado;
 - memory preparation não reserva journal intent antes do clone, não possui operation
   registry/lock/target+journal ACK, deixa root órfão após crash ou recovery worker
-  abandona payload sem intent `ABANDONING|ABANDONED` e zero reopen receipt exatos;
+  abandona payload sem journal+target `ABANDONING`, marca target `ABANDONED` antes de
+  zero-scan/fsync de temp/final/tombstone ou não recupera target-terminal/journal-pendente;
 - admitted-set hash inclui status/backlink/timestamp mutável;
 - effective binding, qualification, transition receipt, rollout authorization ou
   production binding não formam a transformação fechada aprovada;
