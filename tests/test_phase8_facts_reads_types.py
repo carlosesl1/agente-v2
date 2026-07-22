@@ -29,7 +29,13 @@ from reservation_boundary.reads import (
     LegacyGenesisEvidenceRecord,
     LegacyGenesisReadRequest,
     LegacyGenesisReceipt,
+    KnowledgeSource,
     Phase8ToolReadRequest,
+    PUBLIC_READ_POLICY_HASH,
+    ReadEvidenceDisposition,
+    ReadEvidenceReceipt,
+    SanitizedKnowledgeResult,
+    validate_public_text,
 )
 
 
@@ -426,6 +432,83 @@ class Phase8GenesisEvidenceTests(unittest.TestCase):
             replace(
                 unavailable_record,
                 receipt_bytes=absent.to_canonical_bytes(),
+            )
+
+
+class Phase8KnowledgeEvidenceTests(unittest.TestCase):
+    def test_public_policy_probes_and_knowledge_known_answers_are_exact(self) -> None:
+        fixture = _fixture()
+        probes = fixture["policy_probes"]
+        for text in probes["accepted"]:
+            with self.subTest(accepted=text):
+                self.assertEqual(validate_public_text(text, limit=4096), text)
+        for probe in probes["rejected"]:
+            with self.subTest(rejected=probe):
+                with self.assertRaises(ValueError):
+                    validate_public_text(probe["text"], limit=4096)
+
+        self.assertEqual(
+            PUBLIC_READ_POLICY_HASH,
+            fixture["auxiliary_preimages"]["public_read_policy"]["domain_hash"],
+        )
+        examples = fixture["examples"]
+        for disposition in ("public_safe", "private_only"):
+            with self.subTest(disposition=disposition):
+                receipt_item = examples[f"read_evidence_receipt.knowledge_{disposition}"]
+                receipt = ReadEvidenceReceipt.from_canonical_bytes(
+                    receipt_item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertEqual(receipt.disposition.value, disposition)
+                self.assertEqual(receipt.canonical_hash(), receipt_item["canonical_hash"])
+
+                result_item = examples[f"result.knowledge_{disposition}"]
+                result = SanitizedKnowledgeResult.from_canonical_bytes(
+                    result_item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertIs(result.source, KnowledgeSource.FAQ)
+                self.assertEqual(result.evidence_receipt, receipt)
+                self.assertEqual(
+                    result.to_canonical_bytes().decode("utf-8"),
+                    result_item["canonical_utf8"],
+                )
+                self.assertEqual(result.canonical_hash(), result_item["canonical_hash"])
+
+    def test_knowledge_result_rejects_pii_subject_and_evidence_swaps(self) -> None:
+        examples = _fixture()["examples"]
+        public_result = SanitizedKnowledgeResult.from_canonical_bytes(
+            examples["result.knowledge_public_safe"]["canonical_utf8"].encode("utf-8")
+        )
+        private_result = SanitizedKnowledgeResult.from_canonical_bytes(
+            examples["result.knowledge_private_only"]["canonical_utf8"].encode("utf-8")
+        )
+        self.assertIs(
+            public_result.evidence_receipt.disposition,
+            ReadEvidenceDisposition.PUBLIC_SAFE,
+        )
+        self.assertIs(
+            private_result.evidence_receipt.disposition,
+            ReadEvidenceDisposition.PRIVATE_ONLY,
+        )
+
+        with self.assertRaises(ValueError):
+            replace(public_result, answer_text="Telefone pessoal: (75) 99999-9999")
+        with self.assertRaises(ValueError):
+            replace(public_result, subject_id="offer:" + "a" * 64)
+        self.assertEqual(
+            replace(public_result, evidence_receipt=private_result.evidence_receipt),
+            private_result,
+        )
+        lookup_receipt = ReadEvidenceReceipt.from_canonical_bytes(
+            examples["read_evidence_receipt.lookup_positive_public_safe"][
+                "canonical_utf8"
+            ].encode("utf-8")
+        )
+        with self.assertRaises(ValueError):
+            replace(public_result, evidence_receipt=lookup_receipt)
+        with self.assertRaises(ValueError):
+            replace(
+                public_result.evidence_receipt,
+                result_content_hash="0" * 64,
             )
 
 

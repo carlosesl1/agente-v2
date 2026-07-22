@@ -9,6 +9,7 @@ from enum import Enum
 import hashlib
 import json
 import re
+import unicodedata
 from typing import ClassVar, Final, TypeAlias
 
 from reservation_boundary.conversation import SourceEventIdentity
@@ -25,6 +26,7 @@ _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 _GENESIS_ID_RE: Final = re.compile(r"^genesis:[0-9a-f]{64}$")
+_READ_EVIDENCE_ID_RE: Final = re.compile(r"^read-evidence:[0-9a-f]{64}$")
 READ_REQUEST_DOMAIN: Final = "phase8-read-request-v1"
 
 ReadArguments: TypeAlias = (
@@ -685,17 +687,337 @@ class LegacyGenesisEvidenceRecord:
         return record
 
 
+_PUBLIC_READ_POLICY: Final = {
+    "forbidden_patterns": {
+        "br_phone": r"(?<![0-9])(?:\+?55[\s.-]?)?(?:\(?[1-9][0-9]\)?[\s.-]?)?(?:9[0-9]{4}|[2-8][0-9]{3})[\s.-]?[0-9]{4}(?![0-9])",
+        "control": r"[\u0000-\u0008\u000b-\u001f\u007f]",
+        "cpf": r"(?<![0-9])(?:[0-9]{3}[.\s-]?){2}[0-9]{3}[-.\s]?[0-9]{2}(?![0-9])",
+        "e164": r"(?<![0-9])\+[1-9][0-9]{7,14}(?![0-9])",
+        "email": r"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]+\.[A-Z]{2,63}(?![A-Z0-9._%+-])",
+        "html": r"<[A-Za-z!/][^>]*>",
+        "markdown_link": r"!?\[[^\]]*\]\([^)]+\)",
+        "pan": r"(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])",
+        "provider_ref": r"(?:cloudbeds\.property\.|bokun\.product\.)",
+        "random_payment_key": r"(?i)(?<![0-9A-F])[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}(?![0-9A-F])",
+        "secret_marker": r"(?i)\b(?:api[_-]?key|access[_-]?token|bearer)\b\s*[:=]",
+        "url": r"(?i)(?:https?://|www\.)\S+",
+    },
+    "limits": {"knowledge_codepoints": 4096, "label_codepoints": 256},
+    "normalization": {
+        "double_ascii_space": "forbidden",
+        "line_ending": "LF",
+        "surrounding_whitespace": "forbidden",
+        "tab": "forbidden",
+        "unicode": "NFKC",
+    },
+    "schema": "phase8-public-read-sanitization-policy",
+    "version": 1,
+}
+PUBLIC_READ_POLICY_ID: Final = "public-read-v1"
+PUBLIC_READ_POLICY_DOMAIN: Final = "phase8-public-read-sanitization-policy-v1"
+PUBLIC_READ_POLICY_BYTES: Final = json.dumps(
+    _PUBLIC_READ_POLICY,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+).encode("utf-8")
+PUBLIC_READ_POLICY_HASH: Final = hashlib.sha256(
+    PUBLIC_READ_POLICY_DOMAIN.encode("ascii")
+    + b"\x00"
+    + PUBLIC_READ_POLICY_BYTES
+).hexdigest()
+if PUBLIC_READ_POLICY_HASH != "2a3f36953a7d1020df4d3d5f2471df8767be4f99f23413f9effc38d03ac7b637":
+    raise RuntimeError("public read policy identity drift")
+_PUBLIC_READ_PATTERNS: Final = tuple(
+    re.compile(pattern)
+    for pattern in _PUBLIC_READ_POLICY["forbidden_patterns"].values()
+)
+
+
+def validate_public_text(value: object, *, limit: int) -> str:
+    if type(value) is not str or not value:
+        raise ValueError("public text must be a non-empty exact string")
+    if unicodedata.normalize("NFKC", value) != value:
+        raise ValueError("public text must already use NFKC")
+    if value != value.strip() or "\r" in value or "\t" in value or "  " in value:
+        raise ValueError("public text normalization mismatch")
+    if len(value) > limit:
+        raise ValueError("public text exceeds its code-point limit")
+    if any(pattern.search(value) for pattern in _PUBLIC_READ_PATTERNS):
+        raise ValueError("public text contains forbidden private or active content")
+    return value
+
+
+class ReadEvidenceDisposition(str, Enum):
+    PUBLIC_SAFE = "public_safe"
+    PRIVATE_ONLY = "private_only"
+
+
+@dataclass(frozen=True, slots=True)
+class ReadEvidenceReceipt:
+    receipt_id: str
+    request_hash: str
+    result_content_hash: str
+    source_evidence_hash: str
+    policy_id: str
+    policy_hash: str
+    disposition: ReadEvidenceDisposition
+    observed_at: datetime
+    expires_at: datetime
+
+    SCHEMA: ClassVar[str] = "phase8-read-evidence-receipt"
+    ID_PREIMAGE_SCHEMA: ClassVar[str] = "phase8-read-evidence-receipt-id-preimage"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-read-evidence-receipt-v1"
+    RECEIPT_ID_DOMAIN: ClassVar[str] = "phase8-read-evidence-receipt-id-v1"
+    SOURCE_EVIDENCE_DOMAIN: ClassVar[str] = "phase8-read-source-evidence-v1"
+    RESULT_CONTENT_DOMAIN: ClassVar[str] = "phase8-read-result-content-v1"
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.receipt_id) is not str
+            or _READ_EVIDENCE_ID_RE.fullmatch(self.receipt_id) is None
+        ):
+            raise ValueError("ReadEvidenceReceipt.receipt_id must be canonical")
+        _require_sha256(self.request_hash, "ReadEvidenceReceipt.request_hash")
+        _require_sha256(
+            self.result_content_hash,
+            "ReadEvidenceReceipt.result_content_hash",
+        )
+        _require_sha256(
+            self.source_evidence_hash,
+            "ReadEvidenceReceipt.source_evidence_hash",
+        )
+        if self.policy_id != PUBLIC_READ_POLICY_ID or self.policy_hash != PUBLIC_READ_POLICY_HASH:
+            raise ValueError("ReadEvidenceReceipt policy identity mismatch")
+        if type(self.disposition) is not ReadEvidenceDisposition:
+            raise TypeError("ReadEvidenceReceipt.disposition must be exact")
+        _require_utc(self.observed_at, "ReadEvidenceReceipt.observed_at")
+        _require_utc(self.expires_at, "ReadEvidenceReceipt.expires_at")
+        if self.expires_at <= self.observed_at:
+            raise ValueError("ReadEvidenceReceipt.expires_at must be later than observed_at")
+        expected_id = "read-evidence:" + hashlib.sha256(
+            self.RECEIPT_ID_DOMAIN.encode("ascii")
+            + b"\x00"
+            + self.id_preimage_bytes()
+        ).hexdigest()
+        if self.receipt_id != expected_id:
+            raise ValueError("ReadEvidenceReceipt.receipt_id does not bind its fields")
+
+    def _data_without_id(self) -> dict[str, object]:
+        return {
+            "request_hash": self.request_hash,
+            "result_content_hash": self.result_content_hash,
+            "source_evidence_hash": self.source_evidence_hash,
+            "policy_id": self.policy_id,
+            "policy_hash": self.policy_hash,
+            "disposition": self.disposition.value,
+            "observed_at": self.observed_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+        }
+
+    def id_preimage_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.ID_PREIMAGE_SCHEMA,
+            version=self.VERSION,
+            data=self._data_without_id(),
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={"receipt_id": self.receipt_id} | self._data_without_id(),
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "ReadEvidenceReceipt":
+        envelope = _load_canonical_envelope(payload, "ReadEvidenceReceipt")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("ReadEvidenceReceipt envelope identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "receipt_id",
+            "request_hash",
+            "result_content_hash",
+            "source_evidence_hash",
+            "policy_id",
+            "policy_hash",
+            "disposition",
+            "observed_at",
+            "expires_at",
+        }
+        if set(data) != expected or type(data["disposition"]) is not str:
+            raise ValueError("ReadEvidenceReceipt fields mismatch")
+        try:
+            disposition = ReadEvidenceDisposition(data["disposition"])
+        except ValueError as exc:
+            raise ValueError("ReadEvidenceReceipt disposition is invalid") from exc
+        receipt = cls(
+            receipt_id=data["receipt_id"],
+            request_hash=data["request_hash"],
+            result_content_hash=data["result_content_hash"],
+            source_evidence_hash=data["source_evidence_hash"],
+            policy_id=data["policy_id"],
+            policy_hash=data["policy_hash"],
+            disposition=disposition,
+            observed_at=_parse_utc(data["observed_at"], "observed_at"),
+            expires_at=_parse_utc(data["expires_at"], "expires_at"),
+        )
+        if receipt.to_canonical_bytes() != payload:
+            raise ValueError("ReadEvidenceReceipt is not byte-canonical")
+        return receipt
+
+
+class KnowledgeSource(str, Enum):
+    FAQ = "faq"
+    LODGING_DESCRIPTION = "lodging_description"
+    ACTIVITY_DESCRIPTION = "activity_description"
+
+
+@dataclass(frozen=True, slots=True)
+class SanitizedKnowledgeResult:
+    request_hash: str
+    source: KnowledgeSource
+    subject_id: str | None
+    locale: str
+    answer_text: str
+    evidence_receipt: ReadEvidenceReceipt
+
+    SCHEMA: ClassVar[str] = "phase8-sanitized-knowledge-result"
+    CONTENT_PREIMAGE_SCHEMA: ClassVar[str] = (
+        "phase8-sanitized-knowledge-result-content-preimage"
+    )
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-sanitized-knowledge-result-v1"
+
+    def __post_init__(self) -> None:
+        _require_sha256(self.request_hash, "SanitizedKnowledgeResult.request_hash")
+        if type(self.source) is not KnowledgeSource:
+            raise TypeError("SanitizedKnowledgeResult.source must be exact")
+        if self.source is KnowledgeSource.FAQ:
+            if self.subject_id is not None:
+                raise ValueError("FAQ knowledge result must have null subject_id")
+        else:
+            _require_identifier(
+                self.subject_id,
+                "SanitizedKnowledgeResult.subject_id",
+            )
+        if type(self.locale) is not str or _LOCALE_RE.fullmatch(self.locale) is None:
+            raise ValueError("SanitizedKnowledgeResult.locale must be canonical")
+        validate_public_text(self.answer_text, limit=4096)
+        if type(self.evidence_receipt) is not ReadEvidenceReceipt:
+            raise TypeError("SanitizedKnowledgeResult.evidence_receipt must be exact")
+        if self.evidence_receipt.request_hash != self.request_hash:
+            raise ValueError("knowledge result request hash mismatch")
+        expected_content_hash = hashlib.sha256(
+            ReadEvidenceReceipt.RESULT_CONTENT_DOMAIN.encode("ascii")
+            + b"\x00"
+            + self.content_preimage_bytes()
+        ).hexdigest()
+        if self.evidence_receipt.result_content_hash != expected_content_hash:
+            raise ValueError("knowledge result content hash mismatch")
+
+    def _content_data(self) -> dict[str, object]:
+        return {
+            "request_hash": self.request_hash,
+            "source": self.source.value,
+            "subject_id": self.subject_id,
+            "locale": self.locale,
+            "answer_text": self.answer_text,
+        }
+
+    def content_preimage_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.CONTENT_PREIMAGE_SCHEMA,
+            version=self.VERSION,
+            data=self._content_data(),
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._content_data()
+            | {
+                "evidence_receipt": json.loads(
+                    self.evidence_receipt.to_canonical_bytes().decode("utf-8")
+                )
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "SanitizedKnowledgeResult":
+        envelope = _load_canonical_envelope(payload, "SanitizedKnowledgeResult")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("SanitizedKnowledgeResult envelope identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "request_hash",
+            "source",
+            "subject_id",
+            "locale",
+            "answer_text",
+            "evidence_receipt",
+        }
+        if set(data) != expected or type(data["source"]) is not str:
+            raise ValueError("SanitizedKnowledgeResult fields mismatch")
+        try:
+            source = KnowledgeSource(data["source"])
+        except ValueError as exc:
+            raise ValueError("SanitizedKnowledgeResult source is invalid") from exc
+        nested = data["evidence_receipt"]
+        if type(nested) is not dict or set(nested) != {"schema", "version", "data"}:
+            raise ValueError("knowledge evidence receipt envelope mismatch")
+        receipt_bytes = _canonical_envelope(
+            schema=nested["schema"],
+            version=nested["version"],
+            data=nested["data"],
+        )
+        result = cls(
+            request_hash=data["request_hash"],
+            source=source,
+            subject_id=data["subject_id"],
+            locale=data["locale"],
+            answer_text=data["answer_text"],
+            evidence_receipt=ReadEvidenceReceipt.from_canonical_bytes(receipt_bytes),
+        )
+        if result.to_canonical_bytes() != payload:
+            raise ValueError("SanitizedKnowledgeResult is not byte-canonical")
+        return result
+
+
 Phase8ReadRequest: TypeAlias = Phase8ToolReadRequest | LegacyGenesisReadRequest
 
 
 __all__ = (
     "GenesisStatus",
+    "KnowledgeSource",
     "LegacyGenesisEvidenceRecord",
     "LegacyGenesisReadRequest",
     "LegacyGenesisReceipt",
     "LegacyUnavailableReason",
+    "PUBLIC_READ_POLICY_BYTES",
+    "PUBLIC_READ_POLICY_DOMAIN",
+    "PUBLIC_READ_POLICY_HASH",
+    "PUBLIC_READ_POLICY_ID",
     "Phase8ReadRequest",
     "Phase8ToolReadRequest",
     "READ_REQUEST_DOMAIN",
+    "ReadEvidenceDisposition",
+    "ReadEvidenceReceipt",
     "ReadArguments",
+    "SanitizedKnowledgeResult",
+    "validate_public_text",
 )
