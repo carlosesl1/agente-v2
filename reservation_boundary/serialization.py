@@ -84,6 +84,17 @@ _BOUNDARY_DATACLASSES: Final = frozenset(
     item for item in BOUNDARY_TYPES if is_dataclass(item)
 )
 _BOUNDARY_BY_TAG: Final = {item.__name__: item for item in _BOUNDARY_DATACLASSES}
+_TOOL_ARGUMENT_CANONICAL_TYPES: Final = frozenset(
+    item
+    for item in _BOUNDARY_DATACLASSES
+    if item.__name__
+    in {
+        "ActivityPaymentArguments",
+        "ActivityReservationArguments",
+        "LodgingPaymentArguments",
+        "LodgingReservationArguments",
+    }
+)
 _PHASE6_TYPES: Final = frozenset(
     (HandoffWorkflow, PaymentWorkflow, PaymentSettlementCommand)
 )
@@ -354,6 +365,45 @@ def _decode_value(annotation: object, value: object) -> object:
     if annotation is object:
         return _decode_json_value(value)
     raise TypeError(f"unsupported closed boundary annotation: {annotation!r}")
+
+
+def to_tool_arguments_canonical_json(value: object) -> bytes:
+    """Encode one exact command-argument owner object without a wrapper envelope."""
+
+    value_type = type(value)
+    if value_type not in _TOOL_ARGUMENT_CANONICAL_TYPES:
+        raise TypeError("value must be an exact closed command-argument type")
+    return json.dumps(
+        _encode_dataclass(value_type, value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def from_tool_arguments_canonical_json(
+    payload: bytes,
+    expected_type: type[object],
+) -> object:
+    """Decode one strict owner object and reject duplicate, unknown or drifted bytes."""
+
+    if expected_type not in _TOOL_ARGUMENT_CANONICAL_TYPES:
+        raise TypeError("expected_type must be a closed command-argument type")
+    if type(payload) is not bytes or not payload:
+        raise ValueError("tool arguments must be non-empty exact bytes")
+    try:
+        data = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_nonfinite,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("invalid tool-argument JSON") from exc
+    decoded = _decode_dataclass(expected_type, data)
+    if to_tool_arguments_canonical_json(decoded) != payload:
+        raise ValueError("tool-argument JSON is valid but noncanonical")
+    return decoded
 
 
 def to_wire_json(value: object) -> str:

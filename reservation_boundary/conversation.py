@@ -12,7 +12,16 @@ import re
 from typing import ClassVar, Final
 
 from reservation_boundary.effects import ReservationRelayBundle
-from reservation_boundary.types import ConversationIntentKind, NormalizedMessage, TypedFact
+from reservation_boundary.serialization import from_tool_arguments_canonical_json
+from reservation_boundary.types import (
+    ActivityPaymentArguments,
+    ActivityReservationArguments,
+    ConversationIntentKind,
+    LodgingPaymentArguments,
+    LodgingReservationArguments,
+    NormalizedMessage,
+    TypedFact,
+)
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -652,6 +661,102 @@ class CapabilityPolicy:
         ).hexdigest()
 
 
+class NormalizedCommandTool(str, Enum):
+    LODGING_RESERVATION = "cloudbeds_criar_reserva_v2"
+    ACTIVITY_RESERVATION = "bokun_agendar_passeio_v2"
+    LODGING_PAYMENT = "cloudbeds_lancar_pagamento_confirmar_reserva"
+    ACTIVITY_PAYMENT = "bokun_lancar_pagamento_confirmar_reserva"
+
+
+class NormalizedCommandArgumentsType(str, Enum):
+    LODGING_RESERVATION = "lodging_reservation"
+    ACTIVITY_RESERVATION = "activity_reservation"
+    LODGING_PAYMENT = "lodging_payment"
+    ACTIVITY_PAYMENT = "activity_payment"
+
+
+_NORMALIZED_COMMAND_PAIRS: Final = {
+    NormalizedCommandTool.LODGING_RESERVATION: (
+        NormalizedCommandArgumentsType.LODGING_RESERVATION,
+        LodgingReservationArguments,
+    ),
+    NormalizedCommandTool.ACTIVITY_RESERVATION: (
+        NormalizedCommandArgumentsType.ACTIVITY_RESERVATION,
+        ActivityReservationArguments,
+    ),
+    NormalizedCommandTool.LODGING_PAYMENT: (
+        NormalizedCommandArgumentsType.LODGING_PAYMENT,
+        LodgingPaymentArguments,
+    ),
+    NormalizedCommandTool.ACTIVITY_PAYMENT: (
+        NormalizedCommandArgumentsType.ACTIVITY_PAYMENT,
+        ActivityPaymentArguments,
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedToolProposal:
+    """Parent-normalized command proposal without authorization or provider payload."""
+
+    aggregate_turn_id: str
+    request_id: str
+    sequence: int
+    tool_name: NormalizedCommandTool
+    arguments_type: NormalizedCommandArgumentsType
+    typed_arguments_json: bytes
+    request_hash: str
+    frame_commitment_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-normalized-tool-proposal"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-normalized-tool-proposal-v1"
+
+    def __post_init__(self) -> None:
+        _require_id_token(
+            self.aggregate_turn_id,
+            "NormalizedToolProposal.aggregate_turn_id",
+        )
+        _require_id_token(self.request_id, "NormalizedToolProposal.request_id")
+        _require_exact_int(self.sequence, "NormalizedToolProposal.sequence", minimum=0)
+        if type(self.tool_name) is not NormalizedCommandTool:
+            raise TypeError("NormalizedToolProposal.tool_name must be exact")
+        if type(self.arguments_type) is not NormalizedCommandArgumentsType:
+            raise TypeError("NormalizedToolProposal.arguments_type must be exact")
+        expected_arguments_type, owner_type = _NORMALIZED_COMMAND_PAIRS[self.tool_name]
+        if self.arguments_type is not expected_arguments_type:
+            raise ValueError("NormalizedToolProposal tool/arguments pair mismatch")
+        from_tool_arguments_canonical_json(self.typed_arguments_json, owner_type)
+        _require_sha256(self.request_hash, "NormalizedToolProposal.request_hash")
+        _require_sha256(
+            self.frame_commitment_hash,
+            "NormalizedToolProposal.frame_commitment_hash",
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "aggregate_turn_id": self.aggregate_turn_id,
+                "request_id": self.request_id,
+                "sequence": self.sequence,
+                "tool_name": self.tool_name.value,
+                "arguments_type": self.arguments_type.value,
+                "typed_arguments_json": base64.b64encode(
+                    self.typed_arguments_json
+                ).decode("ascii"),
+                "request_hash": self.request_hash,
+                "frame_commitment_hash": self.frame_commitment_hash,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class LearningProposal:
     """Parent-owned deferred learning proposal with an explicit memory CAS."""
@@ -946,6 +1051,9 @@ __all__ = (
     "MayaIntentClosure",
     "MayaTurnClosure",
     "MayaTurnRequest",
+    "NormalizedCommandArgumentsType",
+    "NormalizedCommandTool",
+    "NormalizedToolProposal",
     "PublicReplyChunk",
     "PublicReplyType",
     "PublicRoute",

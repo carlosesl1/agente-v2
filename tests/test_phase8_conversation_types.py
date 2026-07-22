@@ -667,6 +667,114 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                         )
                     )
 
+    def test_normalized_tool_proposal_validates_closed_pair_and_owner_object(self) -> None:
+        proposal_type = getattr(conversation, "NormalizedToolProposal", None)
+        tool_type = getattr(conversation, "NormalizedCommandTool", None)
+        arguments_type = getattr(conversation, "NormalizedCommandArgumentsType", None)
+        for value in (proposal_type, tool_type, arguments_type):
+            self.assertIsNotNone(value)
+        assert proposal_type and tool_type and arguments_type
+        typed_arguments = (
+            b'{"confirmation_signature":"2222222222222222222222222222222222222222222222222222222222222222",'
+            b'"offer_id":"offer-1","summary_version":1}'
+        )
+        proposal = proposal_type(
+            aggregate_turn_id="turn-1",
+            request_id="request-1",
+            sequence=0,
+            tool_name=tool_type.LODGING_RESERVATION,
+            arguments_type=arguments_type.LODGING_RESERVATION,
+            typed_arguments_json=typed_arguments,
+            request_hash="0" * 64,
+            frame_commitment_hash="1" * 64,
+        )
+
+        self.assertEqual(
+            tuple(field.name for field in fields(proposal_type)),
+            (
+                "aggregate_turn_id",
+                "request_id",
+                "sequence",
+                "tool_name",
+                "arguments_type",
+                "typed_arguments_json",
+                "request_hash",
+                "frame_commitment_hash",
+            ),
+        )
+        self.assertEqual(
+            proposal.canonical_hash(),
+            "8ed73dd576a0388e571cac88e2bd329fa464c5db280c9c1beb93d39be731a0c6",
+        )
+        self.assertEqual(
+            proposal_type.DOMAIN,
+            "phase8-normalized-tool-proposal-v1",
+        )
+        payment_arguments = (
+            b'{"amount":{"$type":"DecimalSlot","data":{"value":"30.00"}},'
+            b'"anchor_id":"anchor-1","currency":"BRL","evidence_id":"evidence-1",'
+            b'"proof_status":"confirmed","receiver_profile_id":"receiver-1"}'
+        )
+        for tool, argument_kind, owner_bytes in (
+            (
+                tool_type.LODGING_RESERVATION,
+                arguments_type.LODGING_RESERVATION,
+                typed_arguments,
+            ),
+            (
+                tool_type.ACTIVITY_RESERVATION,
+                arguments_type.ACTIVITY_RESERVATION,
+                typed_arguments,
+            ),
+            (
+                tool_type.LODGING_PAYMENT,
+                arguments_type.LODGING_PAYMENT,
+                payment_arguments,
+            ),
+            (
+                tool_type.ACTIVITY_PAYMENT,
+                arguments_type.ACTIVITY_PAYMENT,
+                payment_arguments,
+            ),
+        ):
+            with self.subTest(tool=tool):
+                self.assertEqual(
+                    proposal_type(
+                        aggregate_turn_id="turn-1",
+                        request_id="request-1",
+                        sequence=0,
+                        tool_name=tool,
+                        arguments_type=argument_kind,
+                        typed_arguments_json=owner_bytes,
+                        request_hash="0" * 64,
+                        frame_commitment_hash="1" * 64,
+                    ).arguments_type,
+                    argument_kind,
+                )
+        valid = {
+            "aggregate_turn_id": "turn-1",
+            "request_id": "request-1",
+            "sequence": 0,
+            "tool_name": tool_type.LODGING_RESERVATION,
+            "arguments_type": arguments_type.LODGING_RESERVATION,
+            "typed_arguments_json": typed_arguments,
+            "request_hash": "0" * 64,
+            "frame_commitment_hash": "1" * 64,
+        }
+        invalid_overrides = (
+            {"tool_name": tool_type.ACTIVITY_RESERVATION},
+            {"arguments_type": arguments_type.ACTIVITY_RESERVATION},
+            {"typed_arguments_json": bytearray(typed_arguments)},
+            {"typed_arguments_json": b'{"offer_id":"offer-1","summary_version":1,"confirmation_signature":"' + b"2" * 64 + b'"}'},
+            {"typed_arguments_json": typed_arguments[:-1] + b',"extra":1}'},
+            {"typed_arguments_json": b'{"confirmation_signature":"short","offer_id":"offer-1","summary_version":1}'},
+            {"sequence": True},
+        )
+        for override in invalid_overrides:
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    proposal_type(**(valid | override))
+
     def test_learning_proposal_binds_v8_claim_memory_cas_and_frame(self) -> None:
         proposal_type = getattr(conversation, "LearningProposal", None)
         self.assertIsNotNone(proposal_type, "LearningProposal must have an owner")
