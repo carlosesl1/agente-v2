@@ -763,6 +763,135 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     proposal_type(**(valid | override))
 
+    def test_maya_turn_proposal_factory_binds_exact_accepted_closure(self) -> None:
+        proposal_type = conversation.MayaTurnProposal
+        intent = conversation.MayaIntentClosure(
+            ConversationIntentKind.REQUEST_HANDOFF,
+            None,
+            None,
+            True,
+        )
+        closure = conversation.MayaTurnClosure(
+            "turn-closure",
+            intent,
+            "Vou chamar uma pessoa.",
+            conversation.PublicRoute.HANDOFF,
+            conversation.PublicReplyType.HANDOFF,
+            3,
+            "a" * 64,
+            "session-closure",
+            True,
+        )
+        closure_hash = closure.canonical_hash()
+        chunk = conversation.PublicReplyChunk(
+            "turn-closure",
+            0,
+            closure.public_text,
+            closure_hash,
+        )
+        proposal = proposal_type.from_accepted_closure(
+            accepted_closure=closure,
+            read_observations=(),
+            facts=(),
+            normalized_tool_proposals=(),
+            learning_proposals=(),
+            public_reply_chunks=(chunk,),
+            final_transcript_commitment_hash="b" * 64,
+            final_transcript_mac="c" * 64,
+            runtime_graph_digest="d" * 64,
+        )
+        self.assertEqual(proposal.maya_turn_closure_hash, closure_hash)
+        proposal.verify_accepted_closure(closure)
+
+        divergent = conversation.MayaTurnClosure(
+            closure.aggregate_turn_id,
+            intent,
+            "Outro texto público.",
+            closure.route,
+            closure.reply_type,
+            closure.final_seq,
+            closure.expected_prefix_mac,
+            closure.ephemeral_session_id,
+            True,
+        )
+        with self.assertRaisesRegex(ValueError, "accepted closure binding mismatch"):
+            proposal.verify_accepted_closure(divergent)
+
+    def test_maya_turn_proposal_orders_interleaved_child_frames_globally(self) -> None:
+        proposal_type = conversation.MayaTurnProposal
+        tool_type = conversation.NormalizedToolProposal
+        tool_kind = conversation.NormalizedCommandTool
+        argument_kind = conversation.NormalizedCommandArgumentsType
+        typed_arguments = (
+            b'{"confirmation_signature":"2222222222222222222222222222222222222222222222222222222222222222",'
+            b'"offer_id":"offer-1","summary_version":1}'
+        )
+        tools = tuple(
+            tool_type(
+                aggregate_turn_id="turn-interleaved",
+                request_id=f"command-{sequence}",
+                sequence=sequence,
+                tool_name=tool_kind.LODGING_RESERVATION,
+                arguments_type=argument_kind.LODGING_RESERVATION,
+                typed_arguments_json=typed_arguments,
+                request_hash=str(sequence) * 64,
+                frame_commitment_hash=str(sequence + 3) * 64,
+            )
+            for sequence in (0, 2)
+        )
+        learning = conversation.LearningProposal(
+            aggregate_turn_id="turn-interleaved",
+            request_id="learning-1",
+            sequence=1,
+            claim=TypedFact("language", StringSlot("pt-BR"), "8" * 64),
+            expected_memory_version=0,
+            expected_memory_hash="6" * 64,
+            request_hash="7" * 64,
+            frame_commitment_hash="8" * 64,
+        )
+        intent = conversation.MayaIntentClosure(
+            ConversationIntentKind.INFORM,
+            None,
+            None,
+            False,
+        )
+        closure = conversation.MayaTurnClosure(
+            "turn-interleaved",
+            intent,
+            "Resposta pública.",
+            conversation.PublicRoute.RECEPTIONIST,
+            conversation.PublicReplyType.ANSWER,
+            3,
+            "9" * 64,
+            "session-interleaved",
+            True,
+        )
+        closure_hash = closure.canonical_hash()
+        proposal = proposal_type(
+            aggregate_turn_id=closure.aggregate_turn_id,
+            intent_closure=closure.intent_closure,
+            read_observations=(),
+            facts=(),
+            normalized_tool_proposals=tools,
+            learning_proposals=(learning,),
+            public_reply_chunks=(
+                conversation.PublicReplyChunk(
+                    closure.aggregate_turn_id,
+                    0,
+                    closure.public_text,
+                    closure_hash,
+                ),
+            ),
+            maya_turn_closure_hash=closure_hash,
+            final_transcript_commitment_hash="a" * 64,
+            final_seq=closure.final_seq,
+            final_transcript_mac="b" * 64,
+            runtime_graph_digest="c" * 64,
+            route=closure.route,
+            reply_type=closure.reply_type,
+        )
+        self.assertEqual(proposal.final_seq, 3)
+
     def test_normalized_tool_proposal_validates_closed_pair_and_owner_object(self) -> None:
         proposal_type = getattr(conversation, "NormalizedToolProposal", None)
         tool_type = getattr(conversation, "NormalizedCommandTool", None)

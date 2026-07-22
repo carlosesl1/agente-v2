@@ -1043,16 +1043,26 @@ class MayaTurnProposal:
         child_proposals = self.normalized_tool_proposals + self.learning_proposals
         if any(item.aggregate_turn_id != self.aggregate_turn_id for item in child_proposals):
             raise ValueError("MayaTurnProposal child turn binding mismatch")
-        sequences = tuple(item.sequence for item in child_proposals)
-        request_ids = tuple(item.request_id for item in child_proposals)
-        frame_hashes = tuple(item.frame_commitment_hash for item in child_proposals)
+        tool_sequences = tuple(item.sequence for item in self.normalized_tool_proposals)
+        learning_sequences = tuple(item.sequence for item in self.learning_proposals)
+        if tool_sequences != tuple(sorted(tool_sequences)) or learning_sequences != tuple(
+            sorted(learning_sequences)
+        ):
+            raise ValueError("MayaTurnProposal typed child artifacts must be ordered")
+        ordered_child_proposals = tuple(
+            sorted(child_proposals, key=lambda item: item.sequence)
+        )
+        sequences = tuple(item.sequence for item in ordered_child_proposals)
+        request_ids = tuple(item.request_id for item in ordered_child_proposals)
+        frame_hashes = tuple(
+            item.frame_commitment_hash for item in ordered_child_proposals
+        )
         if (
             len(set(sequences)) != len(sequences)
-            or sequences != tuple(sorted(sequences))
             or len(set(request_ids)) != len(request_ids)
             or len(set(frame_hashes)) != len(frame_hashes)
         ):
-            raise ValueError("MayaTurnProposal child artifacts must be unique and ordered")
+            raise ValueError("MayaTurnProposal child artifacts must be unique")
 
         if type(self.public_reply_chunks) is not tuple or any(
             type(item) is not PublicReplyChunk for item in self.public_reply_chunks
@@ -1103,6 +1113,58 @@ class MayaTurnProposal:
         )
         if intent_handoff != is_handoff:
             raise ValueError("MayaTurnProposal intent/route handoff mismatch")
+
+    @classmethod
+    def from_accepted_closure(
+        cls,
+        *,
+        accepted_closure: MayaTurnClosure,
+        read_observations: tuple["ReadObservation", ...],
+        facts: tuple[TypedFact, ...],
+        normalized_tool_proposals: tuple[NormalizedToolProposal, ...],
+        learning_proposals: tuple[LearningProposal, ...],
+        public_reply_chunks: tuple[PublicReplyChunk, ...],
+        final_transcript_commitment_hash: str,
+        final_transcript_mac: str,
+        runtime_graph_digest: str,
+    ) -> MayaTurnProposal:
+        """Build the parent proposal from the exact accepted child closure."""
+
+        if type(accepted_closure) is not MayaTurnClosure:
+            raise TypeError("accepted_closure must be exact MayaTurnClosure")
+        proposal = cls(
+            aggregate_turn_id=accepted_closure.aggregate_turn_id,
+            intent_closure=accepted_closure.intent_closure,
+            read_observations=read_observations,
+            facts=facts,
+            normalized_tool_proposals=normalized_tool_proposals,
+            learning_proposals=learning_proposals,
+            public_reply_chunks=public_reply_chunks,
+            maya_turn_closure_hash=accepted_closure.canonical_hash(),
+            final_transcript_commitment_hash=final_transcript_commitment_hash,
+            final_seq=accepted_closure.final_seq,
+            final_transcript_mac=final_transcript_mac,
+            runtime_graph_digest=runtime_graph_digest,
+            route=accepted_closure.route,
+            reply_type=accepted_closure.reply_type,
+        )
+        proposal.verify_accepted_closure(accepted_closure)
+        return proposal
+
+    def verify_accepted_closure(self, accepted_closure: MayaTurnClosure) -> None:
+        """Reject a decoded proposal unless it binds the exact accepted closure."""
+
+        if type(accepted_closure) is not MayaTurnClosure:
+            raise TypeError("accepted_closure must be exact MayaTurnClosure")
+        if (
+            self.aggregate_turn_id != accepted_closure.aggregate_turn_id
+            or self.intent_closure != accepted_closure.intent_closure
+            or self.maya_turn_closure_hash != accepted_closure.canonical_hash()
+            or self.final_seq != accepted_closure.final_seq
+            or self.route is not accepted_closure.route
+            or self.reply_type is not accepted_closure.reply_type
+        ):
+            raise ValueError("MayaTurnProposal accepted closure binding mismatch")
 
     def to_canonical_bytes(self) -> bytes:
         return _canonical_envelope(
