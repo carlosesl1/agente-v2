@@ -834,7 +834,7 @@ QualificationCancelStartReceipt(
     request_hash: SHA256,
     qualification_id: ID_TOKEN,
     epoch: POSITIVE,
-    origin_run_status: QualificationRunStatus,
+    origin_run_status: QualificationCancelOriginRunStatus,
     origin_run_revision: POSITIVE,
     origin_admission_status: AdmissionState,
     origin_admission_revision: POSITIVE,
@@ -1265,6 +1265,14 @@ ephemeral_canary | persistent_production
 ```text
 canary_e2e | sealed_canary_qualification | conversation_test | production_initial
 ```
+
+`QualificationCancelOriginRunStatus` is exactly:
+
+```text
+installing | open | qualifying | effects_verified | learning_drained | memory_sealed | transition_recorded | qualified
+```
+
+This subset is deliberate: `frozen`, `cancelled` and `manual_review` are rejected before constructing `QualificationCancelStartReceipt`, so every legal origin state is covered by every origin-dependent nullable matrix.
 
 `QualificationRunStatus` is exactly:
 
