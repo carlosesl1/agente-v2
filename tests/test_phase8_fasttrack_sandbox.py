@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import reservation_boundary.sandbox as sandbox
 from reservation_boundary.sandbox import (
     HermesDockerModel,
     ModelCallFailed,
@@ -35,10 +36,52 @@ def _response(
             "effect_proposals": effects or [],
             "facts": [],
             "intent": "inform",
+            "read_requests": [],
             "reply": reply,
             "reply_type": "answer",
             "route": "recepcionista",
             "schema": "phase8-sandbox-model-response-v1",
+        }
+    )
+
+
+def _response_with_reads(
+    reads: list[dict[str, object]],
+    *,
+    reply: str = "Vou consultar a hospedagem.",
+) -> bytes:
+    value = json.loads(_response(reply))
+    value["read_requests"] = reads
+    return _canonical(value)
+
+
+def _observation(
+    *,
+    options: list[dict[str, object]] | None = None,
+) -> bytes:
+    return _canonical(
+        {
+            "availability_confirmed": True,
+            "options": options
+            or [
+                {
+                    "adults": 2,
+                    "available_units": 1,
+                    "check_in": "2026-08-10",
+                    "check_out": "2026-08-12",
+                    "children": 0,
+                    "currency": "BRL",
+                    "nights": 2,
+                    "price_reliable": True,
+                    "room_public_name": "Quarto privativo",
+                    "total_amount": "480.00",
+                }
+            ],
+            "price_confirmed": True,
+            "public_summary": "Encontrei uma opção de hospedagem.",
+            "raw_provider_payload_returned": False,
+            "schema": "phase8-sandbox-lodging-observation-v1",
+            "status": "ok",
         }
     )
 
@@ -66,6 +109,85 @@ class _RunResult:
 
 
 class FastTrackSandboxTests(unittest.TestCase):
+    def test_lodging_read_request_is_closed_and_canonical(self) -> None:
+        payload = _response_with_reads(
+            [
+                {
+                    "arguments": {
+                        "adults": 2,
+                        "check_in": "2026-08-10",
+                        "check_out": "2026-08-12",
+                        "children": 0,
+                    },
+                    "kind": "lodging_availability",
+                }
+            ]
+        )
+
+        response = sandbox.SandboxModelResponse.from_canonical_bytes(payload)
+
+        self.assertEqual(len(response.read_requests), 1)
+        request = response.read_requests[0]
+        self.assertEqual(request.check_in, "2026-08-10")
+        self.assertEqual(request.check_out, "2026-08-12")
+        self.assertEqual(request.adults, 2)
+        self.assertEqual(request.children, 0)
+        self.assertEqual(
+            json.loads(request.to_canonical_bytes()),
+            {
+                "arguments": {
+                    "adults": 2,
+                    "check_in": "2026-08-10",
+                    "check_out": "2026-08-12",
+                    "children": 0,
+                },
+                "kind": "lodging_availability",
+            },
+        )
+
+    def test_lodging_read_request_rejects_hostile_shapes(self) -> None:
+        arguments: dict[str, object] = {
+            "adults": 2,
+            "check_in": "2026-08-10",
+            "check_out": "2026-08-12",
+            "children": 0,
+        }
+        valid: dict[str, object] = {
+            "arguments": arguments,
+            "kind": "lodging_availability",
+        }
+        hostile = (
+            {**valid, "extra": "no"},
+            {**valid, "arguments": {**arguments, "adults": True}},
+            {**valid, "arguments": {**arguments, "check_in": "10/08/2026"}},
+            {**valid, "arguments": {**arguments, "check_out": "2026-08-10"}},
+        )
+        for item in hostile:
+            with self.subTest(item=item):
+                with self.assertRaises(sandbox.SandboxProtocolError):
+                    sandbox.SandboxModelResponse.from_canonical_bytes(
+                        _response_with_reads([item])
+                    )
+        with self.assertRaises(sandbox.SandboxProtocolError):
+            sandbox.SandboxModelResponse.from_canonical_bytes(
+                _response_with_reads([valid, valid])
+            )
+
+    def test_lodging_observation_round_trips_and_rejects_internal_ids(self) -> None:
+        observation = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+
+        self.assertEqual(observation.status, "ok")
+        self.assertEqual(observation.to_canonical_bytes(), _observation())
+        self.assertRegex(observation.canonical_hash(), r"^[0-9a-f]{64}$")
+        hostile_option = json.loads(_observation())["options"][0]
+        hostile_option["room_type_id"] = "internal-101"
+        with self.assertRaises(sandbox.SandboxProtocolError):
+            sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+                _observation(options=[hostile_option])
+            )
+
     def test_multi_turn_history_is_durable_and_isolated_by_session(self) -> None:
         model = _QueueModel(_response("Primeiro."), _response("Segundo."))
         with tempfile.TemporaryDirectory() as tmp:

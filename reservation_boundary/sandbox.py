@@ -8,6 +8,7 @@ every proposal is reduced to a durable ``blocked`` record.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import hashlib
 import json
 from pathlib import Path
@@ -42,6 +43,140 @@ class SandboxModelPort(Protocol):
         system_prompt: str,
         messages: tuple[tuple[str, str], ...],
     ) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LodgingAvailabilityReadRequest:
+    check_in: str
+    check_out: str
+    adults: int
+    children: int
+
+    @classmethod
+    def from_mapping(cls, value: object) -> "LodgingAvailabilityReadRequest":
+        if type(value) is not dict or set(value) != {"kind", "arguments"}:
+            raise SandboxProtocolError("lodging read request fields mismatch")
+        if value["kind"] != "lodging_availability":
+            raise SandboxProtocolError("lodging read request kind mismatch")
+        arguments = value["arguments"]
+        expected = {"check_in", "check_out", "adults", "children"}
+        if type(arguments) is not dict or set(arguments) != expected:
+            raise SandboxProtocolError("lodging read arguments mismatch")
+        check_in = _iso_date(arguments["check_in"], "check_in")
+        check_out = _iso_date(arguments["check_out"], "check_out")
+        if date.fromisoformat(check_out) <= date.fromisoformat(check_in):
+            raise SandboxProtocolError("check_out must be after check_in")
+        adults = _bounded_int(arguments["adults"], "adults", minimum=1, maximum=20)
+        children = _bounded_int(
+            arguments["children"], "children", minimum=0, maximum=20
+        )
+        return cls(check_in, check_out, adults, children)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "arguments": {
+                "adults": self.adults,
+                "check_in": self.check_in,
+                "check_out": self.check_out,
+                "children": self.children,
+            },
+            "kind": "lodging_availability",
+        }
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_json(self.to_mapping())
+
+
+_OBSERVATION_SCHEMA: Final = "phase8-sandbox-lodging-observation-v1"
+_OBSERVATION_STATUSES: Final = frozenset(
+    ("ok", "no_bookable_options", "provider_error")
+)
+_PUBLIC_OPTION_REQUIRED: Final = frozenset(
+    (
+        "adults",
+        "check_in",
+        "check_out",
+        "children",
+        "nights",
+        "price_reliable",
+        "room_public_name",
+    )
+)
+_PUBLIC_OPTION_ALLOWED: Final = _PUBLIC_OPTION_REQUIRED | frozenset(
+    ("available_units", "currency", "total_amount")
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LodgingAvailabilityObservation:
+    status: str
+    availability_confirmed: bool
+    price_confirmed: bool
+    options: tuple[dict[str, object], ...]
+    public_summary: str
+    raw_provider_payload_returned: bool = False
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "LodgingAvailabilityObservation":
+        parsed = _parse_json(payload)
+        expected = {
+            "availability_confirmed",
+            "options",
+            "price_confirmed",
+            "public_summary",
+            "raw_provider_payload_returned",
+            "schema",
+            "status",
+        }
+        if type(parsed) is not dict or set(parsed) != expected:
+            raise SandboxProtocolError("lodging observation fields mismatch")
+        if parsed["schema"] != _OBSERVATION_SCHEMA:
+            raise SandboxProtocolError("lodging observation schema mismatch")
+        status = _text(parsed["status"], "observation status")
+        if status not in _OBSERVATION_STATUSES:
+            raise SandboxProtocolError("lodging observation status is outside the closed set")
+        availability = parsed["availability_confirmed"]
+        price = parsed["price_confirmed"]
+        raw_returned = parsed["raw_provider_payload_returned"]
+        if type(availability) is not bool or type(price) is not bool:
+            raise SandboxProtocolError("lodging observation flags must be exact booleans")
+        if raw_returned is not False:
+            raise SandboxProtocolError("raw provider payload must remain false")
+        raw_options = parsed["options"]
+        if type(raw_options) is not list or len(raw_options) > 5:
+            raise SandboxProtocolError("lodging observation options are outside the limit")
+        options = tuple(_public_lodging_option(item) for item in raw_options)
+        if status == "ok" and (not options or not availability):
+            raise SandboxProtocolError("ok lodging observation requires available options")
+        if status != "ok" and (options or availability or price):
+            raise SandboxProtocolError("non-ok lodging observation cannot claim options")
+        has_price = any("total_amount" in item for item in options)
+        if price is not has_price:
+            raise SandboxProtocolError("price_confirmed diverges from public options")
+        summary = _text(parsed["public_summary"], "public_summary")
+        observation = cls(status, availability, price, options, summary, False)
+        if observation.to_canonical_bytes() != payload:
+            raise SandboxProtocolError("lodging observation must be canonical JSON")
+        return observation
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_json(
+            {
+                "availability_confirmed": self.availability_confirmed,
+                "options": list(self.options),
+                "price_confirmed": self.price_confirmed,
+                "public_summary": self.public_summary,
+                "raw_provider_payload_returned": False,
+                "schema": _OBSERVATION_SCHEMA,
+                "status": self.status,
+            }
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            b"phase8-sandbox-lodging-observation-v1\x00"
+            + self.to_canonical_bytes()
+        ).hexdigest()
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -107,6 +242,73 @@ def _closed_json(value: object, name: str) -> object:
     raise SandboxProtocolError(f"{name} contains an unsupported JSON value")
 
 
+def _bounded_int(
+    value: object,
+    name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if type(value) is not int or value < minimum or value > maximum:
+        raise SandboxProtocolError(
+            f"{name} must be an exact integer between {minimum} and {maximum}"
+        )
+    return value
+
+
+def _iso_date(value: object, name: str) -> str:
+    text = _text(value, name)
+    try:
+        parsed = date.fromisoformat(text)
+    except ValueError as exc:
+        raise SandboxProtocolError(f"{name} must be an ISO date") from exc
+    if parsed.isoformat() != text:
+        raise SandboxProtocolError(f"{name} must be a canonical ISO date")
+    return text
+
+
+def _public_lodging_option(value: object) -> dict[str, object]:
+    if type(value) is not dict:
+        raise SandboxProtocolError("lodging option must be an object")
+    fields = set(value)
+    if not _PUBLIC_OPTION_REQUIRED <= fields or not fields <= _PUBLIC_OPTION_ALLOWED:
+        raise SandboxProtocolError("lodging option fields mismatch")
+    result: dict[str, object] = {
+        "adults": _bounded_int(value["adults"], "option.adults", minimum=1, maximum=20),
+        "check_in": _iso_date(value["check_in"], "option.check_in"),
+        "check_out": _iso_date(value["check_out"], "option.check_out"),
+        "children": _bounded_int(
+            value["children"], "option.children", minimum=0, maximum=20
+        ),
+        "nights": _bounded_int(value["nights"], "option.nights", minimum=1, maximum=365),
+        "price_reliable": value["price_reliable"],
+        "room_public_name": _text(value["room_public_name"], "option.room_public_name"),
+    }
+    if type(result["price_reliable"]) is not bool:
+        raise SandboxProtocolError("option.price_reliable must be an exact boolean")
+    if date.fromisoformat(str(result["check_out"])) <= date.fromisoformat(
+        str(result["check_in"])
+    ):
+        raise SandboxProtocolError("option.check_out must be after check_in")
+    if "available_units" in value:
+        result["available_units"] = _bounded_int(
+            value["available_units"],
+            "option.available_units",
+            minimum=1,
+            maximum=10_000,
+        )
+    if "total_amount" in value:
+        result["total_amount"] = _text(value["total_amount"], "option.total_amount")
+        if "currency" not in value:
+            raise SandboxProtocolError("priced option requires currency")
+    if "currency" in value:
+        currency = _text(value["currency"], "option.currency")
+        if not re.fullmatch(r"[A-Z]{3}", currency):
+            raise SandboxProtocolError("option.currency must be ISO-like uppercase")
+        result["currency"] = currency
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class EffectProposal:
     kind: str
@@ -137,6 +339,7 @@ class SandboxModelResponse:
     reply_type: str
     reply: str
     facts: tuple[tuple[str, object], ...]
+    read_requests: tuple[LodgingAvailabilityReadRequest, ...]
     effect_proposals: tuple[EffectProposal, ...]
 
     @classmethod
@@ -149,6 +352,7 @@ class SandboxModelResponse:
             "reply_type",
             "reply",
             "facts",
+            "read_requests",
             "effect_proposals",
         }
         if type(parsed) is not dict or set(parsed) != expected:
@@ -187,6 +391,13 @@ class SandboxModelResponse:
             facts.append((name, value))
             seen_facts.add(name)
 
+        raw_reads = parsed["read_requests"]
+        if type(raw_reads) is not list or len(raw_reads) > 1:
+            raise SandboxProtocolError("read_requests must contain at most one item")
+        read_requests = tuple(
+            LodgingAvailabilityReadRequest.from_mapping(item) for item in raw_reads
+        )
+
         raw_effects = parsed["effect_proposals"]
         if type(raw_effects) is not list:
             raise SandboxProtocolError("effect_proposals must be an array")
@@ -198,7 +409,15 @@ class SandboxModelResponse:
 
         if _canonical_json(parsed) != payload:
             raise SandboxProtocolError("model response must be canonical JSON")
-        return cls(intent, route, reply_type, reply, tuple(facts), tuple(effects))
+        return cls(
+            intent,
+            route,
+            reply_type,
+            reply,
+            tuple(facts),
+            read_requests,
+            tuple(effects),
+        )
 
 
 @dataclass(frozen=True, slots=True)
