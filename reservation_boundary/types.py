@@ -6,9 +6,11 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum
+import hashlib
+import json
 import math
 import re
-from typing import Final, TypeAlias, get_args
+from typing import ClassVar, Final, TypeAlias, get_args
 
 from reservation_domain import ReservationCommand, STATE_TYPES, WorkflowState
 from reservation_execution import OutboxMessage
@@ -237,13 +239,80 @@ _SLOT_TYPES: Final = get_args(SlotValue)
 
 @dataclass(frozen=True, slots=True)
 class TypedFact:
+    SCHEMA: ClassVar[str] = "phase8-typed-fact"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-typed-fact-v1"
+
     name: str
     value: SlotValue
+    frame_commitment_hash: str | None = None
 
     def __post_init__(self) -> None:
         _require_exact_str(self.name, "TypedFact.name", identifier=True)
         if type(self.value) not in _SLOT_TYPES:
             raise TypeError("TypedFact.value must be an exact SlotValue variant")
+        if self.frame_commitment_hash is None:
+            return
+        if (
+            type(self.frame_commitment_hash) is not str
+            or _SHA256_RE.fullmatch(self.frame_commitment_hash) is None
+        ):
+            raise ValueError("TypedFact.frame_commitment_hash must be lowercase SHA-256")
+
+        expected_types: dict[str, type[object]] = {
+            "language": StringSlot,
+            "service": StringSlot,
+            "start_date": DateSlot,
+            "end_date": DateSlot,
+            "adults": IntegerSlot,
+            "children": IntegerSlot,
+        }
+        expected = expected_types.get(self.name)
+        if expected is None:
+            raise ValueError("TypedFact.name is outside the Phase 8 fact catalog")
+        if type(self.value) is not expected:
+            raise TypeError("TypedFact.value does not match its Phase 8 fact name")
+        if self.name == "language" and _LOCALE_RE.fullmatch(self.value.value) is None:
+            raise ValueError("language fact must use a canonical locale")
+        if self.name == "service" and self.value.value not in ("hostel", "agency"):
+            raise ValueError("service fact must be hostel or agency")
+        if self.name == "adults" and self.value.value < 1:
+            raise ValueError("adults fact must be >= 1")
+
+    def to_canonical_bytes(self) -> bytes:
+        if self.frame_commitment_hash is None:
+            raise ValueError("legacy TypedFact cannot serialize as Phase 8")
+        if type(self.value) is StringSlot:
+            kind = "string"
+            value: object = self.value.value
+        elif type(self.value) is IntegerSlot:
+            kind = "integer"
+            value = self.value.value
+        elif type(self.value) is DateSlot:
+            kind = "date"
+            value = self.value.value.isoformat()
+        else:  # pragma: no cover - constructor closes the v8 catalog
+            raise TypeError("unsupported Phase 8 TypedFact slot")
+        return json.dumps(
+            {
+                "schema": self.SCHEMA,
+                "version": self.VERSION,
+                "data": {
+                    "name": self.name,
+                    "value": {"kind": kind, "value": value},
+                    "frame_commitment_hash": self.frame_commitment_hash,
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\0" + self.to_canonical_bytes()
+        ).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

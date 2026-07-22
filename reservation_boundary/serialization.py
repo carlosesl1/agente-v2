@@ -41,6 +41,7 @@ from reservation_boundary.types import (
     LegacyLeadSnapshot,
     PUBLIC_TYPES as BOUNDARY_TYPES,
     ToolDispatchRequest,
+    TypedFact,
     TurnEnvelope,
     TurnLease,
     TurnPlan,
@@ -121,6 +122,17 @@ def _encode_dataclass(cls: type[object], value: object) -> dict[str, object]:
     if type(value) is not cls:
         raise ValueError(f"value must be the exact {cls.__name__} type")
     hints = _hints(cls)
+    if cls is TypedFact:
+        if value.frame_commitment_hash is not None:
+            raise ValueError("Phase 8 TypedFact cannot be downgraded to Phase 7 wire")
+        encoded = {
+            "name": _encode_value(hints["name"], value.name),
+            "value": _encode_value(hints["value"], value.value),
+        }
+        reconstructed = _decode_dataclass(cls, encoded)
+        if reconstructed != value:
+            raise ValueError("TypedFact contains noncanonical Phase 7 field values")
+        return encoded
     encoded = {
         field.name: _encode_value(hints[field.name], getattr(value, field.name))
         for field in fields(cls)
@@ -185,7 +197,7 @@ def _decode_tagged(value: object, expected_tag: str, *, key: str) -> object:
 def _decode_dataclass(cls: type[object], value: object) -> object:
     if type(value) is not dict:
         raise ValueError(f"{cls.__name__} data must be an object")
-    expected = {field.name for field in fields(cls)}
+    expected = {"name", "value"} if cls is TypedFact else {field.name for field in fields(cls)}
     actual = set(value)
     if actual != expected:
         raise ValueError(
@@ -194,6 +206,11 @@ def _decode_dataclass(cls: type[object], value: object) -> object:
         )
     hints = _hints(cls)
     try:
+        if cls is TypedFact:
+            return TypedFact(
+                _decode_value(hints["name"], value["name"]),
+                _decode_value(hints["value"], value["value"]),
+            )
         return cls(
             **{
                 field.name: _decode_value(hints[field.name], value[field.name])

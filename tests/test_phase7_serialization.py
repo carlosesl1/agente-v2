@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 import unittest
 
 from reservation_domain import new_workflow
@@ -27,7 +29,10 @@ from reservation_boundary.types import (
     KernelDecision,
     LegacyLeadSnapshot,
     NormalizedMessage,
+    StateCommitArguments,
+    StringSlot,
     ToolDispatchRequest,
+    TypedFact,
     TurnEnvelope,
     TurnLease,
     TurnPlan,
@@ -187,6 +192,38 @@ class Phase7SerializationTests(unittest.TestCase):
         self.assertEqual(decoded.version, 1)
         self.assertNotEqual(semantic_hash(decoded), semantic_hash(state))
         self.assertEqual(from_wire_json(to_wire_json(replace(decoded)), BoundaryState), decoded)
+
+    def test_typed_fact_wire_remains_exact_and_rejects_v8_downgrade(self) -> None:
+        fixture = json.loads(
+            (
+                Path(__file__).parent
+                / "fixtures"
+                / "phase8_facts_reads_wire_v1.json"
+            ).read_text(encoding="utf-8")
+        )["phase7_compatibility"]["state_commit_request"]
+        request = ToolDispatchRequest(
+            tool_name="chapada_commit_state",
+            arguments=StateCommitArguments(
+                (TypedFact("language", StringSlot("pt-BR")),)
+            ),
+            lead_key="lead-synthetic-001",
+            event_id="event-synthetic-001",
+            deadline=datetime(2026, 8, 1, 12, 5, tzinfo=timezone.utc),
+        )
+
+        wire = to_wire_json(request)
+        self.assertEqual(wire, fixture["canonical_utf8"])
+        self.assertEqual(semantic_hash(request), fixture["semantic_hash"])
+        self.assertEqual(from_wire_json(wire, ToolDispatchRequest), request)
+
+        v8_request = replace(
+            request,
+            arguments=StateCommitArguments(
+                (TypedFact("language", StringSlot("pt-BR"), "a" * 64),)
+            ),
+        )
+        with self.assertRaises(ValueError):
+            to_wire_json(v8_request)
 
 
 if __name__ == "__main__":
