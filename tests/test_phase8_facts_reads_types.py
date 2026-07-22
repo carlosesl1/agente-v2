@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import date, datetime
 import hashlib
 import json
@@ -24,7 +24,13 @@ from reservation_boundary.types import (
     LodgingReadArguments,
     RoomDescriptionArguments,
 )
-from reservation_boundary.reads import LegacyGenesisReadRequest, Phase8ToolReadRequest
+from reservation_boundary.reads import (
+    GenesisStatus,
+    LegacyGenesisEvidenceRecord,
+    LegacyGenesisReadRequest,
+    LegacyGenesisReceipt,
+    Phase8ToolReadRequest,
+)
 
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "phase8_facts_reads_wire_v1.json"
@@ -339,6 +345,87 @@ class Phase8ReadRequestTests(unittest.TestCase):
                 event,
                 deadline,
                 "another_source",
+            )
+
+
+class Phase8GenesisEvidenceTests(unittest.TestCase):
+    def test_genesis_receipts_and_owner_records_match_all_known_answers(self) -> None:
+        examples = _fixture()["examples"]
+        for status in ("found", "proven_absent", "unavailable"):
+            with self.subTest(status=status):
+                receipt_item = examples[f"legacy_genesis_receipt.{status}"]
+                receipt = LegacyGenesisReceipt.from_canonical_bytes(
+                    receipt_item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertEqual(receipt.status.value, status)
+                self.assertEqual(
+                    receipt.to_canonical_bytes().decode("utf-8"),
+                    receipt_item["canonical_utf8"],
+                )
+                self.assertEqual(receipt.canonical_hash(), receipt_item["canonical_hash"])
+
+                record_item = examples[f"legacy_genesis_evidence_record.{status}"]
+                record = LegacyGenesisEvidenceRecord.from_canonical_bytes(
+                    record_item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertEqual(record.receipt_bytes, receipt.to_canonical_bytes())
+                self.assertEqual(
+                    record.to_canonical_bytes().decode("utf-8"),
+                    record_item["canonical_utf8"],
+                )
+                self.assertEqual(record.canonical_hash(), record_item["canonical_hash"])
+
+    def test_genesis_evidence_rejects_status_confusion_and_preimage_swaps(self) -> None:
+        examples = _fixture()["examples"]
+        found = LegacyGenesisReceipt.from_canonical_bytes(
+            examples["legacy_genesis_receipt.found"]["canonical_utf8"].encode("utf-8")
+        )
+        absent = LegacyGenesisReceipt.from_canonical_bytes(
+            examples["legacy_genesis_receipt.proven_absent"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        unavailable = LegacyGenesisReceipt.from_canonical_bytes(
+            examples["legacy_genesis_receipt.unavailable"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        self.assertIs(found.status, GenesisStatus.FOUND)
+        self.assertIs(absent.status, GenesisStatus.PROVEN_ABSENT)
+        self.assertIs(unavailable.status, GenesisStatus.UNAVAILABLE)
+        self.assertNotEqual(absent, unavailable)
+
+        with self.assertRaises(ValueError):
+            replace(found, receipt_id="genesis:" + "0" * 64)
+        with self.assertRaises(ValueError):
+            replace(absent, matched_row_count=1)
+        with self.assertRaises((TypeError, ValueError)):
+            replace(unavailable, failure_evidence_hash=None)
+
+        found_record = LegacyGenesisEvidenceRecord.from_canonical_bytes(
+            examples["legacy_genesis_evidence_record.found"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        unavailable_record = LegacyGenesisEvidenceRecord.from_canonical_bytes(
+            examples["legacy_genesis_evidence_record.unavailable"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        with self.assertRaises(ValueError):
+            replace(
+                found_record,
+                source_snapshot_bytes=found_record.source_snapshot_bytes + b" ",
+            )
+        with self.assertRaises(ValueError):
+            replace(
+                found_record,
+                failure_evidence_bytes=unavailable_record.failure_evidence_bytes,
+            )
+        with self.assertRaises(ValueError):
+            replace(
+                unavailable_record,
+                receipt_bytes=absent.to_canonical_bytes(),
             )
 
 
