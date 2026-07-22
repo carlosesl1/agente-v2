@@ -598,6 +598,157 @@ class TurnReceipt:
         return receipt
 
 
+_TURN_ARTIFACT_KINDS = frozenset(
+    {
+        "frame_commitment",
+        "read_observation",
+        "typed_fact",
+        "normalized_tool_proposal",
+        "learning_proposal",
+        "maya_closure",
+        "maya_proposal",
+        "kernel_decision",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TurnArtifactWrite:
+    artifact_id: str
+    artifact_kind: str
+    frame_sequence: int | None
+    frame_reference: str | None
+    canonical_bytes: bytes
+    artifact_hash: str
+
+    def __post_init__(self) -> None:
+        _receipt_id(self.artifact_id, "TurnArtifactWrite.artifact_id")
+        if type(self.artifact_kind) is not str or self.artifact_kind not in _TURN_ARTIFACT_KINDS:
+            raise ValueError("TurnArtifactWrite.artifact_kind is not closed")
+        if self.frame_sequence is not None:
+            _require_int(
+                self.frame_sequence,
+                "TurnArtifactWrite.frame_sequence",
+                minimum=1,
+            )
+        if self.frame_reference is not None:
+            _require_hash(
+                self.frame_reference,
+                "TurnArtifactWrite.frame_reference",
+            )
+        envelope = _receipt_load_json(self.canonical_bytes, "TurnArtifactWrite.canonical_bytes")
+        if _receipt_json(envelope) != self.canonical_bytes:
+            raise ValueError("TurnArtifactWrite.canonical_bytes are not canonical")
+        _require_hash(self.artifact_hash, "TurnArtifactWrite.artifact_hash")
+
+
+@dataclass(frozen=True, slots=True)
+class CommandRelayWrite:
+    relay_id: str
+    command_id: str
+    bundle_bytes: bytes
+    bundle_hash: str
+
+    def __post_init__(self) -> None:
+        _receipt_id(self.relay_id, "CommandRelayWrite.relay_id")
+        _require_id(self.command_id, "CommandRelayWrite.command_id")
+        envelope = _receipt_load_json(self.bundle_bytes, "CommandRelayWrite.bundle_bytes")
+        if _receipt_json(envelope) != self.bundle_bytes:
+            raise ValueError("CommandRelayWrite.bundle_bytes are not canonical")
+        _require_hash(self.bundle_hash, "CommandRelayWrite.bundle_hash")
+
+
+@dataclass(frozen=True, slots=True)
+class InternalOutboxWrite:
+    job_id: str
+    job_kind: str
+    artifact_bytes: bytes
+    artifact_hash: str
+    qualification_id: str | None
+    epoch: int | None
+    target_operation_id: str
+
+    def __post_init__(self) -> None:
+        _receipt_id(self.job_id, "InternalOutboxWrite.job_id")
+        if type(self.job_kind) is not str or self.job_kind not in {
+            "handoff_relay",
+            "learning_proposal",
+        }:
+            raise ValueError("InternalOutboxWrite.job_kind is not closed")
+        envelope = _receipt_load_json(
+            self.artifact_bytes,
+            "InternalOutboxWrite.artifact_bytes",
+        )
+        if _receipt_json(envelope) != self.artifact_bytes:
+            raise ValueError("InternalOutboxWrite.artifact_bytes are not canonical")
+        _require_hash(self.artifact_hash, "InternalOutboxWrite.artifact_hash")
+        if (self.qualification_id is None) != (self.epoch is None):
+            raise ValueError("InternalOutboxWrite qualification/epoch must be all-null or present")
+        if self.qualification_id is not None:
+            _receipt_id(self.qualification_id, "InternalOutboxWrite.qualification_id")
+            _require_int(self.epoch, "InternalOutboxWrite.epoch", minimum=1)
+        _receipt_id(
+            self.target_operation_id,
+            "InternalOutboxWrite.target_operation_id",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PublicOutboxWrite:
+    public_row_id: str
+    chunk: PublicReplyChunk
+    idempotency_key: str
+    target_binding_hash: str
+    channel_id: str
+    channel_scope: str
+    authorization_kind: str
+    authorization_id: str
+    scope_subject_id: str
+    allocation_id: str
+    immutable_generation: int
+    qualification_id: str | None
+    scenario_id: str | None
+    capability_policy_digest: str
+    effect_authorization_binding_digest: str
+    effective_turn_binding_digest: str
+    deadline_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in (
+            "public_row_id",
+            "idempotency_key",
+            "channel_id",
+            "channel_scope",
+            "authorization_id",
+            "scope_subject_id",
+            "allocation_id",
+        ):
+            _receipt_id(getattr(self, name), f"PublicOutboxWrite.{name}")
+        if type(self.chunk) is not PublicReplyChunk:
+            raise TypeError("PublicOutboxWrite.chunk must be exact PublicReplyChunk")
+        for name in (
+            "target_binding_hash",
+            "capability_policy_digest",
+            "effect_authorization_binding_digest",
+            "effective_turn_binding_digest",
+        ):
+            _require_hash(getattr(self, name), f"PublicOutboxWrite.{name}")
+        _require_int(
+            self.immutable_generation,
+            "PublicOutboxWrite.immutable_generation",
+            minimum=1,
+        )
+        if self.authorization_kind == "conversation_test":
+            if self.qualification_id is not None or self.scenario_id is not None:
+                raise ValueError("conversation test public row cannot carry E2E identity")
+        elif self.authorization_kind == "e2e":
+            _receipt_id(self.qualification_id, "PublicOutboxWrite.qualification_id")
+            _receipt_id(self.scenario_id, "PublicOutboxWrite.scenario_id")
+        else:
+            raise ValueError("PublicOutboxWrite.authorization_kind is not closed")
+        _receipt_utc(self.deadline_at, "PublicOutboxWrite.deadline_at")
+
+
 def _command_record(command: object) -> tuple[str, str, str]:
     if type(command) is ReservationCommand:
         wire = dumps_command(command)
@@ -1181,14 +1332,425 @@ class SQLiteBoundaryStore:
         except sqlite3.IntegrityError as exc:
             raise IdentityConflict("boundary commit violated durable identity") from exc
 
+    def commit_turn_v8(
+        self,
+        *,
+        expected_version: int,
+        fencing_token: int,
+        commit: BoundaryCommit,
+        receipt: TurnReceipt,
+        artifacts: tuple[TurnArtifactWrite, ...],
+        command_relays: tuple[CommandRelayWrite, ...],
+        internal_jobs: tuple[InternalOutboxWrite, ...],
+        public_rows: tuple[PublicOutboxWrite, ...],
+        committed_at: datetime,
+        fault_hook: Callable[[str], None] | None = None,
+    ) -> TurnReceipt:
+        """Persist one complete v8 turn and every owned effect row atomically."""
+        self._ensure_open()
+        if self._schema_version != 8:
+            raise BoundaryStoreError("commit_turn_v8 requires an authenticated v8 store")
+        expected = _require_int(expected_version, "expected_version", minimum=0)
+        token = _require_int(fencing_token, "fencing_token", minimum=1)
+        if type(commit) is not BoundaryCommit:
+            raise TypeError("commit must be the exact BoundaryCommit type")
+        if type(receipt) is not TurnReceipt:
+            raise TypeError("receipt must be the exact TurnReceipt type")
+        exact_groups = (
+            (artifacts, TurnArtifactWrite, "artifacts"),
+            (command_relays, CommandRelayWrite, "command_relays"),
+            (internal_jobs, InternalOutboxWrite, "internal_jobs"),
+            (public_rows, PublicOutboxWrite, "public_rows"),
+        )
+        for rows, member_type, name in exact_groups:
+            if type(rows) is not tuple or any(type(row) is not member_type for row in rows):
+                raise TypeError(f"{name} must be an exact tuple of exact {member_type.__name__}")
+        if fault_hook is not None and not callable(fault_hook):
+            raise TypeError("fault_hook must be callable or None")
+        if commit.facts:
+            raise ValueError("facts must be reduced into state before v8 persistence")
+        if commit.outbox:
+            raise ValueError("v8 public/internal effects must use their owned row families")
+        if commit.state.version != expected + 1:
+            raise ValueError("commit state version must equal expected_version + 1")
+
+        lead_key = _require_id(commit.state.lead_key, "commit.state.lead_key")
+        instant = _utc_text(committed_at, "committed_at")
+        if receipt.committed_at != committed_at:
+            raise IdentityConflict("receipt committed_at diverges from commit timestamp")
+        if receipt.committed_state_version != commit.state.version:
+            raise IdentityConflict("receipt state version diverges from commit")
+        state_json = to_wire_json(commit.state)
+        state_hash = semantic_hash(commit.state)
+        if receipt.committed_state_hash != state_hash:
+            raise IdentityConflict("receipt state hash diverges from commit")
+        commit_hash = semantic_hash(commit)
+        receipt_json = receipt.to_canonical_bytes().decode("utf-8")
+        receipt_hash = receipt.artifact_hash
+
+        command_records = tuple(_command_record(command) for command in commit.commands)
+        expected_command_rows = tuple(
+            (command_id, _sha(command_json))
+            for command_id, _, command_json in command_records
+        )
+        if receipt.command_rows != expected_command_rows:
+            raise IdentityConflict("receipt command rows diverge from commit commands")
+        command_ids = {row[0] for row in command_records}
+        if len(command_ids) != len(command_records):
+            raise IdentityConflict("commit command IDs are not unique")
+
+        artifact_ids = tuple(row.artifact_id for row in artifacts)
+        if len(artifact_ids) != len(set(artifact_ids)):
+            raise IdentityConflict("turn artifact IDs are not unique")
+        maya_rows = tuple(row for row in artifacts if row.artifact_kind == "maya_proposal")
+        kernel_rows = tuple(row for row in artifacts if row.artifact_kind == "kernel_decision")
+        if len(maya_rows) != 1 or maya_rows[0].artifact_hash != receipt.maya_proposal_hash:
+            raise IdentityConflict("receipt must bind exactly one Maya proposal artifact")
+        if len(kernel_rows) != 1 or kernel_rows[0].artifact_hash != receipt.kernel_decision_hash:
+            raise IdentityConflict("receipt must bind exactly one kernel decision artifact")
+        read_rows = {
+            row.artifact_id: row
+            for row in artifacts
+            if row.artifact_kind == "read_observation"
+        }
+        if tuple(
+            (row_id, row.canonical_bytes, row.artifact_hash)
+            for row_id, row in read_rows.items()
+        ) != receipt.read_observations:
+            raise IdentityConflict("receipt read observation rows diverge from artifacts")
+
+        if any(row.command_id not in command_ids for row in command_relays):
+            raise IdentityConflict("command relay does not bind a committed command")
+        if receipt.relay_rows != tuple(
+            (row.relay_id, row.bundle_hash) for row in command_relays
+        ):
+            raise IdentityConflict("receipt relay rows diverge from relay writes")
+        if receipt.internal_outbox_rows != tuple(
+            (row.job_id, row.artifact_hash) for row in internal_jobs
+        ):
+            raise IdentityConflict("receipt internal outbox rows diverge from job writes")
+        expected_public = tuple(
+            (
+                row.public_row_id,
+                row.chunk.ordinal,
+                row.chunk.to_canonical_bytes(),
+                row.chunk.canonical_hash(),
+            )
+            for row in public_rows
+        )
+        if receipt.public_chunks != expected_public:
+            raise IdentityConflict("receipt public chunk rows diverge from public writes")
+        for row in public_rows:
+            if row.chunk.aggregate_turn_id != receipt.aggregate_turn_id:
+                raise IdentityConflict("public chunk does not bind aggregate turn")
+            if row.capability_policy_digest != receipt.capability_policy_digest:
+                raise IdentityConflict("public row capability policy diverges from receipt")
+            if row.effective_turn_binding_digest != receipt.effective_stage_binding_digest:
+                raise IdentityConflict("public row effective binding diverges from receipt")
+
+        def fault(stage: str) -> None:
+            if fault_hook is not None:
+                fault_hook(stage)
+
+        def execute(
+            stage: str,
+            sql: str,
+            parameters: tuple[object, ...] = (),
+        ) -> sqlite3.Cursor:
+            fault(f"before_{stage}")
+            cursor = self._connection.execute(sql, parameters)
+            fault(f"after_{stage}")
+            return cursor
+
+        try:
+            with self._transaction():
+                existing_event = execute(
+                    "event_lookup",
+                    "SELECT event_hash,commit_hash,turn_receipt_json,turn_receipt_hash,state_version "
+                    "FROM boundary_events WHERE lead_key=? AND aggregate_turn_id=?",
+                    (lead_key, receipt.aggregate_turn_id),
+                ).fetchone()
+                if existing_event is not None:
+                    expected_event = (
+                        receipt.event_hash,
+                        commit_hash,
+                        receipt_json,
+                        receipt_hash,
+                        commit.state.version,
+                    )
+                    if existing_event != expected_event:
+                        raise IdentityConflict(
+                            "aggregate turn replay diverged from durable receipt"
+                        )
+                    stored = TurnReceipt.from_canonical_bytes(existing_event[2].encode())
+                    if stored != receipt:
+                        raise DataCorruption("durable receipt bytes do not match replay")
+                    fault("before_commit")
+                    return stored
+
+                previous = execute(
+                    "previous_receipt_lookup",
+                    "SELECT turn_receipt_hash FROM boundary_events "
+                    "WHERE lead_key=? AND state_version=?",
+                    (lead_key, expected),
+                ).fetchone()
+                expected_previous = None if expected == 0 else (
+                    previous[0] if previous is not None else None
+                )
+                if expected > 0 and previous is None:
+                    raise DataCorruption("previous turn receipt is missing")
+                if receipt.previous_turn_receipt_hash != expected_previous:
+                    raise IdentityConflict("receipt previous hash does not bind durable chain")
+
+                state_row = execute(
+                    "state_lookup",
+                    "SELECT version,fencing_token FROM boundary_state WHERE lead_key=?",
+                    (lead_key,),
+                ).fetchone()
+                if state_row is None:
+                    raise StateNotFound(lead_key)
+                if state_row != (expected, token):
+                    raise ConcurrencyConflict("state version or fencing token is stale")
+                if execute(
+                    "state_update",
+                    "UPDATE boundary_state SET version=?,state_json=?,state_hash=?,updated_at=? "
+                    "WHERE lead_key=? AND version=? AND fencing_token=?",
+                    (
+                        commit.state.version,
+                        state_json,
+                        state_hash,
+                        instant,
+                        lead_key,
+                        expected,
+                        token,
+                    ),
+                ).rowcount != 1:
+                    raise ConcurrencyConflict("v8 state CAS lost")
+
+                execute(
+                    "event_insert",
+                    "INSERT INTO boundary_events "
+                    "(lead_key,aggregate_turn_id,event_hash,commit_hash,turn_receipt_json,"
+                    "turn_receipt_hash,state_version,occurred_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        lead_key,
+                        receipt.aggregate_turn_id,
+                        receipt.event_hash,
+                        commit_hash,
+                        receipt_json,
+                        receipt_hash,
+                        commit.state.version,
+                        instant,
+                    ),
+                )
+                for index, source in enumerate(receipt.source_events):
+                    source_json = _receipt_json(
+                        {
+                            "source_event_id": source.source_event_id,
+                            "source_event_hash": source.source_event_hash,
+                        }
+                    ).decode()
+                    execute(
+                        f"source_insert_{index}",
+                        "INSERT INTO boundary_event_sources "
+                        "(lead_key,aggregate_turn_id,source_index,source_event_id,"
+                        "source_event_hash,source_event_json,source_turn_receipt_hash) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            index,
+                            source.source_event_id,
+                            source.source_event_hash,
+                            source_json,
+                            receipt_hash,
+                        ),
+                    )
+                for index, row in enumerate(artifacts):
+                    execute(
+                        f"artifact_insert_{index}",
+                        "INSERT INTO boundary_turn_artifacts "
+                        "(lead_key,aggregate_turn_id,artifact_index,artifact_id,artifact_kind,"
+                        "frame_sequence,frame_reference,artifact_json,artifact_hash,"
+                        "source_turn_receipt_hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            index,
+                            row.artifact_id,
+                            row.artifact_kind,
+                            row.frame_sequence,
+                            row.frame_reference,
+                            row.canonical_bytes.decode(),
+                            row.artifact_hash,
+                            receipt_hash,
+                        ),
+                    )
+                for index, (command, record) in enumerate(zip(commit.commands, command_records)):
+                    command_id, command_type, command_json = record
+                    if type(command) is ReservationCommand:
+                        if (
+                            commit.state.workflow is None
+                            or command.workflow_id
+                            != commit.state.workflow.meta.workflow_id
+                        ):
+                            raise IdentityConflict(
+                                "reservation command does not bind boundary workflow"
+                            )
+                    execute(
+                        f"command_insert_{index}",
+                        "INSERT INTO boundary_commands "
+                        "(command_id,lead_key,aggregate_turn_id,command_type,command_json,"
+                        "command_hash,source_turn_receipt_hash,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (
+                            command_id,
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            command_type,
+                            command_json,
+                            _sha(command_json),
+                            receipt_hash,
+                            instant,
+                        ),
+                    )
+                for index, row in enumerate(command_relays):
+                    execute(
+                        f"relay_insert_{index}",
+                        "INSERT INTO boundary_command_relays "
+                        "(relay_id,command_id,lead_key,aggregate_turn_id,bundle_json,bundle_hash,"
+                        "source_turn_receipt_hash,status,owner,fencing_token,lease_acquired_at,"
+                        "lease_expires_at,claim_count,preparation_failures,target_receipt_json,"
+                        "target_receipt_hash,acked_at,updated_at) "
+                        "VALUES (?,?,?,?,?,?,?,'pending',NULL,0,NULL,NULL,0,0,NULL,NULL,NULL,?)",
+                        (
+                            row.relay_id,
+                            row.command_id,
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            row.bundle_bytes.decode(),
+                            row.bundle_hash,
+                            receipt_hash,
+                            instant,
+                        ),
+                    )
+                for index, row in enumerate(internal_jobs):
+                    execute(
+                        f"internal_outbox_insert_{index}",
+                        "INSERT INTO boundary_outbox "
+                        "(job_id,job_kind,lead_key,aggregate_turn_id,artifact_json,artifact_hash,"
+                        "source_turn_receipt_hash,qualification_id,epoch,target_operation_id,status,"
+                        "owner,fencing_token,lease_acquired_at,lease_expires_at,claim_count,"
+                        "preparation_failures,target_receipt_json,target_receipt_hash,acked_at,updated_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,'pending',NULL,0,NULL,NULL,0,0,NULL,NULL,NULL,?)",
+                        (
+                            row.job_id,
+                            row.job_kind,
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            row.artifact_bytes.decode(),
+                            row.artifact_hash,
+                            receipt_hash,
+                            row.qualification_id,
+                            row.epoch,
+                            row.target_operation_id,
+                            instant,
+                        ),
+                    )
+                for index, row in enumerate(public_rows):
+                    bound = execute(
+                        f"allocation_cas_{index}",
+                        "UPDATE boundary_dispatch_authority SET state='bound',public_row_id=?,"
+                        "cas_revision=cas_revision+1,updated_at=? "
+                        "WHERE authorization_id=? AND scope_subject_id=? AND channel_scope=? "
+                        "AND generation=? AND allocation_id=? AND row_kind='allocation' "
+                        "AND authorization_kind=? AND qualification_id IS ? AND scenario_id IS ? "
+                        "AND capability_policy_digest=? "
+                        "AND effect_authorization_binding_digest=? AND target_binding_hash=? "
+                        "AND allowed_chunk_ordinal=? AND state='available' AND public_row_id IS NULL",
+                        (
+                            row.public_row_id,
+                            instant,
+                            row.authorization_id,
+                            row.scope_subject_id,
+                            row.channel_scope,
+                            row.immutable_generation,
+                            row.allocation_id,
+                            row.authorization_kind,
+                            row.qualification_id,
+                            row.scenario_id,
+                            row.capability_policy_digest,
+                            row.effect_authorization_binding_digest,
+                            row.target_binding_hash,
+                            row.chunk.ordinal,
+                        ),
+                    ).rowcount
+                    if bound != 1:
+                        raise ConcurrencyConflict(
+                            "public effect allocation CAS was stale or divergent"
+                        )
+                    execute(
+                        f"public_outbox_insert_{index}",
+                        "INSERT INTO boundary_public_outbox "
+                        "(public_row_id,lead_key,aggregate_turn_id,chunk_index,idempotency_key,"
+                        "target_binding_hash,channel_id,channel_scope,chunk_json,chunk_hash,"
+                        "predecessor_chunk_hash,status,owner,fencing_token,lease_acquired_at,"
+                        "lease_expires_at,claim_count,preparation_failures,dispatch_slots_consumed,"
+                        "authorization_kind,authorization_id,"
+                        "scope_subject_id,qualification_id,scenario_id,immutable_generation,"
+                        "allocation_id,capability_policy_digest,effect_authorization_binding_digest,"
+                        "effective_turn_binding_digest,source_turn_receipt_hash,delivery_receipt_json,"
+                        "delivery_receipt_hash,deadline_at,created_at,updated_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',NULL,0,NULL,NULL,0,0,0,?,?,?,?,?,?,?,?,?,?,?,"
+                        "NULL,NULL,?,?,?)",
+                        (
+                            row.public_row_id,
+                            lead_key,
+                            receipt.aggregate_turn_id,
+                            row.chunk.ordinal,
+                            row.idempotency_key,
+                            row.target_binding_hash,
+                            row.channel_id,
+                            row.channel_scope,
+                            row.chunk.to_canonical_bytes().decode(),
+                            row.chunk.canonical_hash(),
+                            (
+                                None
+                                if row.chunk.ordinal == 0
+                                else public_rows[index - 1].chunk.canonical_hash()
+                            ),
+                            row.authorization_kind,
+                            row.authorization_id,
+                            row.scope_subject_id,
+                            row.qualification_id,
+                            row.scenario_id,
+                            row.immutable_generation,
+                            row.allocation_id,
+                            row.capability_policy_digest,
+                            row.effect_authorization_binding_digest,
+                            row.effective_turn_binding_digest,
+                            receipt_hash,
+                            _utc_text(row.deadline_at, "public deadline"),
+                            instant,
+                            instant,
+                        ),
+                    )
+                fault("before_commit")
+                return receipt
+        except sqlite3.IntegrityError as exc:
+            raise IdentityConflict("v8 boundary commit violated durable identity") from exc
+
 
 __all__ = (
     "BoundaryStoreError",
+    "CommandRelayWrite",
     "ConcurrencyConflict",
     "DataCorruption",
     "IdentityConflict",
+    "InternalOutboxWrite",
     "LegacyStateReadPort",
+    "PublicOutboxWrite",
     "SQLiteBoundaryStore",
     "StateNotFound",
+    "TurnArtifactWrite",
     "TurnReceipt",
 )
