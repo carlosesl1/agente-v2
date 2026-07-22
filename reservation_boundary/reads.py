@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 import hashlib
 import json
@@ -27,6 +28,10 @@ _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 _GENESIS_ID_RE: Final = re.compile(r"^genesis:[0-9a-f]{64}$")
 _READ_EVIDENCE_ID_RE: Final = re.compile(r"^read-evidence:[0-9a-f]{64}$")
+_OFFER_ID_RE: Final = re.compile(r"^offer:[0-9a-f]{64}$")
+_LOOKUP_ID_RE: Final = re.compile(r"^lookup:[0-9a-f]{64}$")
+_CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
+_DECIMAL_2_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
 READ_REQUEST_DOMAIN: Final = "phase8-read-request-v1"
 
 ReadArguments: TypeAlias = (
@@ -998,12 +1003,388 @@ class SanitizedKnowledgeResult:
         return result
 
 
+class ReadService(str, Enum):
+    LODGING = "lodging"
+    ACTIVITY = "activity"
+
+
+class SanitizedLookupStatus(str, Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    UNCERTAIN = "uncertain"
+
+
+class LookupFailureCode(str, Enum):
+    TRANSPORT_ERROR = "transport_error"
+    HTTP_ERROR = "http_error"
+    SCHEMA_ERROR = "schema_error"
+
+
+def _require_exact_date(value: object, name: str) -> date:
+    if type(value) is not date:
+        raise TypeError(f"{name} must be an exact date")
+    return value
+
+
+def _parse_date(value: object, name: str) -> date:
+    if type(value) is not str:
+        raise ValueError(f"{name} must be canonical date text")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be canonical date text") from exc
+    if parsed.isoformat() != value:
+        raise ValueError(f"{name} must be canonical date text")
+    return parsed
+
+
+def _require_minute_time(value: object, name: str) -> time:
+    if type(value) is not time:
+        raise TypeError(f"{name} must be an exact time")
+    if value.tzinfo is not None or value.second != 0 or value.microsecond != 0:
+        raise ValueError(f"{name} must use canonical HH:MM time")
+    return value
+
+
+def _parse_minute_time(value: object, name: str) -> time:
+    if type(value) is not str or re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value) is None:
+        raise ValueError(f"{name} must use canonical HH:MM time")
+    return time.fromisoformat(value)
+
+
+def _require_decimal_2(value: object, name: str) -> Decimal:
+    if type(value) is not Decimal:
+        raise TypeError(f"{name} must be an exact Decimal")
+    text = format(value, "f")
+    if _DECIMAL_2_RE.fullmatch(text) is None or value <= 0:
+        raise ValueError(f"{name} must be a positive two-decimal amount")
+    return value
+
+
+def _parse_decimal_2(value: object, name: str) -> Decimal:
+    if type(value) is not str or _DECIMAL_2_RE.fullmatch(value) is None:
+        raise ValueError(f"{name} must be canonical two-decimal text")
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must be canonical two-decimal text") from exc
+    return _require_decimal_2(parsed, name)
+
+
+def _nested_contract_bytes(value: object, name: str) -> bytes:
+    if type(value) is not dict or set(value) != {"schema", "version", "data"}:
+        raise ValueError(f"{name} envelope mismatch")
+    if type(value["schema"]) is not str or type(value["version"]) is not int:
+        raise ValueError(f"{name} envelope identity has wrong exact type")
+    if type(value["data"]) is not dict:
+        raise ValueError(f"{name} data must be an object")
+    return _canonical_envelope(
+        schema=value["schema"],
+        version=value["version"],
+        data=value["data"],
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SanitizedOffer:
+    offer_id: str
+    service: ReadService
+    public_label: str
+    start_date: date
+    end_date: date | None
+    start_time: time | None
+    adults: int
+    children: int
+    total_amount: Decimal
+    currency: str
+
+    SCHEMA: ClassVar[str] = "phase8-sanitized-offer"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.offer_id) is not str or _OFFER_ID_RE.fullmatch(self.offer_id) is None:
+            raise ValueError("SanitizedOffer.offer_id must be canonical")
+        if type(self.service) is not ReadService:
+            raise TypeError("SanitizedOffer.service must be exact")
+        validate_public_text(self.public_label, limit=256)
+        _require_exact_date(self.start_date, "SanitizedOffer.start_date")
+        if self.end_date is not None:
+            _require_exact_date(self.end_date, "SanitizedOffer.end_date")
+        if self.start_time is not None:
+            _require_minute_time(self.start_time, "SanitizedOffer.start_time")
+        if type(self.adults) is not int or self.adults < 1:
+            raise ValueError("SanitizedOffer.adults must be an exact integer >= 1")
+        if type(self.children) is not int or self.children < 0:
+            raise ValueError("SanitizedOffer.children must be an exact integer >= 0")
+        _require_decimal_2(self.total_amount, "SanitizedOffer.total_amount")
+        if type(self.currency) is not str or _CURRENCY_RE.fullmatch(self.currency) is None:
+            raise ValueError("SanitizedOffer.currency must be canonical")
+        if self.service is ReadService.LODGING:
+            if self.end_date is None or self.end_date <= self.start_date:
+                raise ValueError("lodging offer requires end_date after start_date")
+        elif self.end_date is not None:
+            raise ValueError("activity offer requires null end_date")
+
+    def _data(self) -> dict[str, object]:
+        return {
+            "offer_id": self.offer_id,
+            "service": self.service.value,
+            "public_label": self.public_label,
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat() if self.end_date is not None else None,
+            "start_time": (
+                self.start_time.strftime("%H:%M") if self.start_time is not None else None
+            ),
+            "adults": self.adults,
+            "children": self.children,
+            "total_amount": format(self.total_amount, "f"),
+            "currency": self.currency,
+        }
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._data(),
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "SanitizedOffer":
+        envelope = _load_canonical_envelope(payload, "SanitizedOffer")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("SanitizedOffer envelope identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "offer_id",
+            "service",
+            "public_label",
+            "start_date",
+            "end_date",
+            "start_time",
+            "adults",
+            "children",
+            "total_amount",
+            "currency",
+        }
+        if set(data) != expected or type(data["service"]) is not str:
+            raise ValueError("SanitizedOffer fields mismatch")
+        try:
+            service = ReadService(data["service"])
+        except ValueError as exc:
+            raise ValueError("SanitizedOffer service is invalid") from exc
+        offer = cls(
+            offer_id=data["offer_id"],
+            service=service,
+            public_label=data["public_label"],
+            start_date=_parse_date(data["start_date"], "start_date"),
+            end_date=(
+                _parse_date(data["end_date"], "end_date")
+                if data["end_date"] is not None
+                else None
+            ),
+            start_time=(
+                _parse_minute_time(data["start_time"], "start_time")
+                if data["start_time"] is not None
+                else None
+            ),
+            adults=data["adults"],
+            children=data["children"],
+            total_amount=_parse_decimal_2(data["total_amount"], "total_amount"),
+            currency=data["currency"],
+        )
+        if offer.to_canonical_bytes() != payload:
+            raise ValueError("SanitizedOffer is not byte-canonical")
+        return offer
+
+
+@dataclass(frozen=True, slots=True)
+class SanitizedLookupResult:
+    request_hash: str
+    service: ReadService
+    status: SanitizedLookupStatus
+    query_signature: str
+    lookup_id: str
+    observed_at: datetime
+    expires_at: datetime
+    snapshot_hash: str
+    offers: tuple[SanitizedOffer, ...]
+    failure_codes: tuple[LookupFailureCode, ...]
+    evidence_receipt: ReadEvidenceReceipt
+
+    SCHEMA: ClassVar[str] = "phase8-sanitized-lookup-result"
+    CONTENT_PREIMAGE_SCHEMA: ClassVar[str] = (
+        "phase8-sanitized-lookup-result-content-preimage"
+    )
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-sanitized-lookup-result-v1"
+
+    def __post_init__(self) -> None:
+        _require_sha256(self.request_hash, "SanitizedLookupResult.request_hash")
+        if type(self.service) is not ReadService:
+            raise TypeError("SanitizedLookupResult.service must be exact")
+        if type(self.status) is not SanitizedLookupStatus:
+            raise TypeError("SanitizedLookupResult.status must be exact")
+        _require_sha256(self.query_signature, "SanitizedLookupResult.query_signature")
+        if type(self.lookup_id) is not str or _LOOKUP_ID_RE.fullmatch(self.lookup_id) is None:
+            raise ValueError("SanitizedLookupResult.lookup_id must be canonical")
+        _require_utc(self.observed_at, "SanitizedLookupResult.observed_at")
+        _require_utc(self.expires_at, "SanitizedLookupResult.expires_at")
+        if self.expires_at <= self.observed_at:
+            raise ValueError("lookup expires_at must be later than observed_at")
+        _require_sha256(self.snapshot_hash, "SanitizedLookupResult.snapshot_hash")
+        if type(self.offers) is not tuple or any(type(item) is not SanitizedOffer for item in self.offers):
+            raise TypeError("SanitizedLookupResult.offers must be an exact offer tuple")
+        if tuple(sorted(self.offers, key=lambda item: item.offer_id)) != self.offers:
+            raise ValueError("SanitizedLookupResult.offers must be sorted")
+        offer_ids = tuple(item.offer_id for item in self.offers)
+        if len(set(offer_ids)) != len(offer_ids):
+            raise ValueError("SanitizedLookupResult.offer IDs must be unique")
+        if any(item.service is not self.service for item in self.offers):
+            raise ValueError("SanitizedLookupResult offer service mismatch")
+        if type(self.failure_codes) is not tuple or any(
+            type(item) is not LookupFailureCode for item in self.failure_codes
+        ):
+            raise TypeError("failure_codes must be an exact enum tuple")
+        if tuple(sorted(self.failure_codes, key=lambda item: item.value)) != self.failure_codes:
+            raise ValueError("failure_codes must be sorted")
+        if len(set(self.failure_codes)) != len(self.failure_codes):
+            raise ValueError("failure_codes must be unique")
+        expected_cardinality = {
+            SanitizedLookupStatus.POSITIVE: (bool(self.offers), not self.failure_codes),
+            SanitizedLookupStatus.NEGATIVE: (not self.offers, not self.failure_codes),
+            SanitizedLookupStatus.UNCERTAIN: (not self.offers, bool(self.failure_codes)),
+        }[self.status]
+        if expected_cardinality != (True, True):
+            raise ValueError("lookup status cardinality mismatch")
+        if type(self.evidence_receipt) is not ReadEvidenceReceipt:
+            raise TypeError("SanitizedLookupResult.evidence_receipt must be exact")
+        if self.evidence_receipt.request_hash != self.request_hash:
+            raise ValueError("lookup result request hash mismatch")
+        if (
+            self.status is SanitizedLookupStatus.UNCERTAIN
+            and self.evidence_receipt.disposition is not ReadEvidenceDisposition.PRIVATE_ONLY
+        ):
+            raise ValueError("uncertain lookup evidence must be private_only")
+        expected_content_hash = hashlib.sha256(
+            ReadEvidenceReceipt.RESULT_CONTENT_DOMAIN.encode("ascii")
+            + b"\x00"
+            + self.content_preimage_bytes()
+        ).hexdigest()
+        if self.evidence_receipt.result_content_hash != expected_content_hash:
+            raise ValueError("lookup result content hash mismatch")
+
+    def _content_data(self) -> dict[str, object]:
+        return {
+            "request_hash": self.request_hash,
+            "service": self.service.value,
+            "status": self.status.value,
+            "query_signature": self.query_signature,
+            "lookup_id": self.lookup_id,
+            "observed_at": self.observed_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "snapshot_hash": self.snapshot_hash,
+            "offers": [
+                json.loads(item.to_canonical_bytes().decode("utf-8"))
+                for item in self.offers
+            ],
+            "failure_codes": [item.value for item in self.failure_codes],
+        }
+
+    def content_preimage_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.CONTENT_PREIMAGE_SCHEMA,
+            version=self.VERSION,
+            data=self._content_data(),
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._content_data()
+            | {
+                "evidence_receipt": json.loads(
+                    self.evidence_receipt.to_canonical_bytes().decode("utf-8")
+                )
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "SanitizedLookupResult":
+        envelope = _load_canonical_envelope(payload, "SanitizedLookupResult")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("SanitizedLookupResult envelope identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "request_hash",
+            "service",
+            "status",
+            "query_signature",
+            "lookup_id",
+            "observed_at",
+            "expires_at",
+            "snapshot_hash",
+            "offers",
+            "failure_codes",
+            "evidence_receipt",
+        }
+        if (
+            set(data) != expected
+            or type(data["service"]) is not str
+            or type(data["status"]) is not str
+            or type(data["offers"]) is not list
+            or type(data["failure_codes"]) is not list
+        ):
+            raise ValueError("SanitizedLookupResult fields mismatch")
+        try:
+            service = ReadService(data["service"])
+            status = SanitizedLookupStatus(data["status"])
+            failure_codes = tuple(LookupFailureCode(item) for item in data["failure_codes"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SanitizedLookupResult enum value is invalid") from exc
+        result = cls(
+            request_hash=data["request_hash"],
+            service=service,
+            status=status,
+            query_signature=data["query_signature"],
+            lookup_id=data["lookup_id"],
+            observed_at=_parse_utc(data["observed_at"], "observed_at"),
+            expires_at=_parse_utc(data["expires_at"], "expires_at"),
+            snapshot_hash=data["snapshot_hash"],
+            offers=tuple(
+                SanitizedOffer.from_canonical_bytes(
+                    _nested_contract_bytes(item, "offer")
+                )
+                for item in data["offers"]
+            ),
+            failure_codes=failure_codes,
+            evidence_receipt=ReadEvidenceReceipt.from_canonical_bytes(
+                _nested_contract_bytes(data["evidence_receipt"], "evidence_receipt")
+            ),
+        )
+        if result.to_canonical_bytes() != payload:
+            raise ValueError("SanitizedLookupResult is not byte-canonical")
+        return result
+
+
 Phase8ReadRequest: TypeAlias = Phase8ToolReadRequest | LegacyGenesisReadRequest
 
 
 __all__ = (
     "GenesisStatus",
     "KnowledgeSource",
+    "LookupFailureCode",
     "LegacyGenesisEvidenceRecord",
     "LegacyGenesisReadRequest",
     "LegacyGenesisReceipt",
@@ -1018,6 +1399,10 @@ __all__ = (
     "ReadEvidenceDisposition",
     "ReadEvidenceReceipt",
     "ReadArguments",
+    "ReadService",
     "SanitizedKnowledgeResult",
+    "SanitizedLookupResult",
+    "SanitizedLookupStatus",
+    "SanitizedOffer",
     "validate_public_text",
 )

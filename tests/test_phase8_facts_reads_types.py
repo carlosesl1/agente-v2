@@ -32,9 +32,14 @@ from reservation_boundary.reads import (
     KnowledgeSource,
     Phase8ToolReadRequest,
     PUBLIC_READ_POLICY_HASH,
+    LookupFailureCode,
+    ReadService,
     ReadEvidenceDisposition,
     ReadEvidenceReceipt,
     SanitizedKnowledgeResult,
+    SanitizedLookupResult,
+    SanitizedLookupStatus,
+    SanitizedOffer,
     validate_public_text,
 )
 
@@ -510,6 +515,88 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
                 public_result.evidence_receipt,
                 result_content_hash="0" * 64,
             )
+
+
+class Phase8LookupProjectionTests(unittest.TestCase):
+    def test_lookup_offer_and_result_known_answers_are_exact(self) -> None:
+        examples = _fixture()["examples"]
+        offer_item = examples["sanitized_offer.lodging"]
+        offer = SanitizedOffer.from_canonical_bytes(
+            offer_item["canonical_utf8"].encode("utf-8")
+        )
+        self.assertIs(offer.service, ReadService.LODGING)
+        self.assertEqual(offer.canonical_hash(), offer_item["canonical_hash"])
+
+        cases = {
+            "result.lookup_positive_public_safe": SanitizedLookupStatus.POSITIVE,
+            "result.lookup_positive_private_only": SanitizedLookupStatus.POSITIVE,
+            "result.lookup_negative_public_safe": SanitizedLookupStatus.NEGATIVE,
+            "result.lookup_negative_private_only": SanitizedLookupStatus.NEGATIVE,
+            "result.lookup_uncertain_private_only": SanitizedLookupStatus.UNCERTAIN,
+        }
+        for name, status in cases.items():
+            with self.subTest(name=name):
+                item = examples[name]
+                result = SanitizedLookupResult.from_canonical_bytes(
+                    item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertIs(result.status, status)
+                self.assertEqual(
+                    result.to_canonical_bytes().decode("utf-8"),
+                    item["canonical_utf8"],
+                )
+                self.assertEqual(result.canonical_hash(), item["canonical_hash"])
+
+    def test_lookup_matrix_and_sensitive_projection_fail_closed(self) -> None:
+        examples = _fixture()["examples"]
+        positive = SanitizedLookupResult.from_canonical_bytes(
+            examples["result.lookup_positive_public_safe"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        negative = SanitizedLookupResult.from_canonical_bytes(
+            examples["result.lookup_negative_public_safe"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        uncertain = SanitizedLookupResult.from_canonical_bytes(
+            examples["result.lookup_uncertain_private_only"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+
+        self.assertEqual(positive.offers, tuple(sorted(positive.offers, key=lambda x: x.offer_id)))
+        self.assertEqual(uncertain.failure_codes, (LookupFailureCode.TRANSPORT_ERROR,))
+        for mutation in (
+            lambda: replace(positive, offers=()),
+            lambda: replace(negative, offers=positive.offers),
+            lambda: replace(uncertain, failure_codes=()),
+            lambda: replace(positive, service=ReadService.ACTIVITY),
+            lambda: replace(
+                positive,
+                offers=(positive.offers[0], positive.offers[0]),
+            ),
+            lambda: replace(
+                positive.offers[0],
+                public_label="Contato: (75) 99999-9999",
+            ),
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises((TypeError, ValueError)):
+                    mutation()
+
+        raw = json.loads(
+            examples["result.lookup_positive_public_safe"]["canonical_utf8"]
+        )
+        raw["data"]["offers"][0]["data"]["provider_ref"] = "secret"
+        hostile = json.dumps(
+            raw,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        with self.assertRaises(ValueError):
+            SanitizedLookupResult.from_canonical_bytes(hostile)
 
 
 if __name__ == "__main__":
