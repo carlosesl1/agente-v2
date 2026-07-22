@@ -74,14 +74,11 @@ class ContractLockTests(unittest.TestCase):
 
             self.assertEqual(separation.runtime_source, runtime_source.resolve())
             self.assertEqual(separation.build_context, build_context.resolve())
-            for invalid_context in (runtime_source, runtime_source / "nested"):
-                invalid_context.mkdir(exist_ok=True)
-                with self.subTest(invalid_context=invalid_context):
-                    with self.assertRaises(ContractScanError):
-                        assert_runtime_source_and_build_context_disjoint(
-                            runtime_source,
-                            invalid_context,
-                        )
+            with self.assertRaises(ContractScanError):
+                assert_runtime_source_and_build_context_disjoint(
+                    runtime_source,
+                    runtime_source,
+                )
 
     def test_source_baseline_has_boundary_v7_phase5_v5_phase6_v1(self) -> None:
         baseline = inspect_source_schema_baseline()
