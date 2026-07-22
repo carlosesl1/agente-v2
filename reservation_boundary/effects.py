@@ -4,14 +4,27 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 import hashlib
 import json
 import re
 from typing import ClassVar, Final
 
+from reservation_followup.handoff import (
+    HandoffAcknowledged,
+    HandoffCancelled,
+    HandoffEffectFailed,
+    HandoffRequested,
+)
+from reservation_followup.serialization import from_wire_json, to_wire_json
+from reservation_followup.types import HandoffEffectPolicy
+
 
 RESERVATION_RELAY_DOMAIN: Final = "phase8-reservation-relay-bundle-v1"
 SETTLEMENT_RELAY_DOMAIN: Final = "phase8-settlement-relay-bundle-v1"
+HANDOFF_RELAY_DOMAIN: Final = "phase8-handoff-relay-bundle-v1"
+TARGET_OPERATION_RECEIPT_DOMAIN: Final = "phase8-target-operation-receipt-v1"
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -69,6 +82,68 @@ def _canonical_envelope(*, schema: str, version: int, data: dict[str, object]) -
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _load_canonical_envelope(payload: bytes, owner: str) -> dict[str, object]:
+    _require_bytes(payload, owner)
+
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"{owner} has a duplicate JSON key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=unique_pairs,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"{owner} has non-finite JSON: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{owner} must be canonical UTF-8 JSON") from exc
+    if type(value) is not dict:
+        raise ValueError(f"{owner} envelope must be an object")
+    return value
+
+
+def _unb64(value: object, name: str) -> bytes:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be base64 text")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise ValueError(f"{name} must be canonical base64") from exc
+    if _b64(decoded) != value or not decoded:
+        raise ValueError(f"{name} must be non-empty canonical base64")
+    return decoded
+
+
+def _utc_text(value: object, name: str) -> str:
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() != timedelta(0)
+    ):
+        raise TypeError(f"{name} must be an exact UTC datetime")
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _parse_utc(value: object, name: str) -> datetime:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be canonical UTC text")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError as exc:
+        raise ValueError(f"{name} must be canonical UTC text") from exc
+    if _utc_text(parsed, name) != value:
+        raise ValueError(f"{name} must be canonical UTC text")
+    return parsed
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,9 +376,225 @@ class SettlementRelayBundle:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class HandoffRelayBundle:
+    """Canonical Phase 6 handoff replay bundle without source backlink."""
+
+    request_bytes: bytes
+    policy_bytes: bytes
+    history_bytes: tuple[bytes, ...]
+    expected_final_state_hash: str
+    artifact_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-handoff-relay-bundle"
+    PREIMAGE_SCHEMA: ClassVar[str] = "phase8-handoff-relay-bundle-preimage"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = HANDOFF_RELAY_DOMAIN
+
+    def __post_init__(self) -> None:
+        _require_bytes(self.request_bytes, "HandoffRelayBundle.request_bytes")
+        _require_bytes(self.policy_bytes, "HandoffRelayBundle.policy_bytes")
+        _require_bytes_tuple(self.history_bytes, "HandoffRelayBundle.history_bytes")
+        request = from_wire_json(
+            self.request_bytes.decode("utf-8"),
+            HandoffRequested,
+        )
+        policy = from_wire_json(
+            self.policy_bytes.decode("utf-8"),
+            HandoffEffectPolicy,
+        )
+        if type(request) is not HandoffRequested:
+            raise ValueError("request_bytes must encode exact HandoffRequested")
+        if type(policy) is not HandoffEffectPolicy:
+            raise ValueError("policy_bytes must encode exact HandoffEffectPolicy")
+        if to_wire_json(request).encode("utf-8") != self.request_bytes:
+            raise ValueError("request_bytes must be byte-canonical")
+        if to_wire_json(policy).encode("utf-8") != self.policy_bytes:
+            raise ValueError("policy_bytes must be byte-canonical")
+        history_types = (HandoffAcknowledged, HandoffEffectFailed, HandoffCancelled)
+        for payload in self.history_bytes:
+            event = None
+            for expected_type in history_types:
+                try:
+                    event = from_wire_json(payload.decode("utf-8"), expected_type)
+                    break
+                except ValueError:
+                    continue
+            if event is None or type(event) not in history_types:
+                raise ValueError("history_bytes contains a non-history handoff event")
+            if to_wire_json(event).encode("utf-8") != payload:
+                raise ValueError("history_bytes member must be byte-canonical")
+        _require_sha256(
+            self.expected_final_state_hash,
+            "HandoffRelayBundle.expected_final_state_hash",
+        )
+        _require_sha256(self.artifact_hash, "HandoffRelayBundle.artifact_hash")
+        expected = hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.artifact_preimage_bytes()
+        ).hexdigest()
+        if self.artifact_hash != expected:
+            raise ValueError("artifact_hash does not authenticate handoff relay preimage")
+
+    def _preimage_data(self) -> dict[str, object]:
+        return {
+            "request_bytes": _b64(self.request_bytes),
+            "policy_bytes": _b64(self.policy_bytes),
+            "history_bytes": [_b64(value) for value in self.history_bytes],
+            "expected_final_state_hash": self.expected_final_state_hash,
+        }
+
+    def artifact_preimage_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.PREIMAGE_SCHEMA,
+            version=self.VERSION,
+            data=self._preimage_data(),
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._preimage_data() | {"artifact_hash": self.artifact_hash},
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "HandoffRelayBundle":
+        envelope = _load_canonical_envelope(payload, cls.__name__)
+        if set(envelope) != {"schema", "version", "data"}:
+            raise ValueError("HandoffRelayBundle envelope fields mismatch")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("HandoffRelayBundle identity mismatch")
+        data = envelope["data"]
+        if type(data) is not dict or set(data) != {
+            "request_bytes",
+            "policy_bytes",
+            "history_bytes",
+            "expected_final_state_hash",
+            "artifact_hash",
+        }:
+            raise ValueError("HandoffRelayBundle fields mismatch")
+        history = data["history_bytes"]
+        if type(history) is not list:
+            raise TypeError("HandoffRelayBundle.history_bytes must be an array")
+        bundle = cls(
+            request_bytes=_unb64(data["request_bytes"], "request_bytes"),
+            policy_bytes=_unb64(data["policy_bytes"], "policy_bytes"),
+            history_bytes=tuple(
+                _unb64(item, "history_bytes item") for item in history
+            ),
+            expected_final_state_hash=data["expected_final_state_hash"],
+            artifact_hash=data["artifact_hash"],
+        )
+        if bundle.to_canonical_bytes() != payload:
+            raise ValueError("HandoffRelayBundle is not byte-canonical")
+        return bundle
+
+
+class InternalJobKind(str, Enum):
+    HANDOFF = "handoff"
+    LEARNING = "learning"
+
+
+@dataclass(frozen=True, slots=True)
+class TargetOperationReceipt:
+    """Canonical target-owned atomic operation receipt."""
+
+    operation_id: str
+    job_kind: InternalJobKind
+    artifact_hash: str
+    source_turn_receipt_hash: str
+    target_commit_hash: str
+    target_result_hash: str
+    committed_at: datetime
+
+    SCHEMA: ClassVar[str] = "phase8-target-operation-receipt"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = TARGET_OPERATION_RECEIPT_DOMAIN
+
+    def __post_init__(self) -> None:
+        for name in (
+            "operation_id",
+            "artifact_hash",
+            "source_turn_receipt_hash",
+            "target_commit_hash",
+            "target_result_hash",
+        ):
+            _require_sha256(getattr(self, name), f"TargetOperationReceipt.{name}")
+        if type(self.job_kind) is not InternalJobKind:
+            raise TypeError("TargetOperationReceipt.job_kind must be exact InternalJobKind")
+        _utc_text(self.committed_at, "TargetOperationReceipt.committed_at")
+
+    def _data(self) -> dict[str, object]:
+        return {
+            "operation_id": self.operation_id,
+            "job_kind": self.job_kind.value,
+            "artifact_hash": self.artifact_hash,
+            "source_turn_receipt_hash": self.source_turn_receipt_hash,
+            "target_commit_hash": self.target_commit_hash,
+            "target_result_hash": self.target_result_hash,
+            "committed_at": _utc_text(
+                self.committed_at,
+                "TargetOperationReceipt.committed_at",
+            ),
+        }
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._data(),
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "TargetOperationReceipt":
+        envelope = _load_canonical_envelope(payload, cls.__name__)
+        if set(envelope) != {"schema", "version", "data"}:
+            raise ValueError("TargetOperationReceipt envelope fields mismatch")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("TargetOperationReceipt identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "operation_id",
+            "job_kind",
+            "artifact_hash",
+            "source_turn_receipt_hash",
+            "target_commit_hash",
+            "target_result_hash",
+            "committed_at",
+        }
+        if type(data) is not dict or set(data) != expected:
+            raise ValueError("TargetOperationReceipt fields mismatch")
+        try:
+            job_kind = InternalJobKind(data["job_kind"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("TargetOperationReceipt job_kind is unknown") from exc
+        receipt = cls(
+            operation_id=data["operation_id"],
+            job_kind=job_kind,
+            artifact_hash=data["artifact_hash"],
+            source_turn_receipt_hash=data["source_turn_receipt_hash"],
+            target_commit_hash=data["target_commit_hash"],
+            target_result_hash=data["target_result_hash"],
+            committed_at=_parse_utc(data["committed_at"], "committed_at"),
+        )
+        if receipt.to_canonical_bytes() != payload:
+            raise ValueError("TargetOperationReceipt is not byte-canonical")
+        return receipt
+
+
 __all__ = (
+    "HANDOFF_RELAY_DOMAIN",
     "RESERVATION_RELAY_DOMAIN",
     "SETTLEMENT_RELAY_DOMAIN",
+    "TARGET_OPERATION_RECEIPT_DOMAIN",
+    "HandoffRelayBundle",
+    "InternalJobKind",
     "ReservationRelayBundle",
     "SettlementRelayBundle",
+    "TargetOperationReceipt",
 )
