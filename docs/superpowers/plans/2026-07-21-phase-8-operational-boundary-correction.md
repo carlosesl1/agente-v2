@@ -640,6 +640,16 @@ A autorização acima cobre somente registro documental e implementação das Ta
 dark/ingress canary, mensagem, conversa humana, E2E, deploy, rollout e rollback
 continuam sujeitos aos gates independentes deste plano e permanecem fechados.
 
+**Task 2 transcript-binding authority:** após review AND 3/3 das lanes técnica/KAT,
+arquitetural e gate/proveniência, Carlos Eduardo aceitou explicitamente em 2026-07-22
+a identidade `6fa3f03b11572a22d557a33c9cc1d141504f0a89`, tree
+`821a15530b2c0e4e969878a7f478e6f61cdc3aed`, spec blob
+`b6d08f9b295873d07fbb393c04942de288e52915` e fixture blob
+`f1363d52e080a79ed94026620fef63237bf2cdf0`, somente nos limites do delta
+`docs/superpowers/specs/2026-07-22-phase-8-task2-transcript-binding-correction-design.md`.
+Esse aceite autoriza apenas a implementação RED/GREEN da Task 2. Build, Docker, rede,
+provider write, mensagens, canary, E2E e rollout permanecem fechados.
+
 Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; o registry e o
 fixture independente comparam lista completa ordenada de campos, enums, nullability,
 assinaturas e domains, rejeitando item ausente **ou extra**. Adicionar campo aberto ou

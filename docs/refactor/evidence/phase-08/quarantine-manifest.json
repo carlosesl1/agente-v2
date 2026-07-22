@@ -13,6 +13,7 @@
     "docs/superpowers/specs/2026-07-22-phase-8-facts-reads-wire-closure-design.md",
     "tests/fixtures/phase8_facts_reads_wire_v1.json",
     "docs/superpowers/specs/2026-07-22-phase-8-remaining-wire-closure-design.md",
+    "docs/superpowers/specs/2026-07-22-phase-8-task2-transcript-binding-correction-design.md",
     "tests/fixtures/phase8_remaining_wire_registry_v1.json"
   ],
   "active_scan_extensions": [
@@ -399,6 +400,36 @@
         "sha256": "51ad64885c14d97c50b93db94c5ab67fd476d8fdd2c6a1e973f54c2a9990dc13"
       },
       "tree": "f260763040745880cbc0263a28f564c044e30079"
+    },
+    "task2_transcript_binding": {
+      "commit": "6fa3f03b11572a22d557a33c9cc1d141504f0a89",
+      "fixture": {
+        "blob": "f1363d52e080a79ed94026620fef63237bf2cdf0",
+        "bytes": 124288,
+        "lines": 1,
+        "path": "tests/fixtures/phase8_remaining_wire_registry_v1.json",
+        "sha256": "e19dc46583023564ef6092c235bc8aba04d828a043154aabeaae8f7d334672b6"
+      },
+      "human_acceptance": {
+        "approved": true,
+        "approved_on": "2026-07-22",
+        "scope": "Task 2 RED/GREEN only; no build, Docker, network, provider write, message, canary, E2E or rollout"
+      },
+      "review": {
+        "verdicts": [
+          "Approved",
+          "Approved",
+          "Approved"
+        ]
+      },
+      "spec": {
+        "blob": "b6d08f9b295873d07fbb393c04942de288e52915",
+        "bytes": 9758,
+        "lines": 234,
+        "path": "docs/superpowers/specs/2026-07-22-phase-8-task2-transcript-binding-correction-design.md",
+        "sha256": "5e07bbcc62fd19f6c894692aa9324506a06c8973bc6a6dcf0b1f747038c944b9"
+      },
+      "tree": "821a15530b2c0e4e969878a7f478e6f61cdc3aed"
     }
   },
   "implementation_authorized": true,
@@ -409,10 +440,10 @@
     "user_acceptance": "APPROVED"
   },
   "replacement_plan": {
-    "bytes": 102645,
-    "lines": 2060,
+    "bytes": 103315,
+    "lines": 2070,
     "path": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
-    "sha256": "47df37edb704c247cded09cf9e4d9362cbaae94e444fb99e2f5b94c99dc6dd3a"
+    "sha256": "edca25a0477e8f3bb4200849933f226a16b1506a3c7d97324a8c9a6bfd86ff68"
   },
   "rollout": "NO-GO",
   "scan_exclusions": [
