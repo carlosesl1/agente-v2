@@ -36,6 +36,10 @@ class ModelCallFailed(RuntimeError):
     """The isolated model process did not produce an authenticated result marker."""
 
 
+class ReadCallFailed(RuntimeError):
+    """The allowlisted read process did not produce an authenticated observation."""
+
+
 class SandboxModelPort(Protocol):
     def complete(
         self,
@@ -43,6 +47,13 @@ class SandboxModelPort(Protocol):
         system_prompt: str,
         messages: tuple[tuple[str, str], ...],
     ) -> bytes: ...
+
+
+class SandboxReadPort(Protocol):
+    def read(
+        self,
+        request: "LodgingAvailabilityReadRequest",
+    ) -> "LodgingAvailabilityObservation": ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -651,6 +662,114 @@ def _run_command(
     )
 
 
+_CLOUDBEDS_RESULT_MARKER: Final = b"PHASE8_CLOUDBEDS_RESULT\x00"
+_CLOUDBEDS_CHILD_ENVIRONMENT: Final = (
+    "HERMES_LEADS_MODE=shadow",
+    "HERMES_LEADS_DRY_RUN=false",
+    "HERMES_LEADS_ALLOW_LIVE_SENDS=false",
+    "HERMES_CLOUDBEDS_READONLY_ENABLED=true",
+    "HERMES_CLOUDBEDS_WRITE_ENABLED=false",
+    "HERMES_CLOUDBEDS_UPSELL_WRITE_ENABLED=false",
+    "HERMES_CLOUDBEDS_PAYMENT_CONFIRMATION_WRITE_ENABLED=false",
+    "HERMES_CLOUDBEDS_STRIPE_PAYMENT_LINK_WRITE_ENABLED=false",
+    "HERMES_BOKUN_READONLY_ENABLED=false",
+    "HERMES_BOKUN_CART_WRITE_ENABLED=false",
+    "HERMES_BOKUN_RESERVATION_WRITE_ENABLED=false",
+    "HERMES_BOKUN_PAYMENT_CONFIRMATION_WRITE_ENABLED=false",
+    "HERMES_STRIPE_PAYMENT_LINK_WRITE_ENABLED=false",
+    "HERMES_WISE_PAYMENT_MATCHER_ENABLED=false",
+    "HERMES_WISE_PAYMENT_MATCHER_SETTLEMENT_ENABLED=false",
+    "HERMES_WISE_PAYMENT_VALIDATION_ENABLED=false",
+    "HERMES_WISE_CLOUDBEDS_HOSTEL_PAYMENT_VALIDATION_WRITE_ENABLED=false",
+    "HERMES_SIDE_EFFECT_LEDGER_ENABLED=false",
+    "HERMES_AUTO_FLUSH_ENABLED=false",
+    "HERMES_PUBLIC_OUTBOX_AUTO_FLUSH_ENABLED=false",
+    "HERMES_POST_PAYMENT_OUTBOX_WORKER_ENABLED=false",
+    "MANYCHAT_API_KEY=",
+    "MANYCHAT_WEBHOOK_SECRET=",
+    "SUPABASE_URL=",
+    "SUPABASE_SERVICE_ROLE_KEY=",
+    "REDIS_URL=",
+    "BOKUN_ACCESS_KEY=",
+    "BOKUN_SECRET_KEY=",
+    "STRIPE_SECRET_KEY=",
+    "STRIPE_LIVE_SECRET_KEY=",
+    "CLOUDBEDS_STRIPE_SECRET_KEY=",
+    "CLOUDBEDS_STRIPE_LIVE_SECRET_KEY=",
+    "WISE_API_TOKEN=",
+    "WISE_CLOUDBEDS_HOSTEL_API_TOKEN=",
+    "HERMES_LEADS_AGENT_EMAIL_PASSWORD_FILE=",
+    "HERMES_LEADS_HANDOFF_NOTIFY_TO_EMAIL=",
+)
+
+
+class CloudbedsDockerRead:
+    """Call one fixed Cloudbeds read in an ephemeral, effect-denied child."""
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        container: str = "chapada-leads-hermes",
+        timeout: int = 30,
+        run: Callable[..., _CompletedProcess] = _run_command,
+    ) -> None:
+        if not isinstance(project_root, Path) or not project_root.is_absolute():
+            raise TypeError("project_root must be an absolute pathlib.Path")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", container) is None:
+            raise ValueError("container name is invalid")
+        if type(timeout) is not int or timeout <= 0:
+            raise ValueError("timeout must be a positive exact integer")
+        child_path = project_root / "scripts" / "phase8_cloudbeds_read_child.py"
+        try:
+            child_source = child_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ReadCallFailed("Cloudbeds child source is unavailable") from exc
+        if not child_source or len(child_source.encode("utf-8")) > 64 * 1024:
+            raise ReadCallFailed("Cloudbeds child source is outside the size limit")
+        self._container = container
+        self._timeout = timeout
+        self._run = run
+        self._child_source = child_source
+
+    def read(
+        self,
+        request: LodgingAvailabilityReadRequest,
+    ) -> LodgingAvailabilityObservation:
+        if type(request) is not LodgingAvailabilityReadRequest:
+            raise TypeError("request must be an exact LodgingAvailabilityReadRequest")
+        command: list[str] = ["docker", "exec", "-i"]
+        for environment in _CLOUDBEDS_CHILD_ENVIRONMENT:
+            command.extend(("-e", environment))
+        command.extend(
+            (
+                self._container,
+                "/app/.venv/bin/python",
+                "-c",
+                self._child_source,
+            )
+        )
+        try:
+            result = self._run(
+                tuple(command),
+                input=request.to_canonical_bytes(),
+                timeout=self._timeout,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ReadCallFailed("Cloudbeds read child could not be executed") from exc
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()[-500:]
+            raise ReadCallFailed(detail or f"Cloudbeds child exited with {result.returncode}")
+        marker_at = result.stdout.rfind(_CLOUDBEDS_RESULT_MARKER)
+        if marker_at < 0:
+            raise ReadCallFailed("Cloudbeds child result marker is missing")
+        payload = result.stdout[marker_at + len(_CLOUDBEDS_RESULT_MARKER) :]
+        try:
+            return LodgingAvailabilityObservation.from_canonical_bytes(payload)
+        except SandboxProtocolError as exc:
+            raise ReadCallFailed("Cloudbeds child returned an invalid observation") from exc
+
+
 class HermesDockerModel:
     """No-shell adapter to an isolated, tool-free AIAgent inside WebUI's venv."""
 
@@ -717,13 +836,18 @@ class HermesDockerModel:
 
 __all__ = (
     "BlockedEffect",
+    "CloudbedsDockerRead",
     "EffectProposal",
     "HermesDockerModel",
+    "LodgingAvailabilityObservation",
+    "LodgingAvailabilityReadRequest",
     "ModelCallFailed",
+    "ReadCallFailed",
     "SandboxConversation",
     "SandboxModelPort",
     "SandboxModelResponse",
     "SandboxProtocolError",
+    "SandboxReadPort",
     "SandboxTurnResult",
     "SQLiteSandboxStore",
 )

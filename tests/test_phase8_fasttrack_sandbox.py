@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 import reservation_boundary.sandbox as sandbox
+from scripts import phase8_cloudbeds_read_child as cloudbeds_child
 from reservation_boundary.sandbox import (
     HermesDockerModel,
     ModelCallFailed,
@@ -271,6 +272,167 @@ class FastTrackSandboxTests(unittest.TestCase):
             with self.assertRaises(SandboxProtocolError):
                 runner.submit(session_id="lead-1", message="Oi")
             self.assertEqual(runner.store.load_messages("lead-1"), ())
+
+    def test_cloudbeds_child_strips_internal_fields_and_caps_options(self) -> None:
+        request: dict[str, object] = {
+            "adults": 2,
+            "check_in": "2026-08-10",
+            "check_out": "2026-08-12",
+            "children": 0,
+        }
+        provider_options = [
+            {
+                "available_units": index + 1,
+                "currency": "BRL",
+                "option_id": f"internal-option-{index}",
+                "price_reliable": True,
+                "rate_plan_id": f"internal-rate-{index}",
+                "room_public_name": f"Quarto {index}",
+                "room_type_id": f"internal-room-{index}",
+                "total_amount": f"{480 + index}.00",
+            }
+            for index in range(6)
+        ]
+        raw = _canonical(
+            {
+                "options": provider_options,
+                "raw_provider_payload_returned": False,
+                "status": "ok",
+            }
+        ).decode("utf-8")
+
+        result = cloudbeds_child._sanitize_result(raw, request=request)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["options"]), 5)
+        serialized = _canonical(result).decode("utf-8")
+        self.assertNotIn("option_id", serialized)
+        self.assertNotIn("room_type_id", serialized)
+        self.assertNotIn("rate_plan_id", serialized)
+        sandbox.LodgingAvailabilityObservation.from_canonical_bytes(_canonical(result))
+
+    def test_cloudbeds_child_converts_untrusted_provider_shape_to_safe_error(self) -> None:
+        result = cloudbeds_child._sanitize_result(
+            '{"raw_provider_payload_returned":true,"status":"ok"}',
+            request={
+                "adults": 2,
+                "check_in": "2026-08-10",
+                "check_out": "2026-08-12",
+                "children": 0,
+            },
+        )
+
+        self.assertEqual(result["status"], "provider_error")
+        self.assertEqual(result["options"], [])
+        self.assertFalse(result["availability_confirmed"])
+        self.assertFalse(result["price_confirmed"])
+        self.assertFalse(result["raw_provider_payload_returned"])
+
+    def test_cloudbeds_adapter_uses_allowlisted_no_shell_child(self) -> None:
+        calls: list[tuple[tuple[str, ...], bytes, int]] = []
+
+        def fake_run(command: tuple[str, ...], *, input: bytes, timeout: int) -> _RunResult:
+            calls.append((command, input, timeout))
+            return _RunResult(0, b"PHASE8_CLOUDBEDS_RESULT\x00" + _observation())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "scripts" / "phase8_cloudbeds_read_child.py"
+            child.parent.mkdir()
+            child.write_text("# fixed child source\n", encoding="utf-8")
+            adapter = sandbox.CloudbedsDockerRead(
+                project_root=root,
+                container="chapada-leads-hermes",
+                run=fake_run,
+            )
+            request = sandbox.LodgingAvailabilityReadRequest.from_mapping(
+                {
+                    "arguments": {
+                        "adults": 2,
+                        "check_in": "2026-08-10",
+                        "check_out": "2026-08-12",
+                        "children": 0,
+                    },
+                    "kind": "lodging_availability",
+                }
+            )
+            observation = adapter.read(request)
+
+        self.assertEqual(observation.status, "ok")
+        command, payload, timeout = calls[0]
+        self.assertEqual(command[:3], ("docker", "exec", "-i"))
+        self.assertEqual(
+            command[-4:],
+            (
+                "chapada-leads-hermes",
+                "/app/.venv/bin/python",
+                "-c",
+                "# fixed child source\n",
+            ),
+        )
+        self.assertNotIn("sh", command)
+        self.assertNotIn("bash", command)
+        required_environment = {
+            "HERMES_LEADS_MODE=shadow",
+            "HERMES_LEADS_DRY_RUN=false",
+            "HERMES_LEADS_ALLOW_LIVE_SENDS=false",
+            "HERMES_CLOUDBEDS_READONLY_ENABLED=true",
+            "HERMES_CLOUDBEDS_WRITE_ENABLED=false",
+            "HERMES_CLOUDBEDS_UPSELL_WRITE_ENABLED=false",
+            "HERMES_CLOUDBEDS_PAYMENT_CONFIRMATION_WRITE_ENABLED=false",
+            "HERMES_CLOUDBEDS_STRIPE_PAYMENT_LINK_WRITE_ENABLED=false",
+            "HERMES_BOKUN_CART_WRITE_ENABLED=false",
+            "HERMES_BOKUN_RESERVATION_WRITE_ENABLED=false",
+            "HERMES_BOKUN_PAYMENT_CONFIRMATION_WRITE_ENABLED=false",
+            "HERMES_STRIPE_PAYMENT_LINK_WRITE_ENABLED=false",
+            "HERMES_WISE_PAYMENT_MATCHER_SETTLEMENT_ENABLED=false",
+            "HERMES_WISE_PAYMENT_VALIDATION_ENABLED=false",
+            "HERMES_WISE_CLOUDBEDS_HOSTEL_PAYMENT_VALIDATION_WRITE_ENABLED=false",
+            "HERMES_SIDE_EFFECT_LEDGER_ENABLED=false",
+            "HERMES_PUBLIC_OUTBOX_AUTO_FLUSH_ENABLED=false",
+            "HERMES_POST_PAYMENT_OUTBOX_WORKER_ENABLED=false",
+            "MANYCHAT_API_KEY=",
+            "SUPABASE_URL=",
+            "SUPABASE_SERVICE_ROLE_KEY=",
+            "REDIS_URL=",
+            "BOKUN_ACCESS_KEY=",
+            "BOKUN_SECRET_KEY=",
+            "STRIPE_SECRET_KEY=",
+            "WISE_API_TOKEN=",
+        }
+        self.assertTrue(required_environment <= set(command))
+        self.assertEqual(payload, request.to_canonical_bytes())
+        self.assertEqual(timeout, 30)
+
+    def test_cloudbeds_adapter_fails_closed_on_child_error_or_bad_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "scripts" / "phase8_cloudbeds_read_child.py"
+            child.parent.mkdir()
+            child.write_text("# fixed child source\n", encoding="utf-8")
+            request = sandbox.LodgingAvailabilityReadRequest.from_mapping(
+                {
+                    "arguments": {
+                        "adults": 2,
+                        "check_in": "2026-08-10",
+                        "check_out": "2026-08-12",
+                        "children": 0,
+                    },
+                    "kind": "lodging_availability",
+                }
+            )
+            failing = sandbox.CloudbedsDockerRead(
+                project_root=root,
+                run=lambda *_args, **_kwargs: _RunResult(2, b"", b"safe failure"),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "safe failure"):
+                failing.read(request)
+            unmarked = sandbox.CloudbedsDockerRead(
+                project_root=root,
+                run=lambda *_args, **_kwargs: _RunResult(0, _observation()),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "result marker"):
+                unmarked.read(request)
 
     def test_hermes_adapter_uses_stdin_no_shell_and_fails_closed(self) -> None:
         calls: list[tuple[tuple[str, ...], bytes, int]] = []
