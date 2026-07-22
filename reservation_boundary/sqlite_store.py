@@ -813,6 +813,321 @@ def _authenticate_v8_connection(connection: sqlite3.Connection) -> None:
         raise DataCorruption("SQLite v8 DDL fingerprint is not exact")
 
 
+_ARTIFACT_DOMAINS = {
+    "frame_commitment": "phase8-conversation-frame-commitment-v1",
+    "read_observation": "phase8-read-observation-v1",
+    "typed_fact": "phase8-typed-fact-v1",
+    "normalized_tool_proposal": "phase8-normalized-tool-proposal-v1",
+    "learning_proposal": "phase8-learning-proposal-v1",
+    "maya_closure": "phase8-maya-turn-closure-v1",
+    "maya_proposal": "phase8-maya-turn-proposal-v1",
+}
+_SCHEMA_DOMAINS = {
+    "phase8-reservation-relay-bundle": "phase8-reservation-relay-bundle-v1",
+    "phase8-settlement-relay-bundle": "phase8-settlement-relay-bundle-v1",
+    "phase8-handoff-relay-bundle": "phase8-handoff-relay-bundle-v1",
+    "phase8-learning-proposal": "phase8-learning-proposal-v1",
+    "phase8-boundary-internal-job": "phase8-boundary-internal-job-v1",
+}
+
+
+def _semantic_canonical_json(text: object, name: str) -> tuple[bytes, dict[str, object]]:
+    if type(text) is not str:
+        raise DataCorruption(f"v8 semantic scan: {name} is not text")
+    payload = text.encode("utf-8")
+    envelope = _receipt_load_json(payload, name)
+    if _receipt_json(envelope) != payload:
+        raise DataCorruption(f"v8 semantic scan: {name} is not canonical JSON")
+    return payload, envelope
+
+
+def _semantic_domain_hash(domain: str, payload: bytes) -> str:
+    return hashlib.sha256(domain.encode("ascii") + b"\x00" + payload).hexdigest()
+
+
+def _semantic_scan_v8_connection(connection: sqlite3.Connection) -> None:
+    """Authenticate every persisted v8 receipt and its relational backlinks."""
+    try:
+        state_rows = connection.execute(
+            "SELECT lead_key,version,state_json,state_hash FROM boundary_state ORDER BY lead_key"
+        ).fetchall()
+        for lead_key, state_version, state_json, state_hash in state_rows:
+            state = from_wire_json(state_json, BoundaryState)
+            if (
+                state.lead_key != lead_key
+                or state.version != state_version
+                or semantic_hash(state) != state_hash
+            ):
+                raise DataCorruption("v8 semantic state identity diverged")
+            events = connection.execute(
+                "SELECT aggregate_turn_id,event_hash,commit_hash,turn_receipt_json,"
+                "turn_receipt_hash,state_version,occurred_at FROM boundary_events "
+                "WHERE lead_key=? ORDER BY state_version",
+                (lead_key,),
+            ).fetchall()
+            if tuple(row[5] for row in events) != tuple(range(1, state_version + 1)):
+                raise DataCorruption("v8 semantic receipt state-version chain diverged")
+            previous_receipt_hash: str | None = None
+            for event in events:
+                (
+                    aggregate_turn_id,
+                    event_hash,
+                    commit_hash,
+                    receipt_json,
+                    receipt_hash,
+                    receipt_state_version,
+                    occurred_at,
+                ) = event
+                _require_hash(event_hash, "semantic event hash")
+                _require_hash(commit_hash, "semantic commit hash")
+                receipt = TurnReceipt.from_canonical_bytes(receipt_json.encode("utf-8"))
+                if (
+                    receipt.aggregate_turn_id != aggregate_turn_id
+                    or receipt.event_hash != event_hash
+                    or receipt.artifact_hash != receipt_hash
+                    or receipt.committed_state_version != receipt_state_version
+                    or receipt.previous_turn_receipt_hash != previous_receipt_hash
+                    or receipt.committed_at != datetime.fromisoformat(occurred_at)
+                ):
+                    raise DataCorruption("v8 semantic receipt/event identity diverged")
+                previous_receipt_hash = receipt_hash
+
+                sources = connection.execute(
+                    "SELECT source_index,source_event_id,source_event_hash,source_event_json,"
+                    "source_turn_receipt_hash FROM boundary_event_sources "
+                    "WHERE lead_key=? AND aggregate_turn_id=? ORDER BY source_index",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                if len(sources) != len(receipt.source_events):
+                    raise DataCorruption("v8 semantic source child cardinality diverged")
+                for index, (stored, expected_source) in enumerate(
+                    zip(sources, receipt.source_events)
+                ):
+                    source_index, source_id, source_hash, source_json, backlink = stored
+                    expected_json = _receipt_json(
+                        {
+                            "source_event_id": expected_source.source_event_id,
+                            "source_event_hash": expected_source.source_event_hash,
+                        }
+                    ).decode()
+                    if stored != (
+                        index,
+                        expected_source.source_event_id,
+                        expected_source.source_event_hash,
+                        expected_json,
+                        receipt_hash,
+                    ):
+                        raise DataCorruption("v8 semantic source child identity diverged")
+
+                artifacts = connection.execute(
+                    "SELECT artifact_index,artifact_id,artifact_kind,frame_sequence,"
+                    "frame_reference,artifact_json,artifact_hash,source_turn_receipt_hash "
+                    "FROM boundary_turn_artifacts WHERE lead_key=? AND aggregate_turn_id=? "
+                    "ORDER BY artifact_index",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                if tuple(row[0] for row in artifacts) != tuple(range(len(artifacts))):
+                    raise DataCorruption("v8 semantic artifact indexes diverged")
+                maya: list[tuple[str, str, bytes]] = []
+                kernel: list[tuple[str, str, bytes]] = []
+                reads: list[tuple[str, bytes, str]] = []
+                for _, artifact_id, kind, _, _, artifact_json, artifact_hash, backlink in artifacts:
+                    payload, _ = _semantic_canonical_json(
+                        artifact_json,
+                        f"artifact {artifact_id}",
+                    )
+                    if backlink != receipt_hash:
+                        raise DataCorruption("v8 semantic artifact receipt backlink diverged")
+                    if kind == "kernel_decision":
+                        expected_hash = hashlib.sha256(payload).hexdigest()
+                    else:
+                        domain = _ARTIFACT_DOMAINS.get(kind)
+                        if domain is None:
+                            raise DataCorruption("v8 semantic artifact kind has no hash domain")
+                        expected_hash = _semantic_domain_hash(domain, payload)
+                    if expected_hash != artifact_hash:
+                        raise DataCorruption("v8 semantic artifact hash diverged from bytes")
+                    if kind == "maya_proposal":
+                        maya.append((artifact_id, artifact_hash, payload))
+                    elif kind == "kernel_decision":
+                        kernel.append((artifact_id, artifact_hash, payload))
+                    elif kind == "read_observation":
+                        observation = ReadObservation.from_canonical_bytes(payload)
+                        if observation.canonical_hash() != artifact_hash:
+                            raise DataCorruption("v8 semantic read artifact hash diverged")
+                        reads.append((artifact_id, payload, artifact_hash))
+                if len(maya) != 1 or maya[0][1] != receipt.maya_proposal_hash:
+                    raise DataCorruption("v8 semantic Maya artifact binding diverged")
+                if len(kernel) != 1 or kernel[0][1] != receipt.kernel_decision_hash:
+                    raise DataCorruption("v8 semantic kernel artifact binding diverged")
+                if tuple(reads) != receipt.read_observations:
+                    raise DataCorruption("v8 semantic read artifact rows diverged")
+
+                commands = connection.execute(
+                    "SELECT command_id,command_json,command_hash,source_turn_receipt_hash "
+                    "FROM boundary_commands WHERE lead_key=? AND aggregate_turn_id=?",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                command_map = {row[0]: row[1:] for row in commands}
+                if len(command_map) != len(receipt.command_rows):
+                    raise DataCorruption("v8 semantic command child cardinality diverged")
+                for command_id, command_hash in receipt.command_rows:
+                    stored = command_map.get(command_id)
+                    if stored is None or stored != (
+                        stored[0],
+                        command_hash,
+                        receipt_hash,
+                    ) or hashlib.sha256(stored[0].encode()).hexdigest() != command_hash:
+                        raise DataCorruption("v8 semantic command child identity diverged")
+
+                relays = connection.execute(
+                    "SELECT relay_id,bundle_json,bundle_hash,source_turn_receipt_hash "
+                    "FROM boundary_command_relays WHERE lead_key=? AND aggregate_turn_id=?",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                relay_map = {row[0]: row[1:] for row in relays}
+                if len(relay_map) != len(receipt.relay_rows):
+                    raise DataCorruption("v8 semantic relay child cardinality diverged")
+                for relay_id, relay_hash in receipt.relay_rows:
+                    stored = relay_map.get(relay_id)
+                    if stored is None:
+                        raise DataCorruption("v8 semantic relay child is missing")
+                    bundle_json, bundle_hash, backlink = stored
+                    payload, envelope = _semantic_canonical_json(
+                        bundle_json,
+                        f"relay {relay_id}",
+                    )
+                    domain = _SCHEMA_DOMAINS.get(envelope.get("schema"))
+                    if (
+                        domain is None
+                        or _semantic_domain_hash(domain, payload) != bundle_hash
+                        or bundle_hash != relay_hash
+                        or backlink != receipt_hash
+                    ):
+                        raise DataCorruption("v8 semantic relay child identity diverged")
+
+                jobs = connection.execute(
+                    "SELECT job_id,artifact_json,artifact_hash,source_turn_receipt_hash "
+                    "FROM boundary_outbox WHERE lead_key=? AND aggregate_turn_id=?",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                job_map = {row[0]: row[1:] for row in jobs}
+                if len(job_map) != len(receipt.internal_outbox_rows):
+                    raise DataCorruption("v8 semantic internal child cardinality diverged")
+                for job_id, job_hash in receipt.internal_outbox_rows:
+                    stored = job_map.get(job_id)
+                    if stored is None:
+                        raise DataCorruption("v8 semantic internal child is missing")
+                    artifact_json, artifact_hash, backlink = stored
+                    payload, envelope = _semantic_canonical_json(
+                        artifact_json,
+                        f"internal job {job_id}",
+                    )
+                    domain = _SCHEMA_DOMAINS.get(envelope.get("schema"))
+                    if (
+                        domain is None
+                        or _semantic_domain_hash(domain, payload) != artifact_hash
+                        or artifact_hash != job_hash
+                        or backlink != receipt_hash
+                    ):
+                        raise DataCorruption("v8 semantic internal child identity diverged")
+
+                public_rows = connection.execute(
+                    "SELECT public_row_id,chunk_index,chunk_json,chunk_hash,"
+                    "predecessor_chunk_hash,target_binding_hash,channel_scope,authorization_kind,"
+                    "authorization_id,scope_subject_id,qualification_id,scenario_id,"
+                    "immutable_generation,allocation_id,capability_policy_digest,"
+                    "effect_authorization_binding_digest,effective_turn_binding_digest,"
+                    "source_turn_receipt_hash FROM boundary_public_outbox "
+                    "WHERE lead_key=? AND aggregate_turn_id=? ORDER BY chunk_index",
+                    (lead_key, aggregate_turn_id),
+                ).fetchall()
+                if len(public_rows) != len(receipt.public_chunks):
+                    raise DataCorruption("v8 semantic public child cardinality diverged")
+                expected_public: list[tuple[str, int, bytes, str]] = []
+                predecessor: str | None = None
+                for row in public_rows:
+                    (
+                        public_row_id,
+                        ordinal,
+                        chunk_json,
+                        chunk_hash,
+                        predecessor_hash,
+                        target_binding_hash,
+                        channel_scope,
+                        authorization_kind,
+                        authorization_id,
+                        scope_subject_id,
+                        qualification_id,
+                        scenario_id,
+                        generation,
+                        allocation_id,
+                        capability_digest,
+                        effect_digest,
+                        effective_digest,
+                        backlink,
+                    ) = row
+                    payload = chunk_json.encode("utf-8")
+                    chunk = _receipt_public_chunk(payload)
+                    if (
+                        chunk.aggregate_turn_id != aggregate_turn_id
+                        or chunk.ordinal != ordinal
+                        or chunk.canonical_hash() != chunk_hash
+                        or predecessor_hash != predecessor
+                        or capability_digest != receipt.capability_policy_digest
+                        or effective_digest != receipt.effective_stage_binding_digest
+                        or backlink != receipt_hash
+                    ):
+                        raise DataCorruption("v8 semantic public child identity diverged")
+                    authority = connection.execute(
+                        "SELECT authorization_kind,qualification_id,scenario_id,"
+                        "capability_policy_digest,effect_authorization_binding_digest,"
+                        "target_binding_hash,allowed_chunk_ordinal,state,public_row_id "
+                        "FROM boundary_dispatch_authority WHERE authorization_id=? "
+                        "AND scope_subject_id=? AND channel_scope=? AND generation=? "
+                        "AND allocation_id=? AND row_kind='allocation'",
+                        (
+                            authorization_id,
+                            scope_subject_id,
+                            channel_scope,
+                            generation,
+                            allocation_id,
+                        ),
+                    ).fetchone()
+                    if authority is None or authority != (
+                        authorization_kind,
+                        qualification_id,
+                        scenario_id,
+                        capability_digest,
+                        effect_digest,
+                        target_binding_hash,
+                        ordinal,
+                        authority[7],
+                        public_row_id,
+                    ) or authority[7] not in {
+                        "bound", "dispatch_fenced", "terminal", "closed", "manual_review"
+                    }:
+                        raise DataCorruption("v8 semantic allocation binding diverged")
+                    expected_public.append((public_row_id, ordinal, payload, chunk_hash))
+                    predecessor = chunk_hash
+                if tuple(expected_public) != receipt.public_chunks:
+                    raise DataCorruption("v8 semantic public receipt tuple diverged")
+
+            if state_version == 0:
+                if events:
+                    raise DataCorruption("v8 semantic genesis state has turn receipts")
+            else:
+                final_receipt = TurnReceipt.from_canonical_bytes(
+                    events[-1][3].encode("utf-8")
+                )
+                if final_receipt.committed_state_hash != state_hash:
+                    raise DataCorruption("v8 semantic final receipt/state hash diverged")
+    except DataCorruption:
+        raise
+    except (BoundaryStoreError, TypeError, ValueError, KeyError, IndexError) as exc:
+        raise DataCorruption("v8 semantic scan rejected persisted bytes") from exc
+
+
 class SQLiteBoundaryStore:
     """One in-memory-capable SQLite boundary unit of work."""
 
@@ -854,11 +1169,8 @@ class SQLiteBoundaryStore:
             connection.execute("PRAGMA synchronous = FULL")
             connection.executescript(render_sqlite_v8())
             _authenticate_v8_connection(connection)
-            return cls(
-                connection,
-                _factory_token=_FACTORY_TOKEN,
-                _schema_version=8,
-            )
+            _semantic_scan_v8_connection(connection)
+            return cls(connection, _factory_token=_FACTORY_TOKEN, _schema_version=8)
         except BaseException:
             connection.close()
             raise
@@ -888,6 +1200,7 @@ class SQLiteBoundaryStore:
                 raise DataCorruption("SQLite v8 WAL mode is unavailable")
             if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
                 raise DataCorruption("SQLite v8 synchronous mode is not FULL")
+            _semantic_scan_v8_connection(connection)
             return cls(
                 connection,
                 _factory_token=_FACTORY_TOKEN,
@@ -912,11 +1225,8 @@ class SQLiteBoundaryStore:
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             _authenticate_v8_connection(connection)
-            return cls(
-                connection,
-                _factory_token=_FACTORY_TOKEN,
-                _schema_version=8,
-            )
+            _semantic_scan_v8_connection(connection)
+            return cls(connection, _factory_token=_FACTORY_TOKEN, _schema_version=8)
         except BaseException:
             connection.close()
             raise
@@ -1002,6 +1312,12 @@ class SQLiteBoundaryStore:
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("SQLiteBoundaryStore is closed")
+
+    def semantic_scan_v8(self) -> None:
+        self._ensure_open()
+        if self._schema_version != 8:
+            raise BoundaryStoreError("semantic_scan_v8 requires an authenticated v8 store")
+        _semantic_scan_v8_connection(self._connection)
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
