@@ -141,6 +141,58 @@ def _load_canonical_object(payload: bytes, name: str) -> dict[str, object]:
     return value
 
 
+def _load_contract_data(
+    payload: bytes,
+    name: str,
+    *,
+    schema: str,
+    version: int,
+    fields: frozenset[str],
+) -> dict[str, object]:
+    envelope = _load_canonical_object(payload, name)
+    if set(envelope) != {"schema", "version", "data"}:
+        raise ValueError(f"{name} envelope fields mismatch")
+    if (
+        type(envelope["schema"]) is not str
+        or type(envelope["version"]) is not int
+        or envelope["schema"] != schema
+        or envelope["version"] != version
+    ):
+        raise ValueError(f"{name} envelope identity mismatch")
+    data = envelope["data"]
+    if type(data) is not dict or set(data) != fields:
+        raise ValueError(f"{name} data fields mismatch")
+    return data
+
+
+def _nested_contract_bytes(value: object, name: str) -> bytes:
+    if type(value) is not dict:
+        raise ValueError(f"{name} must be a nested contract object")
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _parse_utc(value: object, name: str) -> datetime:
+    if type(value) is not str:
+        raise ValueError(f"{name} must be an exact datetime string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a canonical UTC datetime") from exc
+    if (
+        parsed.tzinfo is None
+        or parsed.utcoffset() != timedelta(0)
+        or parsed.isoformat() != value
+    ):
+        raise ValueError(f"{name} must be a canonical UTC datetime")
+    return parsed
+
+
 def _decode_base64(value: object, name: str) -> bytes:
     if type(value) is not str:
         raise ValueError(f"{name} must be a Base64 string")
@@ -271,6 +323,34 @@ class ReservationExecutionProjection:
             self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         ).hexdigest()
 
+    @classmethod
+    def from_canonical_bytes(
+        cls,
+        payload: bytes,
+    ) -> "ReservationExecutionProjection":
+        data = _load_contract_data(
+            payload,
+            "ReservationExecutionProjection",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                (
+                    "reservation_relay_bundle_bytes",
+                    "reservation_relay_bundle_hash",
+                )
+            ),
+        )
+        projection = cls(
+            reservation_relay_bundle_bytes=_decode_base64(
+                data["reservation_relay_bundle_bytes"],
+                "reservation_relay_bundle_bytes",
+            ),
+            reservation_relay_bundle_hash=data["reservation_relay_bundle_hash"],
+        )
+        if projection.to_canonical_bytes() != payload:
+            raise ValueError("ReservationExecutionProjection is not byte-canonical")
+        return projection
+
 
 @dataclass(frozen=True, slots=True)
 class ConversationProjection:
@@ -351,6 +431,56 @@ class ConversationProjection:
             self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         ).hexdigest()
 
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "ConversationProjection":
+        data = _load_contract_data(
+            payload,
+            "ConversationProjection",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                (
+                    "stage",
+                    "desired_services",
+                    "locale",
+                    "facts",
+                    "reservation_execution_projection",
+                )
+            ),
+        )
+        if type(data["desired_services"]) is not list or type(data["facts"]) is not list:
+            raise ValueError("ConversationProjection tuple fields must be arrays")
+        try:
+            stage = ConversationStage(data["stage"])
+            desired_services = tuple(
+                DesiredService(item) for item in data["desired_services"]
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ConversationProjection enum value is invalid") from exc
+        execution_value = data["reservation_execution_projection"]
+        projection = cls(
+            stage=stage,
+            desired_services=desired_services,
+            locale=data["locale"],
+            facts=tuple(
+                TypedFact.from_canonical_bytes(_nested_contract_bytes(item, "fact"))
+                for item in data["facts"]
+            ),
+            reservation_execution_projection=(
+                ReservationExecutionProjection.from_canonical_bytes(
+                    _nested_contract_bytes(
+                        execution_value,
+                        "reservation_execution_projection",
+                    )
+                )
+                if execution_value is not None
+                else None
+            ),
+        )
+        if projection.to_canonical_bytes() != payload:
+            raise ValueError("ConversationProjection is not byte-canonical")
+        return projection
+
 
 @dataclass(frozen=True, slots=True)
 class SourceEventIdentity:
@@ -380,6 +510,23 @@ class SourceEventIdentity:
     def canonical_hash(self) -> str:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "SourceEventIdentity":
+        data = _load_contract_data(
+            payload,
+            "SourceEventIdentity",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(("source_event_id", "source_event_hash")),
+        )
+        identity = cls(
+            source_event_id=data["source_event_id"],
+            source_event_hash=data["source_event_hash"],
+        )
+        if identity.to_canonical_bytes() != payload:
+            raise ValueError("SourceEventIdentity is not byte-canonical")
+        return identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,6 +624,64 @@ class MayaTurnRequest:
     def canonical_hash(self) -> str:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "MayaTurnRequest":
+        data = _load_contract_data(
+            payload,
+            "MayaTurnRequest",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                (
+                    "boundary_state_bytes",
+                    "state_version",
+                    "state_hash",
+                    "normalized_message",
+                    "aggregate_turn_id",
+                    "source_events",
+                    "lead_key_hash",
+                    "private_delivery_binding_hash",
+                    "deadline_at",
+                    "behavior_profile_fingerprint",
+                )
+            ),
+        )
+        normalized_message = data["normalized_message"]
+        if (
+            type(normalized_message) is not dict
+            or set(normalized_message) != {"text", "locale"}
+        ):
+            raise ValueError("MayaTurnRequest.normalized_message fields mismatch")
+        source_events = data["source_events"]
+        if type(source_events) is not list:
+            raise ValueError("MayaTurnRequest.source_events must be an array")
+        request = cls(
+            boundary_state_bytes=_decode_base64(
+                data["boundary_state_bytes"],
+                "boundary_state_bytes",
+            ),
+            state_version=data["state_version"],
+            state_hash=data["state_hash"],
+            normalized_message=NormalizedMessage(
+                text=normalized_message["text"],
+                locale=normalized_message["locale"],
+            ),
+            aggregate_turn_id=data["aggregate_turn_id"],
+            source_events=tuple(
+                SourceEventIdentity.from_canonical_bytes(
+                    _nested_contract_bytes(item, "source_event")
+                )
+                for item in source_events
+            ),
+            lead_key_hash=data["lead_key_hash"],
+            private_delivery_binding_hash=data["private_delivery_binding_hash"],
+            deadline_at=_parse_utc(data["deadline_at"], "deadline_at"),
+            behavior_profile_fingerprint=data["behavior_profile_fingerprint"],
+        )
+        if request.to_canonical_bytes() != payload:
+            raise ValueError("MayaTurnRequest is not byte-canonical")
+        return request
 
 
 class PublicRoute(str, Enum):
@@ -662,6 +867,50 @@ class CapabilityPolicy:
         return hashlib.sha256(
             self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "CapabilityPolicy":
+        data = _load_contract_data(
+            payload,
+            "CapabilityPolicy",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                ("capability_matrix", "worker_modes", "guard_semantics")
+            ),
+        )
+        capability_matrix = data["capability_matrix"]
+        worker_modes = data["worker_modes"]
+        guard_semantics = data["guard_semantics"]
+        if (
+            type(capability_matrix) is not list
+            or type(worker_modes) is not list
+            or type(guard_semantics) is not list
+        ):
+            raise ValueError("CapabilityPolicy tuple fields must be arrays")
+        if any(type(row) is not list or len(row) != 2 for row in capability_matrix):
+            raise ValueError("CapabilityPolicy capability rows must be pairs")
+        if any(type(row) is not list or len(row) != 2 for row in worker_modes):
+            raise ValueError("CapabilityPolicy worker rows must be pairs")
+        try:
+            capability_rows = tuple(
+                (Capability(row[0]), CapabilityDisposition(row[1]))
+                for row in capability_matrix
+            )
+            worker_rows = tuple(
+                (Worker(row[0]), WorkerMode(row[1])) for row in worker_modes
+            )
+            guards = tuple(GuardSemantic(item) for item in guard_semantics)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("CapabilityPolicy enum value is invalid") from exc
+        policy = cls(
+            capability_matrix=capability_rows,
+            worker_modes=worker_rows,
+            guard_semantics=guards,
+        )
+        if policy.to_canonical_bytes() != payload:
+            raise ValueError("CapabilityPolicy is not byte-canonical")
+        return policy
 
 
 class NormalizedCommandTool(str, Enum):
@@ -875,6 +1124,29 @@ class MayaIntentClosure:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
 
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "MayaIntentClosure":
+        data = _load_contract_data(
+            payload,
+            "MayaIntentClosure",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(("kind", "selection", "confirmation", "handoff")),
+        )
+        try:
+            kind = ConversationIntentKind(data["kind"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MayaIntentClosure.kind is invalid") from exc
+        closure = cls(
+            kind=kind,
+            selection=data["selection"],
+            confirmation=data["confirmation"],
+            handoff=data["handoff"],
+        )
+        if closure.to_canonical_bytes() != payload:
+            raise ValueError("MayaIntentClosure is not byte-canonical")
+        return closure
+
 
 @dataclass(frozen=True, slots=True)
 class MayaTurnClosure:
@@ -966,6 +1238,49 @@ class MayaTurnClosure:
     def canonical_hash(self) -> str:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "MayaTurnClosure":
+        data = _load_contract_data(
+            payload,
+            "MayaTurnClosure",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                (
+                    "aggregate_turn_id",
+                    "intent_closure",
+                    "public_text",
+                    "route",
+                    "reply_type",
+                    "final_seq",
+                    "expected_prefix_mac",
+                    "ephemeral_session_id",
+                    "zero_requests_in_flight",
+                )
+            ),
+        )
+        try:
+            route = PublicRoute(data["route"])
+            reply_type = PublicReplyType(data["reply_type"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MayaTurnClosure enum value is invalid") from exc
+        closure = cls(
+            aggregate_turn_id=data["aggregate_turn_id"],
+            intent_closure=MayaIntentClosure.from_canonical_bytes(
+                _nested_contract_bytes(data["intent_closure"], "intent_closure")
+            ),
+            public_text=data["public_text"],
+            route=route,
+            reply_type=reply_type,
+            final_seq=data["final_seq"],
+            expected_prefix_mac=data["expected_prefix_mac"],
+            ephemeral_session_id=data["ephemeral_session_id"],
+            zero_requests_in_flight=data["zero_requests_in_flight"],
+        )
+        if closure.to_canonical_bytes() != payload:
+            raise ValueError("MayaTurnClosure is not byte-canonical")
+        return closure
 
 
 @dataclass(frozen=True, slots=True)
@@ -1285,6 +1600,43 @@ class TranscriptCommitment:
     def canonical_hash(self) -> str:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "TranscriptCommitment":
+        data = _load_contract_data(
+            payload,
+            "TranscriptCommitment",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                (
+                    "direction",
+                    "kind",
+                    "sequence",
+                    "request_id",
+                    "request_hash",
+                    "response_hash",
+                    "previous_frame_commitment",
+                )
+            ),
+        )
+        try:
+            direction = TranscriptDirection(data["direction"])
+            kind = TranscriptKind(data["kind"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("TranscriptCommitment enum value is invalid") from exc
+        commitment = cls(
+            direction=direction,
+            kind=kind,
+            sequence=data["sequence"],
+            request_id=data["request_id"],
+            request_hash=data["request_hash"],
+            response_hash=data["response_hash"],
+            previous_frame_commitment=data["previous_frame_commitment"],
+        )
+        if commitment.to_canonical_bytes() != payload:
+            raise ValueError("TranscriptCommitment is not byte-canonical")
+        return commitment
 
 
 __all__ = (

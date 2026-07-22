@@ -77,6 +77,61 @@ def _require_exact_members(
     return items
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _load_closed_envelope(
+    payload: bytes,
+    name: str,
+    *,
+    schema: str,
+    version: int,
+    fields: frozenset[str],
+) -> dict[str, object]:
+    if type(payload) is not bytes:
+        raise TypeError(f"{name} payload must be exact bytes")
+    if not payload:
+        raise ValueError(f"{name} payload must be non-empty")
+    try:
+        envelope = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"non-finite JSON number: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f"{name} payload must be canonical UTF-8 JSON") from exc
+    if type(envelope) is not dict or set(envelope) != {"schema", "version", "data"}:
+        raise ValueError(f"{name} envelope fields mismatch")
+    if (
+        type(envelope["schema"]) is not str
+        or type(envelope["version"]) is not int
+        or envelope["schema"] != schema
+        or envelope["version"] != version
+    ):
+        raise ValueError(f"{name} envelope identity mismatch")
+    data = envelope["data"]
+    if type(data) is not dict or set(data) != fields:
+        raise ValueError(f"{name} data fields mismatch")
+    canonical = json.dumps(
+        envelope,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    if canonical != payload:
+        raise ValueError(f"{name} payload must use exact canonical JSON")
+    return data
+
+
 class FrozenDict(Mapping[str, object]):
     """Small recursively immutable and hashable mapping used by legacy snapshots."""
 
@@ -313,6 +368,47 @@ class TypedFact:
         return hashlib.sha256(
             self.DOMAIN.encode("ascii") + b"\0" + self.to_canonical_bytes()
         ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "TypedFact":
+        data = _load_closed_envelope(
+            payload,
+            "TypedFact",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(("name", "value", "frame_commitment_hash")),
+        )
+        tagged = data["value"]
+        if type(tagged) is not dict or set(tagged) != {"kind", "value"}:
+            raise ValueError("TypedFact.value fields mismatch")
+        kind = tagged["kind"]
+        if type(kind) is not str:
+            raise ValueError("TypedFact.value.kind must be an exact string")
+        if kind == "string":
+            slot: SlotValue = StringSlot(tagged["value"])
+        elif kind == "integer":
+            slot = IntegerSlot(tagged["value"])
+        elif kind == "date":
+            raw_date = tagged["value"]
+            if type(raw_date) is not str:
+                raise ValueError("TypedFact date value must be an exact string")
+            try:
+                parsed_date = date.fromisoformat(raw_date)
+            except ValueError as exc:
+                raise ValueError("TypedFact date value is invalid") from exc
+            if parsed_date.isoformat() != raw_date:
+                raise ValueError("TypedFact date value must be canonical")
+            slot = DateSlot(parsed_date)
+        else:
+            raise ValueError("TypedFact.value.kind is invalid")
+        fact = cls(
+            name=data["name"],
+            value=slot,
+            frame_commitment_hash=data["frame_commitment_hash"],
+        )
+        if fact.to_canonical_bytes() != payload:
+            raise ValueError("TypedFact payload is not byte-canonical")
+        return fact
 
 
 @dataclass(frozen=True, slots=True)

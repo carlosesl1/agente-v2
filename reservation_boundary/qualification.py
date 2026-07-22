@@ -51,6 +51,58 @@ def _canonical_envelope(*, schema: str, version: int, data: dict[str, object]) -
     ).encode("utf-8")
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _load_contract_data(
+    payload: bytes,
+    name: str,
+    *,
+    schema: str,
+    version: int,
+    fields: frozenset[str],
+) -> dict[str, object]:
+    if type(payload) is not bytes:
+        raise TypeError(f"{name} payload must be exact bytes")
+    if not payload:
+        raise ValueError(f"{name} payload must be non-empty")
+    try:
+        envelope = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"non-finite JSON number: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f"{name} payload must be canonical UTF-8 JSON") from exc
+    if type(envelope) is not dict or set(envelope) != {"schema", "version", "data"}:
+        raise ValueError(f"{name} envelope fields mismatch")
+    if (
+        type(envelope["schema"]) is not str
+        or type(envelope["version"]) is not int
+        or envelope["schema"] != schema
+        or envelope["version"] != version
+    ):
+        raise ValueError(f"{name} envelope identity mismatch")
+    data = envelope["data"]
+    if type(data) is not dict or set(data) != fields:
+        raise ValueError(f"{name} data fields mismatch")
+    if _canonical_envelope(
+        schema=envelope["schema"],
+        version=envelope["version"],
+        data=data,
+    ) != payload:
+        raise ValueError(f"{name} payload must use exact canonical JSON")
+    return data
+
+
 @dataclass(frozen=True, slots=True)
 class BehaviorStateSnapshot:
     """Canonical identity of the dynamic memory state admitted for a turn."""
@@ -89,6 +141,24 @@ class BehaviorStateSnapshot:
     def canonical_hash(self) -> str:
         preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         return hashlib.sha256(preimage).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "BehaviorStateSnapshot":
+        data = _load_contract_data(
+            payload,
+            "BehaviorStateSnapshot",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(("schema", "version", "memory_snapshot_hash")),
+        )
+        snapshot = cls(
+            schema=data["schema"],
+            version=data["version"],
+            memory_snapshot_hash=data["memory_snapshot_hash"],
+        )
+        if snapshot.to_canonical_bytes() != payload:
+            raise ValueError("BehaviorStateSnapshot is not byte-canonical")
+        return snapshot
 
 
 @dataclass(frozen=True, slots=True)
