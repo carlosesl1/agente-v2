@@ -37,7 +37,7 @@ Every contract uses canonical UTF-8 JSON:
 - datetimes are exact UTC and encode as `YYYY-MM-DDTHH:MM:SS.ffffffZ`;
 - dates encode as `YYYY-MM-DD`;
 - tuples encode as JSON arrays and are never accepted from mutable caller collections;
-- a nested contract is embedded as its full decoded canonical envelope, never only as an untyped `data` object;
+- a nested accepted contract uses the exact owner encoding authenticated in `external_contracts`; owner-envelope types embed the full envelope, while the four pre-existing ToolDispatch argument DTOs use their exact owner canonical object;
 - all SHA-256 values are lowercase 64-hex; prefixed IDs use the exact prefix declared by the registry;
 - nullable fields are JSON `null`; absence and null are never equivalent;
 - canonical decode always re-encodes and demands byte identity.
@@ -58,11 +58,11 @@ The companion fixture owns these reusable scalar aliases:
 SHA256       = ^[0-9a-f]{64}$
 OCI_DIGEST   = ^sha256:[0-9a-f]{64}$
 UTC          = canonical UTC timestamp above
-NONEMPTY     = exact str, NFKC, 1..256 bytes, no surrounding whitespace
 ID_TOKEN     = ^[a-z0-9][a-z0-9._:-]{0,127}$
 COUNT        = exact int >= 0, bool rejected
 POSITIVE     = exact int >= 1, bool rejected
 ORDINAL      = exact int >= 0, bool rejected
+PUBLIC_TEXT  = non-empty NFKC public-safe UTF-8 accepted by the facts/reads PII policy
 CANON_BYTES  = non-empty exact bytes whose contract-specific decoder re-encodes identically
 ```
 
@@ -79,6 +79,8 @@ This delta does not redefine the already authenticated facts/reads registry or t
 - `BehaviorStateSnapshot`, `ScenarioTerminalVerificationReceipt`.
 
 Their accepted bytes/domains remain authoritative and collision tests must prove that no contract introduced here decodes under an existing domain.
+
+The fixture records every external type reference with immutable authority and owner encoding. Besides the contracts listed above, the only external references are the four closed migrated ToolDispatch argument DTOs (`LodgingReservationArguments`, `ActivityReservationArguments`, `LodgingPaymentArguments`, `ActivityPaymentArguments`) and the existing Phase 6 `HandoffRequested|HandoffEffectPolicy|HandoffEvent` closed codecs. No unregistered helper or payload type is permitted.
 
 ## 5. Registry families and implementation placement
 
@@ -184,11 +186,11 @@ The operation is pure except for capability-free exact lookups. It returns the s
 The companion fixture top level is exactly:
 
 ```text
-schema, version, encoding, scalar_aliases, enums, families,
+schema, version, encoding, scalar_aliases, external_contracts, enums, families,
 owner_acceptance, known_answer_catalog
 ```
 
-It contains every contract introduced by this delta exactly once, all closed enums, one valid known answer per contract and targeted invalid cases for each nullable/status matrix. Registry order is semantic and fixed; JSON object key order remains canonical lexicographic order. Missing or extra contract, field, enum, domain or example fails the Task 1 wire test.
+It contains every contract introduced by this delta exactly once, all closed enums, every external contract reference with its immutable authority/encoding, and one valid known answer per contract. Focused tests synthesize the invalid members directly from each literal nullable/status matrix. Registry order is semantic and fixed; JSON object key order remains canonical lexicographic order. Missing or extra contract, external reference, field, enum, domain, nullable matrix or example fails the Task 1 wire test.
 
 The final `tests/fixtures/phase8_wire_contract_v8.json` is composed only after this delta is accepted. It embeds authenticated catalogs from:
 
@@ -200,15 +202,7 @@ Composition does not alter either source fixture and rejects duplicate schema/do
 
 ## 8. Conversation and turn closure
 
-The companion fixture is authoritative for the following exact field order, enums and known-answer bytes. Helper row shapes used below are closed inline:
-
-```text
-CommittedRowRef(row_id: ID_TOKEN, row_hash: SHA256)
-CommittedArtifactRef(row_id: ID_TOKEN, canonical_bytes: CANON_BYTES, artifact_hash: SHA256)
-CommittedPublicChunk(row_id: ID_TOKEN, ordinal: ORDINAL, canonical_bytes: CANON_BYTES(PublicReplyChunk), artifact_hash: SHA256)
-CapabilityGrantRow(capability: Capability, disposition: CapabilityDisposition)
-WorkerModeRow(worker: Worker, mode: WorkerMode)
-```
+These six contracts close parent-owned proposal, learning CAS input, public chunks, turn commit evidence and finite capability policy. No helper row name is implicit: embedded row records use the literal fixed scalar tuples shown in each field type.
 
 ### 8.1 `NormalizedToolProposal`
 
@@ -219,7 +213,7 @@ NormalizedToolProposal(
     sequence: ORDINAL,
     tool_name: NormalizedCommandTool,
     arguments_type: NormalizedCommandArgumentsType,
-    typed_arguments_json: CANON_BYTES(NormalizedCommandArgumentsPayload),
+    typed_arguments_json: CANON_BYTES(LodgingReservationArguments|ActivityReservationArguments|LodgingPaymentArguments|ActivityPaymentArguments),
     request_hash: SHA256,
     frame_commitment_hash: SHA256,
 )
@@ -233,14 +227,14 @@ HASH_KIND = domain_hash
 Closed enum references: `NormalizedCommandTool`, `NormalizedCommandArgumentsType`.
 
 Invariants:
-- constructed only by parent ToolDispatch.normalize_proposal.
-- tool_name and arguments_type are a closed exact pair.
-- typed_arguments_json decodes under that exact type with no unknown fields.
-- request/frame/turn/sequence equal the accepted COMMAND transcript frame.
-- contains no command authorization capability provider payload or secret.
-- blocked/unmigrated read state-commit and alias names are rejected.
+- constructed only by parent ToolDispatch.normalize_proposal
+- tool_name and arguments_type are a closed exact pair
+- typed_arguments_json decodes under that exact type with no unknown fields
+- request/frame/turn/sequence equal the accepted COMMAND transcript frame
+- contains no command authorization capability provider payload or secret
+- blocked/unmigrated read state-commit and alias names are rejected
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `NormalizedToolProposal` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.2 `LearningProposal`
 
@@ -250,6 +244,8 @@ LearningProposal(
     request_id: ID_TOKEN,
     sequence: ORDINAL,
     claim: TypedFact,
+    expected_memory_version: COUNT,
+    expected_memory_hash: SHA256,
     request_hash: SHA256,
     frame_commitment_hash: SHA256,
 )
@@ -261,13 +257,13 @@ HASH_KIND = domain_hash
 ```
 
 Invariants:
-- constructed by the parent after a LEARNING frame is validated.
-- claim is one complete v8 TypedFact envelope with the same frame backlink.
-- claim names/value variants remain the accepted closed TypedFact catalog.
-- contains no raw text PII provider payload memory capability receipt or secret.
-- no memory write occurs in-turn; any job is authorized and persisted only by the kernel/commit owner.
+- constructed by the parent after a LEARNING frame is validated
+- claim is one complete v8 TypedFact value with the same frame backlink
+- expected_memory_version and expected_memory_hash are the exact behavior snapshot observed by the attempt and become the compare-and-swap precondition of apply_learning
+- contains no raw text PII provider payload memory capability receipt or secret
+- no memory write occurs in-turn; any job is authorized and persisted only by the kernel/commit owner
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `LearningProposal` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.3 `PublicReplyChunk`
 
@@ -286,13 +282,13 @@ HASH_KIND = domain_hash
 ```
 
 Invariants:
-- constructed only by the deterministic parent splitter/guard.
-- text is nonempty public-safe UTF-8 and contains no raw inbound/provider payload prompt capability credential secret or personal identifier.
-- source_closure_hash resolves the exact accepted closure.
-- ordinals in one proposal are unique and contiguous from zero.
-- delivery uses the persisted UTF-8 bytes without regeneration translation concatenation or splitting.
+- constructed only by the deterministic parent splitter/guard
+- text is nonempty public-safe UTF-8 and contains no raw inbound/provider payload prompt capability credential secret or personal identifier
+- source_closure_hash resolves the exact accepted closure
+- ordinals in one proposal are unique and contiguous from zero
+- delivery uses the persisted UTF-8 bytes without regeneration translation concatenation or splitting
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `PublicReplyChunk` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.4 `MayaTurnProposal`
 
@@ -323,15 +319,15 @@ HASH_KIND = domain_hash
 Closed enum references: `PublicRoute`, `PublicReplyType`.
 
 Invariants:
-- constructed only by the parent from the accepted child closure and parent-owned transcript artifacts.
-- closure fields aggregate_turn_id route reply_type final_seq and hash bindings are equal.
-- all child artifacts are ordered by transcript frame and have unique IDs/backlinks.
-- public chunks have same turn and closure hash with contiguous ordinals.
-- no_reply iff route/reply_type are no_reply and chunks are empty; handoff route iff handoff reply type.
-- final transcript commitment is recomputable without the HMAC key; the MAC is opaque live proof only.
-- contains no legacy ConversationIntent prompt raw payload capability token key credential or secret.
+- constructed only by the parent from the accepted child closure and parent-owned transcript artifacts
+- closure fields aggregate_turn_id route reply_type final_seq and hash bindings are equal
+- all child artifacts are ordered by transcript frame and have unique IDs/backlinks
+- public chunks have same turn and closure hash with contiguous ordinals
+- no_reply iff route/reply_type are no_reply and chunks are empty; handoff route iff handoff reply type
+- final transcript commitment is recomputable without the HMAC key; the MAC is opaque live proof only
+- contains no legacy ConversationIntent prompt raw payload capability token key credential or secret
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `MayaTurnProposal` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.5 `TurnReceipt`
 
@@ -342,13 +338,13 @@ TurnReceipt(
     source_events: nonempty tuple[SourceEventIdentity,...],
     maya_proposal_hash: SHA256,
     kernel_decision_hash: SHA256,
-    read_observations: tuple[CommittedArtifactRef,...],
+    read_observations: tuple[tuple[ID_TOKEN,CANON_BYTES(ReadObservation),SHA256],...],
     committed_state_version: POSITIVE,
     committed_state_hash: SHA256,
-    public_chunks: tuple[CommittedPublicChunk,...],
-    command_rows: tuple[CommittedRowRef,...],
-    relay_rows: tuple[CommittedRowRef,...],
-    internal_outbox_rows: tuple[CommittedRowRef,...],
+    public_chunks: tuple[tuple[ID_TOKEN,ORDINAL,CANON_BYTES(PublicReplyChunk),SHA256],...],
+    command_rows: tuple[tuple[ID_TOKEN,SHA256],...],
+    relay_rows: tuple[tuple[ID_TOKEN,SHA256],...],
+    internal_outbox_rows: tuple[tuple[ID_TOKEN,SHA256],...],
     uds_transcript_mac: SHA256,
     uds_final_seq: POSITIVE,
     structural_graph_digest: SHA256,
@@ -374,25 +370,30 @@ HASH_KIND = artifact_preimage
 PREIMAGE_SCHEMA = phase8-turn-receipt-artifact-preimage
 ```
 
-Nullable matrices: `[["qualification_id","admission_sequence","admission_revision","commit_fence_token","allocation_manifest_hash","immutable_generation","allocation_ids"],["previous_turn_receipt_hash"]]`.
+Closed nullable/status matrix:
+
+- `non-E2E turn`: null = `qualification_id, admission_sequence, admission_revision, commit_fence_token, allocation_manifest_hash, immutable_generation, allocation_ids`; present = `none`.
+- `E2E turn`: null = `none`; present = `qualification_id, admission_sequence, admission_revision, commit_fence_token, allocation_manifest_hash, immutable_generation, allocation_ids`.
+- `first committed turn`: null = `previous_turn_receipt_hash`; present = `none`.
+- `later committed turn`: null = `none`; present = `previous_turn_receipt_hash`.
 
 Invariants:
-- artifact_hash is derived from the preimage excluding artifact_hash; previous_turn_receipt_hash remains inside the preimage.
-- source events are nonempty ordered and source_event_id-unique.
-- read observations include owner row id exact canonical bytes and domain hash.
-- public chunk rows include row id ordinal exact canonical bytes and domain hash; ordinals are contiguous from zero.
-- command relay and internal rows prove only atomic row persistence, never target ACK provider outcome or delivery.
-- qualification/admission/allocation fields are all-null or all-present and allocation IDs are unique.
-- duplicate event/turn returns byte-identical receipt and creates no rows.
+- artifact_hash is derived from the preimage excluding artifact_hash; previous_turn_receipt_hash remains inside the preimage
+- source events are nonempty ordered and source_event_id-unique
+- read observations are ordered tuples (row_id, exact canonical bytes, artifact hash)
+- public chunk rows are ordered tuples (row_id, ordinal, exact canonical bytes, artifact hash); ordinals are contiguous from zero
+- command relay and internal rows prove only atomic row persistence, never target ACK provider outcome or delivery
+- qualification/admission/allocation fields are all-null or all-present and allocation IDs are unique
+- duplicate event/turn returns byte-identical receipt and creates no rows
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `TurnReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.6 `CapabilityPolicy`
 
 ```text
 CapabilityPolicy(
-    capability_matrix: tuple[CapabilityGrantRow,...],
-    worker_modes: tuple[WorkerModeRow,...],
+    capability_matrix: tuple[tuple[Capability,CapabilityDisposition],...],
+    worker_modes: tuple[tuple[Worker,WorkerMode],...],
     guard_semantics: tuple[GuardSemantic,...],
 )
 
@@ -405,15 +406,39 @@ HASH_KIND = domain_hash
 Closed enum references: `Capability`, `CapabilityDisposition`, `Worker`, `WorkerMode`, `GuardSemantic`.
 
 Invariants:
-- capability_matrix has exactly one row per Capability in enum order.
-- worker_modes has exactly one row per Worker in enum order.
-- guard_semantics contains each closed semantic exactly once in enum order.
-- provider write followup delivery public delivery and learning write are independent.
-- contains no stage root path concrete allowlist cardinality percentage traffic split secret or credential.
+- capability_matrix has exactly one row per Capability in enum order
+- worker_modes has exactly one row per Worker in enum order
+- guard_semantics contains each closed semantic exactly once in enum order
+- provider write followup delivery public delivery and learning write are independent
+- contains no stage root path concrete allowlist cardinality percentage traffic split secret or credential
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `CapabilityPolicy` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 8.7 Closed enum values
+
+`NormalizedCommandTool` is exactly:
+
+```text
+cloudbeds_criar_reserva_v2 | bokun_agendar_passeio_v2 | cloudbeds_lancar_pagamento_confirmar_reserva | bokun_lancar_pagamento_confirmar_reserva
+```
+
+`NormalizedCommandArgumentsType` is exactly:
+
+```text
+lodging_reservation | activity_reservation | lodging_payment | activity_payment
+```
+
+`PublicRoute` is exactly:
+
+```text
+recepcionista | hostel | agencia | fechamento | handoff | no_reply
+```
+
+`PublicReplyType` is exactly:
+
+```text
+ask_more | qualify | answer | handoff | no_reply
+```
 
 `Capability` is exactly:
 
@@ -425,36 +450,6 @@ legacy_read | maya_inference | provider_read | turn_commit | relay_enqueue | pro
 
 ```text
 denied | read_only | propose_only | execute
-```
-
-`GuardSemantic` is exactly:
-
-```text
-fail_closed | deadline_bounded | idempotency_required | lease_fenced | owner_checked
-```
-
-`NormalizedCommandArgumentsType` is exactly:
-
-```text
-lodging_reservation | activity_reservation | lodging_payment | activity_payment
-```
-
-`NormalizedCommandTool` is exactly:
-
-```text
-cloudbeds_criar_reserva_v2 | bokun_agendar_passeio_v2 | cloudbeds_lancar_pagamento_confirmar_reserva | bokun_lancar_pagamento_confirmar_reserva
-```
-
-`PublicReplyType` is exactly:
-
-```text
-ask_more | qualify | answer | handoff | no_reply
-```
-
-`PublicRoute` is exactly:
-
-```text
-recepcionista | hostel | agencia | fechamento | handoff | no_reply
 ```
 
 `Worker` is exactly:
@@ -469,23 +464,22 @@ turn_coordinator | command_relay_worker | internal_job_worker | provider_effect_
 disabled | shadow | active
 ```
 
-## 9. Qualification and gate closure
-
-These contracts close future code paths but do not open any operational gate. Human conversation, E2E, rollout and closeout remain separate decisions. Helper rows are closed inline:
+`GuardSemantic` is exactly:
 
 ```text
-DeterministicTurnIdentity(aggregate_turn_id: ID_TOKEN, source_event_ids: nonempty tuple[ID_TOKEN,...], source_event_hashes: nonempty tuple[SHA256,...])
-KindCount(kind: closed family enum, count: COUNT)
+fail_closed | deadline_bounded | idempotency_required | lease_fenced | owner_checked
 ```
 
-Qualification and admission states are distinct. Every transition is full-tuple CAS with a canonical receipt. The only run chain is `installing -> open -> qualifying -> effects_verified -> learning_drained -> memory_sealed -> transition_recorded -> qualified`; cancellation uses `frozen -> cancelled|manual_review`. Admission is only `installing -> open -> qualifying`, or `frozen -> cancelled|manual_review`.
+## 9. Qualification and gate closure
+
+These nineteen contracts close E2E budget, admission, cancellation/reopen, sealing, rollout and the finite human-conversation authorization. Every optional artifact follows a literal status matrix.
 
 ### 9.1 `E2EScenarioContract`
 
 ```text
 E2EScenarioContract(
     scenario_id: ID_TOKEN,
-    turn_identities: nonempty tuple[DeterministicTurnIdentity,...],
+    turn_identities: nonempty tuple[tuple[ID_TOKEN,nonempty tuple[ID_TOKEN,...],nonempty tuple[SHA256,...]],...],
     lead_key_hash: SHA256,
     target_hash: SHA256,
     channel_hash: SHA256,
@@ -495,11 +489,11 @@ E2EScenarioContract(
     effect_scopes: nonempty tuple[EffectScope,...],
     window_start: UTC,
     window_end: UTC,
-    expected_command_counts: tuple[KindCount[ExpectedCommandKind],...],
-    expected_relay_counts: tuple[KindCount[ExpectedRelayKind],...],
-    expected_target_ingress_counts: tuple[KindCount[TargetIngressKind],...],
-    expected_provider_outcome_counts: tuple[KindCount[ProviderOutcomeKind],...],
-    expected_followup_delivery_counts: tuple[KindCount[FollowupDeliveryKind],...],
+    expected_command_counts: tuple[tuple[ExpectedCommandKind,POSITIVE],...],
+    expected_relay_counts: tuple[tuple[ExpectedRelayKind,POSITIVE],...],
+    expected_target_ingress_counts: tuple[tuple[TargetIngressKind,POSITIVE],...],
+    expected_provider_outcome_counts: tuple[tuple[ProviderOutcomeKind,POSITIVE],...],
+    expected_followup_delivery_counts: tuple[tuple[FollowupDeliveryKind,POSITIVE],...],
     expected_public_chunk_count: COUNT,
     expected_public_delivery_count: COUNT,
     expected_compensation_count: COUNT,
@@ -518,14 +512,14 @@ HASH_KIND = domain_hash
 Closed enum references: `ProviderScope`, `WorkflowScope`, `EffectScope`, `ExpectedCommandKind`, `ExpectedRelayKind`, `TargetIngressKind`, `ProviderOutcomeKind`, `FollowupDeliveryKind`.
 
 Invariants:
-- turn identities and all kind-count rows are ordered and key-unique.
-- window_end is later than window_start.
-- external_effect_budget equals the exact sum of terminal external calls/deliveries expected by the scenario.
-- the scenario contains at least one provider outcome or is rejected by its parent contract.
-- provider/workflow/effect scopes are subsets of the parent qualification contract.
-- all target channel and lead identities are hashes; no raw contact appears.
+- turn identities and all kind-count rows are ordered and key-unique
+- window_end is later than window_start
+- external_effect_budget equals the exact sum of terminal external calls/deliveries expected by the scenario
+- the scenario contains at least one provider outcome or is rejected by its parent contract
+- provider/workflow/effect scopes are subsets of the parent qualification contract
+- all target channel and lead identities are hashes; no raw contact appears
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `E2EScenarioContract` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.2 `E2EQualificationContract`
 
@@ -556,14 +550,14 @@ HASH_KIND = domain_hash
 Closed enum references: `ProviderScope`, `WorkflowScope`, `EffectScope`, `TrafficStage`, `StateRootClass`.
 
 Invariants:
-- traffic_stage is canary_e2e and state_root_class is ephemeral_canary.
-- scenario IDs are unique and scenarios are ordered by scenario_id.
-- at least one expected provider outcome and one public delivery exist across scenarios.
-- global external budget equals the exact sum of scenario budgets and cannot be zero.
-- qualification_id is derived after hashing this contract from contract hash release graph policy and admission epoch.
-- no path secret raw target or mutable tag is present.
+- traffic_stage is canary_e2e and state_root_class is ephemeral_canary
+- scenario IDs are unique and scenarios are ordered by scenario_id
+- at least one expected provider outcome and one public delivery exist across scenarios
+- global external budget equals the exact sum of scenario budgets and cannot be zero
+- qualification_id is derived after hashing this contract from contract hash release graph policy and admission epoch
+- no path secret raw target or mutable tag is present
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `E2EQualificationContract` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.3 `E2EEffectAuthorizationBinding`
 
@@ -595,12 +589,12 @@ HASH_KIND = domain_hash
 Closed enum references: `RuntimeRole`, `ProviderScope`, `WorkflowScope`, `EffectScope`, `TrafficStage`, `StateRootClass`.
 
 Invariants:
-- runtime_role is canary_e2e traffic_stage is canary_e2e and root class is ephemeral_canary.
-- all stable fields equal the qualification contract.
-- behavior snapshot is deliberately absent.
-- allocation manifests reference only this stable binding hash.
+- runtime_role is canary_e2e traffic_stage is canary_e2e and root class is ephemeral_canary
+- all stable fields equal the qualification contract
+- behavior snapshot is deliberately absent
+- allocation manifests reference only this stable binding hash
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `E2EEffectAuthorizationBinding` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.4 `EffectiveE2EDeploymentBinding`
 
@@ -633,12 +627,12 @@ HASH_KIND = domain_hash
 Closed enum references: `RuntimeRole`, `ProviderScope`, `WorkflowScope`, `EffectScope`, `TrafficStage`, `StateRootClass`.
 
 Invariants:
-- all stable fields project exactly the E2EEffectAuthorizationBinding.
-- only behavior_state_snapshot_digest may advance and only through a valid LearningReceipt.
-- runtime_role traffic stage and root class are canary_e2e canary_e2e ephemeral_canary.
-- instance_id satisfies the authorization binding constraints.
+- all stable fields project exactly the E2EEffectAuthorizationBinding
+- only behavior_state_snapshot_digest may advance and only through a valid LearningReceipt
+- runtime_role traffic stage and root class are canary_e2e canary_e2e ephemeral_canary
+- instance_id satisfies the authorization binding constraints
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `EffectiveE2EDeploymentBinding` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.5 `LearningClaimsClosedReceipt`
 
@@ -661,15 +655,18 @@ DOMAIN = phase8-learning-claims-closed-receipt-v1
 HASH_KIND = domain_hash
 ```
 
-Nullable/status matrices: `[["previous_qualification_artifact_hash"]]`.
+Closed nullable/status matrix:
+
+- `first qualification journal artifact`: null = `previous_qualification_artifact_hash`; present = `none`.
+- `later qualification journal artifact`: null = `none`; present = `previous_qualification_artifact_hash`.
 
 Invariants:
-- operation_id is stable for qualification and duplicate returns byte-identical bytes.
-- the memory authority closes normal claims before effects scan.
-- zero claims is count zero plus the canonical empty aggregate hash, never omission.
-- the journal persists this owner receipt before effects verification.
+- operation_id is stable for qualification and duplicate returns byte-identical bytes
+- the memory authority closes normal claims before effects scan
+- zero claims is count zero plus the canonical empty aggregate hash, never omission
+- the journal persists this owner receipt before effects verification
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `LearningClaimsClosedReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.6 `BehaviorTransitionReceipt`
 
@@ -694,12 +691,12 @@ HASH_KIND = domain_hash
 ```
 
 Invariants:
-- constructed only after EFFECTS_VERIFIED LEARNING_DRAINED and MEMORY_SEALED.
-- zero learning uses the canonical empty aggregate and before equals sealed digest.
-- nonzero learning advances only through owner LearningReceipts included in the aggregate.
-- duplicate transition bytes are deterministic and journal-CAS bound.
+- constructed only after EFFECTS_VERIFIED LEARNING_DRAINED and MEMORY_SEALED
+- zero learning uses the canonical empty aggregate and before equals sealed digest
+- nonzero learning advances only through owner LearningReceipts included in the aggregate
+- duplicate transition bytes are deterministic and journal-CAS bound
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `BehaviorTransitionReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.7 `SealedCanaryQualificationBinding`
 
@@ -739,13 +736,13 @@ HASH_KIND = domain_hash
 Closed enum references: `ProviderScope`, `WorkflowScope`, `EffectScope`, `StateRootClass`.
 
 Invariants:
-- created only after all qualification transition receipts and exact bilateral scans are terminal.
-- state_root_class is ephemeral_canary and scenario_count equals the nonempty contract.
-- aggregates are recomputed from ordered owner receipts and rows, never caller-supplied evidence.
-- does not pretend to be the effective turn binding.
-- same immutable release child digest and scopes are preserved.
+- created only after all qualification transition receipts and exact bilateral scans are terminal
+- state_root_class is ephemeral_canary and scenario_count equals the nonempty contract
+- aggregates are recomputed from ordered owner receipts and rows, never caller-supplied evidence
+- does not pretend to be the effective turn binding
+- same immutable release child digest and scopes are preserved
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `SealedCanaryQualificationBinding` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.8 `RolloutAuthorization`
 
@@ -782,13 +779,13 @@ HASH_KIND = domain_hash
 Closed enum references: `RuntimeRole`, `ProviderScope`, `WorkflowScope`, `EffectScope`, `TrafficStage`, `StateRootClass`.
 
 Invariants:
-- created in the qualification journal only from QUALIFIED by full-tuple CAS against cancellation.
-- target role root class and traffic stage are production_initial persistent_production rollout_initial.
-- release graph policy behavior transition scopes and sealed binding match exactly.
-- window is finite and current; approver identity is hashed.
-- this authorization is separate from build conversation E2E and closeout decisions.
+- created in the qualification journal only from QUALIFIED by full-tuple CAS against cancellation
+- target role root class and traffic stage are production_initial persistent_production rollout_initial
+- release graph policy behavior transition scopes and sealed binding match exactly
+- window is finite and current; approver identity is hashed
+- this authorization is separate from build conversation E2E and closeout decisions
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `RolloutAuthorization` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.9 `ProductionInitialDeploymentBinding`
 
@@ -822,12 +819,12 @@ HASH_KIND = domain_hash
 Closed enum references: `RuntimeRole`, `ProviderScope`, `WorkflowScope`, `EffectScope`, `TrafficStage`, `StateRootClass`.
 
 Invariants:
-- derived only by derive_production_initial_binding from the sealed qualification and rollout authorization.
-- role transition is sealed_canary_qualification to production_initial and root transition is ephemeral_canary to persistent_production.
-- all release graph policy behavior transition scope allowlist and stage values are equal.
-- cloned memory snapshot is byte-identical to the sealed snapshot and instance satisfies constraints.
+- derived only by derive_production_initial_binding from the sealed qualification and rollout authorization
+- role transition is sealed_canary_qualification to production_initial and root transition is ephemeral_canary to persistent_production
+- all release graph policy behavior transition scope allowlist and stage values are equal
+- cloned memory snapshot is byte-identical to the sealed snapshot and instance satisfies constraints
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `ProductionInitialDeploymentBinding` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.10 `QualificationCancelStartReceipt`
 
@@ -860,16 +857,27 @@ HASH_KIND = domain_hash
 
 Closed enum references: `QualificationRunStatus`, `AdmissionState`.
 
-Nullable/status matrices: `[["cutoff_sequence","admitted_set_hash"],["memory_seal_receipt_hash"],["behavior_transition_receipt_hash"],["sealed_qualification_binding_hash"],["previous_qualification_artifact_hash"]]`.
+Closed nullable/status matrix:
+
+- `origin_run_status=installing|open`: null = `cutoff_sequence, admitted_set_hash`; present = `none`.
+- `origin_run_status=qualifying|effects_verified|learning_drained|memory_sealed|transition_recorded|qualified`: null = `none`; present = `cutoff_sequence, admitted_set_hash`.
+- `origin_run_status=installing|open|qualifying|effects_verified|learning_drained`: null = `memory_seal_receipt_hash`; present = `none`.
+- `origin_run_status=memory_sealed|transition_recorded|qualified`: null = `none`; present = `memory_seal_receipt_hash`.
+- `origin_run_status=installing|open|qualifying|effects_verified|learning_drained|memory_sealed`: null = `behavior_transition_receipt_hash`; present = `none`.
+- `origin_run_status=transition_recorded|qualified`: null = `none`; present = `behavior_transition_receipt_hash`.
+- `origin_run_status=installing|open|qualifying|effects_verified|learning_drained|memory_sealed|transition_recorded`: null = `sealed_qualification_binding_hash`; present = `none`.
+- `origin_run_status=qualified`: null = `none`; present = `sealed_qualification_binding_hash`.
+- `first qualification journal artifact`: null = `previous_qualification_artifact_hash`; present = `none`.
+- `later qualification journal artifact`: null = `none`; present = `previous_qualification_artifact_hash`.
 
 Invariants:
-- same transaction persists this receipt and freezes run plus admission.
-- origin status is one of installing through qualified, never frozen cancelled or manual_review.
-- terminal artifact hashes are preserved according to the origin status and are never deleted.
-- duplicate operation/request returns identical bytes; divergent request fails.
-- eligible rollout authorization/deployment blocks this cancellation path.
+- same transaction persists this receipt and freezes run plus admission
+- origin status is one of installing through qualified, never frozen cancelled or manual_review
+- terminal artifact hashes are preserved according to the origin status and are never deleted
+- duplicate operation/request returns identical bytes; divergent request fails
+- eligible rollout authorization/deployment blocks this cancellation path
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `QualificationCancelStartReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.11 `QualificationCancelReceipt`
 
@@ -904,13 +912,13 @@ HASH_KIND = domain_hash
 Closed enum references: `QualificationRunStatus`, `AdmissionState`.
 
 Invariants:
-- active_count is exactly zero and all memberships are aborted or turn_receipt_committed.
-- all allocation internal provider followup and public closure receipts are owner-verified and terminal.
-- run and admission move together from frozen to cancelled in one transaction.
-- manual review or uncertain effect blocks this receipt.
-- all old qualification ACKs are rejected after this receipt.
+- active_count is exactly zero and all memberships are aborted or turn_receipt_committed
+- all allocation internal provider followup and public closure receipts are owner-verified and terminal
+- run and admission move together from frozen to cancelled in one transaction
+- manual review or uncertain effect blocks this receipt
+- all old qualification ACKs are rejected after this receipt
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `QualificationCancelReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.12 `ReopenPreparationIntent`
 
@@ -944,13 +952,13 @@ HASH_KIND = domain_hash
 Closed enum references: `MemorySourceSnapshotKind`, `ReopenIntentState`.
 
 Invariants:
-- old run and singleton are cancelled terminal and old allocations/jobs/effects are bilaterally closed.
-- new_epoch equals old_epoch plus one and IDs/hashes are derived from the new tuple.
-- state is preparing; one active intent exists per old qualification/epoch.
-- same request retries the exact intent; divergence fails before memory authority.
-- attempt advances only after an abandoned intent is terminal on both sides.
+- old run and singleton are cancelled terminal and old allocations/jobs/effects are bilaterally closed
+- new_epoch equals old_epoch plus one and IDs/hashes are derived from the new tuple
+- state is preparing; one active intent exists per old qualification/epoch
+- same request retries the exact intent; divergence fails before memory authority
+- attempt advances only after an abandoned intent is terminal on both sides
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `ReopenPreparationIntent` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.13 `MemoryPreparationReceipt`
 
@@ -978,13 +986,13 @@ HASH_KIND = domain_hash
 Closed enum references: `MemorySourceSnapshotKind`, `MemoryPreparationState`.
 
 Invariants:
-- owner target reaches prepared only after rename-no-replace chmod and required fsyncs.
-- root identity is path-independent and binds device/inode/class evidence through a private owner record.
-- prepared_content_hash equals the selected baseline or sealed snapshot hash.
-- state is prepared; duplicate returns identical bytes.
-- no SQLite transaction remains open during clone or filesystem publication.
+- owner target reaches prepared only after rename-no-replace chmod and required fsyncs
+- root identity is path-independent and binds device/inode/class evidence through a private owner record
+- prepared_content_hash equals the selected baseline or sealed snapshot hash
+- state is prepared; duplicate returns identical bytes
+- no SQLite transaction remains open during clone or filesystem publication
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `MemoryPreparationReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.14 `MemoryPreparationAckReceipt`
 
@@ -1008,11 +1016,11 @@ HASH_KIND = domain_hash
 Closed enum references: `MemoryPreparationState`.
 
 Invariants:
-- state is acked and target CAS is prepared to acked.
-- journal must persist the same receipt before the new run may open.
-- target-commit/journal-ack retries return byte-identical bytes.
+- state is acked and target CAS is prepared to acked
+- journal must persist the same receipt before the new run may open
+- target-commit/journal-ack retries return byte-identical bytes
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `MemoryPreparationAckReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.15 `ReopenIntentAbandonStartReceipt`
 
@@ -1038,11 +1046,11 @@ HASH_KIND = domain_hash
 Closed enum references: `ReopenIntentState`.
 
 Invariants:
-- old run remains cancelled with zero reopen receipt.
-- same execution lock is held through target and journal terminal abandonment.
-- previous intent state is preparing and journal CAS moves it to abandoning.
+- old run remains cancelled with zero reopen receipt
+- same execution lock is held through target and journal terminal abandonment
+- previous intent state is preparing and journal CAS moves it to abandoning
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `ReopenIntentAbandonStartReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.16 `MemoryPreparationAbandonReceipt`
 
@@ -1067,12 +1075,12 @@ HASH_KIND = domain_hash
 Closed enum references: `MemoryPreparationPredecessor`, `MemoryPreparationState`.
 
 Invariants:
-- target enters abandoning before any filesystem mutation.
-- state is abandoned only after deterministic tombstone cleanup and exact zero scan.
-- not_found predecessor is allowed only with zero row/temp/final/tombstone proof.
-- abandoned never coexists with payload; divergence enters manual_review without further delete.
+- target enters abandoning before any filesystem mutation
+- state is abandoned only after deterministic tombstone cleanup and exact zero scan
+- not_found predecessor is allowed only with zero row/temp/final/tombstone proof
+- abandoned never coexists with payload; divergence enters manual_review without further delete
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `MemoryPreparationAbandonReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.17 `ReopenIntentAbandonReceipt`
 
@@ -1097,11 +1105,11 @@ HASH_KIND = domain_hash
 Closed enum references: `ReopenIntentState`.
 
 Invariants:
-- journal moves abandoning to abandoned only after owner target abandonment receipt is verified.
-- same hash is persisted in journal and duplicate is byte-identical.
-- only then may a later monotonic attempt be reserved.
+- journal moves abandoning to abandoned only after owner target abandonment receipt is verified
+- same hash is persisted in journal and duplicate is byte-identical
+- only then may a later monotonic attempt be reserved
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `ReopenIntentAbandonReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.18 `QualificationReopenReceipt`
 
@@ -1131,12 +1139,12 @@ HASH_KIND = domain_hash
 ```
 
 Invariants:
-- new_epoch is old_epoch plus one and new IDs derive from accepted inputs.
-- same journal transaction validates intent/preparation inserts new run/scenarios moves singleton cancelled to installing and commits this receipt.
-- old intent moves preparing to committed.
-- old ACK/install receipts never bind the new tuple.
+- new_epoch is old_epoch plus one and new IDs derive from accepted inputs
+- same journal transaction validates intent/preparation inserts new run/scenarios moves singleton cancelled to installing and commits this receipt
+- old intent moves preparing to committed
+- old ACK/install receipts never bind the new tuple
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `QualificationReopenReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 9.19 `ConversationTestDispatchAuthorization`
 
@@ -1179,29 +1187,29 @@ HASH_KIND = domain_hash
 Closed enum references: `RuntimeRole`, `TrafficStage`, `StateRootClass`, `EffectScope`.
 
 Invariants:
-- runtime role and traffic stage are conversation_test; root class is ephemeral_canary.
-- allowlist cardinality is exactly one and recipient target channel equal the single allowed contact.
-- opened scopes are exactly public_delivery; provider command relay payment handoff and followup delivery are closed.
-- public allocation IDs are finite unique preinstalled and each call consumes one; unused rows close terminally.
-- reads remain read-only and learning may target only the isolated canary memory binding.
-- state session outbox zero scans and clean baseline are authenticated before issuance.
-- finite window is re-sampled under the public delivery execution lock.
-- does not authorize E2E provider effects rollout or automated conversation.
+- runtime role and traffic stage are conversation_test; root class is ephemeral_canary
+- allowlist cardinality is exactly one and recipient target channel equal the single allowed contact
+- opened scopes are exactly public_delivery; provider command relay payment handoff and followup delivery are closed
+- public allocation IDs are finite unique preinstalled and each call consumes one; unused rows close terminally
+- reads remain read-only and learning may target only the isolated canary memory binding
+- state session outbox zero scans and clean baseline are authenticated before issuance
+- finite window is re-sampled under the public delivery execution lock
+- does not authorize E2E provider effects rollout or automated conversation
 
-The exact known-answer `data`, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under this contract name.
+The byte-exact valid known answer is frozen under `ConversationTestDispatchAuthorization` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
-### 9.20 Closed qualification enum values
+### 9.20 Closed enum values
 
-`AdmissionMembershipStatus` is exactly:
+`ProviderScope` is exactly:
 
 ```text
-admitted | commit_fenced | turn_receipt_committed | aborted | manual_review
+cloudbeds | bokun
 ```
 
-`AdmissionState` is exactly:
+`WorkflowScope` is exactly:
 
 ```text
-installing | open | qualifying | frozen | cancelled | manual_review
+lodging_reservation | activity_reservation | lodging_payment | activity_payment | handoff
 ```
 
 `EffectScope` is exactly:
@@ -1222,28 +1230,10 @@ reservation | settlement
 reservation | settlement
 ```
 
-`FollowupDeliveryKind` is exactly:
+`TargetIngressKind` is exactly:
 
 ```text
-handoff | payment
-```
-
-`MemoryPreparationPredecessor` is exactly:
-
-```text
-not_found | preparing | prepared
-```
-
-`MemoryPreparationState` is exactly:
-
-```text
-preparing | prepared | acked | abandoning | abandoned | manual_review
-```
-
-`MemorySourceSnapshotKind` is exactly:
-
-```text
-sealed_snapshot | authenticated_baseline
+reservation | settlement | handoff
 ```
 
 `ProviderOutcomeKind` is exactly:
@@ -1252,40 +1242,10 @@ sealed_snapshot | authenticated_baseline
 reservation_provider | payment_provider
 ```
 
-`ProviderScope` is exactly:
+`FollowupDeliveryKind` is exactly:
 
 ```text
-cloudbeds | bokun
-```
-
-`QualificationRunStatus` is exactly:
-
-```text
-installing | open | qualifying | effects_verified | learning_drained | memory_sealed | transition_recorded | qualified | frozen | cancelled | manual_review
-```
-
-`ReopenIntentState` is exactly:
-
-```text
-preparing | abandoning | abandoned | committed
-```
-
-`RuntimeRole` is exactly:
-
-```text
-canary_e2e | sealed_canary_qualification | conversation_test | production_initial
-```
-
-`StateRootClass` is exactly:
-
-```text
-ephemeral_canary | persistent_production
-```
-
-`TargetIngressKind` is exactly:
-
-```text
-reservation | settlement | handoff
+handoff | payment
 ```
 
 `TrafficStage` is exactly:
@@ -1294,26 +1254,66 @@ reservation | settlement | handoff
 canary_e2e | conversation_test | rollout_initial
 ```
 
-`WorkflowScope` is exactly:
+`StateRootClass` is exactly:
 
 ```text
-lodging_reservation | activity_reservation | lodging_payment | activity_payment | handoff
+ephemeral_canary | persistent_production
+```
+
+`RuntimeRole` is exactly:
+
+```text
+canary_e2e | sealed_canary_qualification | conversation_test | production_initial
+```
+
+`QualificationRunStatus` is exactly:
+
+```text
+installing | open | qualifying | effects_verified | learning_drained | memory_sealed | transition_recorded | qualified | frozen | cancelled | manual_review
+```
+
+`AdmissionState` is exactly:
+
+```text
+installing | open | qualifying | frozen | cancelled | manual_review
+```
+
+`MemorySourceSnapshotKind` is exactly:
+
+```text
+sealed_snapshot | authenticated_baseline
+```
+
+`ReopenIntentState` is exactly:
+
+```text
+preparing | abandoning | abandoned | committed
+```
+
+`MemoryPreparationState` is exactly:
+
+```text
+preparing | prepared | acked | abandoning | abandoned | manual_review
+```
+
+`MemoryPreparationPredecessor` is exactly:
+
+```text
+not_found | preparing | prepared
 ```
 
 ## 10. Effects, receipts and exact allocation closure
 
-Every identity in this section is an **explicit proposed implementation refinement** because the architectural authority fixed the invariant and owner semantics but did not contain a literal field registry. These decisions do not claim to pre-exist in commit `2889e9e…`; they become executable only through the acceptance procedure in section 1.
-
-No type below adds a capability. Receipts are evidence emitted by their existing owner. `EffectAllocationRow`, `AllocationInstallationReceipt` and `AllocationGenerationClosureReceipt` are the three strictly necessary names assigned here to the architecture’s previously unnamed allocation row and installation/closure receipts. `ChildAllocationUnusedReceipt` keeps the architectural name; there is no broader invented child-decision receipt.
+These fourteen contracts are explicit implementation refinements of existing owners. They add no capability; each receipt is owner-derived. `ChildAllocationUnusedReceipt` is the only child decision receipt and no broader child-decision type exists.
 
 ### 10.1 `HandoffRelayBundle`
 
 ```text
 HandoffRelayBundle(
-    handoff_request_hash: SHA256,
-    handoff_policy_hash: SHA256,
-    sanitized_history_hashes: tuple[SHA256,...],
-    expected_target_binding_hash: SHA256,
+    request_bytes: CANON_BYTES(HandoffRequested),
+    policy_bytes: CANON_BYTES(HandoffEffectPolicy),
+    history_bytes: tuple[CANON_BYTES(HandoffEvent),...],
+    expected_final_state_hash: SHA256,
     artifact_hash: SHA256,
 )
 
@@ -1325,11 +1325,13 @@ PREIMAGE_SCHEMA = phase8-handoff-relay-bundle-preimage
 ```
 
 Invariants:
-- contains only hashes of the closed request, policy, public-safe history and expected target binding; no raw message or PII.
-- artifact_hash is the domain hash of the canonical envelope with artifact_hash omitted.
-- source_turn_receipt_hash is deliberately excluded and belongs to BoundaryInternalJob.
+- request_bytes and policy_bytes strictly decode and byte-identically re-encode the existing Phase 6 closed handoff request and policy contracts
+- history_bytes is an ordered possibly-empty tuple of strict Phase 6 handoff event bytes; request is not duplicated in history
+- the target replays request plus policy plus every history event and requires its owner semantic state hash to equal expected_final_state_hash before commit
+- the bundle contains no raw conversation text, recipient, provider payload, provider reference or capability
+- artifact_hash authenticates the complete replay preimage and excludes source_turn_receipt_hash, which belongs only to BoundaryInternalJob
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `HandoffRelayBundle`.
+The byte-exact valid known answer is frozen under `HandoffRelayBundle` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.2 `BoundaryInternalJob`
 
@@ -1360,13 +1362,13 @@ Closed nullable/status matrix:
 - `qualification_id is present`: null = `none`; present = `qualification_id, epoch`.
 
 Invariants:
-- job_kind selects exactly one strict artifact decoder: handoff or learning.
-- artifact_hash is recomputed from artifact_bytes; source receipt is a separate backlink.
-- qualification_id and epoch are all-null or all-present.
-- target_operation_id is derived with phase8-internal-target-v1 from kind, qualification tuple, job ID, artifact hash and source receipt hash.
-- settlement is not a member and the contract carries no provider, delivery or memory-write capability.
+- job_kind selects exactly one strict artifact decoder: handoff or learning
+- artifact_hash is recomputed from artifact_bytes; source receipt is a separate backlink
+- qualification_id and epoch are all-null or all-present
+- target_operation_id is derived with phase8-internal-target-v1 from kind, qualification tuple, job ID, artifact hash and source receipt hash
+- settlement is not a member and the contract carries no provider, delivery or memory-write capability
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `BoundaryInternalJob`.
+The byte-exact valid known answer is frozen under `BoundaryInternalJob` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.3 `TargetOperationReceipt`
 
@@ -1390,12 +1392,12 @@ HASH_KIND = domain_hash
 Closed enum references: `InternalJobKind`.
 
 Invariants:
-- constructed and persisted atomically by the handoff or learning target owner.
-- operation, artifact and source backlink must equal the accepted BoundaryInternalJob.
-- duplicate exact operation returns byte-identical receipt; any conflicting tuple is divergent.
-- contains no target payload, raw memory, PII, provider reference or capability.
+- constructed and persisted atomically by the handoff or learning target owner
+- operation, artifact and source backlink must equal the accepted BoundaryInternalJob
+- duplicate exact operation returns byte-identical receipt; any conflicting tuple is divergent
+- contains no target payload, raw memory, PII, provider reference or capability
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `TargetOperationReceipt`.
+The byte-exact valid known answer is frozen under `TargetOperationReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.4 `OperationReceiptLookupResult`
 
@@ -1423,12 +1425,12 @@ Closed nullable/status matrix:
 - `status=not_found|divergent`: null = `receipt_bytes`; present = `none`.
 
 Invariants:
-- not_found requires receipt_bytes null and evidence_hash of a complete target zero-scan.
-- receipt requires strict receipt bytes and evidence_hash equal the decoded receipt domain hash.
-- divergent requires receipt_bytes null and evidence_hash of owner divergence evidence.
-- lookup is capability-free and side-effect-free.
+- not_found requires receipt_bytes null and evidence_hash of a complete target zero-scan
+- receipt requires strict receipt bytes and evidence_hash equal the decoded receipt domain hash
+- divergent requires receipt_bytes null and evidence_hash of owner divergence evidence
+- lookup is capability-free and side-effect-free
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `OperationReceiptLookupResult`.
+The byte-exact valid known answer is frozen under `OperationReceiptLookupResult` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.5 `BoundaryRelayReceipt`
 
@@ -1453,12 +1455,12 @@ HASH_KIND = domain_hash
 Closed enum references: `InternalJobSourcePredecessor`, `InternalJobSourceTerminal`.
 
 Invariants:
-- created only after strict validation of TargetOperationReceipt.
-- source status is acked and predecessor is pending or leased.
-- source ACK uses the exact operation, artifact, source receipt and target receipt tuple.
-- receipt authorizes no provider or delivery effect.
+- created only after strict validation of TargetOperationReceipt
+- source status is acked and predecessor is pending or leased
+- source ACK uses the exact operation, artifact, source receipt and target receipt tuple
+- receipt authorizes no provider or delivery effect
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `BoundaryRelayReceipt`.
+The byte-exact valid known answer is frozen under `BoundaryRelayReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.6 `InternalJobClosureReceipt`
 
@@ -1485,12 +1487,12 @@ HASH_KIND = domain_hash
 Closed enum references: `InternalJobKind`, `OperationLookupTerminalAbsence`, `InternalJobSourcePredecessor`, `InternalJobSourceTerminal`.
 
 Invariants:
-- published under the same execution lock only after a complete not_found lookup.
-- source status is cancelled; divergent, unavailable or uncertain target state cannot create this receipt.
-- source CAS and receipt persistence are one boundary transaction.
-- a closed job can never call handoff or mutate memory later.
+- published under the same execution lock only after a complete not_found lookup
+- source status is cancelled; divergent, unavailable or uncertain target state cannot create this receipt
+- source CAS and receipt persistence are one boundary transaction
+- a closed job can never call handoff or mutate memory later
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `InternalJobClosureReceipt`.
+The byte-exact valid known answer is frozen under `InternalJobClosureReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.7 `PublicDeliveryReceipt`
 
@@ -1499,11 +1501,19 @@ PublicDeliveryReceipt(
     public_row_id: ID_TOKEN,
     aggregate_turn_id: ID_TOKEN,
     chunk_ordinal: ORDINAL,
+    artifact_hash: SHA256,
+    source_turn_receipt_hash: SHA256,
+    authorization_kind: PublicDispatchAuthorizationKind,
+    authorization_id: ID_TOKEN,
+    qualification_id: ID_TOKEN|null,
+    scenario_id: ID_TOKEN|null,
     allocation_id: ID_TOKEN,
     immutable_generation: POSITIVE,
     idempotency_key_hash: SHA256,
-    artifact_hash: SHA256,
     target_binding_hash: SHA256,
+    capability_policy_digest: SHA256,
+    effect_authorization_binding_digest: SHA256,
+    effective_turn_binding_digest: SHA256,
     provider_receipt_hash: SHA256,
     result: PublicDeliveryResult,
     delivered_at: UTC,
@@ -1515,15 +1525,22 @@ DOMAIN = phase8-public-delivery-receipt-v1
 HASH_KIND = domain_hash
 ```
 
-Closed enum references: `PublicDeliveryResult`.
+Closed enum references: `PublicDispatchAuthorizationKind`, `PublicDeliveryResult`.
+
+Closed nullable/status matrix:
+
+- `authorization_kind=e2e_qualification`: null = `none`; present = `qualification_id, scenario_id`.
+- `authorization_kind=conversation_test|production_rollout`: null = `qualification_id, scenario_id`; present = `none`.
 
 Invariants:
-- one receipt per exact public row and external call.
-- result is delivered and commits dispatch_fenced to terminal under the public execution lock.
-- allocation and immutable generation are re-sampled immediately before the call and consumed in the same terminal CAS.
-- contains no public text, recipient, channel identifier, provider reference or capability.
+- one owner-derived receipt exists per exact immutable public row and exactly one external call
+- artifact_hash authenticates the row immutable payload including exact chunk bytes hash order and predecessor; source_turn_receipt_hash is the separate relational backlink
+- authorization kind and ID, allocation, immutable generation, target binding and the three policy/binding digests equal the tuple re-sampled at fence and immediately before send
+- result is delivered and receipt persistence plus dispatch_fenced-to-terminal row and allocation CAS are one transaction under the public execution lock
+- E2E alone carries qualification and scenario; conversation-test and production-rollout keep both null
+- contains no public text recipient channel identifier provider reference or capability
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `PublicDeliveryReceipt`.
+The byte-exact valid known answer is frozen under `PublicDeliveryReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.8 `AdmissionAbortReceipt`
 
@@ -1558,12 +1575,12 @@ Closed nullable/status matrix:
 - `predecessor_status=commit_fenced`: null = `none`; present = `admission_revision, commit_fence_token, owner_instance_id`.
 
 Invariants:
-- admitted predecessor requires revision, token and owner all null; commit_fenced requires all present.
-- same lead lock proves byte-identical boundary preimage and zero event, receipt, child, target-ingress or consumed allocation.
-- admission CAS and receipt persistence are atomic; the membership row is never deleted.
-- any divergence or uncertain effect enters manual review instead of abort.
+- admitted predecessor requires revision, token and owner all null; commit_fenced requires all present
+- same lead lock proves byte-identical boundary preimage and zero event, receipt, child, target-ingress or consumed allocation
+- admission CAS and receipt persistence are atomic; the membership row is never deleted
+- any divergence or uncertain effect enters manual review instead of abort
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `AdmissionAbortReceipt`.
+The byte-exact valid known answer is frozen under `AdmissionAbortReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.9 `ProviderEffectOutcomeReceipt`
 
@@ -1604,13 +1621,13 @@ Closed nullable/status matrix:
 - `outcome_shape=economic`: null = `before_state_hash, after_state_hash`; present = `economic_hash`.
 
 Invariants:
-- reservation is derived only from reservation owner rows; settlement only from payment owner rows.
-- state_transition requires before and after hashes with economic null; economic requires economic hash with before and after null.
-- primary requires parent null; compensation requires parent effect ID.
-- journal re-derives from byte-identical terminal owner rows and never trusts worker-supplied receipt bytes.
-- receipt is evidence only and creates no second ledger or effect capability.
+- reservation is derived only from reservation owner rows; settlement only from payment owner rows
+- state_transition requires before and after hashes with economic null; economic requires economic hash with before and after null
+- primary requires parent null; compensation requires parent effect ID
+- journal re-derives from byte-identical terminal owner rows and never trusts worker-supplied receipt bytes
+- receipt is evidence only and creates no second ledger or effect capability
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `ProviderEffectOutcomeReceipt`.
+The byte-exact valid known answer is frozen under `ProviderEffectOutcomeReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.10 `EffectAllocationRow`
 
@@ -1652,14 +1669,17 @@ Closed nullable/status matrix:
 
 - `activation_parent_kind=none`: null = `activation_parent_id, activation_parent_hash`; present = `none`.
 - `activation_parent_kind=provider_allocation|internal_target_operation`: null = `none`; present = `activation_parent_id, activation_parent_hash`.
+- `effect_family=public_delivery`: null = `workflow_scope_hash`; present = `channel_scope_hash, message_ordinal`.
+- `effect_family=reservation|payment`: null = `channel_scope_hash, message_ordinal`; present = `workflow_scope_hash`.
+- `effect_family=handoff_delivery|payment_delivery`: null = `message_ordinal`; present = `workflow_scope_hash, channel_scope_hash`.
 
 Invariants:
-- field combinations follow the closed family/kind/target/scope/parent matrix in the design document.
-- root allocations have no parent; compensation and payment delivery reference provider allocation; handoff delivery references internal target operation.
-- public delivery alone has message ordinal and channel binding with no workflow scope.
-- all identity and scope fields are immutable; historical generations are never rewritten.
+- field combinations follow the closed family/kind/target/scope/parent matrix in the design document
+- root allocations have no parent; compensation and payment delivery reference provider allocation; handoff delivery references internal target operation
+- public delivery alone has message ordinal and channel binding with no workflow scope
+- all identity and scope fields are immutable; historical generations are never rewritten
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `EffectAllocationRow`.
+The byte-exact valid known answer is frozen under `EffectAllocationRow` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.11 `ExactEffectAllocationManifest`
 
@@ -1680,12 +1700,12 @@ HASH_KIND = domain_hash
 ```
 
 Invariants:
-- one row exists for every and only effect allowed by the qualification contract.
-- rows are canonically ordered by target, scenario, generation, ordinal and allocation ID.
-- allocation IDs and target-generation allocation tuples are unique and every parent row precedes its child.
-- allocation_count equals the number of rows and no header or later write can expand budget.
+- one row exists for every and only effect allowed by the qualification contract
+- rows are canonically ordered by target, scenario, generation, ordinal and allocation ID
+- allocation IDs and target-generation allocation tuples are unique and every parent row precedes its child
+- allocation_count equals the number of rows and no header or later write can expand budget
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `ExactEffectAllocationManifest`.
+The byte-exact valid known answer is frozen under `ExactEffectAllocationManifest` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.12 `AllocationInstallationReceipt`
 
@@ -1716,12 +1736,12 @@ HASH_KIND = domain_hash
 Closed enum references: `InstallationTarget`, `InstallationHeaderState`, `InstallationStatus`.
 
 Invariants:
-- exactly one byte-identical receipt per installation target is required before admission opens.
-- header and every target row install atomically; partial install emits no receipt.
-- generation IDs and row hashes are canonical and allocation count equals installed row count.
-- late install against a closed tombstone or divergent tuple fails without receipt.
+- exactly one byte-identical receipt per installation target is required before admission opens
+- header and every target row install atomically; partial install emits no receipt
+- generation IDs and row hashes are canonical and allocation count equals installed row count
+- late install against a closed tombstone or divergent tuple fails without receipt
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `AllocationInstallationReceipt`.
+The byte-exact valid known answer is frozen under `AllocationInstallationReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.13 `ChildAllocationUnusedReceipt`
 
@@ -1759,12 +1779,12 @@ HASH_KIND = domain_hash
 Closed enum references: `ChildInstallationTarget`, `ChildActivationParentKind`, `ParentEvidenceKind`, `ParentDisposition`, `ChildUnusedDecision`, `ChildUnusedBeforeState`, `ChildUnusedAfterState`.
 
 Invariants:
-- created only in the same target-local reducer transaction that verifies the exact terminal activation-parent evidence.
-- parent disposition is does_not_activate_child, decision is unused and state moves available to closed.
-- provider parent accepts only provider outcome evidence; internal target accepts target receipt or internal closure evidence.
-- after this receipt the child can never bind or fence.
+- created only in the same target-local reducer transaction that verifies the exact terminal activation-parent evidence
+- parent disposition is does_not_activate_child, decision is unused and state moves available to closed
+- provider parent accepts only provider outcome evidence; internal target accepts target receipt or internal closure evidence
+- after this receipt the child can never bind or fence
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `ChildAllocationUnusedReceipt`.
+The byte-exact valid known answer is frozen under `ChildAllocationUnusedReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
 ### 10.14 `AllocationGenerationClosureReceipt`
 
@@ -1808,139 +1828,25 @@ Closed nullable/status matrix:
 - `closure_mode=preinstall_tombstone`: null = `installation_receipt_hash`; present = `none`.
 
 Invariants:
-- installed mode requires installation receipt and open to closing to closed; tombstone mode requires null receipt and absent to not_applicable to closed.
-- installed allocation count equals terminal plus closed counts; every child decision is accounted and missing count is zero.
-- tombstone mode has all counts zero and both receipt-hash lists empty.
-- manual-review rows or uncertain fenced effects block closure.
+- installed mode requires installation receipt and open to closing to closed; tombstone mode requires null receipt and absent to not_applicable to closed
+- installed allocation count equals terminal plus closed counts; every child decision is accounted and missing count is zero
+- tombstone mode has all counts zero and both receipt-hash lists empty
+- manual-review rows or uncertain fenced effects block closure
 
-The exact known-answer data, canonical bytes and hash are frozen in `tests/fixtures/phase8_remaining_wire_registry_v1.json` under `AllocationGenerationClosureReceipt`.
+The byte-exact valid known answer is frozen under `AllocationGenerationClosureReceipt` in `tests/fixtures/phase8_remaining_wire_registry_v1.json`.
 
-### 10.15 Closed effects enum values
-
-`ActivationParentKind` is exactly:
-
-```text
-none | provider_allocation | internal_target_operation
-```
-
-`AdmissionAbortPredecessor` is exactly:
-
-```text
-admitted | commit_fenced
-```
-
-`AdmissionAbortTerminal` is exactly:
-
-```text
-aborted
-```
-
-`AllocationEffectRole` is exactly:
-
-```text
-primary | compensation | none
-```
-
-`AllocationInitialState` is exactly:
-
-```text
-available
-```
-
-`AllocationRowKind` is exactly:
-
-```text
-allocation
-```
-
-`ChildActivationParentKind` is exactly:
-
-```text
-provider_allocation | internal_target_operation
-```
-
-`ChildInstallationTarget` is exactly:
-
-```text
-reservation_e2e_effect_authority | followup_e2e_effect_authority
-```
-
-`ChildUnusedAfterState` is exactly:
-
-```text
-closed
-```
-
-`ChildUnusedBeforeState` is exactly:
-
-```text
-available
-```
-
-`ChildUnusedDecision` is exactly:
-
-```text
-unused
-```
-
-`EffectFamily` is exactly:
-
-```text
-reservation | payment | handoff_delivery | payment_delivery | public_delivery
-```
-
-`EffectKind` is exactly:
-
-```text
-provider_primary | provider_compensation | external_message | public_chunk
-```
-
-`GenerationBeginState` is exactly:
-
-```text
-open | absent
-```
-
-`GenerationClosureMode` is exactly:
-
-```text
-installed_generation | preinstall_tombstone
-```
-
-`GenerationFinalState` is exactly:
-
-```text
-closed
-```
-
-`GenerationIntermediateState` is exactly:
-
-```text
-closing | not_applicable
-```
-
-`InstallationHeaderState` is exactly:
-
-```text
-open
-```
-
-`InstallationStatus` is exactly:
-
-```text
-installed
-```
-
-`InstallationTarget` is exactly:
-
-```text
-boundary_dispatch_authority | reservation_e2e_effect_authority | followup_e2e_effect_authority
-```
+### 10.15 Closed enum values
 
 `InternalJobKind` is exactly:
 
 ```text
 handoff | learning
+```
+
+`OperationLookupStatus` is exactly:
+
+```text
+not_found | receipt | divergent
 ```
 
 `InternalJobSourcePredecessor` is exactly:
@@ -1955,28 +1861,34 @@ pending | leased
 acked | cancelled
 ```
 
-`OperationLookupStatus` is exactly:
-
-```text
-not_found | receipt | divergent
-```
-
 `OperationLookupTerminalAbsence` is exactly:
 
 ```text
 not_found
 ```
 
-`ParentDisposition` is exactly:
+`PublicDispatchAuthorizationKind` is exactly:
 
 ```text
-does_not_activate_child
+conversation_test | e2e_qualification | production_rollout
 ```
 
-`ParentEvidenceKind` is exactly:
+`PublicDeliveryResult` is exactly:
 
 ```text
-provider_effect_outcome | target_operation_receipt | internal_job_closure_receipt
+delivered
+```
+
+`AdmissionAbortPredecessor` is exactly:
+
+```text
+admitted | commit_fenced
+```
+
+`AdmissionAbortTerminal` is exactly:
+
+```text
+aborted
 ```
 
 `ProviderEffectFamily` is exactly:
@@ -2003,8 +1915,122 @@ state_transition | economic
 succeeded | failed
 ```
 
-`PublicDeliveryResult` is exactly:
+`AllocationRowKind` is exactly:
 
 ```text
-delivered
+allocation
+```
+
+`InstallationTarget` is exactly:
+
+```text
+boundary_dispatch_authority | reservation_e2e_effect_authority | followup_e2e_effect_authority
+```
+
+`EffectFamily` is exactly:
+
+```text
+reservation | payment | handoff_delivery | payment_delivery | public_delivery
+```
+
+`EffectKind` is exactly:
+
+```text
+provider_primary | provider_compensation | external_message | public_chunk
+```
+
+`AllocationEffectRole` is exactly:
+
+```text
+primary | compensation | none
+```
+
+`ActivationParentKind` is exactly:
+
+```text
+none | provider_allocation | internal_target_operation
+```
+
+`AllocationInitialState` is exactly:
+
+```text
+available
+```
+
+`InstallationHeaderState` is exactly:
+
+```text
+open
+```
+
+`InstallationStatus` is exactly:
+
+```text
+installed
+```
+
+`ChildInstallationTarget` is exactly:
+
+```text
+reservation_e2e_effect_authority | followup_e2e_effect_authority
+```
+
+`ChildActivationParentKind` is exactly:
+
+```text
+provider_allocation | internal_target_operation
+```
+
+`ParentEvidenceKind` is exactly:
+
+```text
+provider_effect_outcome | target_operation_receipt | internal_job_closure_receipt
+```
+
+`ParentDisposition` is exactly:
+
+```text
+does_not_activate_child
+```
+
+`ChildUnusedDecision` is exactly:
+
+```text
+unused
+```
+
+`ChildUnusedBeforeState` is exactly:
+
+```text
+available
+```
+
+`ChildUnusedAfterState` is exactly:
+
+```text
+closed
+```
+
+`GenerationClosureMode` is exactly:
+
+```text
+installed_generation | preinstall_tombstone
+```
+
+`GenerationBeginState` is exactly:
+
+```text
+open | absent
+```
+
+`GenerationIntermediateState` is exactly:
+
+```text
+closing | not_applicable
+```
+
+`GenerationFinalState` is exactly:
+
+```text
+closed
 ```
