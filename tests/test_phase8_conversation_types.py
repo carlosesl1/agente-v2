@@ -667,6 +667,102 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                         )
                     )
 
+    def test_maya_turn_proposal_composes_parent_owned_artifacts_and_kat(self) -> None:
+        proposal_type = getattr(conversation, "MayaTurnProposal", None)
+        self.assertIsNotNone(proposal_type, "MayaTurnProposal must have an owner")
+        assert proposal_type is not None
+        intent = conversation.MayaIntentClosure(
+            ConversationIntentKind.REQUEST_HANDOFF,
+            None,
+            None,
+            True,
+        )
+        chunk = conversation.PublicReplyChunk(
+            "turn-1",
+            0,
+            "Vou chamar uma pessoa.",
+            "a" * 64,
+        )
+        proposal = proposal_type(
+            aggregate_turn_id="turn-1",
+            intent_closure=intent,
+            read_observations=(),
+            facts=(),
+            normalized_tool_proposals=(),
+            learning_proposals=(),
+            public_reply_chunks=(chunk,),
+            maya_turn_closure_hash="a" * 64,
+            final_transcript_commitment_hash="b" * 64,
+            final_seq=1,
+            final_transcript_mac="c" * 64,
+            runtime_graph_digest="d" * 64,
+            route=conversation.PublicRoute.HANDOFF,
+            reply_type=conversation.PublicReplyType.HANDOFF,
+        )
+
+        self.assertEqual(
+            tuple(field.name for field in fields(proposal_type)),
+            (
+                "aggregate_turn_id",
+                "intent_closure",
+                "read_observations",
+                "facts",
+                "normalized_tool_proposals",
+                "learning_proposals",
+                "public_reply_chunks",
+                "maya_turn_closure_hash",
+                "final_transcript_commitment_hash",
+                "final_seq",
+                "final_transcript_mac",
+                "runtime_graph_digest",
+                "route",
+                "reply_type",
+            ),
+        )
+        self.assertEqual(
+            proposal.canonical_hash(),
+            "1f7e8c9f3de0b608260799a19de5532b1cacc9a2f438c483d0d795b0650121e9",
+        )
+        valid = {
+            "aggregate_turn_id": "turn-1",
+            "intent_closure": intent,
+            "read_observations": (),
+            "facts": (),
+            "normalized_tool_proposals": (),
+            "learning_proposals": (),
+            "public_reply_chunks": (chunk,),
+            "maya_turn_closure_hash": "a" * 64,
+            "final_transcript_commitment_hash": "b" * 64,
+            "final_seq": 1,
+            "final_transcript_mac": "c" * 64,
+            "runtime_graph_digest": "d" * 64,
+            "route": conversation.PublicRoute.HANDOFF,
+            "reply_type": conversation.PublicReplyType.HANDOFF,
+        }
+        invalid_overrides = (
+            {"public_reply_chunks": [chunk]},
+            {"public_reply_chunks": ()},
+            {
+                "public_reply_chunks": (
+                    conversation.PublicReplyChunk("turn-1", 1, "Seguro.", "a" * 64),
+                )
+            },
+            {
+                "public_reply_chunks": (
+                    conversation.PublicReplyChunk("other", 0, "Seguro.", "a" * 64),
+                )
+            },
+            {"maya_turn_closure_hash": "e" * 64},
+            {"final_seq": 0},
+            {"route": conversation.PublicRoute.NO_REPLY},
+            {"reply_type": conversation.PublicReplyType.ANSWER},
+            {"facts": (TypedFact("language", StringSlot("pt-BR")),)},
+        )
+        for override in invalid_overrides:
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    proposal_type(**(valid | override))
+
     def test_normalized_tool_proposal_validates_closed_pair_and_owner_object(self) -> None:
         proposal_type = getattr(conversation, "NormalizedToolProposal", None)
         tool_type = getattr(conversation, "NormalizedCommandTool", None)

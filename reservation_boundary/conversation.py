@@ -9,7 +9,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import ClassVar, Final
+from typing import TYPE_CHECKING, ClassVar, Final
 
 from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.serialization import from_tool_arguments_canonical_json
@@ -22,6 +22,9 @@ from reservation_boundary.types import (
     NormalizedMessage,
     TypedFact,
 )
+
+if TYPE_CHECKING:
+    from reservation_boundary.reads import ReadObservation
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -965,6 +968,189 @@ class MayaTurnClosure:
         return hashlib.sha256(preimage).hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class MayaTurnProposal:
+    """Parent-owned aggregate built from an accepted child closure and transcript."""
+
+    aggregate_turn_id: str
+    intent_closure: MayaIntentClosure
+    read_observations: tuple["ReadObservation", ...]
+    facts: tuple[TypedFact, ...]
+    normalized_tool_proposals: tuple[NormalizedToolProposal, ...]
+    learning_proposals: tuple[LearningProposal, ...]
+    public_reply_chunks: tuple[PublicReplyChunk, ...]
+    maya_turn_closure_hash: str
+    final_transcript_commitment_hash: str
+    final_seq: int
+    final_transcript_mac: str
+    runtime_graph_digest: str
+    route: PublicRoute
+    reply_type: PublicReplyType
+
+    SCHEMA: ClassVar[str] = "phase8-maya-turn-proposal"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-maya-turn-proposal-v1"
+
+    def __post_init__(self) -> None:
+        _require_id_token(self.aggregate_turn_id, "MayaTurnProposal.aggregate_turn_id")
+        if type(self.intent_closure) is not MayaIntentClosure:
+            raise TypeError("MayaTurnProposal.intent_closure must be exact")
+
+        from reservation_boundary.reads import ReadObservation
+
+        if type(self.read_observations) is not tuple or any(
+            type(item) is not ReadObservation for item in self.read_observations
+        ):
+            raise TypeError("MayaTurnProposal.read_observations must be exact")
+        read_request_hashes = tuple(item.request_hash for item in self.read_observations)
+        read_frame_hashes = tuple(
+            item.frame_commitment_hash for item in self.read_observations
+        )
+        if len(set(read_request_hashes)) != len(read_request_hashes) or len(
+            set(read_frame_hashes)
+        ) != len(read_frame_hashes):
+            raise ValueError("MayaTurnProposal read observations must be unique")
+
+        if type(self.facts) is not tuple or any(
+            type(item) is not TypedFact for item in self.facts
+        ):
+            raise TypeError("MayaTurnProposal.facts must be an exact TypedFact tuple")
+        fact_order = {
+            "language": 0,
+            "service": 1,
+            "start_date": 2,
+            "end_date": 3,
+            "adults": 4,
+            "children": 5,
+        }
+        fact_positions = tuple(fact_order[item.name] for item in self.facts)
+        if (
+            any(item.frame_commitment_hash is None for item in self.facts)
+            or len(set(fact_positions)) != len(fact_positions)
+            or fact_positions != tuple(sorted(fact_positions))
+        ):
+            raise ValueError("MayaTurnProposal facts must be v8, unique and ordered")
+
+        if type(self.normalized_tool_proposals) is not tuple or any(
+            type(item) is not NormalizedToolProposal
+            for item in self.normalized_tool_proposals
+        ):
+            raise TypeError("MayaTurnProposal normalized tools must be exact")
+        if type(self.learning_proposals) is not tuple or any(
+            type(item) is not LearningProposal for item in self.learning_proposals
+        ):
+            raise TypeError("MayaTurnProposal learning proposals must be exact")
+        child_proposals = self.normalized_tool_proposals + self.learning_proposals
+        if any(item.aggregate_turn_id != self.aggregate_turn_id for item in child_proposals):
+            raise ValueError("MayaTurnProposal child turn binding mismatch")
+        sequences = tuple(item.sequence for item in child_proposals)
+        request_ids = tuple(item.request_id for item in child_proposals)
+        frame_hashes = tuple(item.frame_commitment_hash for item in child_proposals)
+        if (
+            len(set(sequences)) != len(sequences)
+            or sequences != tuple(sorted(sequences))
+            or len(set(request_ids)) != len(request_ids)
+            or len(set(frame_hashes)) != len(frame_hashes)
+        ):
+            raise ValueError("MayaTurnProposal child artifacts must be unique and ordered")
+
+        if type(self.public_reply_chunks) is not tuple or any(
+            type(item) is not PublicReplyChunk for item in self.public_reply_chunks
+        ):
+            raise TypeError("MayaTurnProposal public chunks must be exact")
+        closure_hash = _require_sha256(
+            self.maya_turn_closure_hash,
+            "MayaTurnProposal.maya_turn_closure_hash",
+        )
+        for ordinal, chunk in enumerate(self.public_reply_chunks):
+            if (
+                chunk.aggregate_turn_id != self.aggregate_turn_id
+                or chunk.ordinal != ordinal
+                or chunk.source_closure_hash != closure_hash
+            ):
+                raise ValueError("MayaTurnProposal public chunk binding mismatch")
+        _require_sha256(
+            self.final_transcript_commitment_hash,
+            "MayaTurnProposal.final_transcript_commitment_hash",
+        )
+        final_seq = _require_exact_int(
+            self.final_seq,
+            "MayaTurnProposal.final_seq",
+            minimum=1,
+        )
+        if sequences and sequences[-1] >= final_seq:
+            raise ValueError("MayaTurnProposal child sequence must precede final frame")
+        _require_sha256(
+            self.final_transcript_mac,
+            "MayaTurnProposal.final_transcript_mac",
+        )
+        _require_sha256(
+            self.runtime_graph_digest,
+            "MayaTurnProposal.runtime_graph_digest",
+        )
+        if type(self.route) is not PublicRoute or type(self.reply_type) is not PublicReplyType:
+            raise TypeError("MayaTurnProposal route/reply type must be exact")
+        is_handoff = self.route is PublicRoute.HANDOFF
+        is_no_reply = self.route is PublicRoute.NO_REPLY
+        if is_handoff != (self.reply_type is PublicReplyType.HANDOFF):
+            raise ValueError("MayaTurnProposal handoff route/reply mismatch")
+        if is_no_reply != (self.reply_type is PublicReplyType.NO_REPLY):
+            raise ValueError("MayaTurnProposal no_reply route/reply mismatch")
+        if is_no_reply != (not self.public_reply_chunks):
+            raise ValueError("MayaTurnProposal no_reply/chunk matrix mismatch")
+        intent_handoff = (
+            self.intent_closure.kind is ConversationIntentKind.REQUEST_HANDOFF
+        )
+        if intent_handoff != is_handoff:
+            raise ValueError("MayaTurnProposal intent/route handoff mismatch")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "aggregate_turn_id": self.aggregate_turn_id,
+                "intent_closure": json.loads(
+                    self.intent_closure.to_canonical_bytes().decode("utf-8")
+                ),
+                "read_observations": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.read_observations
+                ],
+                "facts": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.facts
+                ],
+                "normalized_tool_proposals": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.normalized_tool_proposals
+                ],
+                "learning_proposals": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.learning_proposals
+                ],
+                "public_reply_chunks": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.public_reply_chunks
+                ],
+                "maya_turn_closure_hash": self.maya_turn_closure_hash,
+                "final_transcript_commitment_hash": (
+                    self.final_transcript_commitment_hash
+                ),
+                "final_seq": self.final_seq,
+                "final_transcript_mac": self.final_transcript_mac,
+                "runtime_graph_digest": self.runtime_graph_digest,
+                "route": self.route.value,
+                "reply_type": self.reply_type.value,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+
 class TranscriptDirection(str, Enum):
     CHILD_TO_PARENT = "child_to_parent"
     PARENT_TO_CHILD = "parent_to_child"
@@ -1050,6 +1236,7 @@ __all__ = (
     "LearningProposal",
     "MayaIntentClosure",
     "MayaTurnClosure",
+    "MayaTurnProposal",
     "MayaTurnRequest",
     "NormalizedCommandArgumentsType",
     "NormalizedCommandTool",
