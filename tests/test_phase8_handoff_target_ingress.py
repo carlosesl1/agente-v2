@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 import base64
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import tempfile
@@ -87,18 +88,30 @@ class Phase8HandoffTargetIngressTests(unittest.TestCase):
             self.source_hash,
         )
 
-    def _apply(self, store, operation_id: str, bundle: object, **changes: object):
-        apply = getattr(store, "apply_handoff_relay", None)
+    def _apply(self, store, operation_id: str, bundle: object):
+        apply = getattr(store, "accept_boundary_handoff", None)
         self.assertIsNotNone(apply, "Phase 6 v2 store must own handoff ingress")
         assert apply is not None
-        values: dict[str, object] = {
-            "operation_id": operation_id,
-            "bundle": bundle,
-            "source_turn_receipt_hash": self.source_hash,
-            "committed_at": T0 + timedelta(seconds=2),
-        }
-        values.update(changes)
-        return apply(**values)
+        return apply(
+            operation_id=operation_id,
+            bundle=bundle,
+            source_turn_receipt_hash=self.source_hash,
+        )
+
+    def test_public_accept_signature_is_exact(self) -> None:
+        method = getattr(SQLiteFollowupUnitOfWork, "accept_boundary_handoff", None)
+        self.assertIsNotNone(method, "handoff ingress must expose its exact API")
+        assert method is not None
+        signature = inspect.signature(method)
+        self.assertEqual(
+            tuple(signature.parameters),
+            ("self", "operation_id", "source_turn_receipt_hash", "bundle"),
+        )
+        for name in ("operation_id", "source_turn_receipt_hash", "bundle"):
+            self.assertIs(
+                signature.parameters[name].kind,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
 
     def test_operation_id_is_domain_separated_and_binds_the_complete_tuple(self) -> None:
         bundle, _ = _bundle()
@@ -128,14 +141,8 @@ class Phase8HandoffTargetIngressTests(unittest.TestCase):
     def test_atomic_apply_replays_full_history_and_exact_duplicate_returns_receipt(self) -> None:
         bundle, expected_state = _bundle()
         operation_id = self._derive(bundle)
-        first_time = T0 + timedelta(seconds=2)
         with SQLiteFollowupUnitOfWork.open_v2(self.path) as store:
-            first = self._apply(
-                store,
-                operation_id,
-                bundle,
-                committed_at=first_time,
-            )
+            first = self._apply(store, operation_id, bundle)
             self.assertEqual(
                 store.load_handoff(expected_state.request.handoff_id),
                 expected_state,
@@ -151,12 +158,7 @@ class Phase8HandoffTargetIngressTests(unittest.TestCase):
                 (1,),
             )
         with SQLiteFollowupUnitOfWork.open_v2(self.path) as reopened:
-            replay = self._apply(
-                reopened,
-                operation_id,
-                bundle,
-                committed_at=T0 + timedelta(days=1),
-            )
+            replay = self._apply(reopened, operation_id, bundle)
             self.assertEqual(replay.to_canonical_bytes(), first.to_canonical_bytes())
 
     def test_wrong_operation_or_final_hash_fails_before_any_domain_write(self) -> None:
@@ -188,8 +190,9 @@ class Phase8HandoffTargetIngressTests(unittest.TestCase):
                 raise RuntimeError("synthetic target ingress fault")
 
         with SQLiteFollowupUnitOfWork.open_v2(self.path) as store:
+            store._phase8_handoff_fault_hook = fault
             with self.assertRaisesRegex(RuntimeError, "synthetic"):
-                self._apply(store, operation_id, bundle, fault_hook=fault)
+                self._apply(store, operation_id, bundle)
             self.assertEqual(
                 store._connection.execute(
                     "SELECT count(*) FROM handoff_workflows"
@@ -202,6 +205,7 @@ class Phase8HandoffTargetIngressTests(unittest.TestCase):
                 ).fetchone(),
                 (0,),
             )
+            store._phase8_handoff_fault_hook = None
             self._apply(store, operation_id, bundle)
             store._connection.execute(
                 "UPDATE handoff_boundary_ingress_receipts "

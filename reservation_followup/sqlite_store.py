@@ -426,6 +426,7 @@ class SQLiteFollowupUnitOfWork:
             raise ValueError("unsupported follow-up schema version")
         self._connection = connection
         self._schema_version = _schema_version
+        self._phase8_handoff_fault_hook: Callable[[str], None] | None = None
         self._closed = False
 
     @classmethod
@@ -674,7 +675,22 @@ class SQLiteFollowupUnitOfWork:
         if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
             raise DataCorruption("SQLite v2 schema contains foreign key violations")
 
-    def apply_handoff_relay(
+    def accept_boundary_handoff(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: object,
+    ):
+        return self._accept_boundary_handoff(
+            operation_id=operation_id,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            bundle=bundle,
+            committed_at=datetime.now(timezone.utc),
+            fault_hook=self._phase8_handoff_fault_hook,
+        )
+
+    def _accept_boundary_handoff(
         self,
         *,
         operation_id: str,
@@ -770,7 +786,7 @@ class SQLiteFollowupUnitOfWork:
             if fault_hook is not None:
                 fault_hook(stage)
 
-        with self._transaction("apply_handoff_relay"):
+        with self._transaction("accept_boundary_handoff"):
             existing = self._connection.execute(
                 "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
