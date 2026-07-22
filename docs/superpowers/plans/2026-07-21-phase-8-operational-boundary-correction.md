@@ -269,12 +269,14 @@ phase8_release/
   build_authorization.py       # GO_BUILD_ONCE + one-shot ledger/receipt
   oci_identity.py
   approval_manifest.py
+  terminal_packet.py          # packet V acíclico e publicação object-by-object
   validator.py
 scripts/
   validate_phase8_contracts.py
   phase8_prebuild_gate.py
   phase8_publish_oci.py
   phase8_terminal_gate.py
+  phase8_terminal_packet.py
   run_phase8_properties.py
   run_phase8_faults.py
   run_phase8_restarts.py
@@ -414,7 +416,7 @@ invalidar seu F/E e repetir o RED/review da task owner.
 | 18 | `tests.test_phase8_qualification_cancel.QualificationCancelTests.test_all_eight_origins_freeze_both_fsms_and_preserve_artifacts`; `tests.test_phase8_memory_prepare.MemoryPrepareTests.test_s0_to_s5_recovery_is_exact`; `tests.test_phase8_memory_abandon.MemoryAbandonTests.test_a0_to_a4_each_barrier_converges_with_zero_payload`; `tests.test_phase8_memory_recovery.MemoryRecoveryTests.test_worker_has_only_lookup_resume_ack_abandon_and_shared_lock`; `tests.test_phase8_qualification_reopen.QualificationReopenTests.test_new_epoch_root_ids_and_old_ack_rejection` | lock/recovery/cancel producer ausente | cinco módulos Phase8 + `2000` restarts por grammar catalog |
 | 19 | `tests.test_phase8_runtime_graph_contract.RuntimeGraphContractTests.test_manifest_contains_every_worker_reconciler_canceler_lock_and_recovery_node`; `tests.test_phase8_readiness_contract.ReadinessContractTests.test_schema_root_lock_receipt_or_worker_mismatch_is_not_ready` | node/digest scanner ausente | dois módulos Phase8 + closed graph mutation catalog |
 | 20 | `tests.test_phase8_ingress_universe.IngressUniverseTests.test_four_turn_ingresses_have_exact_source_identities_and_coordinator_owner`; `tests.test_phase8_legacy_poison.LegacyPoisonTests.test_every_mutator_is_coordinator_or_shared_migration_guarded`; `tests.test_phase8_child_capability_graph.ChildCapabilityGraphTests.test_child_cannot_import_legacy_provider_delivery_or_memory_writer` | alternate owner/import reachable | três módulos Phase8 + runtime inventory static scan |
-| 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f` | release/terminal-gate producers ausentes ou validator sintético aceita F/E inválido | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate e terminal_gate |
+| 21 | `tests.test_phase8_wheel_reproducibility.WheelReproducibilityTests.test_two_temporary_builds_are_byte_identical`; `tests.test_phase8_build_authorization.BuildAuthorizationTests.test_go_build_once_binds_all_inputs_destination_expiry_nonce_and_consumes_once`; `tests.test_phase8_publish_gate.PublishGateTests.test_malformed_stale_replay_or_non_loopback_calls_poison_runner_zero_times`; `tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f`; `tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f`; `tests.test_phase8_terminal_packet.TerminalPacketTests.test_good_packet_is_acyclic_and_published_as_single_objects`; `tests.test_phase8_terminal_packet.TerminalPacketTests.test_self_reference_schema_hash_or_publication_mismatch_is_rejected` | release/terminal-gate/packet producers ausentes, validator sintético aceita F/E inválido ou packet aceita autorreferência/hash/publicação divergente | módulos wheel, wheel_reproducibility, payload_manifest, source_attestation, build_input, build_authorization, oci_identity, approval_manifest, publish_gate, terminal_gate e terminal_packet |
 
 Task 22 é deliberadamente excluída desta matriz RED/GREEN: é um gate puro sobre
 bytes já congelados. Os testes de `tests.test_phase8_terminal_gate` pertencem à Task
@@ -1474,7 +1476,9 @@ routes/lifespan
 - Create: `phase8_release/build_authorization.py`
 - Create: `phase8_release/oci_identity.py`
 - Create: `phase8_release/approval_manifest.py`
+- Create: `phase8_release/terminal_packet.py`
 - Create: `phase8_release/validator.py`
+- Create: `scripts/phase8_terminal_packet.py`
 - Create: `tests/test_phase8_wheel.py`
 - Create: `tests/test_phase8_wheel_reproducibility.py`
 - Create: `tests/test_phase8_payload_manifest.py`
@@ -1485,6 +1489,75 @@ routes/lifespan
 - Create: `tests/test_phase8_approval_manifest.py`
 - Create: `tests/test_phase8_publish_gate.py`
 - Create: `tests/test_phase8_terminal_gate.py`
+- Create: `tests/test_phase8_terminal_packet.py`
+- Create: `tests/fixtures/phase8_terminal_packet_v1.json`
+
+**Producer do packet V, congelado antes de F:**
+
+```python
+@dataclass(frozen=True)
+class TerminalPacketPublicationReceipt:
+    source_f: str
+    evidence_e: str
+    terminal_result_sha256: str
+    candidate_pair_sha256: str
+    review_request_sha256: str
+    packet_manifest_sha256: str  # identidade V
+    sha256sums_object_sha256: str
+
+class TerminalVerificationPacketBuilder:
+    def build_and_publish(
+        self,
+        *,
+        source_root: Path,
+        source_f: str,
+        evidence_root: Path,
+        evidence_e: str,
+        terminal_result_bytes: bytes,
+        review_criteria_bytes: bytes,
+        staging_root: Path,
+        store: EvidenceArtifactStore,
+    ) -> TerminalPacketPublicationReceipt: ...
+```
+
+O builder autentica `parent(E)==F` e a allowlist integral de E, valida JSON estrito e
+schemas fechados, cria `candidate-pair.json` e `review-request.json`, e exige que
+nenhum membro contenha `V` ou placeholder de V. `packet-manifest.json` lista, em ordem
+canônica, somente os três objetos normativos `terminal-result.json`,
+`candidate-pair.json` e `review-request.json`, cada um com `path|sha256|bytes`.
+
+`V = SHA256(packet-manifest.json)` sobre os bytes canônicos crus. Isso coincide com o
+contrato existente `objects/{expected_sha256}` do `EvidenceArtifactStore`; não há
+directory publication especial. O builder publica como **objetos individuais** os
+três membros e depois `packet-manifest.json`, sempre por
+`store.publish(payload, expected_sha256=SHA256(payload))`. `SHA256SUMS` é derivado
+depois de V, cobre os três membros + manifest, é publicado como quinto objeto
+independente e não integra `packet-manifest.json` nem a preimage de V. O receipt é
+escrito apenas no output privado do CLI e referencia V + hash do objeto SHA256SUMS.
+
+O CLI `scripts/phase8_terminal_packet.py` aceita somente:
+
+```text
+--source-root --source-f --evidence-root --evidence-e --terminal-result
+--review-criteria --staging-root --store-root --output-receipt
+```
+
+Ele deriva o parent/diff via Git read-only, instancia `EvidenceArtifactStore` e chama
+`build_and_publish`.
+Nenhum dos dois producers possui port de rede, Docker, registry, build ou runtime.
+
+**R exato do producer V, executado ainda na Task 21:**
+
+```bash
+python3 -B -m unittest \
+  tests.test_phase8_terminal_packet.TerminalPacketTests.test_good_packet_is_acyclic_and_published_as_single_objects \
+  tests.test_phase8_terminal_packet.TerminalPacketTests.test_self_reference_schema_hash_or_publication_mismatch_is_rejected \
+  -v
+```
+
+No primeiro run, ambos falham por ausência de `TerminalVerificationPacketBuilder` e
+do CLI, nunca por import/typo. O mesmo argv precisa terminar `OK` antes do F task-local
+da Task 21; fixture, P e resultados entram no U/P/S/R/O dessa task.
 
 **Steps:**
 
@@ -1524,6 +1597,12 @@ routes/lifespan
   presença pré-F de runners/catalogs/validators e P-path→S-blob→F-blob; não dependem
   do F/E real que será criado na Task 22. Counters/catalogs são literais e
   independentes do source sob teste.
+- [ ] RED/GREEN dos dois selectors `TerminalPacketTests` usa fixture independente e
+  store temporário real. O caso verde recompõe V, todos os objetos e o receipt; casos
+  hostis cobrem unknown/duplicate key, member extra/ausente/fora de ordem,
+  `review-request` contendo V, manifest contendo próprio digest/V, hash/size
+  divergente, parent/diff E divergente, publish no-replace/inode mismatch e
+  `SHA256SUMS` inserido indevidamente na preimage de V.
 - [ ] Executar somente testes unitários focados de package/release tooling com fakes e
   poison transports; GREEN + blast radius; F/E task-local + AND.
 - [ ] Stop condition: qualquer builder, validator, runner ou teste funcional ausente
@@ -1549,6 +1628,34 @@ durations e hashes sanitizados. E contém somente evidência disponível antes d
 própria identidade; nenhum arquivo em E pode nomear E ou depender de resultado obtido
 depois de congelá-lo.
 
+**Allowlist integral e exclusiva de `F→E`:**
+
+```python
+TASK_EVIDENCE_NAMES = frozenset({
+    "red.patch",
+    "red-provenance.json",
+    "green-result.json",
+    "candidate-pair.json",
+    "SHA256SUMS",
+})
+TERMINAL_E_PATHS = frozenset(
+    f"docs/refactor/evidence/phase-08/tasks/task-{task:02d}/{name}"
+    for task in range(22)
+    for name in TASK_EVIDENCE_NAMES
+) | frozenset({
+    "docs/refactor/evidence/phase-08/tasks/task-22/gate-input-manifest.json",
+    "docs/refactor/evidence/phase-08/tasks/task-22/heavy-gate-result.json",
+    "docs/refactor/evidence/phase-08/tasks/task-22/SHA256SUMS",
+})
+```
+
+O validator calcula `actual_diff_paths` de `git diff-tree --name-only F E` e exige
+literalmente `actual_diff_paths == TERMINAL_E_PATHS`. Exige ainda `parent(E)==F`,
+zero rename/copy/typechange/submodule e nenhum outro path, inclusive índices, READMEs,
+manifests globais ou evidence-child commits. Cada path task-00..21 precisa ser o
+envelope final já aprovado daquela task; byte/hash divergente do registry de tasks é
+erro, não nova evidência permitida.
+
 Depois de E existir, o validator produz um **terminal-verification packet V**
 armazenado fora de E no `EvidenceArtifactStore` privado/content-addressed. Seus
 membros têm contratos acíclicos:
@@ -1560,10 +1667,12 @@ membros têm contratos acíclicos:
 - `packet-manifest.json`: lista ordenada `(path, sha256, bytes)` dos três membros;
 - `SHA256SUMS`: cobre os quatro arquivos anteriores.
 
-`packet-manifest.json` não inclui o próprio digest nem o digest V. O identificador
-externo é `V = SHA256("phase8-terminal-verification-packet-v1" || 0x00 ||
-canonical(packet-manifest.json))`; o store publica o diretório por V com no-replace,
-rehash e fsync. Assim F, E e V são identidades distintas e nenhuma é autorreferente.
+`packet-manifest.json` não inclui o próprio digest nem o digest V. Seus bytes já são
+canonical JSON e `V = SHA256(packet-manifest.json)` sem prefixo adicional, exatamente
+como definido pelo producer da Task 21. O store publica cada membro como objeto
+individual; o objeto `packet-manifest.json` fica em `objects/V`. `SHA256SUMS` é o
+quinto objeto derivado, não é membro normativo e não altera V. Assim F, E e V são
+identidades distintas e nenhuma é autorreferente.
 
 **Steps:**
 
@@ -1586,11 +1695,10 @@ python3 -B scripts/validate_phase8_contracts.py
   catálogo fechado morto; raw outputs apenas no private store.
 - [ ] A fault suite inclui EvidenceArtifactStore publisher vivo, SIGKILL/power-loss,
   chmod→fsync→publish→dir-fsync e scavenger S0/S1/S2 sob lock order coord→owner.
-- [ ] Criar E terminal como filho direto de F consolidando os envelopes aprovados de
-  todas as tasks, hashes, counts e conclusions; verificar que E não altera bytes
-  funcionais/empacotáveis nem incorpora os evidence-child commits intermediários. Em
-  `task-22`, incluir somente `gate-input-manifest.json`, `heavy-gate-result.json` e o
-  `SHA256SUMS` correspondente; então congelar E definitivamente.
+- [ ] Criar E terminal como filho direto de F contendo **exatamente**
+  `TERMINAL_E_PATHS`: os cinco envelopes finais já aprovados de cada task 00–21 e os
+  três arquivos task-22. Provar igualdade de set, bytes/hashes do registry e zero
+  path adicional; então congelar E definitivamente.
 - [ ] Depois de criar E, executar a partir do checkout ainda fixado em F o validator
   externo já congelado na Task 21, com roots e commits explícitos:
 
@@ -1609,8 +1717,26 @@ python3 -B "$SOURCE_F_ROOT/scripts/phase8_terminal_gate.py" \
   escreve raw output apenas no private result root e nunca altera E. Falha não
   autoriza editar F/E: exige novo ciclo a partir da task owner e novo F.
 - [ ] Com o resultado privado verde, construir os cinco arquivos do packet V, validar
-  seus schemas/hashes, publicar V no EvidenceArtifactStore e reabrir F/E apenas para
-  leitura. Não copiar nenhum membro de V para E e não amend/recommit E.
+  e publicar invocando somente o producer já congelado em F:
+
+```bash
+(
+  cd "$SOURCE_F_ROOT"
+  python3 -B scripts/phase8_terminal_packet.py \
+    --source-root "$SOURCE_F_ROOT" \
+    --source-f "$F" \
+    --evidence-root "$EVIDENCE_E_ROOT" \
+    --evidence-e "$E" \
+    --terminal-result "$PRIVATE_RESULT_ROOT/terminal-result.json" \
+    --review-criteria "$PRIVATE_INPUT_ROOT/review-criteria.json" \
+    --staging-root "$PRIVATE_PACKET_STAGING_ROOT" \
+    --store-root "$PRIVATE_EVIDENCE_OBJECT_STORE" \
+    --output-receipt "$PRIVATE_RESULT_ROOT/packet-publication-receipt.json"
+)
+```
+
+  Esperado: exit `0`; receipt autentica V, os cinco objetos e o mesmo F/E; reabrir F/E
+  apenas para leitura. Não copiar membro de V para E e não amend/recommit E.
 - [ ] Enviar o mesmo tuple imutável `(F,E,V)` às três lanes. Cada summary precisa autenticar
   os três digests. Timeout/ausência/Needs fixes = NO-GO.
 - [ ] Correção material reroda todos os comandos e todas as lanes; sem exceção.

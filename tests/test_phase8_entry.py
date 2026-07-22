@@ -249,6 +249,8 @@ class Phase8EntryTests(unittest.TestCase):
             "tests.test_phase8_oci_identity.OciIdentityTests.test_single_arm64_child_and_rollback_config_rootfs_are_exact",
             "tests.test_phase8_terminal_gate.TerminalGateTests.test_all_runners_catalogs_and_contract_validators_were_present_before_f",
             "tests.test_phase8_terminal_gate.TerminalGateTests.test_e_is_direct_evidence_only_child_and_all_red_blobs_match_s_to_f",
+            "tests.test_phase8_terminal_packet.TerminalPacketTests.test_good_packet_is_acyclic_and_published_as_single_objects",
+            "tests.test_phase8_terminal_packet.TerminalPacketTests.test_self_reference_schema_hash_or_publication_mismatch_is_rejected",
         )
         self.assertEqual(tuple(re.findall(r"`([^`]+)`", task_21_row)), expected_selectors)
         self.assertIn("phase8_terminal_gate.py", scripts_inventory)
@@ -304,6 +306,88 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertIn("fora de E", task_22)
         self.assertIn("mesmo tuple imutável `(F,E,V)`", task_22)
         self.assertIn("não inclui o próprio digest", task_22)
+        self.assertIn("objects/V", task_22)
+        self.assertNotIn("phase8-terminal-verification-packet-v1", task_22)
+        self.assertNotIn("publica o diretório por V", task_22)
+
+    def test_replacement_plan_freezes_packet_producer_and_entire_e_allowlist(self) -> None:
+        manifest = _manifest()
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+        task_21 = plan.split("## Task 21:", 1)[1].split("## Task 22:", 1)[0]
+        task_22 = plan.split("## Task 22:", 1)[1].split("## Task 23:", 1)[0]
+
+        for literal in (
+            "Create: `phase8_release/terminal_packet.py`",
+            "Create: `scripts/phase8_terminal_packet.py`",
+            "Create: `tests/test_phase8_terminal_packet.py`",
+            "Create: `tests/fixtures/phase8_terminal_packet_v1.json`",
+            "class TerminalVerificationPacketBuilder",
+            "def build_and_publish(",
+            "EvidenceArtifactStore",
+            "V = SHA256(packet-manifest.json)",
+            "objetos individuais",
+        ):
+            self.assertIn(literal, task_21)
+
+        self.assertIn("python3 -B scripts/phase8_terminal_packet.py", task_22)
+        self.assertIn("--terminal-result", task_22)
+        self.assertIn("--review-criteria", task_22)
+        self.assertIn("--store-root", task_22)
+        self.assertIn("--output-receipt", task_22)
+
+        self.assertIn("TASK_EVIDENCE_NAMES", task_22)
+        self.assertIn("TERMINAL_E_PATHS", task_22)
+        self.assertIn("actual_diff_paths == TERMINAL_E_PATHS", task_22)
+        self.assertIn("range(22)", task_22)
+        for name in (
+            "red.patch",
+            "red-provenance.json",
+            "green-result.json",
+            "candidate-pair.json",
+            "SHA256SUMS",
+            "gate-input-manifest.json",
+            "heavy-gate-result.json",
+        ):
+            self.assertIn(name, task_22)
+        self.assertNotIn("consolidando os envelopes aprovados de todas as tasks", task_22)
+        self.assertIn("nenhum outro path", task_22)
+
+        names_match = re.search(
+            r"TASK_EVIDENCE_NAMES = frozenset\(\{(.*?)\}\)",
+            task_22,
+            re.S,
+        )
+        terminal_match = re.search(
+            r"\) \| frozenset\(\{(.*?)\}\)\n```",
+            task_22,
+            re.S,
+        )
+        self.assertIsNotNone(names_match)
+        self.assertIsNotNone(terminal_match)
+        task_names = tuple(re.findall(r'"([^"]+)"', names_match.group(1)))
+        terminal_names = tuple(re.findall(r'"([^"]+)"', terminal_match.group(1)))
+        actual_universe = {
+            f"docs/refactor/evidence/phase-08/tasks/task-{task:02d}/{name}"
+            for task in range(22)
+            for name in task_names
+        } | set(terminal_names)
+        expected_universe = {
+            f"docs/refactor/evidence/phase-08/tasks/task-{task:02d}/{name}"
+            for task in range(22)
+            for name in (
+                "red.patch",
+                "red-provenance.json",
+                "green-result.json",
+                "candidate-pair.json",
+                "SHA256SUMS",
+            )
+        } | {
+            "docs/refactor/evidence/phase-08/tasks/task-22/gate-input-manifest.json",
+            "docs/refactor/evidence/phase-08/tasks/task-22/heavy-gate-result.json",
+            "docs/refactor/evidence/phase-08/tasks/task-22/SHA256SUMS",
+        }
+        self.assertEqual(actual_universe, expected_universe)
+        self.assertEqual(len(actual_universe), 113)
 
     def test_historical_spec_and_plan_have_non_executable_banners(self) -> None:
         manifest = _manifest()
