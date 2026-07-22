@@ -374,6 +374,80 @@ class MayaTurnClosure:
         return hashlib.sha256(preimage).hexdigest()
 
 
+class TranscriptDirection(str, Enum):
+    CHILD_TO_PARENT = "child_to_parent"
+    PARENT_TO_CHILD = "parent_to_child"
+
+
+class TranscriptKind(str, Enum):
+    READ = "read"
+    STATE_COMMIT = "state_commit"
+    LEARNING = "learning"
+    COMMAND = "command"
+    FINAL = "final"
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptCommitment:
+    """Privacy-safe deterministic commitment for one authenticated frame."""
+
+    direction: TranscriptDirection
+    kind: TranscriptKind
+    sequence: int
+    request_id: str
+    request_hash: str
+    response_hash: str
+    previous_frame_commitment: str
+
+    SCHEMA: ClassVar[str] = "phase8-transcript-commitment"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-transcript-commitment-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.direction) is not TranscriptDirection:
+            raise TypeError(
+                "TranscriptCommitment.direction must be an exact TranscriptDirection"
+            )
+        if type(self.kind) is not TranscriptKind:
+            raise TypeError("TranscriptCommitment.kind must be an exact TranscriptKind")
+        if (
+            self.kind is TranscriptKind.FINAL
+            and self.direction is not TranscriptDirection.CHILD_TO_PARENT
+        ):
+            raise ValueError("FINAL commitments must flow from child to parent")
+        _require_exact_int(
+            self.sequence,
+            "TranscriptCommitment.sequence",
+            minimum=1,
+        )
+        _require_identifier(self.request_id, "TranscriptCommitment.request_id")
+        _require_sha256(self.request_hash, "TranscriptCommitment.request_hash")
+        _require_sha256(self.response_hash, "TranscriptCommitment.response_hash")
+        _require_sha256(
+            self.previous_frame_commitment,
+            "TranscriptCommitment.previous_frame_commitment",
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "direction": self.direction.value,
+                "kind": self.kind.value,
+                "sequence": self.sequence,
+                "request_id": self.request_id,
+                "request_hash": self.request_hash,
+                "response_hash": self.response_hash,
+                "previous_frame_commitment": self.previous_frame_commitment,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        return hashlib.sha256(preimage).hexdigest()
+
+
 __all__ = (
     "MayaIntentClosure",
     "MayaTurnClosure",
@@ -381,4 +455,7 @@ __all__ = (
     "PublicReplyType",
     "PublicRoute",
     "SourceEventIdentity",
+    "TranscriptCommitment",
+    "TranscriptDirection",
+    "TranscriptKind",
 )

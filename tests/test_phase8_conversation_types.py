@@ -419,6 +419,103 @@ class Phase8ConversationTypeTests(unittest.TestCase):
         )
         self.assertEqual(no_reply.public_text, "")
 
+    def test_transcript_commitment_fields_enums_and_hash_are_closed(self) -> None:
+        commitment_type = getattr(conversation, "TranscriptCommitment", None)
+        direction_type = getattr(conversation, "TranscriptDirection", None)
+        kind_type = getattr(conversation, "TranscriptKind", None)
+        self.assertIsNotNone(
+            commitment_type,
+            "TranscriptCommitment must have an owner",
+        )
+        self.assertIsNotNone(direction_type, "TranscriptDirection must have an owner")
+        self.assertIsNotNone(kind_type, "TranscriptKind must have an owner")
+        assert commitment_type is not None
+        assert direction_type is not None
+        assert kind_type is not None
+        self.assertEqual(
+            tuple(item.value for item in direction_type),
+            ("child_to_parent", "parent_to_child"),
+        )
+        self.assertEqual(
+            tuple(item.value for item in kind_type),
+            ("read", "state_commit", "learning", "command", "final"),
+        )
+        self.assertEqual(
+            tuple(field.name for field in fields(commitment_type)),
+            (
+                "direction",
+                "kind",
+                "sequence",
+                "request_id",
+                "request_hash",
+                "response_hash",
+                "previous_frame_commitment",
+            ),
+        )
+        commitment = commitment_type(
+            direction=direction_type.CHILD_TO_PARENT,
+            kind=kind_type.READ,
+            sequence=1,
+            request_id="request-001",
+            request_hash="a" * 64,
+            response_hash="b" * 64,
+            previous_frame_commitment="c" * 64,
+        )
+        self.assertEqual(commitment_type.SCHEMA, "phase8-transcript-commitment")
+        self.assertEqual(commitment_type.VERSION, 1)
+        self.assertEqual(commitment_type.DOMAIN, "phase8-transcript-commitment-v1")
+        expected_bytes = (
+            b'{"data":{"direction":"child_to_parent","kind":"read","previous_frame_commitment":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","request_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","request_id":"request-001","response_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sequence":1},"schema":"phase8-transcript-commitment","version":1}'
+        )
+        self.assertEqual(commitment.to_canonical_bytes(), expected_bytes)
+        self.assertEqual(
+            commitment.canonical_hash(),
+            hashlib.sha256(
+                b"phase8-transcript-commitment-v1\x00" + expected_bytes
+            ).hexdigest(),
+        )
+
+    def test_transcript_commitment_rejects_open_or_inconsistent_frames(self) -> None:
+        commitment_type = getattr(conversation, "TranscriptCommitment", None)
+        direction_type = getattr(conversation, "TranscriptDirection", None)
+        kind_type = getattr(conversation, "TranscriptKind", None)
+        self.assertIsNotNone(
+            commitment_type,
+            "TranscriptCommitment must have an owner",
+        )
+        self.assertIsNotNone(direction_type, "TranscriptDirection must have an owner")
+        self.assertIsNotNone(kind_type, "TranscriptKind must have an owner")
+        assert commitment_type is not None
+        assert direction_type is not None
+        assert kind_type is not None
+        valid = {
+            "direction": direction_type.CHILD_TO_PARENT,
+            "kind": kind_type.READ,
+            "sequence": 1,
+            "request_id": "request-001",
+            "request_hash": "a" * 64,
+            "response_hash": "b" * 64,
+            "previous_frame_commitment": "c" * 64,
+        }
+        invalid_overrides = (
+            {"direction": "child_to_parent"},
+            {"kind": "read"},
+            {"sequence": True},
+            {"sequence": 0},
+            {"request_id": "request 001"},
+            {"request_hash": "A" * 64},
+            {"response_hash": "short"},
+            {"previous_frame_commitment": ""},
+            {
+                "direction": direction_type.PARENT_TO_CHILD,
+                "kind": kind_type.FINAL,
+            },
+        )
+        for override in invalid_overrides:
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    commitment_type(**(valid | override))
+
 
 if __name__ == "__main__":
     unittest.main()
