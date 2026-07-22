@@ -1462,6 +1462,127 @@ class SQLiteBoundaryStore:
             fault(f"after_{stage}")
             return cursor
 
+        def assert_replay_children() -> None:
+            stored_artifact_count = self._connection.execute(
+                "SELECT count(*) FROM boundary_turn_artifacts "
+                "WHERE lead_key=? AND aggregate_turn_id=?",
+                (lead_key, receipt.aggregate_turn_id),
+            ).fetchone()[0]
+            if stored_artifact_count != len(artifacts):
+                raise IdentityConflict("aggregate replay artifact cardinality diverged")
+            for index, row in enumerate(artifacts):
+                stored = self._connection.execute(
+                    "SELECT artifact_kind,frame_sequence,frame_reference,artifact_json,"
+                    "artifact_hash,source_turn_receipt_hash FROM boundary_turn_artifacts "
+                    "WHERE lead_key=? AND aggregate_turn_id=? AND artifact_index=? "
+                    "AND artifact_id=?",
+                    (lead_key, receipt.aggregate_turn_id, index, row.artifact_id),
+                ).fetchone()
+                expected_row = (
+                    row.artifact_kind,
+                    row.frame_sequence,
+                    row.frame_reference,
+                    row.canonical_bytes.decode(),
+                    row.artifact_hash,
+                    receipt_hash,
+                )
+                if stored != expected_row:
+                    raise IdentityConflict("aggregate replay artifact bytes diverged")
+
+            stored_relay_count = self._connection.execute(
+                "SELECT count(*) FROM boundary_command_relays "
+                "WHERE lead_key=? AND aggregate_turn_id=?",
+                (lead_key, receipt.aggregate_turn_id),
+            ).fetchone()[0]
+            if stored_relay_count != len(command_relays):
+                raise IdentityConflict("aggregate replay relay cardinality diverged")
+            for row in command_relays:
+                stored = self._connection.execute(
+                    "SELECT command_id,bundle_json,bundle_hash,source_turn_receipt_hash "
+                    "FROM boundary_command_relays WHERE relay_id=?",
+                    (row.relay_id,),
+                ).fetchone()
+                if stored != (
+                    row.command_id,
+                    row.bundle_bytes.decode(),
+                    row.bundle_hash,
+                    receipt_hash,
+                ):
+                    raise IdentityConflict("aggregate replay relay bytes diverged")
+
+            stored_job_count = self._connection.execute(
+                "SELECT count(*) FROM boundary_outbox "
+                "WHERE lead_key=? AND aggregate_turn_id=?",
+                (lead_key, receipt.aggregate_turn_id),
+            ).fetchone()[0]
+            if stored_job_count != len(internal_jobs):
+                raise IdentityConflict("aggregate replay internal job cardinality diverged")
+            for row in internal_jobs:
+                stored = self._connection.execute(
+                    "SELECT job_kind,artifact_json,artifact_hash,source_turn_receipt_hash,"
+                    "qualification_id,epoch,target_operation_id FROM boundary_outbox "
+                    "WHERE job_id=?",
+                    (row.job_id,),
+                ).fetchone()
+                if stored != (
+                    row.job_kind,
+                    row.artifact_bytes.decode(),
+                    row.artifact_hash,
+                    receipt_hash,
+                    row.qualification_id,
+                    row.epoch,
+                    row.target_operation_id,
+                ):
+                    raise IdentityConflict("aggregate replay internal job bytes diverged")
+
+            stored_public_count = self._connection.execute(
+                "SELECT count(*) FROM boundary_public_outbox "
+                "WHERE lead_key=? AND aggregate_turn_id=?",
+                (lead_key, receipt.aggregate_turn_id),
+            ).fetchone()[0]
+            if stored_public_count != len(public_rows):
+                raise IdentityConflict("aggregate replay public row cardinality diverged")
+            for index, row in enumerate(public_rows):
+                stored = self._connection.execute(
+                    "SELECT chunk_index,idempotency_key,target_binding_hash,channel_id,"
+                    "channel_scope,chunk_json,chunk_hash,predecessor_chunk_hash,"
+                    "authorization_kind,authorization_id,scope_subject_id,qualification_id,"
+                    "scenario_id,immutable_generation,allocation_id,capability_policy_digest,"
+                    "effect_authorization_binding_digest,effective_turn_binding_digest,"
+                    "source_turn_receipt_hash,deadline_at FROM boundary_public_outbox "
+                    "WHERE public_row_id=?",
+                    (row.public_row_id,),
+                ).fetchone()
+                predecessor = (
+                    None
+                    if index == 0
+                    else public_rows[index - 1].chunk.canonical_hash()
+                )
+                expected_row = (
+                    row.chunk.ordinal,
+                    row.idempotency_key,
+                    row.target_binding_hash,
+                    row.channel_id,
+                    row.channel_scope,
+                    row.chunk.to_canonical_bytes().decode(),
+                    row.chunk.canonical_hash(),
+                    predecessor,
+                    row.authorization_kind,
+                    row.authorization_id,
+                    row.scope_subject_id,
+                    row.qualification_id,
+                    row.scenario_id,
+                    row.immutable_generation,
+                    row.allocation_id,
+                    row.capability_policy_digest,
+                    row.effect_authorization_binding_digest,
+                    row.effective_turn_binding_digest,
+                    receipt_hash,
+                    _utc_text(row.deadline_at, "public deadline"),
+                )
+                if stored != expected_row:
+                    raise IdentityConflict("aggregate replay public row bytes diverged")
+
         try:
             with self._transaction():
                 existing_event = execute(
@@ -1485,6 +1606,7 @@ class SQLiteBoundaryStore:
                     stored = TurnReceipt.from_canonical_bytes(existing_event[2].encode())
                     if stored != receipt:
                         raise DataCorruption("durable receipt bytes do not match replay")
+                    assert_replay_children()
                     fault("before_commit")
                     return stored
 
