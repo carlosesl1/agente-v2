@@ -855,7 +855,7 @@ DOMAIN = phase8-qualification-cancel-start-receipt-v1
 HASH_KIND = domain_hash
 ```
 
-Closed enum references: `QualificationRunStatus`, `AdmissionState`.
+Closed enum references: `QualificationCancelOriginRunStatus`, `AdmissionState`.
 
 Closed nullable/status matrix:
 
