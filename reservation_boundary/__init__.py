@@ -73,11 +73,23 @@ from reservation_boundary.mutations import (
     MutationRow,
     run_mutations,
 )
+from reservation_boundary.conversation import *  # noqa: F403
+from reservation_boundary.conversation import __all__ as _conversation_all
+from reservation_boundary.reads import *  # noqa: F403
+from reservation_boundary.reads import __all__ as _reads_all
+from reservation_boundary.effects import *  # noqa: F403
+from reservation_boundary.effects import __all__ as _effects_all
+from reservation_boundary.qualification import *  # noqa: F403
+from reservation_boundary.qualification import __all__ as _qualification_all
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = (
     "__version__",
     *_types_all,
+    *_conversation_all,
+    *_reads_all,
+    *_effects_all,
+    *_qualification_all,
     "from_wire_json",
     "import_legacy_state",
     "BoundaryStoreError",
