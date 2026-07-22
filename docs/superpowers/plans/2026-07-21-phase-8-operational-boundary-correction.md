@@ -598,6 +598,25 @@ separadamente o commit/blob/hash da spec e o hash deste **Implementation Closure
 Registry** no commit do plano; ele não tenta extrair do texto da spec nomes que a spec
 não contém.
 
+**Facts/reads closure authority:** Carlos Eduardo aprovou explicitamente em
+2026-07-22 a identidade `6f638234a200a72178dac66705d739a4b597048f` como
+autoridade executável do refinamento mínimo de facts/reads e autorizou sua
+implementação em micro-unidades RED/GREEN. Essa identidade contém somente:
+
+- spec delta `docs/superpowers/specs/2026-07-22-phase-8-facts-reads-wire-closure-design.md`,
+  blob `3fea9b602042749fa0140f0de088f6c8cf5f981c`, SHA-256
+  `f66f3aeb14ad47ad55d76dfa2b9155335d8c5b20765feb92d338bb9973bef2ef`;
+- fixture normativa `tests/fixtures/phase8_facts_reads_wire_v1.json`, blob
+  `05897324f75d7fd36cffb575699980c17eb16495`, SHA-256
+  `fabdb3677cbd9d1b1157fd1cadcfb589bf8a5f1fb5a8cd827aff2a33a4395241`.
+
+A rechecagem estática final desse commit encerrou F1–F5 (`Approved`) sem ampliar
+effects, capabilities, owners de autorização, FSMs, tabelas ou gates. A autoridade
+é restrita a `TypedFact`, `ReservationExecutionProjection`,
+`ConversationProjection`, requests/receipts/evidence de reads, union sanitizada e
+`ReadObservation`; qualquer outro contrato continua sujeito ao registry e aos gates
+já aprovados neste plano.
+
 Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; o registry e o
 fixture independente comparam lista completa ordenada de campos, enums, nullability,
 assinaturas e domains, rejeitando item ausente **ou extra**. Adicionar campo aberto ou
