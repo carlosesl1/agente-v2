@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from reservation_domain import ReservationCommand, dumps_command
 from reservation_execution import OutboxMessage
@@ -18,7 +21,16 @@ from reservation_followup import (
     to_wire_json as to_phase6_wire_json,
 )
 
-from reservation_boundary.schema import TABLE_NAMES, render_sqlite
+from reservation_boundary.schema import (
+    BOUNDARY_V8_TABLES,
+    TABLE_NAMES,
+    expected_sqlite_v8_schema_fingerprint,
+    render_sqlite,
+    render_sqlite_v8,
+    sqlite_v8_schema_fingerprint,
+)
+from reservation_boundary.conversation import PublicReplyChunk, SourceEventIdentity
+from reservation_boundary.reads import ReadObservation
 from reservation_boundary.serialization import from_wire_json, semantic_hash, to_wire_json
 from reservation_boundary.types import (
     BoundaryCommit,
@@ -97,6 +109,495 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _receipt_unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _receipt_json(value: object) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _receipt_load_json(payload: bytes, name: str) -> dict[str, object]:
+    if type(payload) is not bytes or not payload:
+        raise TypeError(f"{name} must be non-empty exact bytes")
+    try:
+        decoded = payload.decode("utf-8", errors="strict")
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_receipt_unique_object,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError(f"non-finite JSON number: {token}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} must be strict JSON") from exc
+    if type(value) is not dict:
+        raise ValueError(f"{name} must be a JSON object")
+    return value
+
+
+def _receipt_b64encode(value: bytes) -> str:
+    return base64.b64encode(value).decode("ascii")
+
+
+def _receipt_b64decode(value: object, name: str) -> bytes:
+    if type(value) is not str or not value:
+        raise TypeError(f"{name} must be non-empty base64 text")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise ValueError(f"{name} must be canonical base64") from exc
+    if not decoded or _receipt_b64encode(decoded) != value:
+        raise ValueError(f"{name} must be canonical base64")
+    return decoded
+
+
+def _receipt_utc(value: object, name: str) -> str:
+    if type(value) is not datetime:
+        raise TypeError(f"{name} must be an exact datetime")
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must be timezone-aware UTC")
+    return (
+        f"{value.year:04d}-{value.month:02d}-{value.day:02d}T"
+        f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}."
+        f"{value.microsecond:06d}Z"
+    )
+
+
+def _receipt_parse_utc(value: object, name: str) -> datetime:
+    if type(value) is not str or re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z",
+        value,
+    ) is None:
+        raise ValueError(f"{name} must be canonical UTC text")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError as exc:
+        raise ValueError(f"{name} must be canonical UTC text") from exc
+    if _receipt_utc(parsed, name) != value:
+        raise ValueError(f"{name} must be canonical UTC text")
+    return parsed
+
+
+def _receipt_id(value: object, name: str) -> str:
+    if type(value) is not str or re.fullmatch(
+        r"[a-z0-9][a-z0-9._:-]{0,127}", value
+    ) is None:
+        raise ValueError(f"{name} must be a Task 1 ID_TOKEN")
+    return value
+
+
+def _receipt_public_chunk(payload: bytes) -> PublicReplyChunk:
+    envelope = _receipt_load_json(payload, "PublicReplyChunk")
+    if set(envelope) != {"schema", "version", "data"}:
+        raise ValueError("PublicReplyChunk envelope fields mismatch")
+    if (
+        envelope["schema"] != PublicReplyChunk.SCHEMA
+        or envelope["version"] != PublicReplyChunk.VERSION
+        or type(envelope["data"]) is not dict
+    ):
+        raise ValueError("PublicReplyChunk identity mismatch")
+    data = envelope["data"]
+    if set(data) != {
+        "aggregate_turn_id",
+        "ordinal",
+        "text",
+        "source_closure_hash",
+    }:
+        raise ValueError("PublicReplyChunk fields mismatch")
+    chunk = PublicReplyChunk(
+        aggregate_turn_id=data["aggregate_turn_id"],
+        ordinal=data["ordinal"],
+        text=data["text"],
+        source_closure_hash=data["source_closure_hash"],
+    )
+    if chunk.to_canonical_bytes() != payload:
+        raise ValueError("PublicReplyChunk is not byte-canonical")
+    return chunk
+
+
+@dataclass(frozen=True, slots=True)
+class TurnReceipt:
+    """Canonical receipt owned by the v8 atomic boundary store."""
+
+    aggregate_turn_id: str
+    event_hash: str
+    source_events: tuple[SourceEventIdentity, ...]
+    maya_proposal_hash: str
+    kernel_decision_hash: str
+    read_observations: tuple[tuple[str, bytes, str], ...]
+    committed_state_version: int
+    committed_state_hash: str
+    public_chunks: tuple[tuple[str, int, bytes, str], ...]
+    command_rows: tuple[tuple[str, str], ...]
+    relay_rows: tuple[tuple[str, str], ...]
+    internal_outbox_rows: tuple[tuple[str, str], ...]
+    uds_transcript_mac: str
+    uds_final_seq: int
+    structural_graph_digest: str
+    capability_policy_digest: str
+    effective_stage_binding_digest: str
+    behavior_state_snapshot_digest: str
+    qualification_id: str | None
+    admission_sequence: int | None
+    admission_revision: int | None
+    commit_fence_token: int | None
+    allocation_manifest_hash: str | None
+    immutable_generation: int | None
+    allocation_ids: tuple[str, ...] | None
+    committed_at: datetime
+    previous_turn_receipt_hash: str | None
+    artifact_hash: str = ""
+
+    SCHEMA: ClassVar[str] = "phase8-turn-receipt"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-turn-receipt-v1"
+    PREIMAGE_SCHEMA: ClassVar[str] = "phase8-turn-receipt-artifact-preimage"
+
+    def __post_init__(self) -> None:
+        _receipt_id(self.aggregate_turn_id, "TurnReceipt.aggregate_turn_id")
+        for name in (
+            "event_hash",
+            "maya_proposal_hash",
+            "kernel_decision_hash",
+            "committed_state_hash",
+            "uds_transcript_mac",
+            "structural_graph_digest",
+            "capability_policy_digest",
+            "effective_stage_binding_digest",
+            "behavior_state_snapshot_digest",
+        ):
+            _require_hash(getattr(self, name), f"TurnReceipt.{name}")
+        _require_int(
+            self.committed_state_version,
+            "TurnReceipt.committed_state_version",
+            minimum=1,
+        )
+        _require_int(self.uds_final_seq, "TurnReceipt.uds_final_seq", minimum=1)
+        _receipt_utc(self.committed_at, "TurnReceipt.committed_at")
+        if self.previous_turn_receipt_hash is not None:
+            _require_hash(
+                self.previous_turn_receipt_hash,
+                "TurnReceipt.previous_turn_receipt_hash",
+            )
+
+        if type(self.source_events) is not tuple:
+            raise TypeError("TurnReceipt.source_events must be an exact tuple")
+        if not self.source_events:
+            raise ValueError("TurnReceipt.source_events must be non-empty")
+        if any(type(item) is not SourceEventIdentity for item in self.source_events):
+            raise TypeError("TurnReceipt.source_events members must be exact")
+        source_ids = tuple(item.source_event_id for item in self.source_events)
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("TurnReceipt source event IDs must be unique")
+
+        self._validate_read_rows()
+        self._validate_public_rows()
+        for name in ("command_rows", "relay_rows", "internal_outbox_rows"):
+            self._validate_hash_rows(getattr(self, name), name)
+
+        e2e_values = (
+            self.qualification_id,
+            self.admission_sequence,
+            self.admission_revision,
+            self.commit_fence_token,
+            self.allocation_manifest_hash,
+            self.immutable_generation,
+            self.allocation_ids,
+        )
+        if not (all(item is None for item in e2e_values) or all(item is not None for item in e2e_values)):
+            raise ValueError("TurnReceipt E2E fields must be all-null or all-present")
+        if self.qualification_id is not None:
+            _receipt_id(self.qualification_id, "TurnReceipt.qualification_id")
+            _require_int(self.admission_sequence, "TurnReceipt.admission_sequence", minimum=1)
+            _require_int(self.admission_revision, "TurnReceipt.admission_revision", minimum=1)
+            _require_int(self.commit_fence_token, "TurnReceipt.commit_fence_token", minimum=1)
+            _require_hash(
+                self.allocation_manifest_hash,
+                "TurnReceipt.allocation_manifest_hash",
+            )
+            _require_int(
+                self.immutable_generation,
+                "TurnReceipt.immutable_generation",
+                minimum=1,
+            )
+            if type(self.allocation_ids) is not tuple or not self.allocation_ids:
+                raise TypeError("TurnReceipt.allocation_ids must be a non-empty exact tuple")
+            for allocation_id in self.allocation_ids:
+                _receipt_id(allocation_id, "TurnReceipt.allocation_id")
+            if len(self.allocation_ids) != len(set(self.allocation_ids)):
+                raise ValueError("TurnReceipt allocation IDs must be unique")
+
+        expected = hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.artifact_preimage_bytes()
+        ).hexdigest()
+        if self.artifact_hash == "":
+            object.__setattr__(self, "artifact_hash", expected)
+        else:
+            _require_hash(self.artifact_hash, "TurnReceipt.artifact_hash")
+            if self.artifact_hash != expected:
+                raise ValueError("TurnReceipt.artifact_hash mismatch")
+
+    def _validate_read_rows(self) -> None:
+        if type(self.read_observations) is not tuple:
+            raise TypeError("TurnReceipt.read_observations must be an exact tuple")
+        row_ids: list[str] = []
+        for row in self.read_observations:
+            if type(row) is not tuple or len(row) != 3:
+                raise TypeError("TurnReceipt read observation row must be an exact triple")
+            row_id, payload, artifact_hash = row
+            row_ids.append(_receipt_id(row_id, "TurnReceipt.read_observation.row_id"))
+            if type(payload) is not bytes or not payload:
+                raise TypeError("TurnReceipt read observation bytes must be exact")
+            observation = ReadObservation.from_canonical_bytes(payload)
+            _require_hash(artifact_hash, "TurnReceipt.read_observation.artifact_hash")
+            if observation.canonical_hash() != artifact_hash:
+                raise ValueError("TurnReceipt read observation artifact hash mismatch")
+        if len(row_ids) != len(set(row_ids)):
+            raise ValueError("TurnReceipt read observation row IDs must be unique")
+
+    def _validate_public_rows(self) -> None:
+        if type(self.public_chunks) is not tuple:
+            raise TypeError("TurnReceipt.public_chunks must be an exact tuple")
+        row_ids: list[str] = []
+        for expected_ordinal, row in enumerate(self.public_chunks):
+            if type(row) is not tuple or len(row) != 4:
+                raise TypeError("TurnReceipt public chunk row must be an exact quadruple")
+            row_id, ordinal, payload, artifact_hash = row
+            row_ids.append(_receipt_id(row_id, "TurnReceipt.public_chunk.row_id"))
+            if type(ordinal) is not int or ordinal != expected_ordinal:
+                raise ValueError("TurnReceipt public chunk ordinals must be contiguous")
+            if type(payload) is not bytes or not payload:
+                raise TypeError("TurnReceipt public chunk bytes must be exact")
+            chunk = _receipt_public_chunk(payload)
+            if chunk.aggregate_turn_id != self.aggregate_turn_id or chunk.ordinal != ordinal:
+                raise ValueError("TurnReceipt public chunk turn/ordinal mismatch")
+            _require_hash(artifact_hash, "TurnReceipt.public_chunk.artifact_hash")
+            if chunk.canonical_hash() != artifact_hash:
+                raise ValueError("TurnReceipt public chunk artifact hash mismatch")
+        if len(row_ids) != len(set(row_ids)):
+            raise ValueError("TurnReceipt public chunk row IDs must be unique")
+
+    @staticmethod
+    def _validate_hash_rows(rows: object, name: str) -> None:
+        if type(rows) is not tuple:
+            raise TypeError(f"TurnReceipt.{name} must be an exact tuple")
+        row_ids: list[str] = []
+        for row in rows:
+            if type(row) is not tuple or len(row) != 2:
+                raise TypeError(f"TurnReceipt.{name} rows must be exact pairs")
+            row_id, artifact_hash = row
+            row_ids.append(_receipt_id(row_id, f"TurnReceipt.{name}.row_id"))
+            _require_hash(artifact_hash, f"TurnReceipt.{name}.artifact_hash")
+        if len(row_ids) != len(set(row_ids)):
+            raise ValueError(f"TurnReceipt.{name} row IDs must be unique")
+
+    def _data(self, *, include_artifact_hash: bool) -> dict[str, object]:
+        data: dict[str, object] = {
+            "aggregate_turn_id": self.aggregate_turn_id,
+            "event_hash": self.event_hash,
+            "source_events": [
+                {
+                    "source_event_id": item.source_event_id,
+                    "source_event_hash": item.source_event_hash,
+                }
+                for item in self.source_events
+            ],
+            "maya_proposal_hash": self.maya_proposal_hash,
+            "kernel_decision_hash": self.kernel_decision_hash,
+            "read_observations": [
+                [row_id, _receipt_b64encode(payload), artifact_hash]
+                for row_id, payload, artifact_hash in self.read_observations
+            ],
+            "committed_state_version": self.committed_state_version,
+            "committed_state_hash": self.committed_state_hash,
+            "public_chunks": [
+                [row_id, ordinal, _receipt_b64encode(payload), artifact_hash]
+                for row_id, ordinal, payload, artifact_hash in self.public_chunks
+            ],
+            "command_rows": [list(row) for row in self.command_rows],
+            "relay_rows": [list(row) for row in self.relay_rows],
+            "internal_outbox_rows": [list(row) for row in self.internal_outbox_rows],
+            "uds_transcript_mac": self.uds_transcript_mac,
+            "uds_final_seq": self.uds_final_seq,
+            "structural_graph_digest": self.structural_graph_digest,
+            "capability_policy_digest": self.capability_policy_digest,
+            "effective_stage_binding_digest": self.effective_stage_binding_digest,
+            "behavior_state_snapshot_digest": self.behavior_state_snapshot_digest,
+            "qualification_id": self.qualification_id,
+            "admission_sequence": self.admission_sequence,
+            "admission_revision": self.admission_revision,
+            "commit_fence_token": self.commit_fence_token,
+            "allocation_manifest_hash": self.allocation_manifest_hash,
+            "immutable_generation": self.immutable_generation,
+            "allocation_ids": (
+                list(self.allocation_ids) if self.allocation_ids is not None else None
+            ),
+            "committed_at": _receipt_utc(self.committed_at, "TurnReceipt.committed_at"),
+            "previous_turn_receipt_hash": self.previous_turn_receipt_hash,
+        }
+        if include_artifact_hash:
+            data["artifact_hash"] = self.artifact_hash
+        return data
+
+    def artifact_preimage_bytes(self) -> bytes:
+        return _receipt_json(
+            {
+                "schema": self.PREIMAGE_SCHEMA,
+                "version": self.VERSION,
+                "data": self._data(include_artifact_hash=False),
+            }
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _receipt_json(
+            {
+                "schema": self.SCHEMA,
+                "version": self.VERSION,
+                "data": self._data(include_artifact_hash=True),
+            }
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def create(cls, **values: object) -> "TurnReceipt":
+        if "artifact_hash" in values:
+            raise TypeError("TurnReceipt.create derives artifact_hash")
+        return cls(**values)
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "TurnReceipt":
+        envelope = _receipt_load_json(payload, "TurnReceipt")
+        if set(envelope) != {"schema", "version", "data"}:
+            raise ValueError("TurnReceipt envelope fields mismatch")
+        if (
+            envelope["schema"] != cls.SCHEMA
+            or envelope["version"] != cls.VERSION
+            or type(envelope["data"]) is not dict
+        ):
+            raise ValueError("TurnReceipt identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "aggregate_turn_id", "event_hash", "source_events",
+            "maya_proposal_hash", "kernel_decision_hash", "read_observations",
+            "committed_state_version", "committed_state_hash", "public_chunks",
+            "command_rows", "relay_rows", "internal_outbox_rows",
+            "uds_transcript_mac", "uds_final_seq", "structural_graph_digest",
+            "capability_policy_digest", "effective_stage_binding_digest",
+            "behavior_state_snapshot_digest", "qualification_id",
+            "admission_sequence", "admission_revision", "commit_fence_token",
+            "allocation_manifest_hash", "immutable_generation", "allocation_ids",
+            "committed_at", "previous_turn_receipt_hash", "artifact_hash",
+        }
+        if set(data) != expected:
+            raise ValueError("TurnReceipt fields mismatch")
+        for sequence_name in (
+            "source_events", "read_observations", "public_chunks", "command_rows",
+            "relay_rows", "internal_outbox_rows",
+        ):
+            if type(data[sequence_name]) is not list:
+                raise TypeError(f"TurnReceipt.{sequence_name} must be an array")
+        if data["allocation_ids"] is not None and type(data["allocation_ids"]) is not list:
+            raise TypeError("TurnReceipt.allocation_ids must be an array or null")
+
+        source_events: list[SourceEventIdentity] = []
+        for item in data["source_events"]:
+            if type(item) is not dict or set(item) != {
+                "source_event_id", "source_event_hash"
+            }:
+                raise ValueError("TurnReceipt source event fields mismatch")
+            source_events.append(
+                SourceEventIdentity(item["source_event_id"], item["source_event_hash"])
+            )
+
+        def triples(rows: list[object], name: str) -> tuple[tuple[str, bytes, str], ...]:
+            result: list[tuple[str, bytes, str]] = []
+            for row in rows:
+                if type(row) is not list or len(row) != 3:
+                    raise TypeError(f"TurnReceipt.{name} row must be an array triple")
+                result.append(
+                    (row[0], _receipt_b64decode(row[1], name), row[2])
+                )
+            return tuple(result)
+
+        def quadruples(
+            rows: list[object], name: str
+        ) -> tuple[tuple[str, int, bytes, str], ...]:
+            result: list[tuple[str, int, bytes, str]] = []
+            for row in rows:
+                if type(row) is not list or len(row) != 4:
+                    raise TypeError(f"TurnReceipt.{name} row must be an array quadruple")
+                result.append(
+                    (row[0], row[1], _receipt_b64decode(row[2], name), row[3])
+                )
+            return tuple(result)
+
+        def pairs(rows: list[object], name: str) -> tuple[tuple[str, str], ...]:
+            result: list[tuple[str, str]] = []
+            for row in rows:
+                if type(row) is not list or len(row) != 2:
+                    raise TypeError(f"TurnReceipt.{name} row must be an array pair")
+                result.append((row[0], row[1]))
+            return tuple(result)
+
+        receipt = cls(
+            aggregate_turn_id=data["aggregate_turn_id"],
+            event_hash=data["event_hash"],
+            source_events=tuple(source_events),
+            maya_proposal_hash=data["maya_proposal_hash"],
+            kernel_decision_hash=data["kernel_decision_hash"],
+            read_observations=triples(data["read_observations"], "read_observations"),
+            committed_state_version=data["committed_state_version"],
+            committed_state_hash=data["committed_state_hash"],
+            public_chunks=quadruples(data["public_chunks"], "public_chunks"),
+            command_rows=pairs(data["command_rows"], "command_rows"),
+            relay_rows=pairs(data["relay_rows"], "relay_rows"),
+            internal_outbox_rows=pairs(
+                data["internal_outbox_rows"], "internal_outbox_rows"
+            ),
+            uds_transcript_mac=data["uds_transcript_mac"],
+            uds_final_seq=data["uds_final_seq"],
+            structural_graph_digest=data["structural_graph_digest"],
+            capability_policy_digest=data["capability_policy_digest"],
+            effective_stage_binding_digest=data["effective_stage_binding_digest"],
+            behavior_state_snapshot_digest=data["behavior_state_snapshot_digest"],
+            qualification_id=data["qualification_id"],
+            admission_sequence=data["admission_sequence"],
+            admission_revision=data["admission_revision"],
+            commit_fence_token=data["commit_fence_token"],
+            allocation_manifest_hash=data["allocation_manifest_hash"],
+            immutable_generation=data["immutable_generation"],
+            allocation_ids=(
+                tuple(data["allocation_ids"])
+                if data["allocation_ids"] is not None
+                else None
+            ),
+            committed_at=_receipt_parse_utc(data["committed_at"], "committed_at"),
+            previous_turn_receipt_hash=data["previous_turn_receipt_hash"],
+            artifact_hash=data["artifact_hash"],
+        )
+        if receipt.to_canonical_bytes() != payload:
+            raise ValueError("TurnReceipt is not byte-canonical")
+        return receipt
+
+
 def _command_record(command: object) -> tuple[str, str, str]:
     if type(command) is ReservationCommand:
         wire = dumps_command(command)
@@ -136,6 +637,31 @@ def _validate_outbox_bindings(commit: BoundaryCommit) -> None:
             raise IdentityConflict("outbox command does not bind its boundary workflow")
 
 
+def _authenticate_v8_connection(connection: sqlite3.Connection) -> None:
+    names = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    if names != set(BOUNDARY_V8_TABLES):
+        raise DataCorruption("SQLite v8 table universe is not exact")
+    strict = {
+        row[1]: row[5]
+        for row in connection.execute("PRAGMA table_list")
+        if row[1] in names
+    }
+    if strict != {name: 1 for name in BOUNDARY_V8_TABLES}:
+        raise DataCorruption("SQLite v8 tables are not all STRICT")
+    if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+        raise DataCorruption("SQLite v8 foreign keys are disabled")
+    if connection.execute("PRAGMA foreign_key_check").fetchall():
+        raise DataCorruption("SQLite v8 foreign key violations exist")
+    if sqlite_v8_schema_fingerprint(connection) != expected_sqlite_v8_schema_fingerprint():
+        raise DataCorruption("SQLite v8 DDL fingerprint is not exact")
+
+
 class SQLiteBoundaryStore:
     """One in-memory-capable SQLite boundary unit of work."""
 
@@ -144,10 +670,14 @@ class SQLiteBoundaryStore:
         connection: sqlite3.Connection,
         *,
         _factory_token: object,
+        _schema_version: int = 7,
     ) -> None:
         if _factory_token is not _FACTORY_TOKEN:
             raise TypeError("SQLiteBoundaryStore must be created by a factory")
+        if type(_schema_version) is not int or _schema_version not in (7, 8):
+            raise TypeError("schema version must be exact 7 or 8")
         self._connection = connection
+        self._schema_version = _schema_version
         self._closed = False
         self._savepoint_counter = 0
 
@@ -161,6 +691,81 @@ class SQLiteBoundaryStore:
             if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
                 raise DataCorruption("SQLite foreign keys are disabled")
             return cls(connection, _factory_token=_FACTORY_TOKEN)
+        except BaseException:
+            connection.close()
+            raise
+
+    @classmethod
+    def open_memory_v8(cls) -> "SQLiteBoundaryStore":
+        connection = sqlite3.connect(":memory:", isolation_level=None, timeout=5.0)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA synchronous = FULL")
+            connection.executescript(render_sqlite_v8())
+            _authenticate_v8_connection(connection)
+            return cls(
+                connection,
+                _factory_token=_FACTORY_TOKEN,
+                _schema_version=8,
+            )
+        except BaseException:
+            connection.close()
+            raise
+
+    @classmethod
+    def open_path_v8(cls, path: Path) -> "SQLiteBoundaryStore":
+        if not isinstance(path, Path):
+            raise TypeError("path must be an exact pathlib.Path")
+        if path.exists() and not path.is_file():
+            raise ValueError("SQLite v8 path must be a file or absent")
+        connection = sqlite3.connect(path, isolation_level=None, timeout=5.0)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            connection.execute("PRAGMA synchronous = FULL")
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            if not names:
+                connection.executescript(render_sqlite_v8())
+            _authenticate_v8_connection(connection)
+            if str(mode).casefold() != "wal":
+                raise DataCorruption("SQLite v8 WAL mode is unavailable")
+            if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
+                raise DataCorruption("SQLite v8 synchronous mode is not FULL")
+            return cls(
+                connection,
+                _factory_token=_FACTORY_TOKEN,
+                _schema_version=8,
+            )
+        except BaseException:
+            connection.close()
+            raise
+
+    @classmethod
+    def open_readonly_v8(cls, path: Path) -> "SQLiteBoundaryStore":
+        if not isinstance(path, Path):
+            raise TypeError("path must be a pathlib.Path")
+        if not path.is_file():
+            raise ValueError("read-only SQLite v8 path must be an existing file")
+        connection = sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro",
+            uri=True,
+            isolation_level=None,
+            timeout=5.0,
+        )
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            _authenticate_v8_connection(connection)
+            return cls(
+                connection,
+                _factory_token=_FACTORY_TOKEN,
+                _schema_version=8,
+            )
         except BaseException:
             connection.close()
             raise
@@ -585,4 +1190,5 @@ __all__ = (
     "LegacyStateReadPort",
     "SQLiteBoundaryStore",
     "StateNotFound",
+    "TurnReceipt",
 )

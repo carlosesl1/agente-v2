@@ -9,11 +9,16 @@ from reservation_boundary.serialization import (
 )
 from reservation_boundary.legacy_state import import_legacy_state
 from reservation_boundary.schema import (
+    BOUNDARY_V8_TABLES,
     SCHEMA_VERSION,
+    SCHEMA_VERSION_V8,
     TABLE_NAMES,
+    expected_sqlite_v8_schema_fingerprint,
     render_postgresql,
     render_sqlite,
+    render_sqlite_v8,
     schema_hash,
+    sqlite_v8_schema_fingerprint,
 )
 from reservation_boundary.sqlite_store import (
     BoundaryStoreError,
@@ -23,6 +28,7 @@ from reservation_boundary.sqlite_store import (
     LegacyStateReadPort,
     SQLiteBoundaryStore,
     StateNotFound,
+    TurnReceipt,
 )
 from reservation_boundary.coordinator import (
     CoordinationError,
@@ -98,13 +104,19 @@ __all__ = (
     "DataCorruption",
     "IdentityConflict",
     "LegacyStateReadPort",
+    "BOUNDARY_V8_TABLES",
     "SCHEMA_VERSION",
+    "SCHEMA_VERSION_V8",
     "SQLiteBoundaryStore",
     "StateNotFound",
+    "TurnReceipt",
     "TABLE_NAMES",
+    "expected_sqlite_v8_schema_fingerprint",
     "render_postgresql",
     "render_sqlite",
+    "render_sqlite_v8",
     "schema_hash",
+    "sqlite_v8_schema_fingerprint",
     "CoordinationError",
     "InvalidIntent",
     "InvalidKernelDecision",
