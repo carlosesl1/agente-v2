@@ -13,13 +13,23 @@ import re
 import unicodedata
 from typing import ClassVar, Final, TypeAlias
 
-from reservation_boundary.conversation import SourceEventIdentity
+from reservation_boundary.conversation import (
+    ConversationProjection,
+    ConversationStage,
+    DesiredService,
+    ReservationExecutionProjection,
+    SourceEventIdentity,
+)
 from reservation_boundary.types import (
     ActivityDescriptionArguments,
     ActivityReadArguments,
+    DateSlot,
     FaqReadArguments,
+    IntegerSlot,
     LodgingReadArguments,
     RoomDescriptionArguments,
+    StringSlot,
+    TypedFact,
 )
 
 
@@ -1378,16 +1388,275 @@ class SanitizedLookupResult:
         return result
 
 
+def _decode_typed_fact(payload: bytes) -> TypedFact:
+    envelope = _load_canonical_envelope(payload, "TypedFact")
+    if envelope["schema"] != TypedFact.SCHEMA or envelope["version"] != TypedFact.VERSION:
+        raise ValueError("TypedFact envelope identity mismatch")
+    data = envelope["data"]
+    if set(data) != {"name", "value", "frame_commitment_hash"}:
+        raise ValueError("TypedFact fields mismatch")
+    tagged = data["value"]
+    if type(tagged) is not dict or set(tagged) != {"kind", "value"}:
+        raise ValueError("TypedFact value envelope mismatch")
+    kind = tagged["kind"]
+    if kind == "string":
+        slot = StringSlot(tagged["value"])
+    elif kind == "integer":
+        slot = IntegerSlot(tagged["value"])
+    elif kind == "date":
+        slot = DateSlot(_parse_date(tagged["value"], "TypedFact.value"))
+    else:
+        raise ValueError("TypedFact value kind is invalid")
+    fact = TypedFact(
+        name=data["name"],
+        value=slot,
+        frame_commitment_hash=data["frame_commitment_hash"],
+    )
+    if fact.to_canonical_bytes() != payload:
+        raise ValueError("TypedFact is not byte-canonical")
+    return fact
+
+
+def _decode_execution_projection(payload: bytes) -> ReservationExecutionProjection:
+    envelope = _load_canonical_envelope(payload, "ReservationExecutionProjection")
+    if (
+        envelope["schema"] != ReservationExecutionProjection.SCHEMA
+        or envelope["version"] != ReservationExecutionProjection.VERSION
+    ):
+        raise ValueError("ReservationExecutionProjection identity mismatch")
+    data = envelope["data"]
+    if set(data) != {
+        "reservation_relay_bundle_bytes",
+        "reservation_relay_bundle_hash",
+    }:
+        raise ValueError("ReservationExecutionProjection fields mismatch")
+    projection = ReservationExecutionProjection(
+        reservation_relay_bundle_bytes=_decode_base64(
+            data["reservation_relay_bundle_bytes"],
+            "reservation_relay_bundle_bytes",
+        ),
+        reservation_relay_bundle_hash=data["reservation_relay_bundle_hash"],
+    )
+    if projection.to_canonical_bytes() != payload:
+        raise ValueError("ReservationExecutionProjection is not byte-canonical")
+    return projection
+
+
+def _decode_conversation_projection(payload: bytes) -> ConversationProjection:
+    envelope = _load_canonical_envelope(payload, "ConversationProjection")
+    if (
+        envelope["schema"] != ConversationProjection.SCHEMA
+        or envelope["version"] != ConversationProjection.VERSION
+    ):
+        raise ValueError("ConversationProjection identity mismatch")
+    data = envelope["data"]
+    if set(data) != {
+        "stage",
+        "desired_services",
+        "locale",
+        "facts",
+        "reservation_execution_projection",
+    }:
+        raise ValueError("ConversationProjection fields mismatch")
+    if type(data["desired_services"]) is not list or type(data["facts"]) is not list:
+        raise ValueError("ConversationProjection tuple fields must be arrays")
+    try:
+        stage = ConversationStage(data["stage"])
+        desired_services = tuple(DesiredService(item) for item in data["desired_services"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ConversationProjection enum value is invalid") from exc
+    execution_value = data["reservation_execution_projection"]
+    projection = ConversationProjection(
+        stage=stage,
+        desired_services=desired_services,
+        locale=data["locale"],
+        facts=tuple(
+            _decode_typed_fact(_nested_contract_bytes(item, "fact"))
+            for item in data["facts"]
+        ),
+        reservation_execution_projection=(
+            _decode_execution_projection(
+                _nested_contract_bytes(execution_value, "reservation_execution_projection")
+            )
+            if execution_value is not None
+            else None
+        ),
+    )
+    if projection.to_canonical_bytes() != payload:
+        raise ValueError("ConversationProjection is not byte-canonical")
+    return projection
+
+
+@dataclass(frozen=True, slots=True)
+class FoundSnapshot:
+    genesis_receipt: LegacyGenesisReceipt
+    projection: ConversationProjection
+
+    SCHEMA: ClassVar[str] = "phase8-found-snapshot"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-found-snapshot-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.genesis_receipt) is not LegacyGenesisReceipt:
+            raise TypeError("FoundSnapshot.genesis_receipt must be exact")
+        if self.genesis_receipt.status is not GenesisStatus.FOUND:
+            raise ValueError("FoundSnapshot requires a found genesis receipt")
+        if type(self.projection) is not ConversationProjection:
+            raise TypeError("FoundSnapshot.projection must be exact")
+        if self.projection.canonical_hash() != self.genesis_receipt.projection_hash:
+            raise ValueError("FoundSnapshot projection hash mismatch")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "genesis_receipt": json.loads(
+                    self.genesis_receipt.to_canonical_bytes().decode("utf-8")
+                ),
+                "projection": json.loads(
+                    self.projection.to_canonical_bytes().decode("utf-8")
+                ),
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "FoundSnapshot":
+        envelope = _load_canonical_envelope(payload, "FoundSnapshot")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("FoundSnapshot identity mismatch")
+        data = envelope["data"]
+        if set(data) != {"genesis_receipt", "projection"}:
+            raise ValueError("FoundSnapshot fields mismatch")
+        result = cls(
+            genesis_receipt=LegacyGenesisReceipt.from_canonical_bytes(
+                _nested_contract_bytes(data["genesis_receipt"], "genesis_receipt")
+            ),
+            projection=_decode_conversation_projection(
+                _nested_contract_bytes(data["projection"], "projection")
+            ),
+        )
+        if result.to_canonical_bytes() != payload:
+            raise ValueError("FoundSnapshot is not byte-canonical")
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class ProvenAbsent:
+    genesis_receipt: LegacyGenesisReceipt
+
+    SCHEMA: ClassVar[str] = "phase8-proven-absent"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-proven-absent-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.genesis_receipt) is not LegacyGenesisReceipt:
+            raise TypeError("ProvenAbsent.genesis_receipt must be exact")
+        if self.genesis_receipt.status is not GenesisStatus.PROVEN_ABSENT:
+            raise ValueError("ProvenAbsent requires a proven_absent genesis receipt")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "genesis_receipt": json.loads(
+                    self.genesis_receipt.to_canonical_bytes().decode("utf-8")
+                )
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "ProvenAbsent":
+        return _decode_single_genesis_result(payload, cls, GenesisStatus.PROVEN_ABSENT)
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyUnavailable:
+    genesis_receipt: LegacyGenesisReceipt
+
+    SCHEMA: ClassVar[str] = "phase8-legacy-unavailable"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-legacy-unavailable-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.genesis_receipt) is not LegacyGenesisReceipt:
+            raise TypeError("LegacyUnavailable.genesis_receipt must be exact")
+        if self.genesis_receipt.status is not GenesisStatus.UNAVAILABLE:
+            raise ValueError("LegacyUnavailable requires an unavailable genesis receipt")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "genesis_receipt": json.loads(
+                    self.genesis_receipt.to_canonical_bytes().decode("utf-8")
+                )
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "LegacyUnavailable":
+        return _decode_single_genesis_result(payload, cls, GenesisStatus.UNAVAILABLE)
+
+
+def _decode_single_genesis_result(
+    payload: bytes,
+    result_type: type[ProvenAbsent] | type[LegacyUnavailable],
+    expected_status: GenesisStatus,
+) -> ProvenAbsent | LegacyUnavailable:
+    envelope = _load_canonical_envelope(payload, result_type.__name__)
+    if envelope["schema"] != result_type.SCHEMA or envelope["version"] != result_type.VERSION:
+        raise ValueError(f"{result_type.__name__} identity mismatch")
+    data = envelope["data"]
+    if set(data) != {"genesis_receipt"}:
+        raise ValueError(f"{result_type.__name__} fields mismatch")
+    receipt = LegacyGenesisReceipt.from_canonical_bytes(
+        _nested_contract_bytes(data["genesis_receipt"], "genesis_receipt")
+    )
+    if receipt.status is not expected_status:
+        raise ValueError(f"{result_type.__name__} receipt status mismatch")
+    result = result_type(receipt)
+    if result.to_canonical_bytes() != payload:
+        raise ValueError(f"{result_type.__name__} is not byte-canonical")
+    return result
+
+
 Phase8ReadRequest: TypeAlias = Phase8ToolReadRequest | LegacyGenesisReadRequest
+SanitizedReadResult: TypeAlias = (
+    FoundSnapshot
+    | ProvenAbsent
+    | LegacyUnavailable
+    | SanitizedKnowledgeResult
+    | SanitizedLookupResult
+)
 
 
 __all__ = (
     "GenesisStatus",
+    "FoundSnapshot",
     "KnowledgeSource",
     "LookupFailureCode",
     "LegacyGenesisEvidenceRecord",
     "LegacyGenesisReadRequest",
     "LegacyGenesisReceipt",
+    "LegacyUnavailable",
     "LegacyUnavailableReason",
     "PUBLIC_READ_POLICY_BYTES",
     "PUBLIC_READ_POLICY_DOMAIN",
@@ -1395,6 +1664,7 @@ __all__ = (
     "PUBLIC_READ_POLICY_ID",
     "Phase8ReadRequest",
     "Phase8ToolReadRequest",
+    "ProvenAbsent",
     "READ_REQUEST_DOMAIN",
     "ReadEvidenceDisposition",
     "ReadEvidenceReceipt",
@@ -1404,5 +1674,6 @@ __all__ = (
     "SanitizedLookupResult",
     "SanitizedLookupStatus",
     "SanitizedOffer",
+    "SanitizedReadResult",
     "validate_public_text",
 )

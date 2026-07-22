@@ -25,7 +25,9 @@ from reservation_boundary.types import (
     RoomDescriptionArguments,
 )
 from reservation_boundary.reads import (
+    FoundSnapshot,
     GenesisStatus,
+    LegacyUnavailable,
     LegacyGenesisEvidenceRecord,
     LegacyGenesisReadRequest,
     LegacyGenesisReceipt,
@@ -34,6 +36,7 @@ from reservation_boundary.reads import (
     PUBLIC_READ_POLICY_HASH,
     LookupFailureCode,
     ReadService,
+    ProvenAbsent,
     ReadEvidenceDisposition,
     ReadEvidenceReceipt,
     SanitizedKnowledgeResult,
@@ -597,6 +600,53 @@ class Phase8LookupProjectionTests(unittest.TestCase):
         ).encode("utf-8")
         with self.assertRaises(ValueError):
             SanitizedLookupResult.from_canonical_bytes(hostile)
+
+
+class Phase8SanitizedResultUnionTests(unittest.TestCase):
+    def test_genesis_result_known_answers_are_exact_and_distinct(self) -> None:
+        examples = _fixture()["examples"]
+        cases = {
+            "result.found_snapshot": FoundSnapshot,
+            "result.proven_absent": ProvenAbsent,
+            "result.legacy_unavailable": LegacyUnavailable,
+        }
+        decoded = []
+        for name, result_type in cases.items():
+            with self.subTest(name=name):
+                item = examples[name]
+                result = result_type.from_canonical_bytes(
+                    item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertEqual(
+                    result.to_canonical_bytes().decode("utf-8"),
+                    item["canonical_utf8"],
+                )
+                self.assertEqual(result.canonical_hash(), item["canonical_hash"])
+                decoded.append(result)
+
+        found, absent, unavailable = decoded
+        self.assertIs(found.genesis_receipt.status, GenesisStatus.FOUND)
+        self.assertIs(absent.genesis_receipt.status, GenesisStatus.PROVEN_ABSENT)
+        self.assertIs(unavailable.genesis_receipt.status, GenesisStatus.UNAVAILABLE)
+        self.assertNotEqual(absent, unavailable)
+
+    def test_genesis_result_rejects_cross_status_receipts(self) -> None:
+        examples = _fixture()["examples"]
+        found = FoundSnapshot.from_canonical_bytes(
+            examples["result.found_snapshot"]["canonical_utf8"].encode("utf-8")
+        )
+        absent = ProvenAbsent.from_canonical_bytes(
+            examples["result.proven_absent"]["canonical_utf8"].encode("utf-8")
+        )
+        unavailable = LegacyUnavailable.from_canonical_bytes(
+            examples["result.legacy_unavailable"]["canonical_utf8"].encode("utf-8")
+        )
+        with self.assertRaises(ValueError):
+            replace(absent, genesis_receipt=unavailable.genesis_receipt)
+        with self.assertRaises(ValueError):
+            replace(unavailable, genesis_receipt=absent.genesis_receipt)
+        with self.assertRaises((TypeError, ValueError)):
+            replace(found, genesis_receipt=absent.genesis_receipt)
 
 
 if __name__ == "__main__":
