@@ -427,6 +427,7 @@ class SQLiteFollowupUnitOfWork:
         self._connection = connection
         self._schema_version = _schema_version
         self._phase8_handoff_fault_hook: Callable[[str], None] | None = None
+        self._phase8_settlement_fault_hook: Callable[[str], None] | None = None
         self._closed = False
 
     @classmethod
@@ -674,6 +675,312 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption("SQLite foreign keys are disabled")
         if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
             raise DataCorruption("SQLite v2 schema contains foreign key violations")
+
+    def accept_boundary_settlement(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: object,
+    ):
+        return self._accept_boundary_settlement(
+            operation_id=operation_id,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            bundle=bundle,
+            committed_at=datetime.now(timezone.utc),
+            fault_hook=self._phase8_settlement_fault_hook,
+        )
+
+    def _accept_boundary_settlement(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: object,
+        committed_at: datetime,
+        fault_hook: Callable[[str], None] | None,
+    ):
+        from reservation_boundary.effects import (
+            InternalJobKind,
+            SettlementRelayBundle,
+            TargetOperationReceipt,
+            target_operation_id,
+        )
+
+        self._ensure_open()
+        if self._schema_version != SCHEMA_VERSION_V2:
+            raise DataCorruption("settlement ingress requires the exact Phase 6 v2 root")
+        if type(bundle) is not SettlementRelayBundle:
+            raise TypeError("bundle must be the exact SettlementRelayBundle type")
+        expected_operation_id = target_operation_id(
+            InternalJobKind.HANDOFF,
+            bundle.artifact_hash,
+            source_turn_receipt_hash,
+        )
+        if operation_id != expected_operation_id:
+            raise ValueError("operation_id does not match the settlement relay tuple")
+        if fault_hook is not None and not callable(fault_hook):
+            raise TypeError("settlement ingress fault hook must be callable or None")
+
+        try:
+            anchor = from_wire_json(
+                bundle.workflow_anchor.decode("utf-8"),
+                ConfirmedReservationAnchor,
+            )
+            policy = from_wire_json(
+                bundle.policy.decode("utf-8"),
+                PaymentEffectPolicy,
+            )
+            if (
+                to_wire_json(anchor).encode("utf-8") != bundle.workflow_anchor
+                or to_wire_json(policy).encode("utf-8") != bundle.policy
+            ):
+                raise ValueError("settlement anchor or policy is noncanonical")
+            events: list[PaymentEvent] = []
+            for payload in bundle.payment_history:
+                event = None
+                for expected_type in _PAYMENT_EVENT_TYPES:
+                    try:
+                        candidate = from_wire_json(
+                            payload.decode("utf-8"),
+                            expected_type,
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    event = candidate
+                    break
+                if event is None or to_wire_json(event).encode("utf-8") != payload:
+                    raise ValueError("settlement history contains noncanonical bytes")
+                events.append(event)
+            command = from_wire_json(
+                bundle.payment_command.decode("utf-8"),
+                PaymentSettlementCommand,
+            )
+            expected_final = from_wire_json(
+                bundle.expected_final_state.decode("utf-8"),
+                PaymentWorkflow,
+            )
+            if (
+                to_wire_json(command).encode("utf-8") != bundle.payment_command
+                or to_wire_json(expected_final).encode("utf-8")
+                != bundle.expected_final_state
+            ):
+                raise ValueError("settlement command or final state is noncanonical")
+        except (UnicodeDecodeError, TypeError, ValueError) as exc:
+            raise DataCorruption("settlement relay contains invalid Phase 6 bytes") from exc
+
+        state = new_payment(anchor, policy).state
+        steps: list[tuple[PaymentWorkflow, PaymentEvent, PaymentTransition]] = []
+        emitted_commands: list[PaymentSettlementCommand] = []
+        for event in events:
+            current = state
+            try:
+                transition = reduce_payment(current, event)
+            except (TypeError, ValueError) as exc:
+                raise DataCorruption("settlement history cannot be replayed") from exc
+            if transition.status is not PaymentTransitionStatus.APPLIED:
+                raise DataCorruption("settlement history contains a non-applied event")
+            emitted_commands.extend(transition.commands)
+            steps.append((current, event, transition))
+            state = transition.state
+        if tuple(emitted_commands) != (command,):
+            raise DataCorruption("settlement replay did not derive the exact command")
+        expected_evidence = tuple(
+            to_wire_json(event.evidence).encode("utf-8")
+            for event in events
+            if type(event) is PaymentEvidenceRecorded
+        )
+        if expected_evidence != bundle.evidence:
+            raise DataCorruption("settlement evidence bytes diverge from payment history")
+        target_result_hash = semantic_hash(state)
+        if (
+            state != expected_final
+            or to_wire_json(state).encode("utf-8") != bundle.expected_final_state
+            or target_result_hash != bundle.expected_final_state_hash
+        ):
+            raise DataCorruption("settlement relay final state mismatch")
+
+        bundle_json = bundle.to_canonical_bytes().decode("utf-8")
+        commit_preimage = json.dumps(
+            {
+                "artifact_hash": bundle.artifact_hash,
+                "operation_id": operation_id,
+                "payment_id": state.subject.payment_id,
+                "target_result_hash": target_result_hash,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        target_commit_hash = hashlib.sha256(
+            b"phase8-settlement-target-commit-v1\0" + commit_preimage
+        ).hexdigest()
+        receipt = TargetOperationReceipt(
+            operation_id=operation_id,
+            job_kind=InternalJobKind.HANDOFF,
+            artifact_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            target_commit_hash=target_commit_hash,
+            target_result_hash=target_result_hash,
+            committed_at=committed_at,
+        )
+        receipt_json = receipt.to_canonical_bytes().decode("utf-8")
+        receipt_hash = receipt.canonical_hash()
+        committed_at_text = receipt.committed_at.isoformat()
+
+        def trip(stage: str) -> None:
+            if fault_hook is not None:
+                fault_hook(stage)
+
+        with self._transaction("accept_boundary_settlement"):
+            existing = self._connection.execute(
+                "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at FROM main.payment_boundary_ingress_receipts "
+                "WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    stored = TargetOperationReceipt.from_canonical_bytes(
+                        existing[5].encode("utf-8")
+                    )
+                except (AttributeError, TypeError, ValueError) as exc:
+                    raise DataCorruption("persisted settlement receipt is invalid") from exc
+                expected_row = (
+                    stored.source_turn_receipt_hash,
+                    stored.artifact_hash,
+                    bundle_json,
+                    stored.target_commit_hash,
+                    stored.target_result_hash,
+                    stored.to_canonical_bytes().decode("utf-8"),
+                    stored.canonical_hash(),
+                    stored.committed_at.isoformat(),
+                )
+                if (
+                    existing != expected_row
+                    or stored.operation_id != operation_id
+                    or stored.job_kind is not InternalJobKind.HANDOFF
+                    or stored.source_turn_receipt_hash != source_turn_receipt_hash
+                    or stored.artifact_hash != bundle.artifact_hash
+                    or stored.target_commit_hash != target_commit_hash
+                    or stored.target_result_hash != target_result_hash
+                ):
+                    raise DataCorruption("persisted settlement receipt diverges")
+                return stored
+            if self._payment_workflow_row(state.subject.payment_id) is not None:
+                raise IdentityConflict("settlement relay payment identity already exists")
+
+            trip("before_domain")
+            initial = new_payment(anchor, policy).state
+            initial_raw = to_wire_json(initial)
+            timestamp = anchor.confirmed_at.isoformat()
+            self._connection.execute(
+                "INSERT INTO main.payment_workflows "
+                "(payment_id, revision, payment_version, economic_signature, status, "
+                "state_json, state_hash, created_at, updated_at) "
+                "VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    initial.subject.payment_id,
+                    initial.subject.payment_version,
+                    initial.subject.economic_signature,
+                    initial.status.value,
+                    initial_raw,
+                    semantic_hash(initial),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            revision = 0
+            for current, event, transition in steps:
+                if transition.commands:
+                    if (
+                        type(event) is not PaymentEvidenceRecorded
+                        or len(transition.commands) != 1
+                        or transition.state.verified_evidence is None
+                    ):
+                        raise DataCorruption("settlement command provenance is incomplete")
+                    derived_command = transition.commands[0]
+                    verified = transition.state.verified_evidence
+                    event_time = event.recorded_at.isoformat()
+                    self._connection.execute(
+                        "INSERT INTO main.payment_evidence_claims "
+                        "(claim_key, payment_id, payment_version, economic_signature, method, "
+                        "evidence_json, evidence_hash, status, claimed_at, consumed_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?, NULL)",
+                        (
+                            verified.claim_key,
+                            derived_command.payment_id,
+                            derived_command.payment_version,
+                            derived_command.economic_signature,
+                            verified.method.value,
+                            to_wire_json(event),
+                            verified.evidence_hash,
+                            event_time,
+                        ),
+                    )
+                    self._connection.execute(
+                        "INSERT INTO main.payment_commands "
+                        "(settlement_command_id, idempotency_key, payment_id, payment_version, "
+                        "economic_signature, evidence_claim_key, operation, command_json, "
+                        "command_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            derived_command.settlement_command_id,
+                            derived_command.idempotency_key,
+                            derived_command.payment_id,
+                            derived_command.payment_version,
+                            derived_command.economic_signature,
+                            derived_command.evidence_claim_key,
+                            derived_command.operation.value,
+                            to_wire_json(derived_command),
+                            semantic_hash(derived_command),
+                            event_time,
+                        ),
+                    )
+                    self._connection.execute(
+                        "INSERT INTO main.payment_ledger "
+                        "(settlement_command_id, payment_id, payment_version, economic_signature, "
+                        "status, claim_owner, fencing_token, lease_acquired_at, lease_expires_at, "
+                        "claim_count, dispatch_slots_consumed, dispatch_request_hash, "
+                        "dispatch_fenced_at, outcome_certainty, outcome_json, outcome_hash, "
+                        "outcome_recorded_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, 'queued', NULL, 0, NULL, NULL, 0, 0, NULL, NULL, "
+                        "NULL, NULL, NULL, NULL, ?)",
+                        (
+                            derived_command.settlement_command_id,
+                            derived_command.payment_id,
+                            derived_command.payment_version,
+                            derived_command.economic_signature,
+                            event_time,
+                        ),
+                    )
+                self._persist_operational_payment_transition(
+                    current,
+                    revision,
+                    event,
+                    transition,
+                )
+                revision += 1
+            trip("after_domain_before_receipt")
+            self._connection.execute(
+                "INSERT INTO main.payment_boundary_ingress_receipts "
+                "(operation_id, source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    operation_id,
+                    source_turn_receipt_hash,
+                    bundle.artifact_hash,
+                    bundle_json,
+                    target_commit_hash,
+                    target_result_hash,
+                    receipt_json,
+                    receipt_hash,
+                    committed_at_text,
+                ),
+            )
+            trip("after_receipt_before_commit")
+            return receipt
 
     def accept_boundary_handoff(
         self,
