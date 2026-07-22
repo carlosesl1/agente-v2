@@ -1,6 +1,6 @@
 # Phase 8 Facts and Reads Wire Closure Design
 
-**Status:** Revised candidate design delta. Carlos Eduardo approved the delta scope for documentation on 2026-07-22. This revision addresses the focused review of commit `85d9f19cda1d606bb15374727b469af930d05707`. It is not executable implementation authority until its new committed identity is reviewed and explicitly accepted.
+**Status:** Revised candidate design delta. Carlos Eduardo approved the delta scope for documentation on 2026-07-22. This revision addresses the focused reviews of commits `85d9f19cda1d606bb15374727b469af930d05707` and `f2522887f4edbccb55aff0a04861907f40c1698b`. It is not executable implementation authority until its new committed identity is reviewed and explicitly accepted.
 
 **Scope:** Close only the Phase 8 wire for `TypedFact`, `ReservationExecutionProjection`, `ConversationProjection`, typed read requests, owner-verifiable read evidence, the sanitized read-result union, and `ReadObservation`.
 
@@ -139,6 +139,7 @@ POSITIVE_DECIMAL_2   = ^(?:0|[1-9][0-9]*)\.[0-9]{2}$ and Decimal(value) > 0
 - `ReservationExecutionProjection` and `ConversationProjection`;
 - all five `Phase8ToolReadRequest` tool/argument pairs and `LegacyGenesisReadRequest`;
 - all three `LegacyGenesisReceipt.status` variants;
+- all three `LegacyGenesisEvidenceRecord.status` matrices;
 - both `ReadEvidenceDisposition` variants;
 - every `SanitizedReadResult` variant, including all three lookup statuses;
 - every `ReadObservationStatus` matrix row.
@@ -150,12 +151,14 @@ An implementation that produces a different byte or hash is non-conforming even 
 Normative fixture identity for this revision:
 
 ```text
-SHA-256 = c68292d1344eac7a570aaae68c929391222d977355994adcd3ac06d6e44125a7
-bytes = 177492
-lines = 456
-contract examples = 42
+SHA-256 = fabdb3677cbd9d1b1157fd1cadcfb589bf8a5f1fb5a8cd827aff2a33a4395241
+bytes = 208037
+lines = 522
+contract examples = 45
 auxiliary preimages = 18
 Phase 7 compatibility wires = 1
+accepted sanitization probes = 3
+rejected sanitization probes = 9
 ```
 
 All fixture values are synthetic. No raw provider response, contact identity, credential or production payload is present.
@@ -481,6 +484,7 @@ RECEIPT_ID_DOMAIN = phase8-legacy-genesis-receipt-id-v1
 LEGACY_WATERMARK_DOMAIN = phase8-legacy-watermark-v1
 LEGACY_SNAPSHOT_DOMAIN = phase8-legacy-snapshot-v1
 LEGACY_FAILURE_DOMAIN = phase8-legacy-genesis-failure-v1
+LEGACY_EVIDENCE_RECORD_DOMAIN = phase8-legacy-genesis-evidence-record-v1
 ```
 
 `GenesisStatus` is exactly:
@@ -533,61 +537,149 @@ receipt_id = "genesis:" +
   SHA256(ASCII(RECEIPT_ID_DOMAIN) || 0x00 || receipt_id_preimage)
 ```
 
-For `found`:
+For `found`, `canonical_legacy_snapshot_bytes` is the exact canonical envelope:
+
+```text
+schema = phase8-legacy-snapshot-evidence
+version = 1
+data = {
+  source: "chapada_leads_legacy_v1",
+  source_generation: exact integer >= 1,
+  source_watermark_hash: SHA256,
+  lead_key_hash: SHA256,
+  matched_row_count: exactly 1,
+  projection_bytes: non-empty standard-Base64 bytes,
+  projection_hash: SHA256,
+}
+```
+
+`projection_bytes` strict-decodes to one exact `ConversationProjection`,
+re-encodes byte-identically, and its canonical hash equals `projection_hash`.
+The other fields equal the receipt and request bindings. The snapshot hash is:
 
 ```text
 source_snapshot_hash =
   SHA256(ASCII(LEGACY_SNAPSHOT_DOMAIN) || 0x00 || canonical_legacy_snapshot_bytes)
 ```
 
-The receipt's `projection_hash` equals the canonical hash of the `ConversationProjection` produced from that exact snapshot. The owner importer validates that the normalized lead identity in the snapshot hashes to `lead_key_hash`.
+The receipt's `projection_hash` equals the snapshot-evidence projection hash.
+The importer validates the normalized lead identity before constructing the
+evidence and stores only `lead_key_hash`, never the raw lead key, in this
+private codec.
 
-For `unavailable`:
+For `unavailable`, `canonical_failure_evidence_bytes` is the exact canonical
+envelope:
+
+```text
+schema = phase8-legacy-failure-evidence
+version = 1
+data = {
+  source: "chapada_leads_legacy_v1",
+  request_hash: SHA256,
+  lead_key_hash: SHA256,
+  failure_reason: LegacyUnavailableReason,
+  attempt_count: exact integer >= 1,
+  observed_at: UTC_DATETIME,
+}
+```
+
+`request_hash`, `lead_key_hash`, `failure_reason` and `observed_at` equal the
+bound request/receipt. The failure hash is:
 
 ```text
 failure_evidence_hash =
   SHA256(ASCII(LEGACY_FAILURE_DOMAIN) || 0x00 || canonical_failure_evidence_bytes)
 ```
 
-Failure evidence bytes remain in the private owner record and contain only classified error metadata, never credentials or raw provider bodies.
+Failure evidence contains only classified metadata, never exception text,
+credentials, URLs, request/response bodies or raw provider payloads.
 
 For `proven_absent`, the legacy owner performs one exact-key scan in a consistent source snapshot, records source generation/watermark and persists the zero-row receipt before returning it. `None`, timeout, malformed data, unsupported schema or an exception cannot create this status.
 
 ### 6.6 Owner verification for genesis
 
-`LegacyGenesisReceipt` is deterministic evidence but acceptance also proves owner provenance. The importer owner exposes a capability-free verification port:
+`LegacyGenesisReceipt` is deterministic evidence but acceptance also proves
+owner provenance. The owner stores the exact canonical envelope:
 
 ```text
-LegacyGenesisEvidenceStore.get(receipt_id) -> canonical_receipt_bytes | NotFound
+LegacyGenesisEvidenceRecord(
+    receipt_bytes,
+    source_watermark_bytes,
+    source_snapshot_bytes,
+    failure_evidence_bytes,
+)
+
+SCHEMA = phase8-legacy-genesis-evidence-record
+VERSION = 1
+DOMAIN = phase8-legacy-genesis-evidence-record-v1
 ```
 
-The store record is persisted atomically with the classified scan outcome. Parent acceptance requires:
+All four fields are standard-Base64 bytes or JSON `null`. `receipt_bytes` is
+always non-null and strict-decodes to `LegacyGenesisReceipt`. The remaining
+field matrix is exact:
+
+| Receipt status | watermark bytes | snapshot bytes | failure bytes |
+|---|---|---|---|
+| `found` | present | present | null |
+| `proven_absent` | present | null | null |
+| `unavailable` | null | null | present |
+
+The importer owner exposes only this capability-free verification port:
+
+```text
+LegacyGenesisEvidenceStore.get(receipt_id)
+  -> canonical_evidence_record_bytes | NotFound
+```
+
+The store record is persisted atomically with the classified scan outcome.
+Parent acceptance requires:
 
 1. exact `receipt_id` lookup;
-2. byte equality between stored and supplied receipt;
-3. canonical hash/ID/formula validation;
-4. request hash and lead hash equality with the current `LegacyGenesisReadRequest`;
-5. for `found`, projection hash equality with the supplied projection;
-6. exact status matrix.
+2. strict decoding and byte-identical re-encoding of the evidence record and
+   every present nested byte field;
+3. byte equality between `record.receipt_bytes` and the supplied receipt;
+4. canonical receipt hash/ID/formula validation;
+5. recomputation of every present watermark, snapshot and failure hash from
+   the exact owner bytes;
+6. equality of source generation, watermark, request, lead, status and failure
+   bindings with the current request/receipt;
+7. for `found`, strict projection decode plus equality with the supplied
+   projection and its hash;
+8. exact receipt and evidence-record status matrices.
 
-A syntactically valid fabricated hash or receipt not present byte-identically in the owner store is rejected before Boundary commit.
+A syntactically valid fabricated receipt or preimage not present
+byte-identically in the owner store is rejected before Boundary commit.
 
 ### 6.7 Public read sanitization policy
 
 The exact policy ID is `public-read-v1`. Its canonical policy manifest is:
 
 ```json
-{"forbidden_patterns":{"control":"[\\u0000-\\u0008\\u000b-\\u001f\\u007f]","e164":"(?<![0-9])\\+[1-9][0-9]{7,14}(?![0-9])","email":"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]+\\.[A-Z]{2,63}(?![A-Z0-9._%+-])","html":"<[A-Za-z!/][^>]*>","markdown_link":"!?\\[[^\\]]*\\]\\([^)]+\\)","provider_ref":"(?:cloudbeds\\.property\\.|bokun\\.product\\.)","secret_marker":"(?i)\\b(?:api[_-]?key|access[_-]?token|bearer)\\b\\s*[:=]","url":"(?i)(?:https?://|www\\.)\\S+"},"limits":{"knowledge_codepoints":4096,"label_codepoints":256},"normalization":{"double_ascii_space":"forbidden","line_ending":"LF","surrounding_whitespace":"forbidden","tab":"forbidden","unicode":"NFKC"},"schema":"phase8-public-read-sanitization-policy","version":1}
+{"forbidden_patterns":{"br_phone":"(?<![0-9])(?:\\+?55[\\s.-]?)?(?:\\(?[1-9][0-9]\\)?[\\s.-]?)?(?:9[0-9]{4}|[2-8][0-9]{3})[\\s.-]?[0-9]{4}(?![0-9])","control":"[\\u0000-\\u0008\\u000b-\\u001f\\u007f]","cpf":"(?<![0-9])(?:[0-9]{3}[.\\s-]?){2}[0-9]{3}[-.\\s]?[0-9]{2}(?![0-9])","e164":"(?<![0-9])\\+[1-9][0-9]{7,14}(?![0-9])","email":"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]+\\.[A-Z]{2,63}(?![A-Z0-9._%+-])","html":"<[A-Za-z!/][^>]*>","markdown_link":"!?\\[[^\\]]*\\]\\([^)]+\\)","pan":"(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])","provider_ref":"(?:cloudbeds\\.property\\.|bokun\\.product\\.)","random_payment_key":"(?i)(?<![0-9A-F])[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}(?![0-9A-F])","secret_marker":"(?i)\\b(?:api[_-]?key|access[_-]?token|bearer)\\b\\s*[:=]","url":"(?i)(?:https?://|www\\.)\\S+"},"limits":{"knowledge_codepoints":4096,"label_codepoints":256},"normalization":{"double_ascii_space":"forbidden","line_ending":"LF","surrounding_whitespace":"forbidden","tab":"forbidden","unicode":"NFKC"},"schema":"phase8-public-read-sanitization-policy","version":1}
 ```
 
 ```text
 POLICY_DOMAIN = phase8-public-read-sanitization-policy-v1
-policy_hash = 1c27a0e068e1a536cc808a7c671b44226ba0113b0d0256bc15702fd8c77c7962
+policy_hash = 2a3f36953a7d1020df4d3d5f2471df8767be4f99f23413f9effc38d03ac7b637
 ```
 
 The hash is `SHA256(ASCII(POLICY_DOMAIN) || 0x00 || UTF8(canonical_policy_manifest))`.
 
-A conforming text is already Unicode NFKC, uses only LF line endings, has no leading/trailing whitespace, tab or double ASCII space, respects its code-point limit and matches none of the eight forbidden regexes. Empty text is rejected. The policy is reject-only: it never deletes or rewrites a matched substring and then calls the remainder safe.
+A conforming text is already Unicode NFKC, uses only LF line endings, has no
+leading/trailing whitespace, tab or double ASCII space, respects its code-point
+limit and matches none of the twelve forbidden regexes. The literal personal
+identifier coverage is: e-mail, E.164 phone, Brazilian local/national phone
+(mobile or landline, compact or punctuated), CPF, payment-card PAN and random
+UUID-format payment key. CNPJ remains a business identifier and is not treated
+as personal data by this text policy. Empty text is rejected. The policy is
+reject-only: it never deletes or rewrites a matched substring and then calls
+the remainder safe.
+
+The normative fixture carries three accepted probes and nine rejected probes.
+The rejected set includes `(75) 99999-9999`, `75999999999`, `99999-9999`,
+`3333-4444`, `+55 (75) 99999-9999`, compact E.164, CPF, PAN and a UUID-format
+payment key. Every implementation compiles the exact manifest expressions and
+must reproduce every probe outcome before it can emit `public_safe`.
 
 This policy is applied to `answer_text` and every `public_label`. Dates, prices, IDs and other structured claim fields remain typed and are not inferred from text.
 
@@ -1054,7 +1146,9 @@ No heavy suite runs during these units. The complete Task 1 module set and propo
 This revised delta becomes executable only after:
 
 1. its new commit, tree, blob and companion fixture hashes are recorded;
-2. a focused recheck authenticates only the five previous Important findings against that exact identity and reports no open Critical/Important finding;
+2. a focused recheck authenticates only residual F3/F4 against that exact
+   identity, preserves the prior closure of F1/F2/F5, and reports no open
+   Critical/Important finding;
 3. Carlos explicitly accepts that exact identity for implementation;
 4. the approved replacement plan records the identity as the facts/reads closure authority without changing any architectural invariant.
 
