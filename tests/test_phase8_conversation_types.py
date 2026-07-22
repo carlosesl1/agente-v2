@@ -837,12 +837,12 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                 request_hash=str(sequence) * 64,
                 frame_commitment_hash=str(sequence + 3) * 64,
             )
-            for sequence in (0, 2)
+            for sequence in (1, 3)
         )
         learning = conversation.LearningProposal(
             aggregate_turn_id="turn-interleaved",
             request_id="learning-1",
-            sequence=1,
+            sequence=2,
             claim=TypedFact("language", StringSlot("pt-BR"), "8" * 64),
             expected_memory_version=0,
             expected_memory_hash="6" * 64,
@@ -861,7 +861,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             "Resposta pública.",
             conversation.PublicRoute.RECEPTIONIST,
             conversation.PublicReplyType.ANSWER,
-            3,
+            4,
             "9" * 64,
             "session-interleaved",
             True,
@@ -890,7 +890,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             route=closure.route,
             reply_type=closure.reply_type,
         )
-        self.assertEqual(proposal.final_seq, 3)
+        self.assertEqual(proposal.final_seq, 4)
 
     def test_normalized_tool_proposal_validates_closed_pair_and_owner_object(self) -> None:
         proposal_type = getattr(conversation, "NormalizedToolProposal", None)
@@ -906,7 +906,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
         proposal = proposal_type(
             aggregate_turn_id="turn-1",
             request_id="request-1",
-            sequence=0,
+            sequence=1,
             tool_name=tool_type.LODGING_RESERVATION,
             arguments_type=arguments_type.LODGING_RESERVATION,
             typed_arguments_json=typed_arguments,
@@ -929,7 +929,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
         )
         self.assertEqual(
             proposal.canonical_hash(),
-            "8ed73dd576a0388e571cac88e2bd329fa464c5db280c9c1beb93d39be731a0c6",
+            "d38e50cee26acaedd150edc9b4aa6d332dbf44cc0e7adf445c83d8cd864ccac7",
         )
         self.assertEqual(
             proposal_type.DOMAIN,
@@ -967,7 +967,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                     proposal_type(
                         aggregate_turn_id="turn-1",
                         request_id="request-1",
-                        sequence=0,
+                        sequence=1,
                         tool_name=tool,
                         arguments_type=argument_kind,
                         typed_arguments_json=owner_bytes,
@@ -979,7 +979,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
         valid = {
             "aggregate_turn_id": "turn-1",
             "request_id": "request-1",
-            "sequence": 0,
+            "sequence": 1,
             "tool_name": tool_type.LODGING_RESERVATION,
             "arguments_type": arguments_type.LODGING_RESERVATION,
             "typed_arguments_json": typed_arguments,
@@ -993,6 +993,7 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             {"typed_arguments_json": b'{"offer_id":"offer-1","summary_version":1,"confirmation_signature":"' + b"2" * 64 + b'"}'},
             {"typed_arguments_json": typed_arguments[:-1] + b',"extra":1}'},
             {"typed_arguments_json": b'{"confirmation_signature":"short","offer_id":"offer-1","summary_version":1}'},
+            {"sequence": 0},
             {"sequence": True},
         )
         for override in invalid_overrides:

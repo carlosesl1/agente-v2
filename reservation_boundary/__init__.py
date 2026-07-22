@@ -35,6 +35,7 @@ from reservation_boundary.coordinator import (
 )
 from reservation_boundary.dispatch import (
     ALIASES,
+    AuthorizedDispatch,
     CATALOG,
     DispatchRejected,
     DispatchResult,
@@ -112,6 +113,7 @@ __all__ = (
     "TurnEventConflict",
     "TurnImportRejected",
     "ALIASES",
+    "AuthorizedDispatch",
     "CATALOG",
     "DispatchRejected",
     "DispatchResult",

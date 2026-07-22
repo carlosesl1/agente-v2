@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+import hashlib
+import json
 from types import MappingProxyType
 from typing import Final, Mapping
 
@@ -16,6 +18,21 @@ from reservation_domain import (
     UncertainState,
 )
 from reservation_followup import BusinessUnit, PaymentSettlementCommand, PaymentStatus
+
+from reservation_boundary.conversation import (
+    MayaTurnRequest,
+    NormalizedCommandArgumentsType,
+    NormalizedCommandTool,
+    NormalizedToolProposal,
+    TranscriptCommitment,
+    TranscriptDirection,
+    TranscriptKind,
+)
+from reservation_boundary.serialization import (
+    from_tool_arguments_canonical_json,
+    to_tool_arguments_canonical_json,
+    to_wire_json,
+)
 
 from reservation_boundary.types import (
     ActivityDescriptionArguments,
@@ -29,6 +46,7 @@ from reservation_boundary.types import (
     DispatchKind,
     FaqReadArguments,
     IntegerSlot,
+    KernelDecision,
     LodgingPaymentArguments,
     LodgingReadArguments,
     LodgingReservationArguments,
@@ -46,6 +64,20 @@ from reservation_boundary.types import (
 
 class DispatchRejected(ValueError):
     """Request cannot cross the typed dispatch boundary."""
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedDispatch:
+    """Ephemeral proposal-to-command edge without a provider capability."""
+
+    proposal: NormalizedToolProposal
+    command: BoundaryCommand
+
+    def __post_init__(self) -> None:
+        if type(self.proposal) is not NormalizedToolProposal:
+            raise TypeError("proposal must be exact NormalizedToolProposal")
+        if type(self.command) not in (ReservationCommand, PaymentSettlementCommand):
+            raise TypeError("command must be an exact BoundaryCommand value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +211,26 @@ _STATE_FACT_TYPES: Final = MappingProxyType(
         "children": IntegerSlot,
     }
 )
+_NORMALIZED_COMMAND_METADATA: Final = MappingProxyType(
+    {
+        NormalizedCommandTool.LODGING_RESERVATION: (
+            NormalizedCommandArgumentsType.LODGING_RESERVATION,
+            LodgingReservationArguments,
+        ),
+        NormalizedCommandTool.ACTIVITY_RESERVATION: (
+            NormalizedCommandArgumentsType.ACTIVITY_RESERVATION,
+            ActivityReservationArguments,
+        ),
+        NormalizedCommandTool.LODGING_PAYMENT: (
+            NormalizedCommandArgumentsType.LODGING_PAYMENT,
+            LodgingPaymentArguments,
+        ),
+        NormalizedCommandTool.ACTIVITY_PAYMENT: (
+            NormalizedCommandArgumentsType.ACTIVITY_PAYMENT,
+            ActivityPaymentArguments,
+        ),
+    }
+)
 
 
 def command_migration_counts() -> dict[str, int]:
@@ -309,6 +361,142 @@ def _state_facts(arguments: StateCommitArguments) -> tuple[TypedFact, ...]:
 class ToolDispatch:
     """Validate and classify without executing any provider capability."""
 
+    def normalize_proposal(
+        self,
+        *,
+        turn_request: MayaTurnRequest,
+        request: ToolDispatchRequest,
+        transcript_commitment: TranscriptCommitment,
+    ) -> NormalizedToolProposal:
+        """Bind one accepted COMMAND frame to a capability-free typed proposal."""
+
+        if type(turn_request) is not MayaTurnRequest:
+            raise TypeError("turn_request must be exact MayaTurnRequest")
+        if type(request) is not ToolDispatchRequest:
+            raise TypeError("request must be exact ToolDispatchRequest")
+        if type(transcript_commitment) is not TranscriptCommitment:
+            raise TypeError("transcript_commitment must be exact TranscriptCommitment")
+        if transcript_commitment.direction is not TranscriptDirection.CHILD_TO_PARENT:
+            raise DispatchRejected("COMMAND frame direction is invalid")
+        if transcript_commitment.kind is not TranscriptKind.COMMAND:
+            raise DispatchRejected("frame kind is not COMMAND")
+        if request.alias_depth != 0:
+            raise DispatchRejected("normalized command cannot carry an alias")
+        try:
+            normalized_tool = NormalizedCommandTool(request.tool_name)
+        except ValueError as exc:
+            raise DispatchRejected("tool is not a normalized command") from exc
+        arguments_type, owner_type = _NORMALIZED_COMMAND_METADATA[normalized_tool]
+        if type(request.arguments) is not owner_type:
+            raise DispatchRejected("tool arguments do not match normalized command owner")
+
+        expected_lead_hash = hashlib.sha256(
+            b"phase8-lead-key-v1\x00" + request.lead_key.encode("utf-8")
+        ).hexdigest()
+        if expected_lead_hash != turn_request.lead_key_hash:
+            raise DispatchRejected("request lead does not bind Maya turn")
+        if request.event_id != turn_request.aggregate_turn_id:
+            raise DispatchRejected("request event does not bind aggregate turn")
+        if request.deadline != turn_request.deadline_at:
+            raise DispatchRejected("request deadline does not bind Maya turn")
+
+        binding_bytes = json.dumps(
+            {
+                "schema": "phase8-command-request-binding",
+                "version": 1,
+                "data": {
+                    "maya_turn_request_hash": turn_request.canonical_hash(),
+                    "request_id": transcript_commitment.request_id,
+                    "sequence": transcript_commitment.sequence,
+                    "tool_dispatch_request": json.loads(to_wire_json(request)),
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        expected_request_hash = hashlib.sha256(
+            b"phase8-command-request-binding-v1\x00" + binding_bytes
+        ).hexdigest()
+        if transcript_commitment.request_hash != expected_request_hash:
+            raise DispatchRejected("COMMAND request binding mismatch")
+
+        return NormalizedToolProposal(
+            aggregate_turn_id=turn_request.aggregate_turn_id,
+            request_id=transcript_commitment.request_id,
+            sequence=transcript_commitment.sequence,
+            tool_name=normalized_tool,
+            arguments_type=arguments_type,
+            typed_arguments_json=to_tool_arguments_canonical_json(request.arguments),
+            request_hash=transcript_commitment.request_hash,
+            frame_commitment_hash=transcript_commitment.canonical_hash(),
+        )
+
+    def verify_authorized(
+        self,
+        *,
+        proposal: NormalizedToolProposal,
+        state: BoundaryState,
+        decision: KernelDecision,
+    ) -> AuthorizedDispatch:
+        """Verify one proposal edge against state and an existing kernel command."""
+
+        if type(proposal) is not NormalizedToolProposal:
+            raise TypeError("proposal must be exact NormalizedToolProposal")
+        if type(state) is not BoundaryState:
+            raise TypeError("state must be exact BoundaryState")
+        if type(decision) is not KernelDecision:
+            raise TypeError("decision must be exact KernelDecision")
+        if decision.state != state:
+            raise DispatchRejected("kernel decision does not bind authoritative state")
+
+        try:
+            revalidated = NormalizedToolProposal(
+                aggregate_turn_id=proposal.aggregate_turn_id,
+                request_id=proposal.request_id,
+                sequence=proposal.sequence,
+                tool_name=proposal.tool_name,
+                arguments_type=proposal.arguments_type,
+                typed_arguments_json=proposal.typed_arguments_json,
+                request_hash=proposal.request_hash,
+                frame_commitment_hash=proposal.frame_commitment_hash,
+            )
+            metadata = _NORMALIZED_COMMAND_METADATA.get(revalidated.tool_name)
+            if metadata is None:
+                raise ValueError("unknown normalized command")
+            arguments_type, owner_type = metadata
+            if revalidated.arguments_type is not arguments_type:
+                raise ValueError("normalized command arguments type mismatch")
+            arguments = from_tool_arguments_canonical_json(
+                revalidated.typed_arguments_json,
+                owner_type,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DispatchRejected("normalized proposal is invalid") from exc
+
+        tool_name = revalidated.tool_name.value
+        contract = CATALOG.get(tool_name)
+        if (
+            contract is None
+            or contract.kind is not DispatchKind.COMMAND
+            or contract.command_migration
+            not in (
+                CommandMigrationDisposition.RESERVATION,
+                CommandMigrationDisposition.PAYMENT_SETTLEMENT,
+            )
+        ):
+            raise DispatchRejected("proposal is outside migrated command catalog")
+        if contract.command_migration is CommandMigrationDisposition.RESERVATION:
+            expected_command = _reservation_command(tool_name, arguments, state)
+        else:
+            expected_command = _payment_command(tool_name, arguments, state)
+
+        matches = tuple(command for command in decision.commands if command == expected_command)
+        if len(matches) != 1:
+            raise DispatchRejected("proposal does not map to exactly one kernel command")
+        return AuthorizedDispatch(proposal=proposal, command=matches[0])
+
     def dispatch(
         self,
         request: ToolDispatchRequest,
@@ -379,6 +567,7 @@ class ToolDispatch:
 
 __all__ = (
     "ALIASES",
+    "AuthorizedDispatch",
     "CATALOG",
     "DispatchRejected",
     "DispatchResult",

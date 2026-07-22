@@ -970,7 +970,7 @@ class NormalizedToolProposal:
             "NormalizedToolProposal.aggregate_turn_id",
         )
         _require_id_token(self.request_id, "NormalizedToolProposal.request_id")
-        _require_exact_int(self.sequence, "NormalizedToolProposal.sequence", minimum=0)
+        _require_exact_int(self.sequence, "NormalizedToolProposal.sequence", minimum=1)
         if type(self.tool_name) is not NormalizedCommandTool:
             raise TypeError("NormalizedToolProposal.tool_name must be exact")
         if type(self.arguments_type) is not NormalizedCommandArgumentsType:
@@ -1029,7 +1029,7 @@ class LearningProposal:
     def __post_init__(self) -> None:
         _require_id_token(self.aggregate_turn_id, "LearningProposal.aggregate_turn_id")
         _require_id_token(self.request_id, "LearningProposal.request_id")
-        _require_exact_int(self.sequence, "LearningProposal.sequence", minimum=0)
+        _require_exact_int(self.sequence, "LearningProposal.sequence", minimum=1)
         if type(self.claim) is not TypedFact:
             raise TypeError("LearningProposal.claim must be an exact TypedFact")
         if self.claim.frame_commitment_hash is None:
