@@ -8,6 +8,13 @@
 - facts/reads: `6f638234a200a72178dac66705d739a4b597048f`;
 - remaining-wire registry: `f9c2e3478f07a06e2754f4fd42a5b21bed2b0fc7`.
 
+**Substitui:** o candidato insuficiente
+`819f9d6bdabd7b990f64a286b357898a2a5f2e63`. A revisão arquitetural desse
+candidato provou que copiar `TranscriptCommitment.request_hash` sem recompor sua
+preimage ainda permitia combinar commitment do request A com turn/tool/arguments
+do request B. Esta revisão fecha exatamente esse finding; o fixture de cinco leaf
+deltas permanece byte-idêntico.
+
 ## 1. Problema autenticado
 
 A autoridade remaining-wire exige que `NormalizedToolProposal.request_id`,
@@ -51,34 +58,71 @@ class ToolDispatch:
     def normalize_proposal(
         self,
         *,
-        aggregate_turn_id: str,
-        tool_name: str,
-        typed_arguments_json: bytes,
+        turn_request: MayaTurnRequest,
+        request: ToolDispatchRequest,
         transcript_commitment: TranscriptCommitment,
     ) -> NormalizedToolProposal: ...
 ```
 
 Invariantes fechadas:
 
-1. `aggregate_turn_id` satisfaz `ID_TOKEN`.
-2. `transcript_commitment` é o tipo exato `TranscriptCommitment`.
-3. `transcript_commitment.direction is TranscriptDirection.CHILD_TO_PARENT`.
-4. `transcript_commitment.kind is TranscriptKind.COMMAND`.
-5. `tool_name` deve ser um dos quatro nomes command normalizados:
+1. `turn_request`, `request` e `transcript_commitment` são, respectivamente, os
+   tipos exatos `MayaTurnRequest`, `ToolDispatchRequest` e
+   `TranscriptCommitment`; subclasses e DTOs handmade são rejeitados.
+2. `transcript_commitment.direction is TranscriptDirection.CHILD_TO_PARENT`.
+3. `transcript_commitment.kind is TranscriptKind.COMMAND`.
+4. `request.alias_depth == 0`; o normalizador não aceita nem canonicaliza alias.
+5. `request.tool_name` deve ser um dos quatro nomes command normalizados:
    `cloudbeds_criar_reserva_v2`, `bokun_agendar_passeio_v2`,
    `cloudbeds_lancar_pagamento_confirmar_reserva` ou
    `bokun_lancar_pagamento_confirmar_reserva`.
 6. aliases, reads, state-commit e os três commands `BLOCKED_UNMIGRATED` são
    rejeitados; não são canonicalizados.
-7. `arguments_type` é inferido unicamente do nome literal.
-8. `typed_arguments_json` decodifica e reencoda byte-identicamente pelo owner
-   externo correspondente, sem unknown fields.
-9. O proposal recebe diretamente:
+7. `request.arguments` tem o owner type exato do nome literal. O normalizador
+   deriva `arguments_type` unicamente do nome e deriva `typed_arguments_json` com
+   `to_tool_arguments_canonical_json(request.arguments)`; bytes fornecidos em
+   paralelo pelo caller não existem nessa API.
+8. O binding pai é revalidado sem I/O:
+   - `SHA256("phase8-lead-key-v1" || 0x00 || UTF8(request.lead_key)) ==
+     turn_request.lead_key_hash`;
+   - `request.event_id == turn_request.aggregate_turn_id`;
+   - `request.deadline == turn_request.deadline_at`.
+9. A preimage completa do request `COMMAND` é construída localmente, sem helper
+   injetado, estado lateral ou novo DTO:
+
+   ```text
+   command_request_binding_bytes = canonical_json({
+     "schema": "phase8-command-request-binding",
+     "version": 1,
+     "data": {
+       "maya_turn_request_hash": turn_request.canonical_hash(),
+       "request_id": transcript_commitment.request_id,
+       "sequence": transcript_commitment.sequence,
+       "tool_dispatch_request": json.loads(to_wire_json(request)),
+     },
+   })
+
+   expected_request_hash = SHA256(
+     ASCII("phase8-command-request-binding-v1") || 0x00 ||
+     command_request_binding_bytes
+   )
+   ```
+
+   O normalizador exige `transcript_commitment.request_hash ==
+   expected_request_hash`. Canonical JSON usa UTF-8, keys lexicográficas,
+   separators comma/colon, `allow_nan=False` e rejeição de duplicate/unknown keys
+   no decoder owner de `ToolDispatchRequest`.
+10. O proposal recebe diretamente:
+   - `aggregate_turn_id = turn_request.aggregate_turn_id`;
+   - `tool_name = request.tool_name`;
+   - `typed_arguments_json` derivado no passo 7;
    - `request_id = transcript_commitment.request_id`;
    - `sequence = transcript_commitment.sequence`;
    - `request_hash = transcript_commitment.request_hash`;
    - `frame_commitment_hash = transcript_commitment.canonical_hash()`.
-10. O método não cria command, não consulta estado e não transporta capability.
+11. O método não cria command, não consulta store/estado mutável e não transporta
+    capability. `MayaTurnRequest` e `ToolDispatchRequest` são inputs imutáveis já
+    aceitos pelo pai; sua leitura local não é uma consulta.
 
 Não existe encoding alternativo em `transcript_binding: str`; essa assinatura é
 substituída pela assinatura literal acima.
@@ -174,12 +218,15 @@ versionar.
 O RED da Task 2 deve provar, separadamente:
 
 1. `sequence=0` rejeitado por ambos os proposal types;
-2. normalização a partir de um `TranscriptCommitment` `COMMAND` aceito produz o
-   proposal exato e nenhum command;
-3. frame de outra direção/kind, alias ou command bloqueado é rejeitado;
-4. `verify_authorized` rejeita handmade DTO, stale reservation binding, stale
+2. normalização a partir do trio exato `MayaTurnRequest + ToolDispatchRequest +
+   TranscriptCommitment(COMMAND)` produz o proposal exato e nenhum command;
+3. alterar isoladamente aggregate turn, state hash/version, lead, event, deadline,
+   tool, arguments, request ID ou sequence causa mismatch de `request_hash` antes
+   de produzir proposal;
+4. frame de outra direção/kind, alias ou command bloqueado é rejeitado;
+5. `verify_authorized` rejeita handmade DTO, stale reservation binding, stale
    payment evidence e ausência/duplicação/divergência em `decision.commands`;
-5. AST/import scan encontra zero provider, ManyChat, network, send ou executor em
+6. AST/import scan encontra zero provider, ManyChat, network, send ou executor em
    `dispatch.py`.
 
 GREEN e regressão permanecem focados em dispatch/kernel. A suíte pesada, wheel,
