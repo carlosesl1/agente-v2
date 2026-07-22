@@ -85,6 +85,16 @@ def _canonical_envelope(*, schema: str, version: int, data: dict[str, object]) -
     ).encode("utf-8")
 
 
+def _canonical_object_bytes(data: dict[str, object]) -> bytes:
+    return json.dumps(
+        data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 def _load_canonical_envelope(payload: bytes, owner: str) -> dict[str, object]:
     _require_bytes(payload, owner)
 
@@ -515,8 +525,85 @@ def target_operation_id(
         },
     )
     return hashlib.sha256(
-        TARGET_OPERATION_ID_DOMAIN.encode("ascii") + b"\x00" + preimage
+        TARGET_OPERATION_ID_DOMAIN.encode("ascii") + b"\0" + preimage
     ).hexdigest()
+
+
+def phase5_outbox_seed_bytes(message: object) -> bytes:
+    from reservation_execution import OutboxMessage
+
+    if type(message) is not OutboxMessage:
+        raise TypeError("message must be the exact Phase 5 OutboxMessage type")
+    return _canonical_object_bytes(
+        {
+            "canonical_payload": message.canonical_payload,
+            "command_id": message.command_id,
+            "created_at": message.created_at.isoformat(),
+            "idempotency_key": message.idempotency_key,
+            "kind": message.kind.value,
+            "message_id": message.message_id,
+            "payload_hash": message.payload_hash,
+            "template_id": message.template_id,
+            "workflow_id": message.workflow_id,
+        }
+    )
+
+
+def phase5_outbox_from_seed_bytes(payload: bytes):
+    from reservation_execution import OutboxKind, OutboxMessage
+
+    if type(payload) is not bytes or not payload:
+        raise TypeError("Phase 5 outbox seed must be non-empty exact bytes")
+
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Phase 5 outbox seed has duplicate JSON keys")
+            result[key] = value
+        return result
+
+    try:
+        decoded = payload.decode("utf-8")
+        data = json.loads(
+            decoded,
+            object_pairs_hook=unique_pairs,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"Phase 5 outbox seed has non-finite JSON: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("Phase 5 outbox seed is invalid JSON") from exc
+    expected = {
+        "canonical_payload",
+        "command_id",
+        "created_at",
+        "idempotency_key",
+        "kind",
+        "message_id",
+        "payload_hash",
+        "template_id",
+        "workflow_id",
+    }
+    if type(data) is not dict or set(data) != expected:
+        raise ValueError("Phase 5 outbox seed fields mismatch")
+    try:
+        message = OutboxMessage(
+            message_id=data["message_id"],
+            idempotency_key=data["idempotency_key"],
+            workflow_id=data["workflow_id"],
+            command_id=data["command_id"],
+            kind=OutboxKind(data["kind"]),
+            template_id=data["template_id"],
+            canonical_payload=data["canonical_payload"],
+            payload_hash=data["payload_hash"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Phase 5 outbox seed is invalid") from exc
+    if phase5_outbox_seed_bytes(message) != payload:
+        raise ValueError("Phase 5 outbox seed is noncanonical")
+    return message
 
 
 @dataclass(frozen=True, slots=True)

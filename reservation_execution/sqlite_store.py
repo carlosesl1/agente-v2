@@ -6,10 +6,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Iterator
+from typing import Callable, Iterator
 
 from reservation_domain import (
     AwaitingConfirmationState,
@@ -253,6 +254,7 @@ class SQLiteUnitOfWork:
         self._path = path
         self._connection = connection
         self._schema_version = _schema_version
+        self._phase8_reservation_fault_hook: Callable[[str], None] | None = None
         self._closed = False
 
     @classmethod
@@ -503,6 +505,245 @@ class SQLiteUnitOfWork:
             )
         if tuple(self._connection.execute("PRAGMA foreign_key_check")):
             raise DataCorruption("SQLite v6 schema contains foreign key violations")
+
+    def accept_boundary_reservation(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: object,
+    ):
+        return self._accept_boundary_reservation(
+            operation_id=operation_id,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            bundle=bundle,
+            committed_at=datetime.now(timezone.utc),
+            fault_hook=self._phase8_reservation_fault_hook,
+        )
+
+    def _accept_boundary_reservation(
+        self,
+        *,
+        operation_id: str,
+        source_turn_receipt_hash: str,
+        bundle: object,
+        committed_at: datetime,
+        fault_hook: Callable[[str], None] | None,
+    ):
+        from reservation_boundary.effects import (
+            InternalJobKind,
+            ReservationRelayBundle,
+            TargetOperationReceipt,
+            phase5_outbox_from_seed_bytes,
+            target_operation_id,
+        )
+
+        self._ensure_open()
+        if self._schema_version != SCHEMA_VERSION_V6:
+            raise DataCorruption("reservation ingress requires the exact Phase 5 v6 root")
+        if type(bundle) is not ReservationRelayBundle:
+            raise TypeError("bundle must be the exact ReservationRelayBundle type")
+        expected_operation_id = target_operation_id(
+            InternalJobKind.HANDOFF,
+            bundle.artifact_hash,
+            source_turn_receipt_hash,
+        )
+        if operation_id != expected_operation_id:
+            raise ValueError("operation_id does not match the reservation relay tuple")
+        if fault_hook is not None and not callable(fault_hook):
+            raise TypeError("reservation ingress fault hook must be callable or None")
+
+        try:
+            genesis_text = bundle.genesis_state.decode("utf-8")
+            genesis = loads_state(genesis_text)
+            if dumps_state(genesis).encode("utf-8") != bundle.genesis_state:
+                raise ValueError("genesis state bytes are noncanonical")
+            events = tuple(
+                loads_event(payload.decode("utf-8"))
+                for payload in bundle.phase5_events
+            )
+            if any(
+                dumps_event(event).encode("utf-8") != payload
+                for event, payload in zip(events, bundle.phase5_events)
+            ):
+                raise ValueError("Phase 5 event bytes are noncanonical")
+            outboxes = tuple(
+                phase5_outbox_from_seed_bytes(payload)
+                for payload in bundle.summary_outboxes
+            )
+            command = loads_command(bundle.command_ledger_seed.decode("utf-8"))
+            commands = (command,)
+            if (
+                dumps_command(command).encode("utf-8")
+                != bundle.command_ledger_seed
+            ):
+                raise ValueError("command ledger seed bytes are noncanonical")
+        except (UnicodeDecodeError, TypeError, ValueError) as exc:
+            raise DataCorruption("reservation relay contains invalid Phase 5 bytes") from exc
+        if (
+            genesis.meta.revision != 0
+            or genesis.meta.seen_event_ids
+            or genesis.meta.seen_event_hashes
+            or genesis.meta.command_ids
+        ):
+            raise DataCorruption("reservation relay genesis is not revision zero")
+
+        state = genesis
+        outbox_index = 0
+        command_index = 0
+        steps: list[tuple[State, Event, Transition, tuple[OutboxMessage, ...]]] = []
+        for event in events:
+            current = state
+            if type(event) is SummaryRecorded:
+                if outbox_index >= len(outboxes):
+                    raise DataCorruption("summary event is missing its outbox seed")
+                event_outbox = (outboxes[outbox_index],)
+                outbox_index += 1
+                try:
+                    validate_summary_outbox(current, event, event_outbox[0])
+                except (TypeError, ValueError) as exc:
+                    raise DataCorruption("summary outbox seed is invalid") from exc
+            else:
+                event_outbox = ()
+            transition = reduce(current, event)
+            if transition.state.meta.revision != current.meta.revision + 1:
+                raise DataCorruption("reservation relay event did not advance one revision")
+            for command in transition.commands:
+                if command_index >= len(commands) or commands[command_index] != command:
+                    raise DataCorruption("reservation command seed diverges from replay")
+                command_index += 1
+            steps.append((current, event, transition, event_outbox))
+            state = transition.state
+        if outbox_index != len(outboxes) or command_index != len(commands):
+            raise DataCorruption("reservation relay contains unowned target seeds")
+
+        final_json = dumps_state(state)
+        target_result_hash = _sha256_text(final_json)
+        if (
+            final_json.encode("utf-8") != bundle.expected_final_state
+            or target_result_hash != bundle.expected_final_state_hash
+        ):
+            raise DataCorruption("reservation relay final state mismatch")
+        bundle_json = bundle.to_canonical_bytes().decode("utf-8")
+        commit_preimage = json.dumps(
+            {
+                "artifact_hash": bundle.artifact_hash,
+                "operation_id": operation_id,
+                "target_result_hash": target_result_hash,
+                "workflow_id": state.meta.workflow_id,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        target_commit_hash = hashlib.sha256(
+            b"phase8-reservation-target-commit-v1\0" + commit_preimage
+        ).hexdigest()
+        receipt = TargetOperationReceipt(
+            operation_id=operation_id,
+            job_kind=InternalJobKind.HANDOFF,
+            artifact_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            target_commit_hash=target_commit_hash,
+            target_result_hash=target_result_hash,
+            committed_at=committed_at,
+        )
+        receipt_json = receipt.to_canonical_bytes().decode("utf-8")
+        receipt_hash = receipt.canonical_hash()
+        committed_at_text = receipt.committed_at.isoformat()
+
+        def trip(stage: str) -> None:
+            if fault_hook is not None:
+                fault_hook(stage)
+
+        with self._transaction("accept_boundary_reservation"):
+            existing = self._connection.execute(
+                "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at FROM reservation_boundary_ingress_receipts "
+                "WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    stored = TargetOperationReceipt.from_canonical_bytes(
+                        existing[5].encode("utf-8")
+                    )
+                except (AttributeError, TypeError, ValueError) as exc:
+                    raise DataCorruption("persisted reservation receipt is invalid") from exc
+                expected_row = (
+                    stored.source_turn_receipt_hash,
+                    stored.artifact_hash,
+                    bundle_json,
+                    stored.target_commit_hash,
+                    stored.target_result_hash,
+                    stored.to_canonical_bytes().decode("utf-8"),
+                    stored.canonical_hash(),
+                    stored.committed_at.isoformat(),
+                )
+                if (
+                    existing != expected_row
+                    or stored.operation_id != operation_id
+                    or stored.job_kind is not InternalJobKind.HANDOFF
+                    or stored.source_turn_receipt_hash != source_turn_receipt_hash
+                    or stored.artifact_hash != bundle.artifact_hash
+                    or stored.target_commit_hash != target_commit_hash
+                    or stored.target_result_hash != target_result_hash
+                ):
+                    raise DataCorruption("persisted reservation receipt diverges")
+                return stored
+            if self._workflow_row(genesis.meta.workflow_id) is not None:
+                raise IdentityConflict("reservation relay workflow identity already exists")
+
+            trip("before_domain")
+            genesis_json = dumps_state(genesis)
+            genesis_hash = _sha256_text(genesis_json)
+            created_at = genesis.meta.last_event_at.isoformat()
+            self._connection.execute(
+                "INSERT INTO workflows "
+                "(workflow_id, revision, state_type, state_json, state_hash, "
+                "created_at, updated_at) VALUES (?, 0, ?, ?, ?, ?, ?)",
+                (
+                    genesis.meta.workflow_id,
+                    genesis.TYPE,
+                    genesis_json,
+                    genesis_hash,
+                    created_at,
+                    created_at,
+                ),
+            )
+            for current, event, transition, event_outbox in steps:
+                self._insert_event(
+                    genesis.meta.workflow_id,
+                    event,
+                    transition.state.meta.revision,
+                )
+                self._update_state_compare_and_swap(current, transition.state)
+                for command in transition.commands:
+                    self._insert_immutable_command(command)
+                    self._insert_initial_ledger(command)
+                for message in event_outbox:
+                    self._insert_outbox(message)
+            trip("after_domain_before_receipt")
+            self._connection.execute(
+                "INSERT INTO reservation_boundary_ingress_receipts "
+                "(operation_id, source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    operation_id,
+                    source_turn_receipt_hash,
+                    bundle.artifact_hash,
+                    bundle_json,
+                    target_commit_hash,
+                    target_result_hash,
+                    receipt_json,
+                    receipt_hash,
+                    committed_at_text,
+                ),
+            )
+            trip("after_receipt_before_commit")
+            return receipt
 
     def create_workflow(self, state: State) -> None:
         if type(state) not in STATE_TYPES:
