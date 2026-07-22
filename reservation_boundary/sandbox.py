@@ -301,6 +301,12 @@ def _public_lodging_option(value: object) -> dict[str, object]:
         str(result["check_in"])
     ):
         raise SandboxProtocolError("option.check_out must be after check_in")
+    expected_nights = (
+        date.fromisoformat(str(result["check_out"]))
+        - date.fromisoformat(str(result["check_in"]))
+    ).days
+    if result["nights"] != expected_nights:
+        raise SandboxProtocolError("option.nights diverges from the stay interval")
     if "available_units" in value:
         result["available_units"] = _bounded_int(
             value["available_units"],
@@ -309,9 +315,16 @@ def _public_lodging_option(value: object) -> dict[str, object]:
             maximum=10_000,
         )
     if "total_amount" in value:
-        result["total_amount"] = _text(value["total_amount"], "option.total_amount")
+        amount = _text(value["total_amount"], "option.total_amount")
+        if re.fullmatch(r"(?:0|[1-9][0-9]{0,8})\.[0-9]{2}", amount) is None:
+            raise SandboxProtocolError("option.total_amount must be canonical money")
+        if result["price_reliable"] is not True:
+            raise SandboxProtocolError("priced option must be reliable")
+        result["total_amount"] = amount
         if "currency" not in value:
             raise SandboxProtocolError("priced option requires currency")
+    elif "currency" in value:
+        raise SandboxProtocolError("currency without a public price is forbidden")
     if "currency" in value:
         currency = _text(value["currency"], "option.currency")
         if not re.fullmatch(r"[A-Z]{3}", currency):
@@ -841,9 +854,18 @@ class CloudbedsDockerRead:
             raise ReadCallFailed("Cloudbeds child result marker is missing")
         payload = result.stdout[marker_at + len(_CLOUDBEDS_RESULT_MARKER) :]
         try:
-            return LodgingAvailabilityObservation.from_canonical_bytes(payload)
+            observation = LodgingAvailabilityObservation.from_canonical_bytes(payload)
         except SandboxProtocolError as exc:
             raise ReadCallFailed("Cloudbeds child returned an invalid observation") from exc
+        if any(
+            option["check_in"] != request.check_in
+            or option["check_out"] != request.check_out
+            or option["adults"] != request.adults
+            or option["children"] != request.children
+            for option in observation.options
+        ):
+            raise ReadCallFailed("Cloudbeds observation failed request binding")
+        return observation
 
 
 class HermesDockerModel:

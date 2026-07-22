@@ -213,6 +213,12 @@ class FastTrackSandboxTests(unittest.TestCase):
             sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
                 _observation(options=[hostile_option])
             )
+        hostile_price = json.loads(_observation())["options"][0]
+        hostile_price["total_amount"] = "not-a-price"
+        with self.assertRaises(sandbox.SandboxProtocolError):
+            sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+                _observation(options=[hostile_price])
+            )
 
     def test_two_call_read_loop_persists_only_final_public_turn(self) -> None:
         read_item: dict[str, object] = {
@@ -581,6 +587,19 @@ class FastTrackSandboxTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(sandbox.ReadCallFailed, "result marker"):
                 unmarked.read(request)
+            mismatched_option = json.loads(_observation())["options"][0]
+            mismatched_option["check_in"] = "2026-09-01"
+            mismatched_option["check_out"] = "2026-09-03"
+            mismatched = sandbox.CloudbedsDockerRead(
+                project_root=root,
+                run=lambda *_args, **_kwargs: _RunResult(
+                    0,
+                    b"PHASE8_CLOUDBEDS_RESULT\x00"
+                    + _observation(options=[mismatched_option]),
+                ),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "request binding"):
+                mismatched.read(request)
 
     def test_hermes_adapter_uses_stdin_no_shell_and_fails_closed(self) -> None:
         calls: list[tuple[tuple[str, ...], bytes, int]] = []
