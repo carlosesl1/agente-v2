@@ -82,8 +82,8 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertEqual(len(plan_bytes), replacement["bytes"])
         self.assertEqual(len(plan_bytes.decode("utf-8").splitlines()), replacement["lines"])
         self.assertIn("# Fase 8 — Correção da Fronteira Operacional — Implementation Plan", plan_bytes.decode())
-        self.assertFalse(manifest["implementation_authorized"])
-        self.assertFalse(manifest["source_implementation_started"])
+        self.assertTrue(manifest["implementation_authorized"])
+        self.assertTrue(manifest["source_implementation_started"])
         self.assertFalse(manifest["wheel_build_authorized"])
         self.assertFalse(manifest["build_authorized"])
         self.assertFalse(manifest["canary_authorized"])
@@ -91,6 +91,47 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertFalse(manifest["e2e_authorized"])
         self.assertEqual(manifest["rollout"], "NO-GO")
         self.assertFalse(manifest["phase9_started"])
+
+    def test_remaining_wire_authority_records_review_and_human_acceptance(self) -> None:
+        manifest = _manifest()
+        authority = manifest["implementation_authorities"]["remaining_wire"]
+        plan = (ROOT / manifest["replacement_plan"]["path"]).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            authority["commit"],
+            "f9c2e3478f07a06e2754f4fd42a5b21bed2b0fc7",
+        )
+        self.assertEqual(
+            authority["tree"],
+            "f260763040745880cbc0263a28f564c044e30079",
+        )
+        self.assertEqual(authority["review"]["batch_id"], "deleg_8bd465b8")
+        self.assertEqual(authority["review"]["verdicts"], ["Approved"] * 3)
+        self.assertTrue(authority["human_acceptance"]["approved"])
+        self.assertEqual(authority["human_acceptance"]["approved_on"], "2026-07-22")
+        self.assertEqual(
+            authority["spec"]["sha256"],
+            "51ad64885c14d97c50b93db94c5ab67fd476d8fdd2c6a1e973f54c2a9990dc13",
+        )
+        self.assertEqual(
+            authority["fixture"]["sha256"],
+            "e347bca4c328109287108eba78602b78fb06d4543f4a78c15311606434a452a9",
+        )
+        self.assertIn(authority["commit"], plan)
+        self.assertIn(authority["tree"], plan)
+        self.assertEqual(
+            manifest["plan_quarantine_review"],
+            {
+                "technical_and_gate": "APPROVED_3_OF_3",
+                "user_acceptance": "APPROVED",
+            },
+        )
+        self.assertEqual(manifest["status"], "IMPLEMENTATION_AUTHORIZED_SOURCE_STARTED")
+        self.assertFalse(manifest["wheel_build_authorized"])
+        self.assertFalse(manifest["build_authorized"])
+        self.assertFalse(manifest["canary_authorized"])
+        self.assertFalse(manifest["conversation_gate_ready"])
+        self.assertFalse(manifest["e2e_authorized"])
 
     def test_replacement_plan_orders_all_code_before_immutable_candidates(self) -> None:
         manifest = _manifest()

@@ -9,7 +9,11 @@
     "docs/refactor/phases/phase-08-shadow-canary-rollout.md",
     "docs/refactor/evidence/README.md",
     "docs/refactor/evidence/phase-08/README.md",
-    "tests/test_phase8_entry.py"
+    "tests/test_phase8_entry.py",
+    "docs/superpowers/specs/2026-07-22-phase-8-facts-reads-wire-closure-design.md",
+    "tests/fixtures/phase8_facts_reads_wire_v1.json",
+    "docs/superpowers/specs/2026-07-22-phase-8-remaining-wire-closure-design.md",
+    "tests/fixtures/phase8_remaining_wire_registry_v1.json"
   ],
   "active_scan_extensions": [
     "",
@@ -314,11 +318,11 @@
     {
       "classification": "HISTORICAL-NON-EXECUTABLE",
       "current_state": {
-        "bytes": 24723,
+        "bytes": 26567,
         "classification": "ACTIVE-RECONCILED",
-        "lines": 519,
+        "lines": 560,
         "replacement": "tests/test_phase8_entry.py",
-        "sha256": "f1a60d1429934fe64c1971828066e29e8c3dbfded53d73cc6a1ca99185869a3e"
+        "sha256": "4e0f6656e28304b2161ac06c1955dbaabd4b9fc8771c1814d43f62422c17cef6"
       },
       "path": "tests/test_phase8_entry.py",
       "pre_quarantine_head_identity": {
@@ -337,18 +341,78 @@
       "requires_banner": false
     }
   ],
-  "implementation_authorized": false,
+  "implementation_authorities": {
+    "facts_reads": {
+      "commit": "6f638234a200a72178dac66705d739a4b597048f",
+      "fixture": {
+        "blob": "05897324f75d7fd36cffb575699980c17eb16495",
+        "bytes": 208037,
+        "lines": 522,
+        "path": "tests/fixtures/phase8_facts_reads_wire_v1.json",
+        "sha256": "fabdb3677cbd9d1b1157fd1cadcfb589bf8a5f1fb5a8cd827aff2a33a4395241"
+      },
+      "human_acceptance": {
+        "approved": true,
+        "approved_on": "2026-07-22"
+      },
+      "spec": {
+        "blob": "3fea9b602042749fa0140f0de088f6c8cf5f981c",
+        "bytes": 42156,
+        "lines": 1155,
+        "path": "docs/superpowers/specs/2026-07-22-phase-8-facts-reads-wire-closure-design.md",
+        "sha256": "f66f3aeb14ad47ad55d76dfa2b9155335d8c5b20765feb92d338bb9973bef2ef"
+      },
+      "tree": "70af0732bc13cd034af7b53d11946f3af2f6ee91"
+    },
+    "remaining_wire": {
+      "commit": "f9c2e3478f07a06e2754f4fd42a5b21bed2b0fc7",
+      "fixture": {
+        "blob": "dad17e948ab2d96b000f599e3d8f514f288d2f5c",
+        "bytes": 124286,
+        "lines": 1,
+        "path": "tests/fixtures/phase8_remaining_wire_registry_v1.json",
+        "sha256": "e347bca4c328109287108eba78602b78fb06d4543f4a78c15311606434a452a9"
+      },
+      "human_acceptance": {
+        "approved": true,
+        "approved_on": "2026-07-22",
+        "scope": "registry wire restante da Task 1; registro documental e implementação RED/GREEN"
+      },
+      "registry_counts": {
+        "contracts": 39,
+        "enums": 60,
+        "external_contracts": 11
+      },
+      "review": {
+        "batch_id": "deleg_8bd465b8",
+        "verdicts": [
+          "Approved",
+          "Approved",
+          "Approved"
+        ]
+      },
+      "spec": {
+        "blob": "1e39cb69b74d57770a82d0289b6da7f0cf686665",
+        "bytes": 76633,
+        "lines": 2044,
+        "path": "docs/superpowers/specs/2026-07-22-phase-8-remaining-wire-closure-design.md",
+        "sha256": "51ad64885c14d97c50b93db94c5ab67fd476d8fdd2c6a1e973f54c2a9990dc13"
+      },
+      "tree": "f260763040745880cbc0263a28f564c044e30079"
+    }
+  },
+  "implementation_authorized": true,
   "phase": 8,
   "phase9_started": false,
   "plan_quarantine_review": {
-    "technical_and_gate": "PENDING",
-    "user_acceptance": "PENDING"
+    "technical_and_gate": "APPROVED_3_OF_3",
+    "user_acceptance": "APPROVED"
   },
   "replacement_plan": {
-    "bytes": 100141,
-    "lines": 2018,
+    "bytes": 102645,
+    "lines": 2060,
     "path": "docs/superpowers/plans/2026-07-21-phase-8-operational-boundary-correction.md",
-    "sha256": "f1feaf0b1958c8b2a7bfefbfcb168c6c92c38fb457c55d584d9a9bbb03f0fb57"
+    "sha256": "47df37edb704c247cded09cf9e4d9362cbaae94e444fb99e2f5b94c99dc6dd3a"
   },
   "rollout": "NO-GO",
   "scan_exclusions": [
@@ -398,7 +462,7 @@
     }
   ],
   "schema_version": 1,
-  "source_implementation_started": false,
-  "status": "PLAN_QUARANTINE_CANDIDATE",
+  "source_implementation_started": true,
+  "status": "IMPLEMENTATION_AUTHORIZED_SOURCE_STARTED",
   "wheel_build_authorized": false
 }

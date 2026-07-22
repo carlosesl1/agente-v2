@@ -617,6 +617,29 @@ effects, capabilities, owners de autorização, FSMs, tabelas ou gates. A autori
 `ReadObservation`; qualquer outro contrato continua sujeito ao registry e aos gates
 já aprovados neste plano.
 
+**Remaining-wire closure authority:** após review AND 3/3 do batch
+`deleg_8bd465b8`, Carlos Eduardo aprovou explicitamente em 2026-07-22 a identidade
+`f9c2e3478f07a06e2754f4fd42a5b21bed2b0fc7`, tree
+`f260763040745880cbc0263a28f564c044e30079`, como autoridade executável do
+registry wire restante da Task 1 e autorizou sua implementação em micro-unidades
+RED/GREEN. Essa identidade contém somente:
+
+- spec delta `docs/superpowers/specs/2026-07-22-phase-8-remaining-wire-closure-design.md`,
+  blob `1e39cb69b74d57770a82d0289b6da7f0cf686665`, SHA-256
+  `51ad64885c14d97c50b93db94c5ab67fd476d8fdd2c6a1e973f54c2a9990dc13`,
+  `76633` bytes / `2044` linhas;
+- fixture normativa `tests/fixtures/phase8_remaining_wire_registry_v1.json`, blob
+  `dad17e948ab2d96b000f599e3d8f514f288d2f5c`, SHA-256
+  `e347bca4c328109287108eba78602b78fb06d4543f4a78c15311606434a452a9`,
+  `124286` bytes / `1` linha;
+- 39 contratos, 60 enums e 11 referências externas autenticadas, sem ampliar
+  effects, capabilities, owners, tabelas, FSMs ou gates.
+
+A autorização acima cobre somente registro documental e implementação das Tasks
+1–21 conforme o placement owner do registry. Wheel candidata, build OCI, Docker,
+dark/ingress canary, mensagem, conversa humana, E2E, deploy, rollout e rollback
+continuam sujeitos aos gates independentes deste plano e permanecem fechados.
+
 Cada tipo possui `SCHEMA`, `VERSION`, `DOMAIN` e `to_canonical_bytes`; o registry e o
 fixture independente comparam lista completa ordenada de campos, enums, nullability,
 assinaturas e domains, rejeitando item ausente **ou extra**. Adicionar campo aberto ou
