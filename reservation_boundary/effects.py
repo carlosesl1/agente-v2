@@ -11,6 +11,7 @@ from typing import ClassVar, Final
 
 
 RESERVATION_RELAY_DOMAIN: Final = "phase8-reservation-relay-bundle-v1"
+SETTLEMENT_RELAY_DOMAIN: Final = "phase8-settlement-relay-bundle-v1"
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -181,7 +182,128 @@ class ReservationRelayBundle:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SettlementRelayBundle:
+    """Canonical Phase 6 settlement bundle with full replay material."""
+
+    workflow_anchor: bytes
+    policy: bytes
+    payment_history: tuple[bytes, ...]
+    evidence: tuple[bytes, ...]
+    payment_command: bytes
+    expected_final_state: bytes
+    expected_final_state_hash: str
+    qualification_id: str | None
+    scenario_id: str | None
+    immutable_generation: int | None
+    allocation_id: str | None
+    artifact_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-settlement-relay-bundle"
+    PREIMAGE_SCHEMA: ClassVar[str] = "phase8-settlement-relay-bundle-preimage"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = SETTLEMENT_RELAY_DOMAIN
+
+    def __post_init__(self) -> None:
+        _require_bytes(
+            self.workflow_anchor,
+            "SettlementRelayBundle.workflow_anchor",
+        )
+        _require_bytes(self.policy, "SettlementRelayBundle.policy")
+        _require_bytes_tuple(
+            self.payment_history,
+            "SettlementRelayBundle.payment_history",
+        )
+        _require_bytes_tuple(self.evidence, "SettlementRelayBundle.evidence")
+        _require_bytes(
+            self.payment_command,
+            "SettlementRelayBundle.payment_command",
+        )
+        _require_bytes(
+            self.expected_final_state,
+            "SettlementRelayBundle.expected_final_state",
+        )
+        _require_sha256(
+            self.expected_final_state_hash,
+            "SettlementRelayBundle.expected_final_state_hash",
+        )
+        if (
+            hashlib.sha256(self.expected_final_state).hexdigest()
+            != self.expected_final_state_hash
+        ):
+            raise ValueError(
+                "expected_final_state_hash does not authenticate expected_final_state"
+            )
+
+        e2e_values = (
+            self.qualification_id,
+            self.scenario_id,
+            self.immutable_generation,
+            self.allocation_id,
+        )
+        present = tuple(value is not None for value in e2e_values)
+        if any(present) and not all(present):
+            raise ValueError("E2E relay fields must be all-null or all-present")
+        if all(present):
+            _require_identifier(
+                self.qualification_id,
+                "SettlementRelayBundle.qualification_id",
+            )
+            _require_identifier(
+                self.scenario_id,
+                "SettlementRelayBundle.scenario_id",
+            )
+            _require_generation(
+                self.immutable_generation,
+                "SettlementRelayBundle.immutable_generation",
+            )
+            _require_identifier(
+                self.allocation_id,
+                "SettlementRelayBundle.allocation_id",
+            )
+
+        _require_sha256(self.artifact_hash, "SettlementRelayBundle.artifact_hash")
+        expected_artifact_hash = hashlib.sha256(
+            self.DOMAIN.encode("ascii")
+            + b"\x00"
+            + self.artifact_preimage_bytes()
+        ).hexdigest()
+        if self.artifact_hash != expected_artifact_hash:
+            raise ValueError("artifact_hash does not authenticate relay bundle preimage")
+
+    def _preimage_data(self) -> dict[str, object]:
+        return {
+            "workflow_anchor": _b64(self.workflow_anchor),
+            "policy": _b64(self.policy),
+            "payment_history": [_b64(value) for value in self.payment_history],
+            "evidence": [_b64(value) for value in self.evidence],
+            "payment_command": _b64(self.payment_command),
+            "expected_final_state": _b64(self.expected_final_state),
+            "expected_final_state_hash": self.expected_final_state_hash,
+            "qualification_id": self.qualification_id,
+            "scenario_id": self.scenario_id,
+            "immutable_generation": self.immutable_generation,
+            "allocation_id": self.allocation_id,
+        }
+
+    def artifact_preimage_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.PREIMAGE_SCHEMA,
+            version=self.VERSION,
+            data=self._preimage_data(),
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data=self._preimage_data() | {"artifact_hash": self.artifact_hash},
+        )
+
+
 __all__ = (
     "RESERVATION_RELAY_DOMAIN",
+    "SETTLEMENT_RELAY_DOMAIN",
     "ReservationRelayBundle",
+    "SettlementRelayBundle",
 )
