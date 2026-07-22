@@ -213,7 +213,7 @@ class RedProvenanceTests(unittest.TestCase):
                     functional_tree=bad_functional_tree,
                     evidence_commit=bad_evidence,
                     evidence_tree=bad_evidence_tree,
-                    evidence_allowed_paths=(),
+                    evidence_allowed_paths=(evidence_path,),
                     required_test_blobs=replay.test_blobs,
                 )
 
