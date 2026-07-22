@@ -39,6 +39,8 @@ from reservation_boundary.reads import (
     ProvenAbsent,
     ReadEvidenceDisposition,
     ReadEvidenceReceipt,
+    ReadObservation,
+    ReadObservationStatus,
     SanitizedKnowledgeResult,
     SanitizedLookupResult,
     SanitizedLookupStatus,
@@ -647,6 +649,66 @@ class Phase8SanitizedResultUnionTests(unittest.TestCase):
             replace(unavailable, genesis_receipt=absent.genesis_receipt)
         with self.assertRaises((TypeError, ValueError)):
             replace(found, genesis_receipt=absent.genesis_receipt)
+
+
+class Phase8ReadObservationTests(unittest.TestCase):
+    def test_observation_known_answers_cover_the_exact_status_matrix(self) -> None:
+        examples = _fixture()["examples"]
+        expected = {
+            "observation.found_snapshot": (ReadObservationStatus.FOUND_SNAPSHOT, False),
+            "observation.proven_absent": (ReadObservationStatus.PROVEN_ABSENT, False),
+            "observation.legacy_unavailable": (
+                ReadObservationStatus.LEGACY_UNAVAILABLE,
+                False,
+            ),
+            "observation.answered_public_safe": (ReadObservationStatus.ANSWERED, True),
+            "observation.answered_private_only": (ReadObservationStatus.ANSWERED, False),
+            "observation.positive_public_safe": (ReadObservationStatus.POSITIVE, True),
+            "observation.positive_private_only": (ReadObservationStatus.POSITIVE, False),
+            "observation.negative_public_safe": (ReadObservationStatus.NEGATIVE, True),
+            "observation.negative_private_only": (ReadObservationStatus.NEGATIVE, False),
+            "observation.uncertain": (ReadObservationStatus.UNCERTAIN, False),
+        }
+        for name, (status, safe) in expected.items():
+            with self.subTest(name=name):
+                item = examples[name]
+                observation = ReadObservation.from_canonical_bytes(
+                    item["canonical_utf8"].encode("utf-8")
+                )
+                self.assertIs(observation.status, status)
+                self.assertIs(observation.safe_for_public_claims, safe)
+                self.assertEqual(
+                    observation.to_canonical_bytes().decode("utf-8"),
+                    item["canonical_utf8"],
+                )
+                self.assertEqual(observation.canonical_hash(), item["canonical_hash"])
+
+    def test_observation_rejects_caller_selected_status_safety_and_frame(self) -> None:
+        item = _fixture()["examples"]["observation.positive_public_safe"]
+        observation = ReadObservation.from_canonical_bytes(
+            item["canonical_utf8"].encode("utf-8")
+        )
+        for mutation in (
+            lambda: replace(observation, status=ReadObservationStatus.NEGATIVE),
+            lambda: replace(observation, safe_for_public_claims=False),
+            lambda: replace(observation, request_hash="0" * 64),
+            lambda: replace(observation, result_hash="0" * 64),
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises((TypeError, ValueError)):
+                    mutation()
+
+        fact = TypedFact(
+            "language",
+            StringSlot("pt-BR"),
+            observation.frame_commitment_hash,
+        )
+        self.assertEqual(replace(observation, derived_facts=(fact,)).derived_facts, (fact,))
+        with self.assertRaises(ValueError):
+            replace(
+                observation,
+                derived_facts=(replace(fact, frame_commitment_hash="0" * 64),),
+            )
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from reservation_boundary.types import (
     StringSlot,
     TypedFact,
 )
+from reservation_domain import Party, SearchQuery, ServiceKind
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -1648,6 +1649,392 @@ SanitizedReadResult: TypeAlias = (
 )
 
 
+def _decode_source_event(value: object) -> SourceEventIdentity:
+    payload = _nested_contract_bytes(value, "source_event")
+    envelope = _load_canonical_envelope(payload, "SourceEventIdentity")
+    if (
+        envelope["schema"] != SourceEventIdentity.SCHEMA
+        or envelope["version"] != SourceEventIdentity.VERSION
+        or set(envelope["data"]) != {"source_event_id", "source_event_hash"}
+    ):
+        raise ValueError("SourceEventIdentity contract mismatch")
+    event = SourceEventIdentity(
+        source_event_id=envelope["data"]["source_event_id"],
+        source_event_hash=envelope["data"]["source_event_hash"],
+    )
+    if event.to_canonical_bytes() != payload:
+        raise ValueError("SourceEventIdentity is not byte-canonical")
+    return event
+
+
+def _decode_read_arguments(value: object, tool_name: object) -> ReadArguments:
+    if type(value) is not dict or set(value) != {"type", "data"}:
+        raise ValueError("read arguments tagged value mismatch")
+    tag = value["type"]
+    data = value["data"]
+    if type(tag) is not str or type(data) is not dict:
+        raise ValueError("read arguments tagged value has wrong exact types")
+    expected = _TOOL_ARGUMENT_TYPES.get(tool_name)
+    if expected is None or tag != expected.__name__:
+        raise ValueError("read arguments tag/tool pair mismatch")
+    if expected is FaqReadArguments:
+        if set(data) != {"query", "locale"}:
+            raise ValueError("FaqReadArguments fields mismatch")
+        return FaqReadArguments(query=data["query"], locale=data["locale"])
+    if expected is LodgingReadArguments:
+        if set(data) != {"check_in", "check_out", "adults", "children"}:
+            raise ValueError("LodgingReadArguments fields mismatch")
+        return LodgingReadArguments(
+            check_in=_parse_date(data["check_in"], "check_in"),
+            check_out=_parse_date(data["check_out"], "check_out"),
+            adults=data["adults"],
+            children=data["children"],
+        )
+    if expected is RoomDescriptionArguments:
+        if set(data) != {"room_offer_id"}:
+            raise ValueError("RoomDescriptionArguments fields mismatch")
+        return RoomDescriptionArguments(room_offer_id=data["room_offer_id"])
+    if expected is ActivityReadArguments:
+        if set(data) != {"activity_id", "activity_date", "participants"}:
+            raise ValueError("ActivityReadArguments fields mismatch")
+        return ActivityReadArguments(
+            activity_id=data["activity_id"],
+            activity_date=_parse_date(data["activity_date"], "activity_date"),
+            participants=data["participants"],
+        )
+    if expected is ActivityDescriptionArguments:
+        if set(data) != {"activity_id"}:
+            raise ValueError("ActivityDescriptionArguments fields mismatch")
+        return ActivityDescriptionArguments(activity_id=data["activity_id"])
+    raise ValueError("unsupported read arguments")
+
+
+def _decode_read_request(payload: bytes) -> Phase8ReadRequest:
+    envelope = _load_canonical_envelope(payload, "Phase8ReadRequest")
+    data = envelope["data"]
+    if envelope["schema"] == Phase8ToolReadRequest.SCHEMA:
+        if envelope["version"] != Phase8ToolReadRequest.VERSION or set(data) != {
+            "tool_name",
+            "arguments",
+            "lead_key_hash",
+            "aggregate_turn_id",
+            "source_event",
+            "deadline_at",
+            "locale",
+            "projection_hash",
+        }:
+            raise ValueError("Phase8ToolReadRequest fields mismatch")
+        request: Phase8ReadRequest = Phase8ToolReadRequest(
+            tool_name=data["tool_name"],
+            arguments=_decode_read_arguments(data["arguments"], data["tool_name"]),
+            lead_key_hash=data["lead_key_hash"],
+            aggregate_turn_id=data["aggregate_turn_id"],
+            source_event=_decode_source_event(data["source_event"]),
+            deadline_at=_parse_utc(data["deadline_at"], "deadline_at"),
+            locale=data["locale"],
+            projection_hash=data["projection_hash"],
+        )
+    elif envelope["schema"] == LegacyGenesisReadRequest.SCHEMA:
+        if envelope["version"] != LegacyGenesisReadRequest.VERSION or set(data) != {
+            "lead_key_hash",
+            "aggregate_turn_id",
+            "source_event",
+            "deadline_at",
+            "legacy_source",
+        }:
+            raise ValueError("LegacyGenesisReadRequest fields mismatch")
+        request = LegacyGenesisReadRequest(
+            lead_key_hash=data["lead_key_hash"],
+            aggregate_turn_id=data["aggregate_turn_id"],
+            source_event=_decode_source_event(data["source_event"]),
+            deadline_at=_parse_utc(data["deadline_at"], "deadline_at"),
+            legacy_source=data["legacy_source"],
+        )
+    else:
+        raise ValueError("request schema is outside Phase8ReadRequest")
+    if request.to_canonical_bytes() != payload:
+        raise ValueError("Phase8ReadRequest is not byte-canonical")
+    return request
+
+
+def _decode_sanitized_result(payload: bytes) -> SanitizedReadResult:
+    envelope = _load_canonical_envelope(payload, "SanitizedReadResult")
+    result_types: dict[str, type[object]] = {
+        FoundSnapshot.SCHEMA: FoundSnapshot,
+        ProvenAbsent.SCHEMA: ProvenAbsent,
+        LegacyUnavailable.SCHEMA: LegacyUnavailable,
+        SanitizedKnowledgeResult.SCHEMA: SanitizedKnowledgeResult,
+        SanitizedLookupResult.SCHEMA: SanitizedLookupResult,
+    }
+    result_type = result_types.get(envelope["schema"])
+    if result_type is None:
+        raise ValueError("result schema is outside SanitizedReadResult")
+    result = result_type.from_canonical_bytes(payload)
+    if not isinstance(
+        result,
+        (
+            FoundSnapshot,
+            ProvenAbsent,
+            LegacyUnavailable,
+            SanitizedKnowledgeResult,
+            SanitizedLookupResult,
+        ),
+    ):
+        raise TypeError("decoded read result has an impossible type")
+    return result
+
+
+def _validate_request_result_equality(
+    request: Phase8ReadRequest,
+    result: SanitizedReadResult,
+) -> None:
+    if type(request) is LegacyGenesisReadRequest:
+        if type(result) not in {FoundSnapshot, ProvenAbsent, LegacyUnavailable}:
+            raise ValueError("genesis request requires a genesis result")
+        if (
+            result.genesis_receipt.request_hash != request.read_request_hash()
+            or result.genesis_receipt.lead_key_hash != request.lead_key_hash
+        ):
+            raise ValueError("genesis request/result binding mismatch")
+        return
+    if type(request) is not Phase8ToolReadRequest:
+        raise TypeError("request must be an exact Phase8ReadRequest")
+    if type(result) is SanitizedKnowledgeResult:
+        expected = {
+            "cerebro_consultar": (KnowledgeSource.FAQ, None),
+            "cloudbeds_descrever_quartos": (
+                KnowledgeSource.LODGING_DESCRIPTION,
+                request.arguments.room_offer_id
+                if type(request.arguments) is RoomDescriptionArguments
+                else None,
+            ),
+            "bokun_consultar_descricao": (
+                KnowledgeSource.ACTIVITY_DESCRIPTION,
+                request.arguments.activity_id
+                if type(request.arguments) is ActivityDescriptionArguments
+                else None,
+            ),
+        }.get(request.tool_name)
+        if (
+            expected is None
+            or result.source is not expected[0]
+            or result.subject_id != expected[1]
+            or result.locale != request.locale
+        ):
+            raise ValueError("knowledge request/result equality mismatch")
+        return
+    if type(result) is not SanitizedLookupResult:
+        raise ValueError("tool request requires its exact sanitized result class")
+    if request.tool_name == "cloudbeds_consultar_hospedagem_v2" and type(
+        request.arguments
+    ) is LodgingReadArguments:
+        args = request.arguments
+        service = ReadService.LODGING
+        query = SearchQuery(
+            service=ServiceKind.LODGING,
+            start_date=args.check_in,
+            end_date=args.check_out,
+            start_time=None,
+            party=Party(args.adults, args.children),
+        )
+        offers_match = all(
+            offer.start_date == args.check_in
+            and offer.end_date == args.check_out
+            and offer.start_time is None
+            and offer.adults == args.adults
+            and offer.children == args.children
+            for offer in result.offers
+        )
+    elif request.tool_name == "bokun_consultar_passeio_v2" and type(
+        request.arguments
+    ) is ActivityReadArguments:
+        args = request.arguments
+        service = ReadService.ACTIVITY
+        query = SearchQuery(
+            service=ServiceKind.ACTIVITY,
+            start_date=args.activity_date,
+            end_date=None,
+            start_time=None,
+            party=Party(args.participants, 0),
+        )
+        offers_match = all(
+            offer.start_date == args.activity_date
+            and offer.end_date is None
+            and offer.start_time is None
+            and offer.adults == args.participants
+            and offer.children == 0
+            for offer in result.offers
+        )
+    else:
+        raise ValueError("lookup result does not match the request tool")
+    if (
+        result.service is not service
+        or result.query_signature != query.signature
+        or not offers_match
+    ):
+        raise ValueError("lookup request/result equality mismatch")
+
+
+class ReadObservationStatus(str, Enum):
+    FOUND_SNAPSHOT = "found_snapshot"
+    PROVEN_ABSENT = "proven_absent"
+    LEGACY_UNAVAILABLE = "legacy_unavailable"
+    ANSWERED = "answered"
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True, slots=True)
+class ReadObservation:
+    request_bytes: bytes
+    request_hash: str
+    status: ReadObservationStatus
+    typed_result_bytes: bytes
+    result_hash: str
+    derived_facts: tuple[TypedFact, ...]
+    safe_for_public_claims: bool
+    frame_commitment_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-read-observation"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-read-observation-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.request_bytes) is not bytes or not self.request_bytes:
+            raise TypeError("ReadObservation.request_bytes must be non-empty exact bytes")
+        if type(self.typed_result_bytes) is not bytes or not self.typed_result_bytes:
+            raise TypeError("ReadObservation.typed_result_bytes must be non-empty exact bytes")
+        request = _decode_read_request(self.request_bytes)
+        result = _decode_sanitized_result(self.typed_result_bytes)
+        _require_sha256(self.request_hash, "ReadObservation.request_hash")
+        _require_sha256(self.result_hash, "ReadObservation.result_hash")
+        if request.read_request_hash() != self.request_hash:
+            raise ValueError("ReadObservation.request_hash mismatch")
+        if result.canonical_hash() != self.result_hash:
+            raise ValueError("ReadObservation.result_hash mismatch")
+        _validate_request_result_equality(request, result)
+        if type(self.status) is not ReadObservationStatus:
+            raise TypeError("ReadObservation.status must be exact")
+        if type(self.safe_for_public_claims) is not bool:
+            raise TypeError("safe_for_public_claims must be an exact bool")
+        if type(result) is FoundSnapshot:
+            expected_status, expected_safe = ReadObservationStatus.FOUND_SNAPSHOT, False
+        elif type(result) is ProvenAbsent:
+            expected_status, expected_safe = ReadObservationStatus.PROVEN_ABSENT, False
+        elif type(result) is LegacyUnavailable:
+            expected_status, expected_safe = ReadObservationStatus.LEGACY_UNAVAILABLE, False
+        elif type(result) is SanitizedKnowledgeResult:
+            expected_status = ReadObservationStatus.ANSWERED
+            expected_safe = (
+                result.evidence_receipt.disposition is ReadEvidenceDisposition.PUBLIC_SAFE
+            )
+        else:
+            expected_status = {
+                SanitizedLookupStatus.POSITIVE: ReadObservationStatus.POSITIVE,
+                SanitizedLookupStatus.NEGATIVE: ReadObservationStatus.NEGATIVE,
+                SanitizedLookupStatus.UNCERTAIN: ReadObservationStatus.UNCERTAIN,
+            }[result.status]
+            expected_safe = (
+                result.status is not SanitizedLookupStatus.UNCERTAIN
+                and result.evidence_receipt.disposition is ReadEvidenceDisposition.PUBLIC_SAFE
+            )
+        if self.status is not expected_status or self.safe_for_public_claims is not expected_safe:
+            raise ValueError("ReadObservation status/public-safety matrix mismatch")
+        _require_sha256(
+            self.frame_commitment_hash,
+            "ReadObservation.frame_commitment_hash",
+        )
+        if type(self.derived_facts) is not tuple or any(
+            type(item) is not TypedFact for item in self.derived_facts
+        ):
+            raise TypeError("derived_facts must be an exact TypedFact tuple")
+        order = {
+            "language": 0,
+            "service": 1,
+            "start_date": 2,
+            "end_date": 3,
+            "adults": 4,
+            "children": 5,
+        }
+        positions = tuple(order[item.name] for item in self.derived_facts)
+        if len(set(positions)) != len(positions) or positions != tuple(sorted(positions)):
+            raise ValueError("derived_facts must be unique and catalog-ordered")
+        if any(
+            item.frame_commitment_hash != self.frame_commitment_hash
+            for item in self.derived_facts
+        ):
+            raise ValueError("derived fact frame commitment mismatch")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "request_bytes": base64.b64encode(self.request_bytes).decode("ascii"),
+                "request_hash": self.request_hash,
+                "status": self.status.value,
+                "typed_result_bytes": base64.b64encode(self.typed_result_bytes).decode(
+                    "ascii"
+                ),
+                "result_hash": self.result_hash,
+                "derived_facts": [
+                    json.loads(item.to_canonical_bytes().decode("utf-8"))
+                    for item in self.derived_facts
+                ],
+                "safe_for_public_claims": self.safe_for_public_claims,
+                "frame_commitment_hash": self.frame_commitment_hash,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "ReadObservation":
+        envelope = _load_canonical_envelope(payload, "ReadObservation")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("ReadObservation identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "request_bytes",
+            "request_hash",
+            "status",
+            "typed_result_bytes",
+            "result_hash",
+            "derived_facts",
+            "safe_for_public_claims",
+            "frame_commitment_hash",
+        }
+        if set(data) != expected or type(data["derived_facts"]) is not list:
+            raise ValueError("ReadObservation fields mismatch")
+        try:
+            status = ReadObservationStatus(data["status"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ReadObservation status is invalid") from exc
+        observation = cls(
+            request_bytes=_decode_base64(data["request_bytes"], "request_bytes"),
+            request_hash=data["request_hash"],
+            status=status,
+            typed_result_bytes=_decode_base64(
+                data["typed_result_bytes"],
+                "typed_result_bytes",
+            ),
+            result_hash=data["result_hash"],
+            derived_facts=tuple(
+                _decode_typed_fact(_nested_contract_bytes(item, "derived_fact"))
+                for item in data["derived_facts"]
+            ),
+            safe_for_public_claims=data["safe_for_public_claims"],
+            frame_commitment_hash=data["frame_commitment_hash"],
+        )
+        if observation.to_canonical_bytes() != payload:
+            raise ValueError("ReadObservation is not byte-canonical")
+        return observation
+
+
 __all__ = (
     "GenesisStatus",
     "FoundSnapshot",
@@ -1668,6 +2055,8 @@ __all__ = (
     "READ_REQUEST_DOMAIN",
     "ReadEvidenceDisposition",
     "ReadEvidenceReceipt",
+    "ReadObservation",
+    "ReadObservationStatus",
     "ReadArguments",
     "ReadService",
     "SanitizedKnowledgeResult",
