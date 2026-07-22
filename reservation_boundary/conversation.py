@@ -5,12 +5,13 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 import hashlib
 import json
 import re
 from typing import ClassVar, Final
 
-from reservation_boundary.types import NormalizedMessage
+from reservation_boundary.types import ConversationIntentKind, NormalizedMessage
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -54,6 +55,24 @@ def _require_utc(value: object, name: str) -> datetime:
         raise TypeError(f"{name} must be an exact datetime")
     if value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise ValueError(f"{name} must be timezone-aware UTC")
+    return value
+
+
+def _require_exact_bool(value: object, name: str) -> bool:
+    if type(value) is not bool:
+        raise TypeError(f"{name} must be an exact boolean")
+    return value
+
+
+def _require_text(value: object, name: str, *, allow_empty: bool = False) -> str:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be an exact string")
+    if not allow_empty and not value:
+        raise ValueError(f"{name} must be non-empty")
+    if value != value.strip():
+        raise ValueError(f"{name} must not have surrounding whitespace")
+    if any((ord(char) < 32 and char not in "\n\t") or ord(char) == 127 for char in value):
+        raise ValueError(f"{name} contains a forbidden control character")
     return value
 
 
@@ -194,4 +213,172 @@ class MayaTurnRequest:
         return hashlib.sha256(preimage).hexdigest()
 
 
-__all__ = ("MayaTurnRequest", "SourceEventIdentity")
+class PublicRoute(str, Enum):
+    RECEPTIONIST = "recepcionista"
+    HOSTEL = "hostel"
+    AGENCY = "agencia"
+    CLOSING = "fechamento"
+    HANDOFF = "handoff"
+    NO_REPLY = "no_reply"
+
+
+class PublicReplyType(str, Enum):
+    ASK_MORE = "ask_more"
+    QUALIFY = "qualify"
+    ANSWER = "answer"
+    HANDOFF = "handoff"
+    NO_REPLY = "no_reply"
+
+
+@dataclass(frozen=True, slots=True)
+class MayaIntentClosure:
+    """Child-owned intent closure with no facts, tools or commands."""
+
+    kind: ConversationIntentKind
+    selection: str | None
+    confirmation: int | None
+    handoff: bool
+
+    SCHEMA: ClassVar[str] = "phase8-maya-intent-closure"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-maya-intent-closure-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not ConversationIntentKind:
+            raise TypeError("MayaIntentClosure.kind must be exact")
+        if self.kind is ConversationIntentKind.TOOL_REQUEST:
+            raise ValueError("MayaIntentClosure cannot carry a tool-request intent")
+        _require_exact_bool(self.handoff, "MayaIntentClosure.handoff")
+        if self.kind is ConversationIntentKind.SELECT:
+            _require_identifier(self.selection, "MayaIntentClosure.selection")
+        elif self.selection is not None:
+            raise ValueError("MayaIntentClosure.selection is allowed only for select")
+        if self.kind is ConversationIntentKind.CONFIRM:
+            _require_exact_int(
+                self.confirmation,
+                "MayaIntentClosure.confirmation",
+                minimum=1,
+            )
+        elif self.confirmation is not None:
+            raise ValueError("MayaIntentClosure.confirmation is allowed only for confirm")
+        expects_handoff = self.kind is ConversationIntentKind.REQUEST_HANDOFF
+        if self.handoff is not expects_handoff:
+            raise ValueError("MayaIntentClosure.handoff must match request_handoff kind")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "kind": self.kind.value,
+                "selection": self.selection,
+                "confirmation": self.confirmation,
+                "handoff": self.handoff,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        return hashlib.sha256(preimage).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class MayaTurnClosure:
+    """Terminal closure emitted by the isolated Maya child."""
+
+    aggregate_turn_id: str
+    intent_closure: MayaIntentClosure
+    public_text: str
+    route: PublicRoute
+    reply_type: PublicReplyType
+    final_seq: int
+    expected_prefix_mac: str
+    ephemeral_session_id: str
+    zero_requests_in_flight: bool
+
+    SCHEMA: ClassVar[str] = "phase8-maya-turn-closure"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-maya-turn-closure-v1"
+
+    def __post_init__(self) -> None:
+        _require_identifier(self.aggregate_turn_id, "MayaTurnClosure.aggregate_turn_id")
+        if type(self.intent_closure) is not MayaIntentClosure:
+            raise TypeError(
+                "MayaTurnClosure.intent_closure must be an exact MayaIntentClosure"
+            )
+        if type(self.route) is not PublicRoute:
+            raise TypeError("MayaTurnClosure.route must be an exact PublicRoute")
+        if type(self.reply_type) is not PublicReplyType:
+            raise TypeError(
+                "MayaTurnClosure.reply_type must be an exact PublicReplyType"
+            )
+        is_handoff = self.route is PublicRoute.HANDOFF
+        is_no_reply = self.route is PublicRoute.NO_REPLY
+        if is_handoff != (self.reply_type is PublicReplyType.HANDOFF):
+            raise ValueError("handoff route and reply type must agree")
+        if is_no_reply != (self.reply_type is PublicReplyType.NO_REPLY):
+            raise ValueError("no_reply route and reply type must agree")
+        if not is_handoff and not is_no_reply and self.reply_type in {
+            PublicReplyType.HANDOFF,
+            PublicReplyType.NO_REPLY,
+        }:
+            raise ValueError("normal routes require a public reply type")
+        intent_requests_handoff = (
+            self.intent_closure.kind is ConversationIntentKind.REQUEST_HANDOFF
+        )
+        if intent_requests_handoff != is_handoff:
+            raise ValueError("request_handoff intent and handoff route must agree")
+        _require_text(
+            self.public_text,
+            "MayaTurnClosure.public_text",
+            allow_empty=is_no_reply,
+        )
+        if is_no_reply and self.public_text:
+            raise ValueError("no_reply closure must not contain public text")
+        _require_exact_int(self.final_seq, "MayaTurnClosure.final_seq", minimum=1)
+        _require_sha256(
+            self.expected_prefix_mac,
+            "MayaTurnClosure.expected_prefix_mac",
+        )
+        _require_identifier(
+            self.ephemeral_session_id,
+            "MayaTurnClosure.ephemeral_session_id",
+        )
+        if not _require_exact_bool(
+            self.zero_requests_in_flight,
+            "MayaTurnClosure.zero_requests_in_flight",
+        ):
+            raise ValueError("MayaTurnClosure must declare zero requests in flight")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "aggregate_turn_id": self.aggregate_turn_id,
+                "intent_closure": json.loads(
+                    self.intent_closure.to_canonical_bytes().decode("utf-8")
+                ),
+                "public_text": self.public_text,
+                "route": self.route.value,
+                "reply_type": self.reply_type.value,
+                "final_seq": self.final_seq,
+                "expected_prefix_mac": self.expected_prefix_mac,
+                "ephemeral_session_id": self.ephemeral_session_id,
+                "zero_requests_in_flight": self.zero_requests_in_flight,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        preimage = self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        return hashlib.sha256(preimage).hexdigest()
+
+
+__all__ = (
+    "MayaIntentClosure",
+    "MayaTurnClosure",
+    "MayaTurnRequest",
+    "PublicReplyType",
+    "PublicRoute",
+    "SourceEventIdentity",
+)
