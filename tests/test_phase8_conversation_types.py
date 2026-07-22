@@ -516,6 +516,152 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     commitment_type(**(valid | override))
 
+    def test_public_reply_chunk_matches_accepted_known_answer_and_policy(self) -> None:
+        chunk_type = getattr(conversation, "PublicReplyChunk", None)
+        self.assertIsNotNone(chunk_type, "PublicReplyChunk must have an owner")
+        assert chunk_type is not None
+        chunk = chunk_type(
+            aggregate_turn_id="turn-1",
+            ordinal=0,
+            text="Vou chamar uma pessoa.",
+            source_closure_hash="a" * 64,
+        )
+
+        self.assertEqual(
+            tuple(field.name for field in fields(chunk_type)),
+            ("aggregate_turn_id", "ordinal", "text", "source_closure_hash"),
+        )
+        self.assertEqual(chunk_type.SCHEMA, "phase8-public-reply-chunk")
+        self.assertEqual(chunk_type.VERSION, 1)
+        self.assertEqual(chunk_type.DOMAIN, "phase8-public-reply-chunk-v1")
+        expected = (
+            b'{"data":{"aggregate_turn_id":"turn-1","ordinal":0,'
+            b'"source_closure_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+            b'"text":"Vou chamar uma pessoa."},"schema":"phase8-public-reply-chunk","version":1}'
+        )
+        self.assertEqual(chunk.to_canonical_bytes(), expected)
+        self.assertEqual(
+            chunk.canonical_hash(),
+            "151df95a0d5ac9322f1263e9f35766e3e1db3aa91c6f42332d946dfcbf3641e1",
+        )
+        for override in (
+            {"aggregate_turn_id": "Turn-1"},
+            {"ordinal": True},
+            {"ordinal": -1},
+            {"text": ""},
+            {"text": "Telefone pessoal: (75) 99999-9999"},
+            {"text": "  espaço"},
+            {"source_closure_hash": "A" * 64},
+        ):
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    chunk_type(
+                        **(
+                            {
+                                "aggregate_turn_id": "turn-1",
+                                "ordinal": 0,
+                                "text": "Resposta segura.",
+                                "source_closure_hash": "a" * 64,
+                            }
+                            | override
+                        )
+                    )
+
+    def test_capability_policy_is_complete_ordered_and_matches_known_answer(self) -> None:
+        policy_type = getattr(conversation, "CapabilityPolicy", None)
+        capability_type = getattr(conversation, "Capability", None)
+        disposition_type = getattr(conversation, "CapabilityDisposition", None)
+        worker_type = getattr(conversation, "Worker", None)
+        mode_type = getattr(conversation, "WorkerMode", None)
+        guard_type = getattr(conversation, "GuardSemantic", None)
+        for value in (
+            policy_type,
+            capability_type,
+            disposition_type,
+            worker_type,
+            mode_type,
+            guard_type,
+        ):
+            self.assertIsNotNone(value)
+        assert policy_type and capability_type and disposition_type
+        assert worker_type and mode_type and guard_type
+
+        capability_rows = (
+            (capability_type.LEGACY_READ, disposition_type.READ_ONLY),
+            (capability_type.MAYA_INFERENCE, disposition_type.EXECUTE),
+            (capability_type.PROVIDER_READ, disposition_type.READ_ONLY),
+            (capability_type.TURN_COMMIT, disposition_type.EXECUTE),
+            (capability_type.RELAY_ENQUEUE, disposition_type.EXECUTE),
+            (capability_type.PROVIDER_WRITE, disposition_type.DENIED),
+            (capability_type.FOLLOWUP_DELIVERY, disposition_type.DENIED),
+            (capability_type.PUBLIC_DELIVERY, disposition_type.DENIED),
+            (capability_type.LEARNING_WRITE, disposition_type.DENIED),
+        )
+        worker_rows = (
+            (worker_type.TURN_COORDINATOR, mode_type.ACTIVE),
+            (worker_type.COMMAND_RELAY_WORKER, mode_type.ACTIVE),
+            (worker_type.INTERNAL_JOB_WORKER, mode_type.ACTIVE),
+            (worker_type.PROVIDER_EFFECT_WORKER, mode_type.DISABLED),
+            (worker_type.FOLLOWUP_DELIVERY_WORKER, mode_type.DISABLED),
+            (worker_type.PUBLIC_DELIVERY_WORKER, mode_type.DISABLED),
+            (worker_type.LEARNING_WORKER, mode_type.DISABLED),
+            (worker_type.RECONCILIATION_WORKER, mode_type.SHADOW),
+            (worker_type.QUALIFICATION_CONTROLLER, mode_type.DISABLED),
+        )
+        policy = policy_type(
+            capability_matrix=capability_rows,
+            worker_modes=worker_rows,
+            guard_semantics=tuple(guard_type),
+        )
+
+        self.assertEqual(
+            tuple(field.name for field in fields(policy_type)),
+            ("capability_matrix", "worker_modes", "guard_semantics"),
+        )
+        self.assertEqual(policy_type.SCHEMA, "phase8-capability-policy")
+        self.assertEqual(policy_type.VERSION, 1)
+        self.assertEqual(policy_type.DOMAIN, "phase8-capability-policy-v1")
+        self.assertEqual(
+            policy.canonical_hash(),
+            "6e8761645380f978ad63091535f84a2c2cce657643377aabc944b4d5e2a671a4",
+        )
+        self.assertEqual(
+            json.loads(policy.to_canonical_bytes()),
+            {
+                "schema": "phase8-capability-policy",
+                "version": 1,
+                "data": {
+                    "capability_matrix": [
+                        [capability.value, disposition.value]
+                        for capability, disposition in capability_rows
+                    ],
+                    "worker_modes": [
+                        [worker.value, mode.value] for worker, mode in worker_rows
+                    ],
+                    "guard_semantics": [guard.value for guard in guard_type],
+                },
+            },
+        )
+        for override in (
+            {"capability_matrix": list(capability_rows)},
+            {"capability_matrix": capability_rows[:-1]},
+            {"capability_matrix": capability_rows[1:] + capability_rows[:1]},
+            {"worker_modes": worker_rows[:-1]},
+            {"guard_semantics": tuple(reversed(tuple(guard_type)))},
+        ):
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    policy_type(
+                        **(
+                            {
+                                "capability_matrix": capability_rows,
+                                "worker_modes": worker_rows,
+                                "guard_semantics": tuple(guard_type),
+                            }
+                            | override
+                        )
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

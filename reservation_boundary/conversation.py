@@ -16,6 +16,7 @@ from reservation_boundary.types import ConversationIntentKind, NormalizedMessage
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_ID_TOKEN_RE: Final = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
@@ -25,6 +26,14 @@ def _require_identifier(value: object, name: str) -> str:
         raise TypeError(f"{name} must be an exact string")
     if _IDENTIFIER_RE.fullmatch(value) is None:
         raise ValueError(f"{name} must use the closed identifier alphabet")
+    return value
+
+
+def _require_id_token(value: object, name: str) -> str:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be an exact string")
+    if _ID_TOKEN_RE.fullmatch(value) is None:
+        raise ValueError(f"{name} must use the Task 1 ID_TOKEN alphabet")
     return value
 
 
@@ -476,6 +485,174 @@ class PublicReplyType(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class PublicReplyChunk:
+    """Exact public bytes produced by the deterministic parent splitter/guard."""
+
+    aggregate_turn_id: str
+    ordinal: int
+    text: str
+    source_closure_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-public-reply-chunk"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-public-reply-chunk-v1"
+
+    def __post_init__(self) -> None:
+        _require_id_token(self.aggregate_turn_id, "PublicReplyChunk.aggregate_turn_id")
+        _require_exact_int(self.ordinal, "PublicReplyChunk.ordinal", minimum=0)
+        # Keep one accepted public-text policy without creating a module import cycle.
+        from reservation_boundary.reads import validate_public_text
+
+        validate_public_text(self.text, limit=4096)
+        _require_sha256(
+            self.source_closure_hash,
+            "PublicReplyChunk.source_closure_hash",
+        )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "aggregate_turn_id": self.aggregate_turn_id,
+                "ordinal": self.ordinal,
+                "text": self.text,
+                "source_closure_hash": self.source_closure_hash,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+
+class Capability(str, Enum):
+    LEGACY_READ = "legacy_read"
+    MAYA_INFERENCE = "maya_inference"
+    PROVIDER_READ = "provider_read"
+    TURN_COMMIT = "turn_commit"
+    RELAY_ENQUEUE = "relay_enqueue"
+    PROVIDER_WRITE = "provider_write"
+    FOLLOWUP_DELIVERY = "followup_delivery"
+    PUBLIC_DELIVERY = "public_delivery"
+    LEARNING_WRITE = "learning_write"
+
+
+class CapabilityDisposition(str, Enum):
+    DENIED = "denied"
+    READ_ONLY = "read_only"
+    PROPOSE_ONLY = "propose_only"
+    EXECUTE = "execute"
+
+
+class Worker(str, Enum):
+    TURN_COORDINATOR = "turn_coordinator"
+    COMMAND_RELAY_WORKER = "command_relay_worker"
+    INTERNAL_JOB_WORKER = "internal_job_worker"
+    PROVIDER_EFFECT_WORKER = "provider_effect_worker"
+    FOLLOWUP_DELIVERY_WORKER = "followup_delivery_worker"
+    PUBLIC_DELIVERY_WORKER = "public_delivery_worker"
+    LEARNING_WORKER = "learning_worker"
+    RECONCILIATION_WORKER = "reconciliation_worker"
+    QUALIFICATION_CONTROLLER = "qualification_controller"
+
+
+class WorkerMode(str, Enum):
+    DISABLED = "disabled"
+    SHADOW = "shadow"
+    ACTIVE = "active"
+
+
+class GuardSemantic(str, Enum):
+    FAIL_CLOSED = "fail_closed"
+    DEADLINE_BOUNDED = "deadline_bounded"
+    IDEMPOTENCY_REQUIRED = "idempotency_required"
+    LEASE_FENCED = "lease_fenced"
+    OWNER_CHECKED = "owner_checked"
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityPolicy:
+    """Closed stage capability matrix without concrete roots or allowlists."""
+
+    capability_matrix: tuple[tuple[Capability, CapabilityDisposition], ...]
+    worker_modes: tuple[tuple[Worker, WorkerMode], ...]
+    guard_semantics: tuple[GuardSemantic, ...]
+
+    SCHEMA: ClassVar[str] = "phase8-capability-policy"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-capability-policy-v1"
+
+    def __post_init__(self) -> None:
+        if type(self.capability_matrix) is not tuple:
+            raise TypeError("CapabilityPolicy.capability_matrix must be an exact tuple")
+        expected_capabilities = tuple(Capability)
+        if len(self.capability_matrix) != len(expected_capabilities):
+            raise ValueError("CapabilityPolicy must contain every capability exactly once")
+        for row, expected_capability in zip(
+            self.capability_matrix,
+            expected_capabilities,
+            strict=True,
+        ):
+            if type(row) is not tuple or len(row) != 2:
+                raise TypeError("CapabilityPolicy capability rows must be exact pairs")
+            capability, disposition = row
+            if type(capability) is not Capability or capability is not expected_capability:
+                raise ValueError("CapabilityPolicy capabilities must use enum order")
+            if type(disposition) is not CapabilityDisposition:
+                raise TypeError("CapabilityPolicy dispositions must be exact")
+
+        if type(self.worker_modes) is not tuple:
+            raise TypeError("CapabilityPolicy.worker_modes must be an exact tuple")
+        expected_workers = tuple(Worker)
+        if len(self.worker_modes) != len(expected_workers):
+            raise ValueError("CapabilityPolicy must contain every worker exactly once")
+        for row, expected_worker in zip(
+            self.worker_modes,
+            expected_workers,
+            strict=True,
+        ):
+            if type(row) is not tuple or len(row) != 2:
+                raise TypeError("CapabilityPolicy worker rows must be exact pairs")
+            worker, mode = row
+            if type(worker) is not Worker or worker is not expected_worker:
+                raise ValueError("CapabilityPolicy workers must use enum order")
+            if type(mode) is not WorkerMode:
+                raise TypeError("CapabilityPolicy worker modes must be exact")
+
+        if type(self.guard_semantics) is not tuple:
+            raise TypeError("CapabilityPolicy.guard_semantics must be an exact tuple")
+        if self.guard_semantics != tuple(GuardSemantic) or any(
+            type(item) is not GuardSemantic for item in self.guard_semantics
+        ):
+            raise ValueError(
+                "CapabilityPolicy guard semantics must be complete and enum-ordered"
+            )
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "capability_matrix": [
+                    [capability.value, disposition.value]
+                    for capability, disposition in self.capability_matrix
+                ],
+                "worker_modes": [
+                    [worker.value, mode.value] for worker, mode in self.worker_modes
+                ],
+                "guard_semantics": [item.value for item in self.guard_semantics],
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
 class MayaIntentClosure:
     """Child-owned intent closure with no facts, tools or commands."""
 
@@ -694,12 +871,17 @@ class TranscriptCommitment:
 
 
 __all__ = (
+    "Capability",
+    "CapabilityDisposition",
+    "CapabilityPolicy",
     "ConversationProjection",
     "ConversationStage",
     "DesiredService",
+    "GuardSemantic",
     "MayaIntentClosure",
     "MayaTurnClosure",
     "MayaTurnRequest",
+    "PublicReplyChunk",
     "PublicReplyType",
     "PublicRoute",
     "ReservationExecutionProjection",
@@ -707,4 +889,6 @@ __all__ = (
     "TranscriptCommitment",
     "TranscriptDirection",
     "TranscriptKind",
+    "Worker",
+    "WorkerMode",
 )
