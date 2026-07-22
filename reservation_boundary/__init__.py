@@ -79,6 +79,8 @@ from reservation_boundary.conversation import *  # noqa: F403
 from reservation_boundary.conversation import __all__ as _conversation_all
 from reservation_boundary.reads import *  # noqa: F403
 from reservation_boundary.reads import __all__ as _reads_all
+from reservation_boundary.authority import *  # noqa: F403
+from reservation_boundary.authority import __all__ as _authority_all
 from reservation_boundary.effects import *  # noqa: F403
 from reservation_boundary.effects import __all__ as _effects_all
 from reservation_boundary.qualification import *  # noqa: F403
@@ -90,6 +92,7 @@ __all__ = (
     *_types_all,
     *_conversation_all,
     *_reads_all,
+    *_authority_all,
     *_effects_all,
     *_qualification_all,
     "from_wire_json",

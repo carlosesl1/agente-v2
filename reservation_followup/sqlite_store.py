@@ -676,6 +676,196 @@ class SQLiteFollowupUnitOfWork:
         if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
             raise DataCorruption("SQLite v2 schema contains foreign key violations")
 
+    def install_e2e_followup_allocations(
+            self,
+            *,
+            operation_id: str,
+            manifest: object,
+            installed_at: datetime,
+        ):
+            from reservation_boundary.authority import (
+                AllocationInstallationReceipt,
+                EffectAllocationRow,
+                ExactEffectAllocationManifest,
+                InstallationHeaderState,
+                InstallationStatus,
+                InstallationTarget,
+            )
+
+            self._ensure_open()
+            if self._schema_version != SCHEMA_VERSION_V2:
+                raise DataCorruption("followup authority install requires Phase 6 v2")
+            if type(manifest) is not ExactEffectAllocationManifest:
+                raise TypeError("manifest must be exact ExactEffectAllocationManifest")
+            rows = tuple(
+                row
+                for row in manifest.rows
+                if row.installation_target
+                is InstallationTarget.FOLLOWUP_E2E_EFFECT_AUTHORITY
+            )
+            if not rows or any(type(row) is not EffectAllocationRow for row in rows):
+                raise DataCorruption("followup target manifest is empty or invalid")
+            generation_ids = tuple(sorted({row.generation_id for row in rows}))
+            row_hashes = tuple(row.canonical_hash() for row in rows)
+            aggregate_hash = hashlib.sha256(
+                b"phase8-installed-allocation-aggregate-v1\0"
+                + b"".join(bytes.fromhex(value) for value in row_hashes)
+            ).hexdigest()
+
+            def make_receipt(timestamp: datetime) -> AllocationInstallationReceipt:
+                return AllocationInstallationReceipt(
+                    operation_id=operation_id,
+                    installation_target=(
+                        InstallationTarget.FOLLOWUP_E2E_EFFECT_AUTHORITY
+                    ),
+                    qualification_id=manifest.qualification_id,
+                    epoch=manifest.epoch,
+                    contract_hash=manifest.contract_hash,
+                    effect_authorization_binding_hash=(
+                        manifest.effect_authorization_binding_hash
+                    ),
+                    manifest_hash=manifest.canonical_hash(),
+                    generation_ids=generation_ids,
+                    installed_row_hashes=row_hashes,
+                    allocation_count=len(rows),
+                    installed_allocation_aggregate_hash=aggregate_hash,
+                    header_state=InstallationHeaderState.OPEN,
+                    status=InstallationStatus.INSTALLED,
+                    installed_at=timestamp,
+                )
+
+            candidate = make_receipt(installed_at)
+            with self._transaction("install_e2e_followup_allocations"):
+                existing_headers = self._connection.execute(
+                    "SELECT generation_id, state, installation_operation_id, "
+                    "installation_receipt_json, installation_receipt_hash, installed_at, "
+                    "manifest_hash FROM followup_e2e_effect_authority "
+                    "WHERE qualification_id=? AND epoch=? AND row_kind='generation_header' "
+                    "ORDER BY generation_id",
+                    (manifest.qualification_id, manifest.epoch),
+                ).fetchall()
+                if existing_headers:
+                    if (
+                        len(existing_headers) != len(generation_ids)
+                        or tuple(row[0] for row in existing_headers) != generation_ids
+                        or any(row[1] != "open" for row in existing_headers)
+                    ):
+                        raise DataCorruption("followup generation is closed or divergent")
+                    stored_at = datetime.fromisoformat(existing_headers[0][5])
+                    stored = make_receipt(stored_at)
+                    if any(
+                        row[2] != operation_id
+                        or row[3] != stored.to_canonical_bytes().decode("utf-8")
+                        or row[4] != stored.canonical_hash()
+                        or row[5] != stored_at.isoformat()
+                        or row[6] != manifest.canonical_hash()
+                        for row in existing_headers
+                    ):
+                        raise DataCorruption("persisted followup installation diverges")
+                    persisted_allocations = self._connection.execute(
+                        "SELECT allocation_id, allocation_hash, state FROM "
+                        "followup_e2e_effect_authority WHERE qualification_id=? "
+                        "AND epoch=? AND row_kind='allocation' ORDER BY allocation_ordinal, "
+                        "allocation_id",
+                        (manifest.qualification_id, manifest.epoch),
+                    ).fetchall()
+                    expected_allocations = [
+                        (row.allocation_id, row.canonical_hash(), "available") for row in rows
+                    ]
+                    if persisted_allocations != expected_allocations:
+                        raise DataCorruption("persisted followup allocation set diverges")
+                    return stored
+                partial = self._connection.execute(
+                    "SELECT count(*) FROM followup_e2e_effect_authority "
+                    "WHERE qualification_id=? AND epoch=?",
+                    (manifest.qualification_id, manifest.epoch),
+                ).fetchone()[0]
+                if partial:
+                    raise DataCorruption("partial followup authority installation exists")
+
+                receipt_json = candidate.to_canonical_bytes().decode("utf-8")
+                receipt_hash = candidate.canonical_hash()
+                installed_text = installed_at.isoformat()
+                for scenario_id, generation_id in sorted(
+                    {(row.scenario_id, row.generation_id) for row in rows}
+                ):
+                    self._connection.execute(
+                        "INSERT INTO followup_e2e_effect_authority "
+                        "(row_kind, installation_target, qualification_id, epoch, scenario_id, "
+                        "contract_hash, effect_authorization_binding_hash, manifest_hash, "
+                        "generation_id, allocation_id, allocation_ordinal, allocation_hash, "
+                        "effect_family, effect_kind, effect_role, effect_scope_hash, "
+                        "workflow_scope_hash, channel_scope_hash, target_binding_hash, "
+                        "message_ordinal, activation_parent_kind, activation_parent_id, "
+                        "activation_parent_hash, state, bound_subject_id, bound_subject_hash, "
+                        "child_decision_receipt_json, child_decision_receipt_hash, revision, "
+                        "installation_operation_id, installation_receipt_json, "
+                        "installation_receipt_hash, installed_allocation_aggregate_hash, "
+                        "installed_at, closed_at) VALUES "
+                        "('generation_header', 'followup_e2e_effect_authority', ?, ?, ?, "
+                        "?, ?, ?, ?, '__header__', NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+                        "NULL, NULL, NULL, NULL, NULL, NULL, 'open', NULL, NULL, NULL, NULL, 0, "
+                        "?, ?, ?, ?, ?, NULL)",
+                        (
+                            manifest.qualification_id,
+                            manifest.epoch,
+                            scenario_id,
+                            manifest.contract_hash,
+                            manifest.effect_authorization_binding_hash,
+                            manifest.canonical_hash(),
+                            generation_id,
+                            operation_id,
+                            receipt_json,
+                            receipt_hash,
+                            aggregate_hash,
+                            installed_text,
+                        ),
+                    )
+                for row in rows:
+                    self._connection.execute(
+                        "INSERT INTO followup_e2e_effect_authority "
+                        "(row_kind, installation_target, qualification_id, epoch, scenario_id, "
+                        "contract_hash, effect_authorization_binding_hash, manifest_hash, "
+                        "generation_id, allocation_id, allocation_ordinal, allocation_hash, "
+                        "effect_family, effect_kind, effect_role, effect_scope_hash, "
+                        "workflow_scope_hash, channel_scope_hash, target_binding_hash, "
+                        "message_ordinal, activation_parent_kind, activation_parent_id, "
+                        "activation_parent_hash, state, bound_subject_id, bound_subject_hash, "
+                        "child_decision_receipt_json, child_decision_receipt_hash, revision, "
+                        "installation_operation_id, installation_receipt_json, "
+                        "installation_receipt_hash, installed_allocation_aggregate_hash, "
+                        "installed_at, closed_at) VALUES "
+                        "('allocation', 'followup_e2e_effect_authority', ?, ?, ?, ?, ?, ?, "
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', NULL, NULL, "
+                        "NULL, NULL, 0, NULL, NULL, NULL, NULL, ?, NULL)",
+                        (
+                            row.qualification_id,
+                            row.epoch,
+                            row.scenario_id,
+                            row.contract_hash,
+                            row.effect_authorization_binding_hash,
+                            manifest.canonical_hash(),
+                            row.generation_id,
+                            row.allocation_id,
+                            row.allocation_ordinal,
+                            row.canonical_hash(),
+                            row.effect_family.value,
+                            row.effect_kind.value,
+                            row.effect_role.value,
+                            row.effect_scope_hash,
+                            row.workflow_scope_hash,
+                            row.channel_scope_hash,
+                            row.target_binding_hash,
+                            row.message_ordinal,
+                            row.activation_parent_kind.value,
+                            row.activation_parent_id,
+                            row.activation_parent_hash,
+                            installed_text,
+                        ),
+                    )
+                return candidate
+
+
     def accept_boundary_settlement(
         self,
         *,
@@ -832,12 +1022,14 @@ class SQLiteFollowupUnitOfWork:
             if fault_hook is not None:
                 fault_hook(stage)
 
+        authority_receipt = (None, None, None, None, None, None)
         with self._transaction("accept_boundary_settlement"):
             existing = self._connection.execute(
                 "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
-                "committed_at FROM main.payment_boundary_ingress_receipts "
-                "WHERE operation_id=?",
+                "qualification_id, epoch, scenario_id, generation_id, allocation_id, "
+                "authority_row_hash, committed_at FROM "
+                "main.payment_boundary_ingress_receipts WHERE operation_id=?",
                 (operation_id,),
             ).fetchone()
             if existing is not None:
@@ -847,6 +1039,35 @@ class SQLiteFollowupUnitOfWork:
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
                     raise DataCorruption("persisted settlement receipt is invalid") from exc
+                authority_values = existing[7:13]
+                if bundle.qualification_id is None:
+                    if authority_values != (None, None, None, None, None, None):
+                        raise DataCorruption("non-E2E settlement receipt has authority tuple")
+                else:
+                    if authority_values[:3] != (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                    ) or authority_values[4] != bundle.allocation_id:
+                        raise DataCorruption("settlement receipt authority tuple diverges")
+                    bound_row = self._connection.execute(
+                        "SELECT generation_id, allocation_hash, state, bound_subject_id "
+                        "FROM main.followup_e2e_effect_authority WHERE "
+                        "qualification_id=? AND epoch=? AND scenario_id=? AND allocation_id=?",
+                        (
+                            bundle.qualification_id,
+                            bundle.immutable_generation,
+                            bundle.scenario_id,
+                            bundle.allocation_id,
+                        ),
+                    ).fetchone()
+                    if (
+                        bound_row is None
+                        or bound_row[0] != authority_values[3]
+                        or bound_row[1] != authority_values[5]
+                        or bound_row[2:] != ("bound", command.settlement_command_id)
+                    ):
+                        raise DataCorruption("bound settlement authority row diverges")
                 expected_row = (
                     stored.source_turn_receipt_hash,
                     stored.artifact_hash,
@@ -855,6 +1076,7 @@ class SQLiteFollowupUnitOfWork:
                     stored.target_result_hash,
                     stored.to_canonical_bytes().decode("utf-8"),
                     stored.canonical_hash(),
+                    *authority_values,
                     stored.committed_at.isoformat(),
                 )
                 if (
@@ -870,6 +1092,69 @@ class SQLiteFollowupUnitOfWork:
                 return stored
             if self._payment_workflow_row(state.subject.payment_id) is not None:
                 raise IdentityConflict("settlement relay payment identity already exists")
+
+            if bundle.qualification_id is not None:
+                target_binding_hash = hashlib.sha256(
+                    b"phase8-authority-target-binding-v1\0"
+                    + command.settlement_command_id.encode("utf-8")
+                ).hexdigest()
+                authority = self._connection.execute(
+                    "SELECT generation_id, state, effect_family, target_binding_hash, "
+                    "allocation_hash, revision FROM main.followup_e2e_effect_authority "
+                    "WHERE qualification_id=? AND epoch=? AND scenario_id=? "
+                    "AND allocation_id=? AND row_kind='allocation'",
+                    (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        bundle.allocation_id,
+                    ),
+                ).fetchone()
+                if (
+                    authority is None
+                    or authority[1] != "available"
+                    or authority[2] != "payment"
+                    or authority[3] != target_binding_hash
+                ):
+                    raise DataCorruption("settlement E2E allocation is absent or unavailable")
+                header = self._connection.execute(
+                    "SELECT state FROM main.followup_e2e_effect_authority WHERE "
+                    "qualification_id=? AND epoch=? AND scenario_id=? AND generation_id=? "
+                    "AND allocation_id='__header__'",
+                    (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        authority[0],
+                    ),
+                ).fetchone()
+                if header != ("open",):
+                    raise DataCorruption("settlement E2E generation is not open")
+                authority_receipt = (
+                    bundle.qualification_id,
+                    bundle.immutable_generation,
+                    bundle.scenario_id,
+                    authority[0],
+                    bundle.allocation_id,
+                    authority[4],
+                )
+                bound = self._connection.execute(
+                    "UPDATE main.followup_e2e_effect_authority SET state='bound', "
+                    "bound_subject_id=?, bound_subject_hash=?, revision=revision+1 "
+                    "WHERE qualification_id=? AND epoch=? AND scenario_id=? "
+                    "AND allocation_id=? AND state='available' AND revision=?",
+                    (
+                        command.settlement_command_id,
+                        semantic_hash(command),
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        bundle.allocation_id,
+                        authority[5],
+                    ),
+                )
+                if bound.rowcount != 1:
+                    raise ConcurrencyConflict("settlement E2E allocation bind CAS was lost")
 
             trip("before_domain")
             initial = new_payment(anchor, policy).state
@@ -966,7 +1251,9 @@ class SQLiteFollowupUnitOfWork:
                 "INSERT INTO main.payment_boundary_ingress_receipts "
                 "(operation_id, source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
-                "committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "qualification_id, epoch, scenario_id, generation_id, allocation_id, "
+                "authority_row_hash, committed_at) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     operation_id,
                     source_turn_receipt_hash,
@@ -976,6 +1263,7 @@ class SQLiteFollowupUnitOfWork:
                     target_result_hash,
                     receipt_json,
                     receipt_hash,
+                    *authority_receipt,
                     committed_at_text,
                 ),
             )
@@ -1591,6 +1879,32 @@ class SQLiteFollowupUnitOfWork:
         for job in jobs:
             raw = to_wire_json(job)
             timestamp = job.created_at.isoformat()
+            if self._schema_version == SCHEMA_VERSION_V2:
+                self._connection.execute(
+                    "INSERT INTO main.handoff_outbox "
+                    "(message_id, idempotency_key, effect_id, handoff_id, kind, "
+                    "template_id, payload_json, payload_hash, status, claim_owner, "
+                    "fencing_token, lease_acquired_at, lease_expires_at, "
+                    "delivery_attempts, delivered_at, receipt_hash, created_at, updated_at, "
+                    "dispatch_slots_consumed, qualification_id, epoch, scenario_id, "
+                    "generation_id, allocation_id, effect_authorization_binding_hash, "
+                    "dispatch_deadline_at, cas_revision) VALUES "
+                    "(?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 0, NULL, NULL, 0, NULL, "
+                    "NULL, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)",
+                    (
+                        job.effect_id,
+                        job.effect_id,
+                        job.effect_id,
+                        job.handoff_id,
+                        job.kind.value,
+                        job.kind.value,
+                        raw,
+                        semantic_hash(job),
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                continue
             self._connection.execute(
                 "INSERT INTO main.handoff_outbox "
                 "(message_id, idempotency_key, effect_id, handoff_id, kind, "
@@ -1625,6 +1939,36 @@ class SQLiteFollowupUnitOfWork:
             effect_id = _payment_effect_id(command.settlement_command_id, job.kind)
             raw = to_wire_json(job)
             timestamp = created_at.isoformat()
+            if self._schema_version == SCHEMA_VERSION_V2:
+                self._connection.execute(
+                    "INSERT INTO main.payment_outbox "
+                    "(message_id, idempotency_key, effect_id, payment_id, payment_version, "
+                    "economic_signature, settlement_command_id, kind, template_id, "
+                    "payload_json, payload_hash, status, claim_owner, fencing_token, "
+                    "lease_acquired_at, lease_expires_at, delivery_attempts, delivered_at, "
+                    "receipt_hash, created_at, updated_at, dispatch_slots_consumed, "
+                    "qualification_id, epoch, scenario_id, generation_id, allocation_id, "
+                    "effect_authorization_binding_hash, dispatch_deadline_at, cas_revision) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 0, NULL, "
+                    "NULL, 0, NULL, NULL, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, "
+                    "NULL, 0)",
+                    (
+                        effect_id,
+                        effect_id,
+                        effect_id,
+                        command.payment_id,
+                        command.payment_version,
+                        command.economic_signature,
+                        command.settlement_command_id,
+                        job.kind.value,
+                        job.kind.value,
+                        raw,
+                        semantic_hash(job),
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                continue
             self._connection.execute(
                 "INSERT INTO main.payment_outbox "
                 "(message_id, idempotency_key, effect_id, payment_id, payment_version, "
@@ -1915,25 +2259,67 @@ class SQLiteFollowupUnitOfWork:
             updated_at = _canonical_time(row[17], "handoff outbox updated_at")
             if now < created_at or now < updated_at:
                 raise ValueError("claim time cannot predate the handoff outbox state")
-            cursor = self._connection.execute(
-                "UPDATE main.handoff_outbox SET status='leased', claim_owner=?, "
-                "fencing_token=fencing_token+1, lease_acquired_at=?, "
-                "lease_expires_at=?, delivery_attempts=delivery_attempts+1, updated_at=? "
-                "WHERE message_id=? AND fencing_token=? AND delivery_attempts=? AND "
-                "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
-                "AND lease_expires_at IS NULL) OR "
-                "(status='leased' AND lease_expires_at<=?))",
-                (
-                    owner,
-                    now.isoformat(),
-                    expires_at.isoformat(),
-                    now.isoformat(),
-                    message.effect_id,
-                    row[10],
-                    row[13],
-                    now.isoformat(),
-                ),
-            )
+            if self._schema_version == SCHEMA_VERSION_V2:
+                v2_meta = self._connection.execute(
+                    "SELECT dispatch_deadline_at, cas_revision FROM main.handoff_outbox "
+                    "WHERE message_id=?",
+                    (message.effect_id,),
+                ).fetchone()
+                if v2_meta is None:
+                    raise DataCorruption("handoff outbox v2 metadata is missing")
+                deadline = (
+                    expires_at
+                    if v2_meta[0] is None
+                    else _canonical_time(
+                        v2_meta[0],
+                        "handoff outbox dispatch_deadline_at",
+                    )
+                )
+                if now >= deadline or expires_at > deadline:
+                    raise ValueError("handoff lease exceeds immutable dispatch deadline")
+                cursor = self._connection.execute(
+                    "UPDATE main.handoff_outbox SET status='leased', claim_owner=?, "
+                    "fencing_token=fencing_token+1, lease_acquired_at=?, "
+                    "lease_expires_at=?, delivery_attempts=delivery_attempts+1, "
+                    "dispatch_deadline_at=COALESCE(dispatch_deadline_at, ?), "
+                    "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
+                    "AND fencing_token=? AND delivery_attempts=? AND cas_revision=? AND "
+                    "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                    "AND lease_expires_at IS NULL) OR "
+                    "(status='leased' AND lease_expires_at<=?))",
+                    (
+                        owner,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        deadline.isoformat(),
+                        now.isoformat(),
+                        message.effect_id,
+                        row[10],
+                        row[13],
+                        v2_meta[1],
+                        now.isoformat(),
+                    ),
+                )
+            else:
+                cursor = self._connection.execute(
+                    "UPDATE main.handoff_outbox SET status='leased', claim_owner=?, "
+                    "fencing_token=fencing_token+1, lease_acquired_at=?, "
+                    "lease_expires_at=?, delivery_attempts=delivery_attempts+1, updated_at=? "
+                    "WHERE message_id=? AND fencing_token=? AND delivery_attempts=? AND "
+                    "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                    "AND lease_expires_at IS NULL) OR "
+                    "(status='leased' AND lease_expires_at<=?))",
+                    (
+                        owner,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        now.isoformat(),
+                        message.effect_id,
+                        row[10],
+                        row[13],
+                        now.isoformat(),
+                    ),
+                )
             if cursor.rowcount != 1:
                 raise ConcurrencyConflict("handoff outbox claim lost its compare-and-swap")
             updated = self._handoff_outbox_row(message.effect_id)
@@ -1963,22 +2349,48 @@ class SQLiteFollowupUnitOfWork:
         with self._transaction("release_handoff_outbox"):
             current, revision = self._load_handoff(claim.message.handoff_id)
             message, row = self._assert_live_handoff_claim(claim, now=now)
-            cursor = self._connection.execute(
-                "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
-                "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
-                "WHERE message_id=? AND status='leased' AND claim_owner=? "
-                "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
-                "AND delivery_attempts=?",
-                (
-                    now.isoformat(),
-                    message.effect_id,
-                    row[9],
-                    claim.fencing_token,
-                    claim.lease_acquired_at.isoformat(),
-                    claim.lease_expires_at.isoformat(),
-                    claim.delivery_attempts,
-                ),
-            )
+            if self._schema_version == SCHEMA_VERSION_V2:
+                v2_meta = self._connection.execute(
+                    "SELECT cas_revision FROM main.handoff_outbox WHERE message_id=?",
+                    (message.effect_id,),
+                ).fetchone()
+                if v2_meta is None:
+                    raise DataCorruption("handoff outbox v2 metadata is missing")
+                cursor = self._connection.execute(
+                    "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, "
+                    "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
+                    "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                    "AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND delivery_attempts=? AND cas_revision=?",
+                    (
+                        now.isoformat(),
+                        message.effect_id,
+                        row[9],
+                        claim.fencing_token,
+                        claim.lease_acquired_at.isoformat(),
+                        claim.lease_expires_at.isoformat(),
+                        claim.delivery_attempts,
+                        v2_meta[0],
+                    ),
+                )
+            else:
+                cursor = self._connection.execute(
+                    "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                    "WHERE message_id=? AND status='leased' AND claim_owner=? "
+                    "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND delivery_attempts=?",
+                    (
+                        now.isoformat(),
+                        message.effect_id,
+                        row[9],
+                        claim.fencing_token,
+                        claim.lease_acquired_at.isoformat(),
+                        claim.lease_expires_at.isoformat(),
+                        claim.delivery_attempts,
+                    ),
+                )
             if cursor.rowcount != 1:
                 raise StaleLease("handoff outbox release lost its live lease")
             existing = next(
@@ -3852,25 +4264,67 @@ class SQLiteFollowupUnitOfWork:
             updated_at = _canonical_time(row[20], "payment outbox updated_at")
             if now < created_at or now < updated_at:
                 raise ValueError("claim time cannot predate the payment outbox state")
-            cursor = self._connection.execute(
-                "UPDATE main.payment_outbox SET status='leased', claim_owner=?, "
-                "fencing_token=fencing_token+1, lease_acquired_at=?, lease_expires_at=?, "
-                "delivery_attempts=delivery_attempts+1, updated_at=? WHERE message_id=? "
-                "AND fencing_token=? AND delivery_attempts=? AND "
-                "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
-                "AND lease_expires_at IS NULL) OR "
-                "(status='leased' AND lease_expires_at<=?))",
-                (
-                    owner,
-                    now.isoformat(),
-                    expires_at.isoformat(),
-                    now.isoformat(),
-                    candidate[0],
-                    row[13],
-                    row[16],
-                    now.isoformat(),
-                ),
-            )
+            if self._schema_version == SCHEMA_VERSION_V2:
+                v2_meta = self._connection.execute(
+                    "SELECT dispatch_deadline_at, cas_revision FROM main.payment_outbox "
+                    "WHERE message_id=?",
+                    (candidate[0],),
+                ).fetchone()
+                if v2_meta is None:
+                    raise DataCorruption("payment outbox v2 metadata is missing")
+                deadline = (
+                    expires_at
+                    if v2_meta[0] is None
+                    else _canonical_time(
+                        v2_meta[0],
+                        "payment outbox dispatch_deadline_at",
+                    )
+                )
+                if now >= deadline or expires_at > deadline:
+                    raise ValueError("payment lease exceeds immutable dispatch deadline")
+                cursor = self._connection.execute(
+                    "UPDATE main.payment_outbox SET status='leased', claim_owner=?, "
+                    "fencing_token=fencing_token+1, lease_acquired_at=?, lease_expires_at=?, "
+                    "delivery_attempts=delivery_attempts+1, "
+                    "dispatch_deadline_at=COALESCE(dispatch_deadline_at, ?), "
+                    "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
+                    "AND fencing_token=? AND delivery_attempts=? AND cas_revision=? AND "
+                    "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                    "AND lease_expires_at IS NULL) OR "
+                    "(status='leased' AND lease_expires_at<=?))",
+                    (
+                        owner,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        deadline.isoformat(),
+                        now.isoformat(),
+                        candidate[0],
+                        row[13],
+                        row[16],
+                        v2_meta[1],
+                        now.isoformat(),
+                    ),
+                )
+            else:
+                cursor = self._connection.execute(
+                    "UPDATE main.payment_outbox SET status='leased', claim_owner=?, "
+                    "fencing_token=fencing_token+1, lease_acquired_at=?, lease_expires_at=?, "
+                    "delivery_attempts=delivery_attempts+1, updated_at=? WHERE message_id=? "
+                    "AND fencing_token=? AND delivery_attempts=? AND "
+                    "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
+                    "AND lease_expires_at IS NULL) OR "
+                    "(status='leased' AND lease_expires_at<=?))",
+                    (
+                        owner,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        now.isoformat(),
+                        candidate[0],
+                        row[13],
+                        row[16],
+                        now.isoformat(),
+                    ),
+                )
             if cursor.rowcount != 1:
                 raise ConcurrencyConflict("payment outbox claim lost its compare-and-swap")
             updated = self._payment_outbox_row(candidate[0])
@@ -3907,22 +4361,48 @@ class SQLiteFollowupUnitOfWork:
         with self._transaction("release_payment_outbox"):
             self._load_payment(clean.payment_id)
             clean, row = self._assert_live_payment_claim(clean, now=now)
-            cursor = self._connection.execute(
-                "UPDATE main.payment_outbox SET status='pending', claim_owner=NULL, "
-                "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
-                "WHERE message_id=? AND status='leased' AND claim_owner=? "
-                "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
-                "AND delivery_attempts=?",
-                (
-                    now.isoformat(),
-                    clean.message_id,
-                    row[12],
-                    clean.fencing_token,
-                    clean.lease_acquired_at.isoformat(),
-                    clean.lease_expires_at.isoformat(),
-                    clean.delivery_attempts,
-                ),
-            )
+            if self._schema_version == SCHEMA_VERSION_V2:
+                v2_meta = self._connection.execute(
+                    "SELECT cas_revision FROM main.payment_outbox WHERE message_id=?",
+                    (clean.message_id,),
+                ).fetchone()
+                if v2_meta is None:
+                    raise DataCorruption("payment outbox v2 metadata is missing")
+                cursor = self._connection.execute(
+                    "UPDATE main.payment_outbox SET status='pending', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, "
+                    "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
+                    "AND status='leased' AND claim_owner=? AND fencing_token=? "
+                    "AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND delivery_attempts=? AND cas_revision=?",
+                    (
+                        now.isoformat(),
+                        clean.message_id,
+                        row[12],
+                        clean.fencing_token,
+                        clean.lease_acquired_at.isoformat(),
+                        clean.lease_expires_at.isoformat(),
+                        clean.delivery_attempts,
+                        v2_meta[0],
+                    ),
+                )
+            else:
+                cursor = self._connection.execute(
+                    "UPDATE main.payment_outbox SET status='pending', claim_owner=NULL, "
+                    "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
+                    "WHERE message_id=? AND status='leased' AND claim_owner=? "
+                    "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
+                    "AND delivery_attempts=?",
+                    (
+                        now.isoformat(),
+                        clean.message_id,
+                        row[12],
+                        clean.fencing_token,
+                        clean.lease_acquired_at.isoformat(),
+                        clean.lease_expires_at.isoformat(),
+                        clean.delivery_attempts,
+                    ),
+                )
             if cursor.rowcount != 1:
                 raise StaleLease("payment outbox release lost its live lease")
             return clean

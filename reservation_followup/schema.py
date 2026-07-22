@@ -149,7 +149,7 @@ def handoff_events_contract() -> TableContract:
     )
 
 
-def _outbox_columns(prefix: str) -> tuple[ColumnContract, ...]:
+def _outbox_columns(prefix: str, *, v2: bool = False) -> tuple[ColumnContract, ...]:
     workflow_id = "handoff_id" if prefix == "handoff" else "payment_id"
     base: list[ColumnContract] = [
         _text("message_id", check=_nonempty("message_id")),
@@ -180,7 +180,15 @@ def _outbox_columns(prefix: str) -> tuple[ColumnContract, ...]:
             _text("template_id", check=_nonempty("template_id")),
             _text("payload_json", check=_nonempty("payload_json")),
             _hash("payload_hash"),
-            _text("status", check="status IN ('pending', 'leased', 'delivered')"),
+            _text(
+                "status",
+                check=(
+                    "status IN ('pending', 'leased', 'delivered')"
+                    if not v2
+                    else "status IN ('pending', 'leased', 'dispatch_fenced', "
+                    "'delivered', 'cancelled', 'manual_review')"
+                ),
+            ),
             _text("claim_owner", nullable=True, check=_nonempty("claim_owner")),
             _integer("fencing_token", "fencing_token >= 0"),
             _timestamp("lease_acquired_at", nullable=True),
@@ -192,10 +200,37 @@ def _outbox_columns(prefix: str) -> tuple[ColumnContract, ...]:
             _timestamp("updated_at"),
         )
     )
+    if v2:
+        base.extend(
+            (
+                _integer(
+                    "dispatch_slots_consumed",
+                    "dispatch_slots_consumed IN (0, 1)",
+                ),
+                _text(
+                    "qualification_id",
+                    nullable=True,
+                    check=_nonempty("qualification_id"),
+                ),
+                ColumnContract(
+                    "epoch",
+                    "INTEGER",
+                    "bigint",
+                    True,
+                    "epoch IS NULL OR epoch >= 1",
+                ),
+                _text("scenario_id", nullable=True, check=_nonempty("scenario_id")),
+                _text("generation_id", nullable=True, check=_nonempty("generation_id")),
+                _text("allocation_id", nullable=True, check=_nonempty("allocation_id")),
+                _hash("effect_authorization_binding_hash", nullable=True),
+                _timestamp("dispatch_deadline_at", nullable=True),
+                _integer("cas_revision", "cas_revision >= 0"),
+            )
+        )
     return tuple(base)
 
 
-def _outbox_constraints(prefix: str) -> tuple[str, ...]:
+def _outbox_constraints(prefix: str, *, v2: bool = False) -> tuple[str, ...]:
     table = f"{prefix}_outbox"
     workflow_table = f"{prefix}_workflows"
     workflow_id = "handoff_id" if prefix == "handoff" else "payment_id"
@@ -264,6 +299,21 @@ def _outbox_constraints(prefix: str) -> tuple[str, ...]:
             f"CONSTRAINT ck_{table}_status_matrix CHECK {status_matrix}",
         )
     )
+    if v2:
+        constraints.extend(
+            (
+                f"CONSTRAINT ck_{table}_authority_tuple CHECK "
+                "((qualification_id IS NULL AND epoch IS NULL AND scenario_id IS NULL "
+                "AND generation_id IS NULL AND allocation_id IS NULL AND "
+                "effect_authorization_binding_hash IS NULL) OR "
+                "(qualification_id IS NOT NULL AND epoch IS NOT NULL AND "
+                "scenario_id IS NOT NULL AND generation_id IS NOT NULL AND "
+                "allocation_id IS NOT NULL AND "
+                "effect_authorization_binding_hash IS NOT NULL))",
+                f"CONSTRAINT ck_{table}_dispatch_deadline CHECK "
+                "(dispatch_deadline_at IS NULL OR dispatch_deadline_at >= created_at)",
+            )
+        )
     return tuple(constraints)
 
 
@@ -517,6 +567,22 @@ def payment_outbox_contract() -> TableContract:
     )
 
 
+def handoff_outbox_v2_contract() -> TableContract:
+    return TableContract(
+        "handoff_outbox",
+        _outbox_columns("handoff", v2=True),
+        _outbox_constraints("handoff", v2=True),
+    )
+
+
+def payment_outbox_v2_contract() -> TableContract:
+    return TableContract(
+        "payment_outbox",
+        _outbox_columns("payment", v2=True),
+        _outbox_constraints("payment", v2=True),
+    )
+
+
 def payment_receipts_contract() -> TableContract:
     return _receipts_contract("payment")
 
@@ -549,11 +615,23 @@ def _boundary_ingress_receipts_contract(table_name: str) -> TableContract:
             _hash("target_result_hash"),
             _text("receipt_json", check=_nonempty("receipt_json")),
             _hash("receipt_hash"),
+            _text("qualification_id", nullable=True, check=_nonempty("qualification_id")),
+            ColumnContract("epoch", "INTEGER", "bigint", True, "epoch IS NULL OR epoch >= 1"),
+            _text("scenario_id", nullable=True, check=_nonempty("scenario_id")),
+            _text("generation_id", nullable=True, check=_nonempty("generation_id")),
+            _text("allocation_id", nullable=True, check=_nonempty("allocation_id")),
+            _hash("authority_row_hash", nullable=True),
             _timestamp("committed_at"),
         ),
         (
             f"CONSTRAINT pk_{table_name} PRIMARY KEY (operation_id)",
             f"CONSTRAINT uq_{table_name}_receipt UNIQUE (receipt_hash)",
+            f"CONSTRAINT ck_{table_name}_authority_tuple CHECK "
+            "((qualification_id IS NULL AND epoch IS NULL AND scenario_id IS NULL AND "
+            "generation_id IS NULL AND allocation_id IS NULL AND authority_row_hash IS NULL) "
+            "OR (qualification_id IS NOT NULL AND epoch IS NOT NULL AND "
+            "scenario_id IS NOT NULL AND generation_id IS NOT NULL AND "
+            "allocation_id IS NOT NULL AND authority_row_hash IS NOT NULL))",
         ),
     )
 
@@ -568,104 +646,68 @@ def payment_boundary_ingress_receipts_contract() -> TableContract:
 
 def followup_e2e_effect_authority_contract() -> TableContract:
     def nullable_ordinal(name: str) -> ColumnContract:
-        return ColumnContract(
-            name,
-            "INTEGER",
-            "bigint",
-            True,
-            f"{name} IS NULL OR {name} >= 0",
-        )
+        return ColumnContract(name, "INTEGER", "bigint", True, f"{name} IS NULL OR {name} >= 0")
 
     return TableContract(
-        "followup_e2e_effect_authority",
-        (
-            _text("authority_row_id", check=_nonempty("authority_row_id")),
+        name="followup_e2e_effect_authority",
+        columns=(
             _text("row_kind", check="row_kind IN ('generation_header', 'allocation')"),
-            _text("qualification_id", check=_nonempty("qualification_id")),
+            _text("installation_target", check="installation_target = 'followup_e2e_effect_authority'"),
+            _text("qualification_id"),
             _integer("epoch", "epoch >= 1"),
+            _text("scenario_id"),
             _hash("contract_hash"),
             _hash("effect_authorization_binding_hash"),
             _hash("manifest_hash"),
-            _text("generation_id", check=_nonempty("generation_id")),
-            _text("allocation_id", nullable=True, check=_nonempty("allocation_id")),
+            _text("generation_id"),
+            _text("allocation_id"),
             nullable_ordinal("allocation_ordinal"),
-            _text("scenario_id", nullable=True, check=_nonempty("scenario_id")),
-            _text(
-                "effect_family",
-                nullable=True,
-                check=(
-                    "effect_family IS NULL OR effect_family IN "
-                    "('handoff_delivery', 'payment', 'payment_delivery')"
-                ),
-            ),
-            _text("effect_kind", nullable=True, check=_nonempty("effect_kind")),
-            _text(
-                "effect_role",
-                nullable=True,
-                check=(
-                    "effect_role IS NULL OR effect_role IN "
-                    "('none', 'primary', 'compensation')"
-                ),
-            ),
+            _hash("allocation_hash", nullable=True),
+            _text("effect_family", nullable=True, check="effect_family IS NULL OR effect_family IN ('payment', 'handoff_delivery', 'payment_delivery')"),
+            _text("effect_kind", nullable=True, check="effect_kind IS NULL OR effect_kind IN ('provider_primary', 'provider_compensation', 'external_message')"),
+            _text("effect_role", nullable=True, check="effect_role IS NULL OR effect_role IN ('none', 'primary', 'compensation')"),
             _hash("effect_scope_hash", nullable=True),
             _hash("workflow_scope_hash", nullable=True),
             _hash("channel_scope_hash", nullable=True),
             _hash("target_binding_hash", nullable=True),
             nullable_ordinal("message_ordinal"),
-            _text(
-                "activation_parent_kind",
-                nullable=True,
-                check=(
-                    "activation_parent_kind IS NULL OR activation_parent_kind IN "
-                    "('none', 'provider_allocation', 'internal_target_operation')"
-                ),
-            ),
-            _text(
-                "activation_parent_id",
-                nullable=True,
-                check=_nonempty("activation_parent_id"),
-            ),
+            _text("activation_parent_kind", nullable=True, check="activation_parent_kind IS NULL OR activation_parent_kind IN ('none', 'provider_allocation', 'internal_target_operation')"),
+            _text("activation_parent_id", nullable=True),
             _hash("activation_parent_hash", nullable=True),
-            _text(
-                "state",
-                check=(
-                    "state IN ('open', 'closed', 'available', 'consumed', "
-                    "'unused', 'manual_review')"
-                ),
-            ),
+            _text("state", check="state IN ('open', 'closing', 'closed', 'available', 'bound', 'dispatch_fenced', 'terminal', 'manual_review')"),
+            _text("bound_subject_id", nullable=True),
+            _hash("bound_subject_hash", nullable=True),
+            _text("child_decision_receipt_json", nullable=True),
+            _hash("child_decision_receipt_hash", nullable=True),
+            _integer("revision", "revision >= 0"),
+            _hash("installation_operation_id", nullable=True),
+            _text("installation_receipt_json", nullable=True),
+            _hash("installation_receipt_hash", nullable=True),
+            _hash("installed_allocation_aggregate_hash", nullable=True),
             _timestamp("installed_at"),
             _timestamp("closed_at", nullable=True),
         ),
-        (
-            "CONSTRAINT pk_followup_e2e_effect_authority "
-            "PRIMARY KEY (authority_row_id)",
-            "CONSTRAINT uq_followup_e2e_effect_authority_allocation "
-            "UNIQUE (allocation_id)",
-            "CONSTRAINT ck_followup_e2e_effect_authority_row_matrix CHECK "
-            "((row_kind = 'generation_header' AND allocation_id IS NULL AND "
-            "allocation_ordinal IS NULL AND scenario_id IS NULL AND "
-            "effect_family IS NULL AND effect_kind IS NULL AND effect_role IS NULL "
-            "AND effect_scope_hash IS NULL AND workflow_scope_hash IS NULL AND "
-            "channel_scope_hash IS NULL AND target_binding_hash IS NULL AND "
-            "message_ordinal IS NULL AND activation_parent_kind IS NULL AND "
-            "activation_parent_id IS NULL AND activation_parent_hash IS NULL AND "
-            "state IN ('open', 'closed')) OR (row_kind = 'allocation' AND "
-            "allocation_id IS NOT NULL AND allocation_ordinal IS NOT NULL AND "
-            "scenario_id IS NOT NULL AND effect_family IS NOT NULL AND "
-            "effect_kind IS NOT NULL AND effect_role IS NOT NULL AND "
-            "effect_scope_hash IS NOT NULL AND target_binding_hash IS NOT NULL AND "
-            "activation_parent_kind IS NOT NULL AND "
-            "state IN ('available', 'consumed', 'unused', 'manual_review')))",
-            "CONSTRAINT ck_followup_e2e_effect_authority_close_tuple CHECK "
-            "((state = 'closed' AND closed_at IS NOT NULL) OR "
-            "(state != 'closed' AND closed_at IS NULL))",
+        table_constraints=(
+            "CONSTRAINT pk_followup_e2e_effect_authority PRIMARY KEY (qualification_id, scenario_id, generation_id, allocation_id)",
+            "CONSTRAINT uq_followup_e2e_effect_authority_allocation UNIQUE (allocation_id)",
+            "CONSTRAINT ck_followup_e2e_effect_authority_row_matrix CHECK (((row_kind = 'generation_header' AND allocation_id = '__header__' AND allocation_ordinal IS NULL AND allocation_hash IS NULL AND effect_family IS NULL AND effect_kind IS NULL AND effect_role IS NULL AND effect_scope_hash IS NULL AND workflow_scope_hash IS NULL AND channel_scope_hash IS NULL AND target_binding_hash IS NULL AND message_ordinal IS NULL AND activation_parent_kind IS NULL AND activation_parent_id IS NULL AND activation_parent_hash IS NULL AND bound_subject_id IS NULL AND bound_subject_hash IS NULL AND child_decision_receipt_json IS NULL AND child_decision_receipt_hash IS NULL AND state IN ('open', 'closing', 'closed', 'manual_review')) OR (row_kind = 'allocation' AND allocation_id != '__header__' AND allocation_ordinal IS NOT NULL AND allocation_hash IS NOT NULL AND effect_family IS NOT NULL AND effect_kind IS NOT NULL AND effect_role IS NOT NULL AND effect_scope_hash IS NOT NULL AND workflow_scope_hash IS NOT NULL AND target_binding_hash IS NOT NULL AND message_ordinal IS NULL AND activation_parent_kind IS NOT NULL AND installation_operation_id IS NULL AND installation_receipt_json IS NULL AND installation_receipt_hash IS NULL AND installed_allocation_aggregate_hash IS NULL AND state IN ('available', 'bound', 'dispatch_fenced', 'terminal', 'closed', 'manual_review'))))",
+            "CONSTRAINT ck_followup_e2e_effect_authority_bind_tuple CHECK ((bound_subject_id IS NULL AND bound_subject_hash IS NULL) OR (bound_subject_id IS NOT NULL AND bound_subject_hash IS NOT NULL))",
+            "CONSTRAINT ck_followup_e2e_effect_authority_close_tuple CHECK (((state = 'closed') AND closed_at IS NOT NULL) OR (state != 'closed' AND closed_at IS NULL))",
         ),
     )
 
 
 def schema_contract_v2() -> tuple[TableContract, ...]:
+    legacy = tuple(
+        handoff_outbox_v2_contract()
+        if table.name == "handoff_outbox"
+        else payment_outbox_v2_contract()
+        if table.name == "payment_outbox"
+        else table
+        for table in schema_contract()
+    )
     return (
-        *schema_contract(),
+        *legacy,
         handoff_boundary_ingress_receipts_contract(),
         payment_boundary_ingress_receipts_contract(),
         followup_e2e_effect_authority_contract(),

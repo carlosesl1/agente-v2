@@ -506,6 +506,252 @@ class SQLiteUnitOfWork:
         if tuple(self._connection.execute("PRAGMA foreign_key_check")):
             raise DataCorruption("SQLite v6 schema contains foreign key violations")
 
+    def install_e2e_reservation_allocations(
+        self,
+        *,
+        operation_id: str,
+        manifest: object,
+        installed_at: datetime,
+    ):
+        from reservation_boundary.authority import (
+            AllocationInstallationReceipt,
+            EffectAllocationRow,
+            ExactEffectAllocationManifest,
+            InstallationHeaderState,
+            InstallationStatus,
+            InstallationTarget,
+        )
+
+        self._ensure_open()
+        if self._schema_version != SCHEMA_VERSION_V6:
+            raise DataCorruption("reservation authority install requires Phase 5 v6")
+        if type(manifest) is not ExactEffectAllocationManifest:
+            raise TypeError("manifest must be exact ExactEffectAllocationManifest")
+        rows = tuple(
+            row
+            for row in manifest.rows
+            if row.installation_target
+            is InstallationTarget.RESERVATION_E2E_EFFECT_AUTHORITY
+        )
+        if not rows or any(type(row) is not EffectAllocationRow for row in rows):
+            raise DataCorruption("reservation target manifest is empty or invalid")
+        generation_ids = tuple(sorted({row.generation_id for row in rows}))
+        row_hashes = tuple(row.canonical_hash() for row in rows)
+        aggregate_hash = hashlib.sha256(
+            b"phase8-installed-allocation-aggregate-v1\0"
+            + b"".join(bytes.fromhex(value) for value in row_hashes)
+        ).hexdigest()
+
+        def make_receipt(timestamp: datetime) -> AllocationInstallationReceipt:
+            return AllocationInstallationReceipt(
+                operation_id=operation_id,
+                installation_target=(
+                    InstallationTarget.RESERVATION_E2E_EFFECT_AUTHORITY
+                ),
+                qualification_id=manifest.qualification_id,
+                epoch=manifest.epoch,
+                contract_hash=manifest.contract_hash,
+                effect_authorization_binding_hash=(
+                    manifest.effect_authorization_binding_hash
+                ),
+                manifest_hash=manifest.canonical_hash(),
+                generation_ids=generation_ids,
+                installed_row_hashes=row_hashes,
+                allocation_count=len(rows),
+                installed_allocation_aggregate_hash=aggregate_hash,
+                header_state=InstallationHeaderState.OPEN,
+                status=InstallationStatus.INSTALLED,
+                installed_at=timestamp,
+            )
+
+        candidate = make_receipt(installed_at)
+        with self._transaction("install_e2e_reservation_allocations"):
+            existing_headers = self._connection.execute(
+                "SELECT generation_id, state, installation_operation_id, "
+                "installation_receipt_json, installation_receipt_hash, installed_at, "
+                "manifest_hash FROM reservation_e2e_effect_authority "
+                "WHERE qualification_id=? AND epoch=? AND row_kind='generation_header' "
+                "ORDER BY generation_id",
+                (manifest.qualification_id, manifest.epoch),
+            ).fetchall()
+            if existing_headers:
+                if (
+                    len(existing_headers) != len(generation_ids)
+                    or tuple(row[0] for row in existing_headers) != generation_ids
+                    or any(row[1] != "open" for row in existing_headers)
+                ):
+                    raise DataCorruption("reservation generation is closed or divergent")
+                stored_at = datetime.fromisoformat(existing_headers[0][5])
+                stored = make_receipt(stored_at)
+                if any(
+                    row[2] != operation_id
+                    or row[3] != stored.to_canonical_bytes().decode("utf-8")
+                    or row[4] != stored.canonical_hash()
+                    or row[5] != stored_at.isoformat()
+                    or row[6] != manifest.canonical_hash()
+                    for row in existing_headers
+                ):
+                    raise DataCorruption("persisted reservation installation diverges")
+                persisted_allocations = self._connection.execute(
+                    "SELECT allocation_id, allocation_hash, state FROM "
+                    "reservation_e2e_effect_authority WHERE qualification_id=? "
+                    "AND epoch=? AND row_kind='allocation' ORDER BY allocation_ordinal, "
+                    "allocation_id",
+                    (manifest.qualification_id, manifest.epoch),
+                ).fetchall()
+                expected_allocations = [
+                    (row.allocation_id, row.canonical_hash(), "available") for row in rows
+                ]
+                if persisted_allocations != expected_allocations:
+                    raise DataCorruption("persisted reservation allocation set diverges")
+                return stored
+            partial = self._connection.execute(
+                "SELECT count(*) FROM reservation_e2e_effect_authority "
+                "WHERE qualification_id=? AND epoch=?",
+                (manifest.qualification_id, manifest.epoch),
+            ).fetchone()[0]
+            if partial:
+                raise DataCorruption("partial reservation authority installation exists")
+
+            receipt_json = candidate.to_canonical_bytes().decode("utf-8")
+            receipt_hash = candidate.canonical_hash()
+            installed_text = installed_at.isoformat()
+            for scenario_id, generation_id in sorted(
+                {(row.scenario_id, row.generation_id) for row in rows}
+            ):
+                self._connection.execute(
+                    "INSERT INTO reservation_e2e_effect_authority "
+                    "(row_kind, installation_target, qualification_id, epoch, scenario_id, "
+                    "contract_hash, effect_authorization_binding_hash, manifest_hash, "
+                    "generation_id, allocation_id, allocation_ordinal, allocation_hash, "
+                    "effect_family, effect_kind, effect_role, effect_scope_hash, "
+                    "workflow_scope_hash, channel_scope_hash, target_binding_hash, "
+                    "message_ordinal, activation_parent_kind, activation_parent_id, "
+                    "activation_parent_hash, state, bound_subject_id, bound_subject_hash, "
+                    "child_decision_receipt_json, child_decision_receipt_hash, revision, "
+                    "installation_operation_id, installation_receipt_json, "
+                    "installation_receipt_hash, installed_allocation_aggregate_hash, "
+                    "installed_at, closed_at) VALUES "
+                    "('generation_header', 'reservation_e2e_effect_authority', ?, ?, ?, "
+                    "?, ?, ?, ?, '__header__', NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+                    "NULL, NULL, NULL, NULL, NULL, NULL, 'open', NULL, NULL, NULL, NULL, 0, "
+                    "?, ?, ?, ?, ?, NULL)",
+                    (
+                        manifest.qualification_id,
+                        manifest.epoch,
+                        scenario_id,
+                        manifest.contract_hash,
+                        manifest.effect_authorization_binding_hash,
+                        manifest.canonical_hash(),
+                        generation_id,
+                        operation_id,
+                        receipt_json,
+                        receipt_hash,
+                        aggregate_hash,
+                        installed_text,
+                    ),
+                )
+            for row in rows:
+                self._connection.execute(
+                    "INSERT INTO reservation_e2e_effect_authority "
+                    "(row_kind, installation_target, qualification_id, epoch, scenario_id, "
+                    "contract_hash, effect_authorization_binding_hash, manifest_hash, "
+                    "generation_id, allocation_id, allocation_ordinal, allocation_hash, "
+                    "effect_family, effect_kind, effect_role, effect_scope_hash, "
+                    "workflow_scope_hash, channel_scope_hash, target_binding_hash, "
+                    "message_ordinal, activation_parent_kind, activation_parent_id, "
+                    "activation_parent_hash, state, bound_subject_id, bound_subject_hash, "
+                    "child_decision_receipt_json, child_decision_receipt_hash, revision, "
+                    "installation_operation_id, installation_receipt_json, "
+                    "installation_receipt_hash, installed_allocation_aggregate_hash, "
+                    "installed_at, closed_at) VALUES "
+                    "('allocation', 'reservation_e2e_effect_authority', ?, ?, ?, ?, ?, ?, "
+                    "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', NULL, NULL, "
+                    "NULL, NULL, 0, NULL, NULL, NULL, NULL, ?, NULL)",
+                    (
+                        row.qualification_id,
+                        row.epoch,
+                        row.scenario_id,
+                        row.contract_hash,
+                        row.effect_authorization_binding_hash,
+                        manifest.canonical_hash(),
+                        row.generation_id,
+                        row.allocation_id,
+                        row.allocation_ordinal,
+                        row.canonical_hash(),
+                        row.effect_family.value,
+                        row.effect_kind.value,
+                        row.effect_role.value,
+                        row.effect_scope_hash,
+                        row.workflow_scope_hash,
+                        row.channel_scope_hash,
+                        row.target_binding_hash,
+                        row.message_ordinal,
+                        row.activation_parent_kind.value,
+                        row.activation_parent_id,
+                        row.activation_parent_hash,
+                        installed_text,
+                    ),
+                )
+            return candidate
+
+    def close_e2e_reservation_generation(
+        self,
+        *,
+        qualification_id: str,
+        epoch: int,
+        scenario_id: str,
+        generation_id: str,
+        contract_hash: str,
+        effect_authorization_binding_hash: str,
+        manifest_hash: str,
+        closed_at: datetime,
+    ) -> None:
+        self._ensure_open()
+        if self._schema_version != SCHEMA_VERSION_V6:
+            raise DataCorruption("reservation generation close requires Phase 5 v6")
+        with self._transaction("close_e2e_reservation_generation"):
+            existing = self._connection.execute(
+                "SELECT state FROM reservation_e2e_effect_authority WHERE "
+                "qualification_id=? AND epoch=? AND scenario_id=? AND generation_id=? "
+                "AND allocation_id='__header__'",
+                (qualification_id, epoch, scenario_id, generation_id),
+            ).fetchone()
+            if existing is None:
+                self._connection.execute(
+                    "INSERT INTO reservation_e2e_effect_authority "
+                    "(row_kind, installation_target, qualification_id, epoch, scenario_id, "
+                    "contract_hash, effect_authorization_binding_hash, manifest_hash, "
+                    "generation_id, allocation_id, allocation_ordinal, allocation_hash, "
+                    "effect_family, effect_kind, effect_role, effect_scope_hash, "
+                    "workflow_scope_hash, channel_scope_hash, target_binding_hash, "
+                    "message_ordinal, activation_parent_kind, activation_parent_id, "
+                    "activation_parent_hash, state, bound_subject_id, bound_subject_hash, "
+                    "child_decision_receipt_json, child_decision_receipt_hash, revision, "
+                    "installation_operation_id, installation_receipt_json, "
+                    "installation_receipt_hash, installed_allocation_aggregate_hash, "
+                    "installed_at, closed_at) VALUES "
+                    "('generation_header', 'reservation_e2e_effect_authority', ?, ?, ?, ?, "
+                    "?, ?, ?, '__header__', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+                    "NULL, NULL, NULL, NULL, NULL, 'closed', NULL, NULL, NULL, NULL, 0, NULL, "
+                    "NULL, NULL, NULL, ?, ?)",
+                    (
+                        qualification_id,
+                        epoch,
+                        scenario_id,
+                        contract_hash,
+                        effect_authorization_binding_hash,
+                        manifest_hash,
+                        generation_id,
+                        closed_at.isoformat(),
+                        closed_at.isoformat(),
+                    ),
+                )
+                return
+            if existing[0] == "closed":
+                return
+            raise DataCorruption("installed reservation generation requires dependency close")
+
     def accept_boundary_reservation(
         self,
         *,
@@ -656,12 +902,14 @@ class SQLiteUnitOfWork:
             if fault_hook is not None:
                 fault_hook(stage)
 
+        authority_receipt = (None, None, None, None, None, None)
         with self._transaction("accept_boundary_reservation"):
             existing = self._connection.execute(
                 "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
-                "committed_at FROM reservation_boundary_ingress_receipts "
-                "WHERE operation_id=?",
+                "qualification_id, epoch, scenario_id, generation_id, allocation_id, "
+                "authority_row_hash, committed_at FROM "
+                "reservation_boundary_ingress_receipts WHERE operation_id=?",
                 (operation_id,),
             ).fetchone()
             if existing is not None:
@@ -671,6 +919,35 @@ class SQLiteUnitOfWork:
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
                     raise DataCorruption("persisted reservation receipt is invalid") from exc
+                authority_values = existing[7:13]
+                if bundle.qualification_id is None:
+                    if authority_values != (None, None, None, None, None, None):
+                        raise DataCorruption("non-E2E reservation receipt has authority tuple")
+                else:
+                    if authority_values[:3] != (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                    ) or authority_values[4] != bundle.allocation_id:
+                        raise DataCorruption("reservation receipt authority tuple diverges")
+                    bound_row = self._connection.execute(
+                        "SELECT generation_id, allocation_hash, state, bound_subject_id "
+                        "FROM reservation_e2e_effect_authority WHERE qualification_id=? "
+                        "AND epoch=? AND scenario_id=? AND allocation_id=?",
+                        (
+                            bundle.qualification_id,
+                            bundle.immutable_generation,
+                            bundle.scenario_id,
+                            bundle.allocation_id,
+                        ),
+                    ).fetchone()
+                    if (
+                        bound_row is None
+                        or bound_row[0] != authority_values[3]
+                        or bound_row[1] != authority_values[5]
+                        or bound_row[2:] != ("bound", commands[0].command_id)
+                    ):
+                        raise DataCorruption("bound reservation authority row diverges")
                 expected_row = (
                     stored.source_turn_receipt_hash,
                     stored.artifact_hash,
@@ -679,6 +956,7 @@ class SQLiteUnitOfWork:
                     stored.target_result_hash,
                     stored.to_canonical_bytes().decode("utf-8"),
                     stored.canonical_hash(),
+                    *authority_values,
                     stored.committed_at.isoformat(),
                 )
                 if (
@@ -694,6 +972,70 @@ class SQLiteUnitOfWork:
                 return stored
             if self._workflow_row(genesis.meta.workflow_id) is not None:
                 raise IdentityConflict("reservation relay workflow identity already exists")
+
+            if bundle.qualification_id is not None:
+                command = commands[0]
+                target_binding_hash = hashlib.sha256(
+                    b"phase8-authority-target-binding-v1\0"
+                    + command.command_id.encode("utf-8")
+                ).hexdigest()
+                authority = self._connection.execute(
+                    "SELECT generation_id, state, effect_family, target_binding_hash, "
+                    "allocation_hash, revision FROM reservation_e2e_effect_authority "
+                    "WHERE qualification_id=? AND epoch=? AND scenario_id=? "
+                    "AND allocation_id=? AND row_kind='allocation'",
+                    (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        bundle.allocation_id,
+                    ),
+                ).fetchone()
+                if (
+                    authority is None
+                    or authority[1] != "available"
+                    or authority[2] != "reservation"
+                    or authority[3] != target_binding_hash
+                ):
+                    raise DataCorruption("reservation E2E allocation is absent or unavailable")
+                header = self._connection.execute(
+                    "SELECT state FROM reservation_e2e_effect_authority WHERE "
+                    "qualification_id=? AND epoch=? AND scenario_id=? AND generation_id=? "
+                    "AND allocation_id='__header__'",
+                    (
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        authority[0],
+                    ),
+                ).fetchone()
+                if header != ("open",):
+                    raise DataCorruption("reservation E2E generation is not open")
+                authority_receipt = (
+                    bundle.qualification_id,
+                    bundle.immutable_generation,
+                    bundle.scenario_id,
+                    authority[0],
+                    bundle.allocation_id,
+                    authority[4],
+                )
+                bound = self._connection.execute(
+                    "UPDATE reservation_e2e_effect_authority SET state='bound', "
+                    "bound_subject_id=?, bound_subject_hash=?, revision=revision+1 "
+                    "WHERE qualification_id=? AND epoch=? AND scenario_id=? "
+                    "AND allocation_id=? AND state='available' AND revision=?",
+                    (
+                        command.command_id,
+                        _sha256_text(dumps_command(command)),
+                        bundle.qualification_id,
+                        bundle.immutable_generation,
+                        bundle.scenario_id,
+                        bundle.allocation_id,
+                        authority[5],
+                    ),
+                )
+                if bound.rowcount != 1:
+                    raise ConcurrencyConflict("reservation E2E allocation bind CAS was lost")
 
             trip("before_domain")
             genesis_json = dumps_state(genesis)
@@ -729,7 +1071,9 @@ class SQLiteUnitOfWork:
                 "INSERT INTO reservation_boundary_ingress_receipts "
                 "(operation_id, source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
-                "committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "qualification_id, epoch, scenario_id, generation_id, allocation_id, "
+                "authority_row_hash, committed_at) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     operation_id,
                     source_turn_receipt_hash,
@@ -739,6 +1083,7 @@ class SQLiteUnitOfWork:
                     target_result_hash,
                     receipt_json,
                     receipt_hash,
+                    *authority_receipt,
                     committed_at_text,
                 ),
             )

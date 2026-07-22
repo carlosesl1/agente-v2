@@ -345,6 +345,12 @@ def reservation_boundary_ingress_receipts_contract() -> TableContract:
             _hash("target_result_hash"),
             _text("receipt_json"),
             _hash("receipt_hash"),
+            _text("qualification_id", nullable=True),
+            ColumnContract("epoch", "INTEGER", "bigint", True, "epoch IS NULL OR epoch >= 1"),
+            _text("scenario_id", nullable=True),
+            _text("generation_id", nullable=True),
+            _text("allocation_id", nullable=True),
+            _hash("authority_row_hash", nullable=True),
             _timestamp("committed_at"),
         ),
         table_constraints=(
@@ -352,96 +358,65 @@ def reservation_boundary_ingress_receipts_contract() -> TableContract:
             "PRIMARY KEY (operation_id)",
             "CONSTRAINT uq_reservation_boundary_ingress_receipts_receipt "
             "UNIQUE (receipt_hash)",
+            "CONSTRAINT ck_reservation_boundary_ingress_receipts_authority_tuple CHECK "
+            "((qualification_id IS NULL AND epoch IS NULL AND scenario_id IS NULL AND "
+            "generation_id IS NULL AND allocation_id IS NULL AND authority_row_hash IS NULL) "
+            "OR (qualification_id IS NOT NULL AND epoch IS NOT NULL AND "
+            "scenario_id IS NOT NULL AND generation_id IS NOT NULL AND "
+            "allocation_id IS NOT NULL AND authority_row_hash IS NOT NULL))",
         ),
     )
 
 
 def reservation_e2e_effect_authority_contract() -> TableContract:
     def nullable_ordinal(name: str) -> ColumnContract:
-        return ColumnContract(
-            name,
-            "INTEGER",
-            "bigint",
-            True,
-            f"{name} IS NULL OR {name} >= 0",
-        )
+        return ColumnContract(name, "INTEGER", "bigint", True, f"{name} IS NULL OR {name} >= 0")
 
     return TableContract(
         name="reservation_e2e_effect_authority",
         columns=(
-            _text("authority_row_id"),
             _text("row_kind", check="row_kind IN ('generation_header', 'allocation')"),
+            _text("installation_target", check="installation_target = 'reservation_e2e_effect_authority'"),
             _text("qualification_id"),
             _integer("epoch", "epoch >= 1"),
+            _text("scenario_id"),
             _hash("contract_hash"),
             _hash("effect_authorization_binding_hash"),
             _hash("manifest_hash"),
             _text("generation_id"),
-            _text("allocation_id", nullable=True),
+            _text("allocation_id"),
             nullable_ordinal("allocation_ordinal"),
-            _text("scenario_id", nullable=True),
-            _text(
-                "effect_family",
-                nullable=True,
-                check="effect_family IS NULL OR effect_family = 'reservation'",
-            ),
-            _text("effect_kind", nullable=True),
-            _text(
-                "effect_role",
-                nullable=True,
-                check=(
-                    "effect_role IS NULL OR "
-                    "effect_role IN ('primary', 'compensation')"
-                ),
-            ),
+            _hash("allocation_hash", nullable=True),
+            _text("effect_family", nullable=True, check="effect_family IS NULL OR effect_family = 'reservation'"),
+            _text("effect_kind", nullable=True, check="effect_kind IS NULL OR effect_kind IN ('provider_primary', 'provider_compensation')"),
+            _text("effect_role", nullable=True, check="effect_role IS NULL OR effect_role IN ('primary', 'compensation')"),
             _hash("effect_scope_hash", nullable=True),
             _hash("workflow_scope_hash", nullable=True),
             _hash("channel_scope_hash", nullable=True),
             _hash("target_binding_hash", nullable=True),
             nullable_ordinal("message_ordinal"),
-            _text(
-                "activation_parent_kind",
-                nullable=True,
-                check=(
-                    "activation_parent_kind IS NULL OR activation_parent_kind IN "
-                    "('none', 'provider_allocation', 'internal_target_operation')"
-                ),
-            ),
+            _text("activation_parent_kind", nullable=True, check="activation_parent_kind IS NULL OR activation_parent_kind IN ('none', 'provider_allocation', 'internal_target_operation')"),
             _text("activation_parent_id", nullable=True),
             _hash("activation_parent_hash", nullable=True),
-            _text(
-                "state",
-                check=(
-                    "state IN ('open', 'closed', 'available', 'consumed', "
-                    "'unused', 'manual_review')"
-                ),
-            ),
+            _text("state", check="state IN ('open', 'closing', 'closed', 'available', 'bound', 'dispatch_fenced', 'terminal', 'manual_review')"),
+            _text("bound_subject_id", nullable=True),
+            _hash("bound_subject_hash", nullable=True),
+            _text("child_decision_receipt_json", nullable=True),
+            _hash("child_decision_receipt_hash", nullable=True),
+            _integer("revision", "revision >= 0"),
+            _hash("installation_operation_id", nullable=True),
+            _text("installation_receipt_json", nullable=True),
+            _hash("installation_receipt_hash", nullable=True),
+            _hash("installed_allocation_aggregate_hash", nullable=True),
             _timestamp("installed_at"),
             _timestamp("closed_at", nullable=True),
         ),
         table_constraints=(
-            "CONSTRAINT pk_reservation_e2e_effect_authority "
-            "PRIMARY KEY (authority_row_id)",
-            "CONSTRAINT uq_reservation_e2e_effect_authority_allocation "
-            "UNIQUE (allocation_id)",
-            "CONSTRAINT ck_reservation_e2e_effect_authority_row_matrix CHECK "
-            "((row_kind = 'generation_header' AND allocation_id IS NULL AND "
-            "allocation_ordinal IS NULL AND scenario_id IS NULL AND "
-            "effect_family IS NULL AND effect_kind IS NULL AND effect_role IS NULL "
-            "AND effect_scope_hash IS NULL AND workflow_scope_hash IS NULL AND "
-            "channel_scope_hash IS NULL AND target_binding_hash IS NULL AND "
-            "message_ordinal IS NULL AND activation_parent_kind IS NULL AND "
-            "activation_parent_id IS NULL AND activation_parent_hash IS NULL AND "
-            "state IN ('open', 'closed')) OR (row_kind = 'allocation' AND "
-            "allocation_id IS NOT NULL AND allocation_ordinal IS NOT NULL AND "
-            "scenario_id IS NOT NULL AND effect_family IS NOT NULL AND "
-            "effect_kind IS NOT NULL AND effect_role IS NOT NULL AND "
-            "effect_scope_hash IS NOT NULL AND target_binding_hash IS NOT NULL AND "
-            "activation_parent_kind IS NOT NULL AND "
-            "state IN ('available', 'consumed', 'unused', 'manual_review')))",
-            "CONSTRAINT ck_reservation_e2e_effect_authority_close_tuple CHECK "
-            "((state = 'closed' AND closed_at IS NOT NULL) OR "
-            "(state != 'closed' AND closed_at IS NULL))",
+            "CONSTRAINT pk_reservation_e2e_effect_authority PRIMARY KEY (qualification_id, scenario_id, generation_id, allocation_id)",
+            "CONSTRAINT uq_reservation_e2e_effect_authority_allocation UNIQUE (allocation_id)",
+            "CONSTRAINT ck_reservation_e2e_effect_authority_row_matrix CHECK (((row_kind = 'generation_header' AND allocation_id = '__header__' AND allocation_ordinal IS NULL AND allocation_hash IS NULL AND effect_family IS NULL AND effect_kind IS NULL AND effect_role IS NULL AND effect_scope_hash IS NULL AND workflow_scope_hash IS NULL AND channel_scope_hash IS NULL AND target_binding_hash IS NULL AND message_ordinal IS NULL AND activation_parent_kind IS NULL AND activation_parent_id IS NULL AND activation_parent_hash IS NULL AND bound_subject_id IS NULL AND bound_subject_hash IS NULL AND child_decision_receipt_json IS NULL AND child_decision_receipt_hash IS NULL AND state IN ('open', 'closing', 'closed', 'manual_review')) OR (row_kind = 'allocation' AND allocation_id != '__header__' AND allocation_ordinal IS NOT NULL AND allocation_hash IS NOT NULL AND effect_family = 'reservation' AND effect_kind IS NOT NULL AND effect_role IS NOT NULL AND effect_scope_hash IS NOT NULL AND workflow_scope_hash IS NOT NULL AND channel_scope_hash IS NULL AND target_binding_hash IS NOT NULL AND message_ordinal IS NULL AND activation_parent_kind IS NOT NULL AND installation_operation_id IS NULL AND installation_receipt_json IS NULL AND installation_receipt_hash IS NULL AND installed_allocation_aggregate_hash IS NULL AND state IN ('available', 'bound', 'dispatch_fenced', 'terminal', 'closed', 'manual_review'))))",
+            "CONSTRAINT ck_reservation_e2e_effect_authority_bind_tuple CHECK ((bound_subject_id IS NULL AND bound_subject_hash IS NULL) OR (bound_subject_id IS NOT NULL AND bound_subject_hash IS NOT NULL))",
+            "CONSTRAINT ck_reservation_e2e_effect_authority_close_tuple CHECK (((state = 'closed') AND closed_at IS NOT NULL) OR (state != 'closed' AND closed_at IS NULL))",
         ),
     )
 
