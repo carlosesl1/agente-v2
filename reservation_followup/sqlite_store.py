@@ -14,7 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Callable, Iterator
 
 from .handoff import (
     HandoffAcknowledged,
@@ -673,6 +673,191 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption("SQLite foreign keys are disabled")
         if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
             raise DataCorruption("SQLite v2 schema contains foreign key violations")
+
+    def apply_handoff_relay(
+        self,
+        *,
+        operation_id: str,
+        bundle: object,
+        source_turn_receipt_hash: str,
+        committed_at: datetime,
+        fault_hook: Callable[[str], None] | None = None,
+    ):
+        from reservation_boundary.effects import (
+            HandoffRelayBundle,
+            InternalJobKind,
+            TargetOperationReceipt,
+            target_operation_id,
+        )
+
+        if self._schema_version != SCHEMA_VERSION_V2:
+            raise StoreError("handoff relay ingress requires the Phase 6 v2 root")
+        if type(bundle) is not HandoffRelayBundle:
+            raise TypeError("bundle must be exact HandoffRelayBundle")
+        if fault_hook is not None and not callable(fault_hook):
+            raise TypeError("fault_hook must be callable or None")
+        expected_operation_id = target_operation_id(
+            InternalJobKind.HANDOFF,
+            bundle.artifact_hash,
+            source_turn_receipt_hash,
+        )
+        if operation_id != expected_operation_id:
+            raise ValueError("operation_id does not bind handoff artifact and source receipt")
+
+        request = from_wire_json(bundle.request_bytes.decode("utf-8"), HandoffRequested)
+        policy = from_wire_json(bundle.policy_bytes.decode("utf-8"), HandoffEffectPolicy)
+        event_types = (HandoffAcknowledged, HandoffEffectFailed, HandoffCancelled)
+        history: list[HandoffEvent] = []
+        for payload in bundle.history_bytes:
+            event = None
+            for event_type in event_types:
+                try:
+                    event = from_wire_json(payload.decode("utf-8"), event_type)
+                    break
+                except ValueError:
+                    continue
+            if event is None:
+                raise DataCorruption("handoff relay history cannot be decoded")
+            history.append(event)
+
+        initial = new_handoff(request, policy)
+        state = initial.state
+        all_events: list[HandoffEvent] = [request]
+        jobs: list[HandoffEffectJob] = list(initial.effect_jobs)
+        for event in history:
+            transition = reduce_handoff(state, event)
+            if transition.status is not HandoffTransitionStatus.APPLIED:
+                raise DataCorruption("handoff relay history is not an applied replay")
+            state = transition.state
+            all_events.extend(transition.events)
+            jobs.extend(transition.effect_jobs)
+        target_result_hash = semantic_hash(state)
+        if target_result_hash != bundle.expected_final_state_hash:
+            raise DataCorruption("handoff relay final state hash mismatch")
+
+        state_json = to_wire_json(state)
+        commit_preimage = json.dumps(
+            {
+                "operation_id": operation_id,
+                "artifact_hash": bundle.artifact_hash,
+                "source_turn_receipt_hash": source_turn_receipt_hash,
+                "target_result_hash": target_result_hash,
+                "state_json": state_json,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        target_commit_hash = hashlib.sha256(
+            b"phase8-handoff-target-commit-v1\x00" + commit_preimage
+        ).hexdigest()
+        receipt = TargetOperationReceipt(
+            operation_id=operation_id,
+            job_kind=InternalJobKind.HANDOFF,
+            artifact_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_turn_receipt_hash,
+            target_commit_hash=target_commit_hash,
+            target_result_hash=target_result_hash,
+            committed_at=committed_at,
+        )
+        bundle_json = bundle.to_canonical_bytes().decode("utf-8")
+        receipt_json = receipt.to_canonical_bytes().decode("utf-8")
+        receipt_hash = receipt.canonical_hash()
+        committed_at_text = receipt.committed_at.isoformat()
+
+        def trip(stage: str) -> None:
+            if fault_hook is not None:
+                fault_hook(stage)
+
+        with self._transaction("apply_handoff_relay"):
+            existing = self._connection.execute(
+                "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at FROM main.handoff_boundary_ingress_receipts "
+                "WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    stored = TargetOperationReceipt.from_canonical_bytes(
+                        existing[5].encode("utf-8")
+                    )
+                except (AttributeError, TypeError, ValueError) as exc:
+                    raise DataCorruption("stored handoff target receipt is invalid") from exc
+                expected_row = (
+                    stored.source_turn_receipt_hash,
+                    stored.artifact_hash,
+                    bundle_json,
+                    stored.target_commit_hash,
+                    stored.target_result_hash,
+                    stored.to_canonical_bytes().decode("utf-8"),
+                    stored.canonical_hash(),
+                    stored.committed_at.isoformat(),
+                )
+                if existing != expected_row:
+                    raise DataCorruption("stored handoff target receipt columns diverge")
+                if (
+                    stored.operation_id != operation_id
+                    or stored.job_kind is not InternalJobKind.HANDOFF
+                    or stored.artifact_hash != bundle.artifact_hash
+                    or stored.source_turn_receipt_hash != source_turn_receipt_hash
+                    or stored.target_commit_hash != target_commit_hash
+                    or stored.target_result_hash != target_result_hash
+                ):
+                    raise DataCorruption("stored handoff target receipt tuple diverges")
+                return stored
+
+            collision = self._connection.execute(
+                "SELECT handoff_id FROM main.handoff_workflows "
+                "WHERE handoff_id=? OR incident_key=?",
+                (request.handoff_id, request.incident_key),
+            ).fetchone()
+            if collision is not None:
+                raise IdentityConflict(
+                    "handoff target operation collides with an existing workflow"
+                )
+            trip("before_domain")
+            updated_at = _handoff_event_time(all_events[-1]).isoformat()
+            self._connection.execute(
+                "INSERT INTO main.handoff_workflows "
+                "(handoff_id, incident_key, revision, status, lead_key_hash, state_json, "
+                "state_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    request.handoff_id,
+                    request.incident_key,
+                    len(all_events),
+                    state.status.value,
+                    request.lead_key_hash,
+                    state_json,
+                    target_result_hash,
+                    request.requested_at.isoformat(),
+                    updated_at,
+                ),
+            )
+            for revision, event in enumerate(all_events, start=1):
+                self._insert_handoff_event(request.handoff_id, revision, event)
+            self._insert_handoff_jobs(tuple(jobs))
+            trip("after_domain_before_receipt")
+            self._connection.execute(
+                "INSERT INTO main.handoff_boundary_ingress_receipts "
+                "(operation_id, source_turn_receipt_hash, artifact_hash, bundle_json, "
+                "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "
+                "committed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    operation_id,
+                    source_turn_receipt_hash,
+                    bundle.artifact_hash,
+                    bundle_json,
+                    target_commit_hash,
+                    target_result_hash,
+                    receipt_json,
+                    receipt_hash,
+                    committed_at_text,
+                ),
+            )
+            trip("after_receipt_before_commit")
+        return receipt
 
     def _handoff_workflow_row(self, handoff_id: str):
         return self._connection.execute(

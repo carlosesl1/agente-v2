@@ -25,6 +25,7 @@ RESERVATION_RELAY_DOMAIN: Final = "phase8-reservation-relay-bundle-v1"
 SETTLEMENT_RELAY_DOMAIN: Final = "phase8-settlement-relay-bundle-v1"
 HANDOFF_RELAY_DOMAIN: Final = "phase8-handoff-relay-bundle-v1"
 TARGET_OPERATION_RECEIPT_DOMAIN: Final = "phase8-target-operation-receipt-v1"
+TARGET_OPERATION_ID_DOMAIN: Final = "phase8-target-operation-id-v1"
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -495,6 +496,29 @@ class InternalJobKind(str, Enum):
     LEARNING = "learning"
 
 
+def target_operation_id(
+    job_kind: InternalJobKind,
+    artifact_hash: str,
+    source_turn_receipt_hash: str,
+) -> str:
+    if type(job_kind) is not InternalJobKind:
+        raise TypeError("job_kind must be exact InternalJobKind")
+    _require_sha256(artifact_hash, "artifact_hash")
+    _require_sha256(source_turn_receipt_hash, "source_turn_receipt_hash")
+    preimage = _canonical_envelope(
+        schema="phase8-target-operation-id-preimage",
+        version=1,
+        data={
+            "job_kind": job_kind.value,
+            "artifact_hash": artifact_hash,
+            "source_turn_receipt_hash": source_turn_receipt_hash,
+        },
+    )
+    return hashlib.sha256(
+        TARGET_OPERATION_ID_DOMAIN.encode("ascii") + b"\x00" + preimage
+    ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class TargetOperationReceipt:
     """Canonical target-owned atomic operation receipt."""
@@ -591,10 +615,12 @@ __all__ = (
     "HANDOFF_RELAY_DOMAIN",
     "RESERVATION_RELAY_DOMAIN",
     "SETTLEMENT_RELAY_DOMAIN",
+    "TARGET_OPERATION_ID_DOMAIN",
     "TARGET_OPERATION_RECEIPT_DOMAIN",
     "HandoffRelayBundle",
     "InternalJobKind",
     "ReservationRelayBundle",
     "SettlementRelayBundle",
     "TargetOperationReceipt",
+    "target_operation_id",
 )
