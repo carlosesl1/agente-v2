@@ -653,6 +653,70 @@ class CapabilityPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class LearningProposal:
+    """Parent-owned deferred learning proposal with an explicit memory CAS."""
+
+    aggregate_turn_id: str
+    request_id: str
+    sequence: int
+    claim: TypedFact
+    expected_memory_version: int
+    expected_memory_hash: str
+    request_hash: str
+    frame_commitment_hash: str
+
+    SCHEMA: ClassVar[str] = "phase8-learning-proposal"
+    VERSION: ClassVar[int] = 1
+    DOMAIN: ClassVar[str] = "phase8-learning-proposal-v1"
+
+    def __post_init__(self) -> None:
+        _require_id_token(self.aggregate_turn_id, "LearningProposal.aggregate_turn_id")
+        _require_id_token(self.request_id, "LearningProposal.request_id")
+        _require_exact_int(self.sequence, "LearningProposal.sequence", minimum=0)
+        if type(self.claim) is not TypedFact:
+            raise TypeError("LearningProposal.claim must be an exact TypedFact")
+        if self.claim.frame_commitment_hash is None:
+            raise ValueError("LearningProposal.claim must use the v8 TypedFact wire")
+        _require_exact_int(
+            self.expected_memory_version,
+            "LearningProposal.expected_memory_version",
+            minimum=0,
+        )
+        _require_sha256(
+            self.expected_memory_hash,
+            "LearningProposal.expected_memory_hash",
+        )
+        _require_sha256(self.request_hash, "LearningProposal.request_hash")
+        frame_hash = _require_sha256(
+            self.frame_commitment_hash,
+            "LearningProposal.frame_commitment_hash",
+        )
+        if self.claim.frame_commitment_hash != frame_hash:
+            raise ValueError("LearningProposal claim/frame backlink mismatch")
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_envelope(
+            schema=self.SCHEMA,
+            version=self.VERSION,
+            data={
+                "aggregate_turn_id": self.aggregate_turn_id,
+                "request_id": self.request_id,
+                "sequence": self.sequence,
+                "claim": json.loads(self.claim.to_canonical_bytes().decode("utf-8")),
+                "expected_memory_version": self.expected_memory_version,
+                "expected_memory_hash": self.expected_memory_hash,
+                "request_hash": self.request_hash,
+                "frame_commitment_hash": self.frame_commitment_hash,
+            },
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
 class MayaIntentClosure:
     """Child-owned intent closure with no facts, tools or commands."""
 
@@ -878,6 +942,7 @@ __all__ = (
     "ConversationStage",
     "DesiredService",
     "GuardSemantic",
+    "LearningProposal",
     "MayaIntentClosure",
     "MayaTurnClosure",
     "MayaTurnRequest",

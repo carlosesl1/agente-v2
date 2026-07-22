@@ -10,7 +10,12 @@ import unittest
 
 import reservation_boundary.conversation as conversation
 from reservation_boundary.conversation import SourceEventIdentity
-from reservation_boundary.types import ConversationIntentKind, NormalizedMessage
+from reservation_boundary.types import (
+    ConversationIntentKind,
+    NormalizedMessage,
+    StringSlot,
+    TypedFact,
+)
 
 
 DEADLINE = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
@@ -657,6 +662,73 @@ class Phase8ConversationTypeTests(unittest.TestCase):
                                 "capability_matrix": capability_rows,
                                 "worker_modes": worker_rows,
                                 "guard_semantics": tuple(guard_type),
+                            }
+                            | override
+                        )
+                    )
+
+    def test_learning_proposal_binds_v8_claim_memory_cas_and_frame(self) -> None:
+        proposal_type = getattr(conversation, "LearningProposal", None)
+        self.assertIsNotNone(proposal_type, "LearningProposal must have an owner")
+        assert proposal_type is not None
+        claim = TypedFact("language", StringSlot("pt-BR"), "3" * 64)
+        proposal = proposal_type(
+            aggregate_turn_id="turn-1",
+            request_id="request-2",
+            sequence=1,
+            claim=claim,
+            expected_memory_version=0,
+            expected_memory_hash="6" * 64,
+            request_hash="4" * 64,
+            frame_commitment_hash="3" * 64,
+        )
+
+        self.assertEqual(
+            tuple(field.name for field in fields(proposal_type)),
+            (
+                "aggregate_turn_id",
+                "request_id",
+                "sequence",
+                "claim",
+                "expected_memory_version",
+                "expected_memory_hash",
+                "request_hash",
+                "frame_commitment_hash",
+            ),
+        )
+        self.assertEqual(proposal_type.SCHEMA, "phase8-learning-proposal")
+        self.assertEqual(proposal_type.VERSION, 1)
+        self.assertEqual(proposal_type.DOMAIN, "phase8-learning-proposal-v1")
+        self.assertEqual(
+            proposal.canonical_hash(),
+            "11926681ffaf17906cf6a7214e056e15505a996a289b9b11df71dee9119c4fb6",
+        )
+        self.assertEqual(
+            json.loads(proposal.to_canonical_bytes())["data"]["claim"],
+            json.loads(claim.to_canonical_bytes()),
+        )
+        for override in (
+            {"aggregate_turn_id": "Turn-1"},
+            {"sequence": True},
+            {"claim": TypedFact("language", StringSlot("pt-BR"), "5" * 64)},
+            {"claim": TypedFact("language", StringSlot("pt-BR"))},
+            {"expected_memory_version": -1},
+            {"expected_memory_hash": "short"},
+            {"frame_commitment_hash": "A" * 64},
+        ):
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, ValueError)):
+                    proposal_type(
+                        **(
+                            {
+                                "aggregate_turn_id": "turn-1",
+                                "request_id": "request-2",
+                                "sequence": 1,
+                                "claim": claim,
+                                "expected_memory_version": 0,
+                                "expected_memory_hash": "6" * 64,
+                                "request_hash": "4" * 64,
+                                "frame_commitment_hash": "3" * 64,
                             }
                             | override
                         )
