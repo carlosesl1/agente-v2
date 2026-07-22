@@ -26,6 +26,10 @@ EXPECTED_STAGES = (
     "after_artifact_insert_0",
     "before_artifact_insert_1",
     "after_artifact_insert_1",
+    "before_artifact_insert_2",
+    "after_artifact_insert_2",
+    "before_artifact_insert_3",
+    "after_artifact_insert_3",
     "before_command_insert_0",
     "after_command_insert_0",
     "before_relay_insert_0",
@@ -103,7 +107,7 @@ class Phase8BoundaryAtomicFaultTests(unittest.TestCase):
                     ).fetchone()[0]
                     for table in atomic_module.TABLES
                 )
-                self.assertEqual(counts, (1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 0))
+                self.assertEqual(counts, (1, 1, 1, 4, 1, 1, 1, 1, 2, 1, 0))
 
 
 if __name__ == "__main__":

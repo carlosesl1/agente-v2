@@ -29,12 +29,19 @@ from reservation_boundary.schema import (
     render_sqlite_v8,
     sqlite_v8_schema_fingerprint,
 )
-from reservation_boundary.conversation import PublicReplyChunk, SourceEventIdentity
+from reservation_boundary.conversation import (
+    MayaTurnClosure,
+    PublicReplyChunk,
+    SourceEventIdentity,
+    TranscriptCommitment,
+)
 from reservation_boundary.reads import ReadObservation
 from reservation_boundary.serialization import from_wire_json, semantic_hash, to_wire_json
 from reservation_boundary.types import (
     BoundaryCommit,
     BoundaryState,
+    KernelDecision,
+    OutboxMessage,
     ImportDisposition,
     ImportResult,
     LegacyLeadSnapshot,
@@ -749,6 +756,163 @@ class PublicOutboxWrite:
         _receipt_utc(self.deadline_at, "PublicOutboxWrite.deadline_at")
 
 
+def _validate_v8_artifact_graph(
+    *,
+    receipt: TurnReceipt,
+    artifacts: tuple[TurnArtifactWrite, ...],
+    public_chunks: tuple[PublicReplyChunk, ...],
+    expected_state: BoundaryState | None = None,
+    expected_commands: tuple[object, ...] | None = None,
+) -> KernelDecision:
+    """Recompose transcript → closure → proposal → decision bilaterally."""
+    by_kind = {
+        kind: tuple(item for item in artifacts if item.artifact_kind == kind)
+        for kind in _TURN_ARTIFACT_KINDS
+    }
+    if (
+        len(by_kind["maya_closure"]) != 1
+        or len(by_kind["maya_proposal"]) != 1
+        or len(by_kind["kernel_decision"]) != 1
+        or not by_kind["frame_commitment"]
+    ):
+        raise ValueError("v8 artifact graph requires frames, closure, proposal and decision")
+
+    for artifact in artifacts:
+        if artifact.artifact_kind == "kernel_decision":
+            expected_hash = hashlib.sha256(artifact.canonical_bytes).hexdigest()
+        else:
+            domain = _ARTIFACT_DOMAINS.get(artifact.artifact_kind)
+            if domain is None:
+                raise ValueError("v8 artifact graph kind has no hash domain")
+            expected_hash = _semantic_domain_hash(domain, artifact.canonical_bytes)
+        if artifact.artifact_hash != expected_hash:
+            raise ValueError("v8 artifact graph hash diverges from canonical bytes")
+
+    frames = tuple(
+        TranscriptCommitment.from_canonical_bytes(item.canonical_bytes)
+        for item in by_kind["frame_commitment"]
+    )
+    if tuple(item.sequence for item in frames) != tuple(range(1, len(frames) + 1)):
+        raise ValueError("v8 transcript frame sequence is not contiguous")
+    for artifact, frame in zip(by_kind["frame_commitment"], frames):
+        if artifact.frame_sequence != frame.sequence or artifact.artifact_hash != frame.canonical_hash():
+            raise ValueError("v8 transcript artifact/frame identity diverged")
+
+    closure_artifact = by_kind["maya_closure"][0]
+    closure = MayaTurnClosure.from_canonical_bytes(closure_artifact.canonical_bytes)
+    if closure.canonical_hash() != closure_artifact.artifact_hash:
+        raise ValueError("v8 closure artifact hash diverged")
+
+    proposal_artifact = by_kind["maya_proposal"][0]
+    proposal_envelope = _receipt_load_json(
+        proposal_artifact.canonical_bytes,
+        "MayaTurnProposal",
+    )
+    if set(proposal_envelope) != {"schema", "version", "data"} or (
+        proposal_envelope["schema"] != "phase8-maya-turn-proposal"
+        or proposal_envelope["version"] != 1
+        or type(proposal_envelope["data"]) is not dict
+    ):
+        raise ValueError("v8 Maya proposal envelope diverged")
+    proposal = proposal_envelope["data"]
+    proposal_fields = {
+        "aggregate_turn_id",
+        "intent_closure",
+        "read_observations",
+        "facts",
+        "normalized_tool_proposals",
+        "learning_proposals",
+        "public_reply_chunks",
+        "maya_turn_closure_hash",
+        "final_transcript_commitment_hash",
+        "final_seq",
+        "final_transcript_mac",
+        "runtime_graph_digest",
+        "route",
+        "reply_type",
+    }
+    if set(proposal) != proposal_fields:
+        raise ValueError("v8 Maya proposal fields diverged")
+
+    def nested_rows(field: str) -> tuple[bytes, ...]:
+        value = proposal[field]
+        if type(value) is not list or any(type(item) is not dict for item in value):
+            raise TypeError(f"v8 Maya proposal {field} must be object rows")
+        return tuple(_receipt_json(item) for item in value)
+
+    proposal_reads = nested_rows("read_observations")
+    proposal_facts = nested_rows("facts")
+    proposal_tools = nested_rows("normalized_tool_proposals")
+    proposal_learning = nested_rows("learning_proposals")
+    proposal_public = nested_rows("public_reply_chunks")
+    stored_reads = tuple(item.canonical_bytes for item in by_kind["read_observation"])
+    stored_facts = tuple(item.canonical_bytes for item in by_kind["typed_fact"])
+    stored_tools = tuple(
+        item.canonical_bytes for item in by_kind["normalized_tool_proposal"]
+    )
+    stored_learning = tuple(item.canonical_bytes for item in by_kind["learning_proposal"])
+    public_bytes = tuple(item.to_canonical_bytes() for item in public_chunks)
+    if (
+        proposal_reads != stored_reads
+        or proposal_reads != tuple(row[1] for row in receipt.read_observations)
+        or proposal_facts != stored_facts
+        or proposal_tools != stored_tools
+        or proposal_learning != stored_learning
+        or proposal_public != public_bytes
+        or public_bytes != tuple(row[2] for row in receipt.public_chunks)
+    ):
+        raise ValueError("v8 Maya proposal child graph diverged")
+
+    intent_bytes = _receipt_json(proposal["intent_closure"])
+    if (
+        proposal["aggregate_turn_id"] != receipt.aggregate_turn_id
+        or closure.aggregate_turn_id != receipt.aggregate_turn_id
+        or intent_bytes != closure.intent_closure.to_canonical_bytes()
+        or proposal["maya_turn_closure_hash"] != closure.canonical_hash()
+        or proposal["final_transcript_commitment_hash"] != frames[-1].canonical_hash()
+        or proposal["final_seq"] != frames[-1].sequence
+        or proposal["final_seq"] != closure.final_seq
+        or proposal["final_seq"] != receipt.uds_final_seq
+        or proposal["final_transcript_mac"] != receipt.uds_transcript_mac
+        or proposal["runtime_graph_digest"] != receipt.structural_graph_digest
+        or proposal["route"] != closure.route.value
+        or proposal["reply_type"] != closure.reply_type.value
+        or proposal_artifact.artifact_hash != receipt.maya_proposal_hash
+    ):
+        raise ValueError("v8 transcript/closure/proposal binding diverged")
+    if tuple(chunk.ordinal for chunk in public_chunks) != tuple(range(len(public_chunks))):
+        raise ValueError("v8 public chunks are not contiguous")
+    if any(
+        chunk.aggregate_turn_id != receipt.aggregate_turn_id
+        or chunk.source_closure_hash != closure.canonical_hash()
+        for chunk in public_chunks
+    ):
+        raise ValueError("v8 public chunks do not bind accepted closure")
+
+    decision_artifact = by_kind["kernel_decision"][0]
+    decision = from_wire_json(decision_artifact.canonical_bytes.decode("utf-8"), KernelDecision)
+    decision_rows = tuple(
+        (
+            command.command_id,
+            hashlib.sha256(dumps_command(command).encode("utf-8")).hexdigest(),
+        )
+        for command in decision.commands
+    )
+    if (
+        semantic_hash(decision) != decision_artifact.artifact_hash
+        or decision_artifact.artifact_hash != receipt.kernel_decision_hash
+        or semantic_hash(decision.state) != receipt.committed_state_hash
+        or decision.state.version != receipt.committed_state_version
+        or decision_rows != receipt.command_rows
+    ):
+        raise ValueError("v8 proposal/decision/receipt binding diverged")
+    if expected_state is not None and decision.state != expected_state:
+        raise ValueError("v8 decision state diverges from commit")
+    if expected_commands is not None and decision.commands != expected_commands:
+        raise ValueError("v8 decision commands diverge from commit")
+    return decision
+
+
 def _command_record(command: object) -> tuple[str, str, str]:
     if type(command) is ReservationCommand:
         wire = dumps_command(command)
@@ -814,7 +978,7 @@ def _authenticate_v8_connection(connection: sqlite3.Connection) -> None:
 
 
 _ARTIFACT_DOMAINS = {
-    "frame_commitment": "phase8-conversation-frame-commitment-v1",
+    "frame_commitment": "phase8-transcript-commitment-v1",
     "read_observation": "phase8-read-observation-v1",
     "typed_fact": "phase8-typed-fact-v1",
     "normalized_tool_proposal": "phase8-normalized-tool-proposal-v1",
@@ -931,10 +1095,21 @@ def _semantic_scan_v8_connection(connection: sqlite3.Connection) -> None:
                 maya: list[tuple[str, str, bytes]] = []
                 kernel: list[tuple[str, str, bytes]] = []
                 reads: list[tuple[str, bytes, str]] = []
-                for _, artifact_id, kind, _, _, artifact_json, artifact_hash, backlink in artifacts:
+                graph_artifacts: list[TurnArtifactWrite] = []
+                for _, artifact_id, kind, frame_sequence, frame_reference, artifact_json, artifact_hash, backlink in artifacts:
                     payload, _ = _semantic_canonical_json(
                         artifact_json,
                         f"artifact {artifact_id}",
+                    )
+                    graph_artifacts.append(
+                        TurnArtifactWrite(
+                            artifact_id,
+                            kind,
+                            frame_sequence,
+                            frame_reference,
+                            payload,
+                            artifact_hash,
+                        )
                     )
                     if backlink != receipt_hash:
                         raise DataCorruption("v8 semantic artifact receipt backlink diverged")
@@ -1045,6 +1220,7 @@ def _semantic_scan_v8_connection(connection: sqlite3.Connection) -> None:
                 if len(public_rows) != len(receipt.public_chunks):
                     raise DataCorruption("v8 semantic public child cardinality diverged")
                 expected_public: list[tuple[str, int, bytes, str]] = []
+                graph_public: list[PublicReplyChunk] = []
                 predecessor: str | None = None
                 for row in public_rows:
                     (
@@ -1109,9 +1285,15 @@ def _semantic_scan_v8_connection(connection: sqlite3.Connection) -> None:
                     }:
                         raise DataCorruption("v8 semantic allocation binding diverged")
                     expected_public.append((public_row_id, ordinal, payload, chunk_hash))
+                    graph_public.append(chunk)
                     predecessor = chunk_hash
                 if tuple(expected_public) != receipt.public_chunks:
                     raise DataCorruption("v8 semantic public receipt tuple diverged")
+                _validate_v8_artifact_graph(
+                    receipt=receipt,
+                    artifacts=tuple(graph_artifacts),
+                    public_chunks=tuple(graph_public),
+                )
 
             if state_version == 0:
                 if events:
@@ -1763,6 +1945,16 @@ class SQLiteBoundaryStore:
                 raise IdentityConflict("public row capability policy diverges from receipt")
             if row.effective_turn_binding_digest != receipt.effective_stage_binding_digest:
                 raise IdentityConflict("public row effective binding diverges from receipt")
+        try:
+            _validate_v8_artifact_graph(
+                receipt=receipt,
+                artifacts=artifacts,
+                public_chunks=tuple(row.chunk for row in public_rows),
+                expected_state=commit.state,
+                expected_commands=commit.commands,
+            )
+        except (TypeError, ValueError) as exc:
+            raise IdentityConflict("turn artifact semantic graph diverges") from exc
 
         def fault(stage: str) -> None:
             if fault_hook is not None:

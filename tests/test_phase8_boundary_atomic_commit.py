@@ -9,10 +9,21 @@ import json
 import unittest
 
 from reservation_domain import dumps_command
-from reservation_boundary.conversation import PublicReplyChunk, SourceEventIdentity
+from reservation_boundary.conversation import (
+    MayaIntentClosure,
+    MayaTurnClosure,
+    MayaTurnProposal,
+    PublicReplyChunk,
+    PublicReplyType,
+    PublicRoute,
+    SourceEventIdentity,
+    TranscriptCommitment,
+    TranscriptDirection,
+    TranscriptKind,
+)
 from reservation_boundary.serialization import semantic_hash, to_wire_json
-from reservation_boundary.sqlite_store import SQLiteBoundaryStore, TurnReceipt
-from reservation_boundary.types import BoundaryCommit, KernelDecision
+from reservation_boundary.sqlite_store import IdentityConflict, SQLiteBoundaryStore, TurnReceipt
+from reservation_boundary.types import BoundaryCommit, ConversationIntentKind, KernelDecision
 from tests.test_phase7_sqlite_store import queued_import
 
 
@@ -90,15 +101,64 @@ class Phase8BoundaryAtomicCommitTests(unittest.TestCase):
         commit = BoundaryCommit(next_state, (command,), (), ())
         decision = KernelDecision(next_state, (command,), (), (), ())
 
-        maya_bytes = _canonical(
-            "phase8-maya-turn-proposal",
-            {"aggregate_turn_id": "turn-atomic-1", "closure_hash": "1" * 64},
+        intent = MayaIntentClosure(
+            ConversationIntentKind.REQUEST_HANDOFF,
+            None,
+            None,
+            True,
         )
-        maya_hash = _domain_hash("phase8-maya-turn-proposal-v1", maya_bytes)
+        closure = MayaTurnClosure(
+            "turn-atomic-1",
+            intent,
+            "Vou chamar uma pessoa.",
+            PublicRoute.HANDOFF,
+            PublicReplyType.HANDOFF,
+            1,
+            "5" * 64,
+            "session-atomic-1",
+            True,
+        )
+        chunk = PublicReplyChunk(
+            "turn-atomic-1",
+            0,
+            closure.public_text,
+            closure.canonical_hash(),
+        )
+        final_frame = TranscriptCommitment(
+            TranscriptDirection.CHILD_TO_PARENT,
+            TranscriptKind.FINAL,
+            1,
+            "final-request-1",
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+        )
+        maya_proposal = MayaTurnProposal.from_accepted_closure(
+            accepted_closure=closure,
+            read_observations=(),
+            facts=(),
+            normalized_tool_proposals=(),
+            learning_proposals=(),
+            public_reply_chunks=(chunk,),
+            final_transcript_commitment_hash=final_frame.canonical_hash(),
+            final_transcript_mac="6" * 64,
+            runtime_graph_digest="7" * 64,
+        )
+        self.maya_proposal = maya_proposal
+        maya_bytes = maya_proposal.to_canonical_bytes()
+        maya_hash = maya_proposal.canonical_hash()
         decision_bytes = to_wire_json(decision).encode()
         decision_hash = semantic_hash(decision)
         artifact_type = self._type("TurnArtifactWrite")
         artifacts = (
+            artifact_type(
+                "frame-1", "frame_commitment", 1, final_frame.canonical_hash(),
+                final_frame.to_canonical_bytes(), final_frame.canonical_hash(),
+            ),
+            artifact_type(
+                "closure-1", "maya_closure", None, None,
+                closure.to_canonical_bytes(), closure.canonical_hash(),
+            ),
             artifact_type(
                 "maya-proposal-1", "maya_proposal", None, None,
                 maya_bytes, maya_hash,
@@ -126,7 +186,6 @@ class Phase8BoundaryAtomicCommitTests(unittest.TestCase):
             ),
         )
 
-        chunk = PublicReplyChunk("turn-atomic-1", 0, "Resposta pública.", "1" * 64)
         public_type = self._type("PublicOutboxWrite")
         public = (
             public_type(
@@ -209,7 +268,7 @@ class Phase8BoundaryAtomicCommitTests(unittest.TestCase):
             self.store._connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in TABLES
         )
-        self.assertEqual(counts, (1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 0))
+        self.assertEqual(counts, (1, 1, 1, 4, 1, 1, 1, 1, 2, 1, 0))
         self.assertEqual(self.store.load_state(commit.state.lead_key).state, commit.state)
         authority = self.store._connection.execute(
             "SELECT state,public_row_id,cas_revision FROM boundary_dispatch_authority "
@@ -246,8 +305,43 @@ class Phase8BoundaryAtomicCommitTests(unittest.TestCase):
                 for item in artifacts
             ],
         )
-        self.assertEqual(receipt.maya_proposal_hash, artifacts[0].artifact_hash)
-        self.assertEqual(receipt.kernel_decision_hash, artifacts[1].artifact_hash)
+        self.assertEqual(receipt.maya_proposal_hash, artifacts[2].artifact_hash)
+        self.assertEqual(receipt.kernel_decision_hash, artifacts[3].artifact_hash)
+
+    def test_commit_rejects_proposal_receipt_semantic_divergence(self) -> None:
+        current, token, commit, receipt, artifacts, relays, internal, public = self._case()
+        divergent = replace(self.maya_proposal, runtime_graph_digest="f" * 64)
+        divergent_artifacts = tuple(
+            replace(
+                artifact,
+                canonical_bytes=divergent.to_canonical_bytes(),
+                artifact_hash=divergent.canonical_hash(),
+            )
+            if artifact.artifact_kind == "maya_proposal"
+            else artifact
+            for artifact in artifacts
+        )
+        divergent_receipt = replace(
+            receipt,
+            maya_proposal_hash=divergent.canonical_hash(),
+            artifact_hash="",
+        )
+        with self.assertRaises(IdentityConflict):
+            self.store.commit_turn_v8(
+                expected_version=current.version,
+                fencing_token=token,
+                commit=commit,
+                receipt=divergent_receipt,
+                artifacts=divergent_artifacts,
+                command_relays=relays,
+                internal_jobs=internal,
+                public_rows=public,
+                committed_at=T0,
+            )
+        self.assertEqual(
+            self.store.load_state(current.state.lead_key).state.version,
+            0,
+        )
 
 
 if __name__ == "__main__":

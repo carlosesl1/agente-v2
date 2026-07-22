@@ -46,7 +46,7 @@ class Phase8BoundaryReplayTests(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(second.to_canonical_bytes(), first.to_canonical_bytes())
         self.assertEqual(self._counts(store), before)
-        self.assertEqual(before, (1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 0))
+        self.assertEqual(before, (1, 1, 1, 4, 1, 1, 1, 1, 2, 1, 0))
 
     def test_same_aggregate_with_divergent_receipt_is_identity_conflict(self) -> None:
         store, kwargs = self._prepared()
