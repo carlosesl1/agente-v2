@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import fields
-from datetime import date
+from datetime import date, datetime
 import hashlib
 import json
 from pathlib import Path
@@ -17,6 +17,14 @@ from reservation_boundary.conversation import (
     ReservationExecutionProjection,
 )
 from reservation_boundary.types import DateSlot, IntegerSlot, StringSlot, TypedFact
+from reservation_boundary.types import (
+    ActivityDescriptionArguments,
+    ActivityReadArguments,
+    FaqReadArguments,
+    LodgingReadArguments,
+    RoomDescriptionArguments,
+)
+from reservation_boundary.reads import LegacyGenesisReadRequest, Phase8ToolReadRequest
 
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "phase8_facts_reads_wire_v1.json"
@@ -199,6 +207,139 @@ class Phase8ProjectionTests(unittest.TestCase):
             with self.subTest(services=services, locale=locale, facts=facts_value):
                 with self.assertRaises((TypeError, ValueError)):
                     ConversationProjection(stage, services, locale, facts_value, execution)
+
+
+class Phase8ReadRequestTests(unittest.TestCase):
+    @staticmethod
+    def _source_event(data: dict[str, object]):
+        from reservation_boundary.conversation import SourceEventIdentity
+
+        event_data = data["source_event"]["data"]
+        return SourceEventIdentity(
+            event_data["source_event_id"],
+            event_data["source_event_hash"],
+        )
+
+    def test_all_five_tool_requests_and_genesis_match_known_answers(self) -> None:
+        examples = _fixture()["examples"]
+        argument_types = {
+            "FaqReadArguments": lambda data: FaqReadArguments(
+                data["query"], data["locale"]
+            ),
+            "LodgingReadArguments": lambda data: LodgingReadArguments(
+                date.fromisoformat(data["check_in"]),
+                date.fromisoformat(data["check_out"]),
+                data["adults"],
+                data["children"],
+            ),
+            "RoomDescriptionArguments": lambda data: RoomDescriptionArguments(
+                data["room_offer_id"]
+            ),
+            "ActivityReadArguments": lambda data: ActivityReadArguments(
+                data["activity_id"],
+                date.fromisoformat(data["activity_date"]),
+                data["participants"],
+            ),
+            "ActivityDescriptionArguments": lambda data: ActivityDescriptionArguments(
+                data["activity_id"]
+            ),
+        }
+        labels = (
+            "faq",
+            "lodging_availability",
+            "room_description",
+            "activity_availability",
+            "activity_description",
+        )
+        for label in labels:
+            with self.subTest(label=label):
+                item = examples[f"read_request.{label}"]
+                data = json.loads(item["canonical_utf8"])["data"]
+                argument = argument_types[data["arguments"]["type"]](
+                    data["arguments"]["data"]
+                )
+                request = Phase8ToolReadRequest(
+                    data["tool_name"],
+                    argument,
+                    data["lead_key_hash"],
+                    data["aggregate_turn_id"],
+                    self._source_event(data),
+                    datetime.fromisoformat(data["deadline_at"]),
+                    data["locale"],
+                    data["projection_hash"],
+                )
+                self.assertEqual(
+                    request.to_canonical_bytes().decode("utf-8"),
+                    item["canonical_utf8"],
+                )
+                self.assertEqual(request.canonical_hash(), item["canonical_hash"])
+                self.assertEqual(request.read_request_hash(), item["request_hash"])
+
+        genesis_item = examples["read_request.legacy_genesis"]
+        genesis_data = json.loads(genesis_item["canonical_utf8"])["data"]
+        genesis = LegacyGenesisReadRequest(
+            genesis_data["lead_key_hash"],
+            genesis_data["aggregate_turn_id"],
+            self._source_event(genesis_data),
+            datetime.fromisoformat(genesis_data["deadline_at"]),
+            genesis_data["legacy_source"],
+        )
+        self.assertEqual(
+            genesis.to_canonical_bytes().decode("utf-8"),
+            genesis_item["canonical_utf8"],
+        )
+        self.assertEqual(genesis.canonical_hash(), genesis_item["canonical_hash"])
+        self.assertEqual(genesis.read_request_hash(), genesis_item["request_hash"])
+
+    def test_read_request_tool_pairs_and_turn_bindings_fail_closed(self) -> None:
+        examples = _fixture()["examples"]
+        data = json.loads(examples["read_request.faq"]["canonical_utf8"])["data"]
+        event = self._source_event(data)
+        deadline = datetime.fromisoformat(data["deadline_at"])
+        common = (
+            data["lead_key_hash"],
+            data["aggregate_turn_id"],
+            event,
+            deadline,
+            data["locale"],
+            data["projection_hash"],
+        )
+        invalid = (
+            ("unknown_read", FaqReadArguments("Question?", "pt-BR"), common),
+            (
+                "cerebro_consultar",
+                LodgingReadArguments(date(2026, 8, 1), date(2026, 8, 2), 1, 0),
+                common,
+            ),
+            (
+                "cerebro_consultar",
+                FaqReadArguments("Question?", "en"),
+                common,
+            ),
+            (
+                "cerebro_consultar",
+                FaqReadArguments("Question?", "pt-BR"),
+                ("x" * 64, *common[1:]),
+            ),
+            (
+                "cerebro_consultar",
+                FaqReadArguments("Question?", "pt-BR"),
+                (*common[:3], deadline.replace(tzinfo=None), *common[4:]),
+            ),
+        )
+        for tool_name, arguments, bindings in invalid:
+            with self.subTest(tool_name=tool_name, arguments=arguments):
+                with self.assertRaises((TypeError, ValueError)):
+                    Phase8ToolReadRequest(tool_name, arguments, *bindings)
+
+        with self.assertRaises(ValueError):
+            LegacyGenesisReadRequest(
+                data["lead_key_hash"],
+                data["aggregate_turn_id"],
+                event,
+                deadline,
+                "another_source",
+            )
 
 
 if __name__ == "__main__":
