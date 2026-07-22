@@ -63,57 +63,70 @@ class EvidenceArtifactStore:
         owner_fd: int | None = None
         temporary_fd: int | None = None
         published = False
-        with self._coord_lock():
-            objects_fd = self._open_directory(self.root / "objects")
-            try:
-                existing = self._verify_existing(objects_fd, digest, payload, missing_ok=True)
-                if existing is not None:
-                    return existing
-            finally:
-                os.close(objects_fd)
-
-            staging_fd = self._open_directory(self.root / ".staging")
-            try:
-                for _ in range(128):
-                    candidate = secrets.token_hex(16)
-                    try:
-                        os.mkdir(candidate, mode=0o700, dir_fd=staging_fd)
-                    except FileExistsError:
-                        continue
-                    stage_name = candidate
-                    break
-                if stage_name is None:
-                    raise ManualReviewError("could not allocate a unique staging prefix")
-                stage_fd = os.open(
-                    stage_name,
-                    os.O_RDONLY | _DIRECTORY | _NOFOLLOW,
-                    dir_fd=staging_fd,
-                )
-                self._verify_directory_fd(stage_fd, expected_mode=0o700, label="staging prefix")
-                owner_fd = os.open(
-                    "owner.lock",
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR | _NOFOLLOW,
-                    0o600,
-                    dir_fd=stage_fd,
-                )
-                os.fchmod(owner_fd, 0o600)
-                self._verify_regular_fd(owner_fd, expected_modes={0o600}, label="owner.lock")
-                fcntl.flock(owner_fd, fcntl.LOCK_EX)
-                temporary_fd = os.open(
-                    "object.tmp",
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR | _NOFOLLOW,
-                    0o600,
-                    dir_fd=stage_fd,
-                )
-                os.fchmod(temporary_fd, 0o600)
-            finally:
-                os.close(staging_fd)
-
-        assert stage_name is not None
-        assert stage_fd is not None
-        assert owner_fd is not None
-        assert temporary_fd is not None
+        result: EvidenceObject | None = None
         try:
+            with self._coord_lock():
+                objects_fd = self._open_directory(self.root / "objects")
+                try:
+                    existing = self._verify_existing(objects_fd, digest, payload, missing_ok=True)
+                    if existing is not None:
+                        return existing
+                finally:
+                    os.close(objects_fd)
+
+                staging_fd = self._open_directory(self.root / ".staging")
+                try:
+                    for _ in range(128):
+                        candidate = secrets.token_hex(16)
+                        try:
+                            os.mkdir(candidate, mode=0o700, dir_fd=staging_fd)
+                        except FileExistsError:
+                            continue
+                        stage_name = candidate
+                        os.fsync(staging_fd)
+                        break
+                    if stage_name is None:
+                        raise ManualReviewError("could not allocate a unique staging prefix")
+                    stage_fd = os.open(
+                        stage_name,
+                        os.O_RDONLY | _DIRECTORY | _NOFOLLOW,
+                        dir_fd=staging_fd,
+                    )
+                    self._verify_directory_fd(
+                        stage_fd,
+                        expected_mode=0o700,
+                        label="staging prefix",
+                    )
+                    owner_fd = os.open(
+                        "owner.lock",
+                        os.O_CREAT | os.O_EXCL | os.O_RDWR | _NOFOLLOW,
+                        0o600,
+                        dir_fd=stage_fd,
+                    )
+                    os.fchmod(owner_fd, 0o600)
+                    self._verify_regular_fd(
+                        owner_fd,
+                        expected_modes={0o600},
+                        label="owner.lock",
+                    )
+                    os.fsync(owner_fd)
+                    os.fsync(stage_fd)
+                    fcntl.flock(owner_fd, fcntl.LOCK_EX)
+                    temporary_fd = os.open(
+                        "object.tmp",
+                        os.O_CREAT | os.O_EXCL | os.O_RDWR | _NOFOLLOW,
+                        0o600,
+                        dir_fd=stage_fd,
+                    )
+                    os.fchmod(temporary_fd, 0o600)
+                    os.fsync(stage_fd)
+                finally:
+                    os.close(staging_fd)
+
+            assert stage_name is not None
+            assert stage_fd is not None
+            assert owner_fd is not None
+            assert temporary_fd is not None
             _write_all(temporary_fd, payload)
             os.fsync(temporary_fd)
             os.close(temporary_fd)
@@ -167,12 +180,16 @@ class EvidenceArtifactStore:
         finally:
             if temporary_fd is not None:
                 os.close(temporary_fd)
-            fcntl.flock(owner_fd, fcntl.LOCK_UN)
-            os.close(owner_fd)
-            os.close(stage_fd)
+            if owner_fd is not None:
+                fcntl.flock(owner_fd, fcntl.LOCK_UN)
+                os.close(owner_fd)
+            if stage_fd is not None:
+                os.close(stage_fd)
 
         if published:
+            assert stage_name is not None
             self._cleanup_published_stage(stage_name)
+        assert result is not None
         return result
 
     def recover(self) -> RecoveryReport:
