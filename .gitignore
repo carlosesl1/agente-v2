@@ -25,6 +25,7 @@ artifacts/
 runs/
 reports/generated/
 raw/
+.phase8-evidence/
 customer-data/
 provider-payloads/
 
