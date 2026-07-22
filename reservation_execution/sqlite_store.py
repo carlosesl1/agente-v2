@@ -52,7 +52,16 @@ from .projection import (
     project_preparation_failure_outbox,
     validate_summary_outbox,
 )
-from .schema import SCHEMA_VERSION, render_sqlite, schema_contract, schema_hash
+from .schema import (
+    PHASE5_V6_TABLES,
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_V6,
+    render_sqlite,
+    render_sqlite_v6,
+    schema_contract,
+    schema_hash,
+    schema_hash_v6,
+)
 from .types import (
     CommandClaim,
     DeliveryReceipt,
@@ -70,6 +79,7 @@ from .types import (
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
+_EXPECTED_TABLES_V6 = PHASE5_V6_TABLES
 _FACTORY_TOKEN = object()
 _MAX_PREPARATION_FAILURES = 3
 
@@ -204,7 +214,11 @@ def _sqlite_store_error(exc: sqlite3.Error, operation: str) -> StoreError:
     return StoreUnavailable(f"{operation} failed in SQLite")
 
 
-def _schema_statements(sql: str) -> tuple[str, ...]:
+def _schema_statements(
+    sql: str,
+    *,
+    expected_count: int = len(_EXPECTED_TABLES),
+) -> tuple[str, ...]:
     statements: list[str] = []
     buffer = ""
     for line in sql.splitlines(keepends=True):
@@ -216,7 +230,7 @@ def _schema_statements(sql: str) -> tuple[str, ...]:
             buffer = ""
     if buffer.strip():
         raise DataCorruption("generated SQLite schema contains an incomplete statement")
-    if len(statements) != len(_EXPECTED_TABLES):
+    if len(statements) != expected_count:
         raise DataCorruption("generated SQLite schema statement count is not closed")
     return tuple(statements)
 
@@ -230,11 +244,15 @@ class SQLiteUnitOfWork:
         connection: sqlite3.Connection,
         *,
         _factory_token: object,
+        _schema_version: int = SCHEMA_VERSION,
     ):
         if _factory_token is not _FACTORY_TOKEN:
             raise TypeError("SQLiteUnitOfWork must be created with open()")
+        if _schema_version not in (SCHEMA_VERSION, SCHEMA_VERSION_V6):
+            raise ValueError("unsupported execution schema version")
         self._path = path
         self._connection = connection
+        self._schema_version = _schema_version
         self._closed = False
 
     @classmethod
@@ -266,6 +284,45 @@ class SQLiteUnitOfWork:
             if connection is not None:
                 connection.close()
             raise _sqlite_store_error(exc, "open") from exc
+        except BaseException:
+            if connection is not None:
+                connection.close()
+            raise
+
+    @classmethod
+    def open_v6(cls, path: Path) -> "SQLiteUnitOfWork":
+        if not isinstance(path, Path):
+            raise TypeError("path must be a pathlib.Path")
+        if path.exists() and not path.is_file():
+            raise ValueError("SQLite path must be a file or absent")
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                path,
+                isolation_level=None,
+                timeout=5.0,
+            )
+            connection.execute("PRAGMA foreign_keys = ON")
+            mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            connection.execute("PRAGMA synchronous = FULL")
+            if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+                raise DataCorruption("SQLite foreign keys could not be enabled")
+            if str(mode).casefold() != "wal":
+                raise DataCorruption("SQLite WAL mode could not be enabled")
+            if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
+                raise DataCorruption("SQLite FULL synchronous mode could not be enabled")
+            store = cls(
+                path,
+                connection,
+                _factory_token=_FACTORY_TOKEN,
+                _schema_version=SCHEMA_VERSION_V6,
+            )
+            store._initialize_or_validate_schema_v6()
+            return store
+        except sqlite3.Error as exc:
+            if connection is not None:
+                connection.close()
+            raise _sqlite_store_error(exc, "open_v6") from exc
         except BaseException:
             if connection is not None:
                 connection.close()
@@ -367,6 +424,85 @@ class SQLiteUnitOfWork:
             raise DataCorruption(
                 f"SQLite migration mismatch: expected={expected}, found={rows}"
             )
+
+    def _initialize_or_validate_schema_v6(self) -> None:
+        names = self._table_names()
+        if not names:
+            with self._transaction("initialize_schema_v6"):
+                for statement in _schema_statements(
+                    render_sqlite_v6(),
+                    expected_count=len(_EXPECTED_TABLES_V6),
+                ):
+                    self._connection.execute(statement)
+                self._connection.execute(
+                    "INSERT INTO schema_migrations "
+                    "(version, schema_hash, applied_at) VALUES (?, ?, ?)",
+                    (
+                        SCHEMA_VERSION_V6,
+                        schema_hash_v6(),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+            names = self._table_names()
+        if names != _EXPECTED_TABLES_V6:
+            raise DataCorruption(
+                "SQLite v6 table universe mismatch: "
+                f"expected={_EXPECTED_TABLES_V6}, found={names}"
+            )
+        expected_statements = _schema_statements(
+            render_sqlite_v6(),
+            expected_count=len(_EXPECTED_TABLES_V6),
+        )
+        expected_sql = {
+            name: statement.removesuffix(";")
+            for name, statement in zip(
+                _EXPECTED_TABLES_V6,
+                expected_statements,
+                strict=True,
+            )
+        }
+        actual_rows = tuple(
+            self._connection.execute(
+                "SELECT name, sql FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
+            )
+        )
+        if tuple(name for name, _ in actual_rows) != _EXPECTED_TABLES_V6:
+            raise DataCorruption("SQLite v6 table order is divergent")
+        for name, actual_sql in actual_rows:
+            if actual_sql != expected_sql[name]:
+                raise DataCorruption(f"SQLite v6 table definition drift: {name}")
+        explicit_objects = tuple(
+            self._connection.execute(
+                "SELECT type, name FROM sqlite_master "
+                "WHERE type != 'table' AND sql IS NOT NULL ORDER BY type, name"
+            )
+        )
+        if explicit_objects:
+            raise DataCorruption(
+                f"SQLite v6 schema has unexpected objects: {explicit_objects}"
+            )
+        temporary_objects = tuple(
+            self._connection.execute(
+                "SELECT type, name FROM sqlite_temp_master "
+                "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            )
+        )
+        if temporary_objects:
+            raise DataCorruption("SQLite v6 TEMP schema is not empty")
+        migrations = tuple(
+            self._connection.execute(
+                "SELECT version, schema_hash FROM schema_migrations ORDER BY version"
+            )
+        )
+        expected_migrations = ((SCHEMA_VERSION_V6, schema_hash_v6()),)
+        if migrations != expected_migrations:
+            raise DataCorruption(
+                "SQLite v6 migration identity mismatch: "
+                f"expected={expected_migrations}, found={migrations}"
+            )
+        if tuple(self._connection.execute("PRAGMA foreign_key_check")):
+            raise DataCorruption("SQLite v6 schema contains foreign key violations")
 
     def create_workflow(self, state: State) -> None:
         if type(state) not in STATE_TYPES:

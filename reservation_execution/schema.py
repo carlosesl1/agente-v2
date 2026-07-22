@@ -7,6 +7,7 @@ import hashlib
 from typing import Literal
 
 SCHEMA_VERSION = 5
+SCHEMA_VERSION_V6 = 6
 
 Dialect = Literal["sqlite", "postgresql"]
 
@@ -332,6 +333,130 @@ def schema_contract() -> tuple[TableContract, ...]:
     )
 
 
+def reservation_boundary_ingress_receipts_contract() -> TableContract:
+    return TableContract(
+        name="reservation_boundary_ingress_receipts",
+        columns=(
+            _hash("operation_id"),
+            _hash("source_turn_receipt_hash"),
+            _hash("artifact_hash"),
+            _text("bundle_json"),
+            _hash("target_commit_hash"),
+            _hash("target_result_hash"),
+            _text("receipt_json"),
+            _hash("receipt_hash"),
+            _timestamp("committed_at"),
+        ),
+        table_constraints=(
+            "CONSTRAINT pk_reservation_boundary_ingress_receipts "
+            "PRIMARY KEY (operation_id)",
+            "CONSTRAINT uq_reservation_boundary_ingress_receipts_receipt "
+            "UNIQUE (receipt_hash)",
+        ),
+    )
+
+
+def reservation_e2e_effect_authority_contract() -> TableContract:
+    def nullable_ordinal(name: str) -> ColumnContract:
+        return ColumnContract(
+            name,
+            "INTEGER",
+            "bigint",
+            True,
+            f"{name} IS NULL OR {name} >= 0",
+        )
+
+    return TableContract(
+        name="reservation_e2e_effect_authority",
+        columns=(
+            _text("authority_row_id"),
+            _text("row_kind", check="row_kind IN ('generation_header', 'allocation')"),
+            _text("qualification_id"),
+            _integer("epoch", "epoch >= 1"),
+            _hash("contract_hash"),
+            _hash("effect_authorization_binding_hash"),
+            _hash("manifest_hash"),
+            _text("generation_id"),
+            _text("allocation_id", nullable=True),
+            nullable_ordinal("allocation_ordinal"),
+            _text("scenario_id", nullable=True),
+            _text(
+                "effect_family",
+                nullable=True,
+                check="effect_family IS NULL OR effect_family = 'reservation'",
+            ),
+            _text("effect_kind", nullable=True),
+            _text(
+                "effect_role",
+                nullable=True,
+                check=(
+                    "effect_role IS NULL OR "
+                    "effect_role IN ('primary', 'compensation')"
+                ),
+            ),
+            _hash("effect_scope_hash", nullable=True),
+            _hash("workflow_scope_hash", nullable=True),
+            _hash("channel_scope_hash", nullable=True),
+            _hash("target_binding_hash", nullable=True),
+            nullable_ordinal("message_ordinal"),
+            _text(
+                "activation_parent_kind",
+                nullable=True,
+                check=(
+                    "activation_parent_kind IS NULL OR activation_parent_kind IN "
+                    "('none', 'provider_allocation', 'internal_target_operation')"
+                ),
+            ),
+            _text("activation_parent_id", nullable=True),
+            _hash("activation_parent_hash", nullable=True),
+            _text(
+                "state",
+                check=(
+                    "state IN ('open', 'closed', 'available', 'consumed', "
+                    "'unused', 'manual_review')"
+                ),
+            ),
+            _timestamp("installed_at"),
+            _timestamp("closed_at", nullable=True),
+        ),
+        table_constraints=(
+            "CONSTRAINT pk_reservation_e2e_effect_authority "
+            "PRIMARY KEY (authority_row_id)",
+            "CONSTRAINT uq_reservation_e2e_effect_authority_allocation "
+            "UNIQUE (allocation_id)",
+            "CONSTRAINT ck_reservation_e2e_effect_authority_row_matrix CHECK "
+            "((row_kind = 'generation_header' AND allocation_id IS NULL AND "
+            "allocation_ordinal IS NULL AND scenario_id IS NULL AND "
+            "effect_family IS NULL AND effect_kind IS NULL AND effect_role IS NULL "
+            "AND effect_scope_hash IS NULL AND workflow_scope_hash IS NULL AND "
+            "channel_scope_hash IS NULL AND target_binding_hash IS NULL AND "
+            "message_ordinal IS NULL AND activation_parent_kind IS NULL AND "
+            "activation_parent_id IS NULL AND activation_parent_hash IS NULL AND "
+            "state IN ('open', 'closed')) OR (row_kind = 'allocation' AND "
+            "allocation_id IS NOT NULL AND allocation_ordinal IS NOT NULL AND "
+            "scenario_id IS NOT NULL AND effect_family IS NOT NULL AND "
+            "effect_kind IS NOT NULL AND effect_role IS NOT NULL AND "
+            "effect_scope_hash IS NOT NULL AND target_binding_hash IS NOT NULL AND "
+            "activation_parent_kind IS NOT NULL AND "
+            "state IN ('available', 'consumed', 'unused', 'manual_review')))",
+            "CONSTRAINT ck_reservation_e2e_effect_authority_close_tuple CHECK "
+            "((state = 'closed' AND closed_at IS NOT NULL) OR "
+            "(state != 'closed' AND closed_at IS NULL))",
+        ),
+    )
+
+
+def schema_contract_v6() -> tuple[TableContract, ...]:
+    return (
+        *schema_contract(),
+        reservation_boundary_ingress_receipts_contract(),
+        reservation_e2e_effect_authority_contract(),
+    )
+
+
+PHASE5_V6_TABLES = tuple(table.name for table in schema_contract_v6())
+
+
 def _render_column(dialect: Dialect, column: ColumnContract) -> str:
     sql_type = column.sqlite_type if dialect == "sqlite" else column.postgresql_type
     parts = [column.name, sql_type]
@@ -368,6 +493,10 @@ def render_sqlite() -> str:
     return _render("sqlite", schema_contract())
 
 
+def render_sqlite_v6() -> str:
+    return _render("sqlite", schema_contract_v6())
+
+
 def render_postgresql() -> str:
     return _render("postgresql", schema_contract())
 
@@ -380,3 +509,7 @@ def schema_hash(dialect: str) -> str:
     else:
         raise ValueError(f"unsupported schema dialect: {dialect}")
     return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+
+
+def schema_hash_v6() -> str:
+    return hashlib.sha256(render_sqlite_v6().encode("utf-8")).hexdigest()

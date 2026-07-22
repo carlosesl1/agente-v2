@@ -58,7 +58,14 @@ from .projection import (
     PaymentEffectKind,
     required_payment_effects,
 )
-from .schema import render_sqlite, schema_contract
+from .schema import (
+    PHASE6_V2_TABLES,
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_V2,
+    render_sqlite,
+    render_sqlite_v2,
+    schema_contract,
+)
 from .serialization import from_wire_json, semantic_hash, to_wire_json
 from .types import (
     ConfirmedReservationAnchor,
@@ -80,6 +87,7 @@ from .types import (
 )
 
 _EXPECTED_TABLES = tuple(table.name for table in schema_contract())
+_EXPECTED_TABLES_V2 = PHASE6_V2_TABLES
 _FACTORY_TOKEN = object()
 _HANDOFF_EVENT_TYPES = (
     HandoffRequested,
@@ -310,6 +318,34 @@ def _expected_sql_by_table() -> dict[str, str]:
     }
 
 
+def _schema_statements_v2() -> tuple[str, ...]:
+    statements: list[str] = []
+    buffer = ""
+    for line in render_sqlite_v2().splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            statement = buffer.strip()
+            if statement:
+                statements.append(statement)
+            buffer = ""
+    if buffer.strip() or len(statements) != len(_EXPECTED_TABLES_V2) + 1:
+        raise DataCorruption("generated SQLite v2 schema statement universe is not closed")
+    if statements[0].casefold() != "pragma foreign_keys = on;":
+        raise DataCorruption("generated SQLite v2 schema lacks its FK preamble")
+    return tuple(statements)
+
+
+def _expected_sql_by_table_v2() -> dict[str, str]:
+    return {
+        table_name: statement.removesuffix(";")
+        for table_name, statement in zip(
+            _EXPECTED_TABLES_V2,
+            _schema_statements_v2()[1:],
+            strict=True,
+        )
+    }
+
+
 def _handoff_event_time(event: HandoffEvent) -> datetime:
     if type(event) is HandoffRequested:
         return event.requested_at
@@ -382,16 +418,22 @@ class SQLiteFollowupUnitOfWork:
         connection: sqlite3.Connection,
         *,
         _factory_token: object,
+        _schema_version: int = SCHEMA_VERSION,
     ) -> None:
         if _factory_token is not _FACTORY_TOKEN:
             raise TypeError("SQLiteFollowupUnitOfWork must be created with open()")
+        if _schema_version not in (SCHEMA_VERSION, SCHEMA_VERSION_V2):
+            raise ValueError("unsupported follow-up schema version")
         self._connection = connection
+        self._schema_version = _schema_version
         self._closed = False
 
     @classmethod
     def open(
         cls,
         path_or_connection: Path | str | sqlite3.Connection,
+        *,
+        _schema_version: int = SCHEMA_VERSION,
     ) -> "SQLiteFollowupUnitOfWork":
         connection: sqlite3.Connection | None = None
         caller_supplied = type(path_or_connection) is sqlite3.Connection
@@ -455,8 +497,15 @@ class SQLiteFollowupUnitOfWork:
             connection.execute("PRAGMA foreign_keys = ON")
             if connection.execute("PRAGMA foreign_keys").fetchone() != (1,):
                 raise DataCorruption("SQLite foreign keys could not be enabled")
-            store = cls(connection, _factory_token=_FACTORY_TOKEN)
-            store._initialize_or_validate_schema()
+            store = cls(
+                connection,
+                _factory_token=_FACTORY_TOKEN,
+                _schema_version=_schema_version,
+            )
+            if _schema_version == SCHEMA_VERSION_V2:
+                store._initialize_or_validate_schema_v2()
+            else:
+                store._initialize_or_validate_schema()
             return store
         except sqlite3.Error as exc:
             cleanup_rejected_connection()
@@ -464,6 +513,13 @@ class SQLiteFollowupUnitOfWork:
         except BaseException:
             cleanup_rejected_connection()
             raise
+
+    @classmethod
+    def open_v2(
+        cls,
+        path_or_connection: Path | str | sqlite3.Connection,
+    ) -> "SQLiteFollowupUnitOfWork":
+        return cls.open(path_or_connection, _schema_version=SCHEMA_VERSION_V2)
 
     def __enter__(self) -> "SQLiteFollowupUnitOfWork":
         self._ensure_open()
@@ -578,6 +634,45 @@ class SQLiteFollowupUnitOfWork:
             raise DataCorruption("SQLite follow-up schema must not contain triggers")
         if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
             raise DataCorruption("SQLite follow-up schema contains foreign key violations")
+
+    def _initialize_or_validate_schema_v2(self) -> None:
+        self._validate_connection_namespace()
+        rows = self._table_rows()
+        if not rows:
+            with self._transaction("initialize_schema_v2"):
+                for statement in _schema_statements_v2()[1:]:
+                    self._connection.execute(
+                        statement.replace(
+                            "CREATE TABLE ",
+                            "CREATE TABLE main.",
+                            1,
+                        )
+                    )
+            rows = self._table_rows()
+        names = tuple(row[0] for row in rows)
+        if names != _EXPECTED_TABLES_V2:
+            raise DataCorruption(
+                "SQLite v2 table universe mismatch: "
+                f"expected={_EXPECTED_TABLES_V2}, found={names}"
+            )
+        expected_sql = _expected_sql_by_table_v2()
+        for name, actual_sql in rows:
+            if actual_sql != expected_sql[name]:
+                raise DataCorruption(f"SQLite v2 table definition drift: {name}")
+        explicit_objects = tuple(
+            self._connection.execute(
+                "SELECT type, name FROM main.sqlite_master "
+                "WHERE type != 'table' AND sql IS NOT NULL ORDER BY type, name"
+            )
+        )
+        if explicit_objects:
+            raise DataCorruption(
+                f"SQLite v2 schema has unexpected objects: {explicit_objects}"
+            )
+        if self._connection.execute("PRAGMA foreign_keys").fetchone() != (1,):
+            raise DataCorruption("SQLite foreign keys are disabled")
+        if tuple(self._connection.execute("PRAGMA main.foreign_key_check")):
+            raise DataCorruption("SQLite v2 schema contains foreign key violations")
 
     def _handoff_workflow_row(self, handoff_id: str):
         return self._connection.execute(
