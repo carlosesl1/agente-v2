@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
@@ -88,9 +89,10 @@ def _observation(
 
 
 class _QueueModel:
-    def __init__(self, *responses: bytes) -> None:
+    def __init__(self, *responses: bytes, before_call=None) -> None:
         self.responses = list(responses)
         self.calls: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+        self.before_call = before_call
 
     def complete(
         self,
@@ -98,8 +100,31 @@ class _QueueModel:
         system_prompt: str,
         messages: tuple[tuple[str, str], ...],
     ) -> bytes:
+        if self.before_call is not None:
+            self.before_call()
         self.calls.append((system_prompt, messages))
         return self.responses.pop(0)
+
+
+class _QueueRead:
+    def __init__(
+        self,
+        observation: sandbox.LodgingAvailabilityObservation,
+        *,
+        before_call=None,
+    ) -> None:
+        self.observation = observation
+        self.calls: list[sandbox.LodgingAvailabilityReadRequest] = []
+        self.before_call = before_call
+
+    def read(
+        self,
+        request: sandbox.LodgingAvailabilityReadRequest,
+    ) -> sandbox.LodgingAvailabilityObservation:
+        if self.before_call is not None:
+            self.before_call()
+        self.calls.append(request)
+        return self.observation
 
 
 class _RunResult:
@@ -188,6 +213,129 @@ class FastTrackSandboxTests(unittest.TestCase):
             sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
                 _observation(options=[hostile_option])
             )
+
+    def test_two_call_read_loop_persists_only_final_public_turn(self) -> None:
+        read_item: dict[str, object] = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-10",
+                "check_out": "2026-08-12",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        first = _response_with_reads([read_item])
+        final = _response("Encontrei uma opção real para essas datas.")
+        model = _QueueModel(first, final)
+        observation = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+        reads = _QueueRead(observation)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=model,
+                reads=reads,
+                knowledge={"brand": "Chapada Backpackers"},
+            )
+
+            result = runner.submit(
+                session_id="lead-read",
+                message="10 a 12 de agosto, para 2 adultos.",
+            )
+
+            self.assertEqual(result.reply, "Encontrei uma opção real para essas datas.")
+            self.assertEqual(result.read_observation, observation)
+            self.assertEqual(len(model.calls), 2)
+            self.assertEqual(len(reads.calls), 1)
+            follow_up = model.calls[1][1]
+            self.assertEqual(follow_up[-2], ("assistant", first.decode("utf-8")))
+            self.assertEqual(follow_up[-1][0], "user")
+            self.assertTrue(follow_up[-1][1].startswith("READ_OBSERVATION="))
+            self.assertIn(observation.canonical_hash(), follow_up[-1][1])
+            self.assertEqual(store.load_messages("lead-read"), (
+                ("user", "10 a 12 de agosto, para 2 adultos."),
+                ("assistant", "Encontrei uma opção real para essas datas."),
+            ))
+            self.assertEqual(store.read_observation_count("lead-read"), 1)
+
+    def test_model_and_read_calls_happen_without_sqlite_write_transaction(self) -> None:
+        read_item: dict[str, object] = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-10",
+                "check_out": "2026-08-12",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        observation = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sandbox.sqlite3"
+            store = SQLiteSandboxStore(path)
+
+            def assert_unlocked() -> None:
+                connection = sqlite3.connect(path, timeout=0.1)
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.rollback()
+                finally:
+                    connection.close()
+
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([read_item]),
+                    _response("Consulta concluída."),
+                    before_call=assert_unlocked,
+                ),
+                reads=_QueueRead(observation, before_call=assert_unlocked),
+                knowledge={},
+            )
+
+            runner.submit(session_id="transaction-probe", message="Consulte.")
+
+            self.assertEqual(store.read_observation_count("transaction-probe"), 1)
+
+    def test_read_loop_fails_closed_without_port_or_on_second_read(self) -> None:
+        read_item: dict[str, object] = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-10",
+                "check_out": "2026-08-12",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        observation = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3")
+            no_port = SandboxConversation(
+                store=store,
+                model=_QueueModel(_response_with_reads([read_item])),
+                knowledge={},
+            )
+            with self.assertRaises(sandbox.ReadCallFailed):
+                no_port.submit(session_id="no-port", message="Consulte.")
+            self.assertEqual(store.load_messages("no-port"), ())
+
+            repeated = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([read_item]),
+                    _response_with_reads([read_item]),
+                ),
+                reads=_QueueRead(observation),
+                knowledge={},
+            )
+            with self.assertRaises(sandbox.SandboxProtocolError):
+                repeated.submit(session_id="second-read", message="Consulte.")
+            self.assertEqual(store.load_messages("second-read"), ())
 
     def test_multi_turn_history_is_durable_and_isolated_by_session(self) -> None:
         model = _QueueModel(_response("Primeiro."), _response("Segundo."))

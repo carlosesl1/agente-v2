@@ -439,6 +439,7 @@ class SandboxTurnResult:
     route: str
     reply_type: str
     blocked_effects: tuple[BlockedEffect, ...]
+    read_observation: LodgingAvailabilityObservation | None = None
 
 
 class SQLiteSandboxStore:
@@ -474,6 +475,15 @@ class SQLiteSandboxStore:
                     proposal_hash TEXT NOT NULL,
                     reason TEXT NOT NULL CHECK (reason = 'sandbox_effects_disabled'),
                     PRIMARY KEY (session_id, ordinal, effect_ordinal),
+                    FOREIGN KEY (session_id) REFERENCES sandbox_sessions(session_id)
+                ) STRICT;
+                CREATE TABLE IF NOT EXISTS sandbox_read_observations (
+                    session_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    kind TEXT NOT NULL CHECK (kind = 'lodging_availability'),
+                    observation_json BLOB NOT NULL,
+                    observation_hash TEXT NOT NULL,
+                    PRIMARY KEY (session_id, ordinal),
                     FOREIGN KEY (session_id) REFERENCES sandbox_sessions(session_id)
                 ) STRICT;
                 """
@@ -512,6 +522,7 @@ class SQLiteSandboxStore:
         response_bytes: bytes,
         response: SandboxModelResponse,
         blocked: tuple[BlockedEffect, ...],
+        observation: LodgingAvailabilityObservation | None = None,
     ) -> int:
         session = self._session_id(session_id)
         user_message = _text(message, "message")
@@ -553,6 +564,21 @@ class SQLiteSandboxStore:
                         item.reason,
                     ),
                 )
+            if observation is not None:
+                connection.execute(
+                    """
+                    INSERT INTO sandbox_read_observations(
+                        session_id,ordinal,kind,observation_json,observation_hash
+                    ) VALUES (?,?,?,?,?)
+                    """,
+                    (
+                        session,
+                        ordinal,
+                        "lodging_availability",
+                        observation.to_canonical_bytes(),
+                        observation.canonical_hash(),
+                    ),
+                )
             connection.commit()
         return ordinal
 
@@ -561,6 +587,15 @@ class SQLiteSandboxStore:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT COUNT(*) FROM sandbox_blocked_effects WHERE session_id = ?",
+                (session,),
+            ).fetchone()
+        return int(row[0])
+
+    def read_observation_count(self, session_id: str) -> int:
+        session = self._session_id(session_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM sandbox_read_observations WHERE session_id = ?",
                 (session,),
             ).fetchone()
         return int(row[0])
@@ -574,16 +609,20 @@ class SandboxConversation:
         *,
         store: SQLiteSandboxStore,
         model: SandboxModelPort,
+        reads: SandboxReadPort | None = None,
         knowledge: dict[str, object],
     ) -> None:
         if type(store) is not SQLiteSandboxStore:
             raise TypeError("store must be exact SQLiteSandboxStore")
         if not hasattr(model, "complete"):
             raise TypeError("model must implement complete")
+        if reads is not None and not hasattr(reads, "read"):
+            raise TypeError("reads must implement read")
         if type(knowledge) is not dict:
             raise TypeError("knowledge must be an exact dict")
         self.store = store
         self._model = model
+        self._reads = reads
         self._knowledge = _closed_json(knowledge, "knowledge")
 
     def _system_prompt(self) -> str:
@@ -595,14 +634,20 @@ class SandboxConversation:
             "link, produto ou confirmação. Produto deve usar apenas ID canônico fornecido. "
             "Se faltarem dados, faça uma pergunta curta. Toda intenção de enviar mensagem, "
             "reservar, cobrar, pagar, aprender ou gravar fora deste diário deve aparecer em "
-            "effect_proposals e nunca ser descrita como executada. Não há ferramentas. "
-            "Retorne somente um objeto JSON com estas sete chaves exatas: "
-            "schema,intent,route,reply_type,reply,facts,effect_proposals. "
+            "effect_proposals e nunca ser descrita como executada. Você não possui ferramentas. "
+            "Retorne somente um objeto JSON com estas oito chaves exatas: "
+            "schema,intent,route,reply_type,reply,facts,read_requests,effect_proposals. "
             "schema deve ser phase8-sandbox-model-response-v1; intent é inform|select|adjust|"
             "confirm|request_handoff; route é recepcionista|hostel|agencia|fechamento|handoff|"
             "no_reply; reply_type é ask_more|qualify|answer|handoff|no_reply. facts contém no "
             "máximo um item por nome, somente para language|service|start_date|end_date|adults|"
             "children, e apenas quando o lead fornecer o valor; cada item é {name,value}. "
+            "read_requests deve ser [] ou conter exatamente um objeto "
+            "{kind:'lodging_availability',arguments:{check_in,check_out,adults,children}}. "
+            "Solicite a leitura somente quando os quatro argumentos estiverem presentes; ao "
+            "solicitar leitura, effect_proposals deve ser []. Se receber uma mensagem privada "
+            "READ_OBSERVATION, use somente seus dados públicos para a resposta final e retorne "
+            "read_requests=[]. Nunca mostre o hash ou o envelope da observação ao lead. "
             "effect_proposals é uma lista de objetos "
             "{kind,arguments}. Produza JSON canônico sem markdown. KNOWLEDGE=" + knowledge
         )
@@ -617,6 +662,35 @@ class SandboxConversation:
             messages=messages,
         )
         response = SandboxModelResponse.from_canonical_bytes(response_bytes)
+        observation: LodgingAvailabilityObservation | None = None
+        if response.read_requests:
+            if response.effect_proposals:
+                raise SandboxProtocolError(
+                    "read request response cannot also propose effects"
+                )
+            if self._reads is None:
+                raise ReadCallFailed("sandbox read port is unavailable")
+            observation = self._reads.read(response.read_requests[0])
+            if type(observation) is not LodgingAvailabilityObservation:
+                raise ReadCallFailed("sandbox read port returned an invalid observation")
+            private_observation = _canonical_json(
+                {
+                    "hash": observation.canonical_hash(),
+                    "observation": _parse_json(observation.to_canonical_bytes()),
+                }
+            ).decode("utf-8")
+            final_messages = (
+                *messages,
+                ("assistant", response_bytes.decode("utf-8")),
+                ("user", "READ_OBSERVATION=" + private_observation),
+            )
+            response_bytes = self._model.complete(
+                system_prompt=self._system_prompt(),
+                messages=final_messages,
+            )
+            response = SandboxModelResponse.from_canonical_bytes(response_bytes)
+            if response.read_requests:
+                raise SandboxProtocolError("second sandbox read request is forbidden")
         blocked = tuple(
             BlockedEffect(
                 item.kind,
@@ -630,6 +704,7 @@ class SandboxConversation:
             response_bytes=response_bytes,
             response=response,
             blocked=blocked,
+            observation=observation,
         )
         return SandboxTurnResult(
             ordinal,
@@ -638,6 +713,7 @@ class SandboxConversation:
             response.route,
             response.reply_type,
             blocked,
+            observation,
         )
 
 

@@ -14,8 +14,10 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from reservation_boundary.sandbox import (
+    CloudbedsDockerRead,
     HermesDockerModel,
     ModelCallFailed,
+    ReadCallFailed,
     SandboxConversation,
     SandboxProtocolError,
     SQLiteSandboxStore,
@@ -38,7 +40,10 @@ def _knowledge(path: Path | None) -> dict[str, object]:
             "environment": "sandbox",
             "external_effects": False,
             "known_services": ["hostel", "agency"],
-            "notice": "Preços, links e disponibilidade não foram fornecidos neste sandbox.",
+            "notice": (
+                "Preço e disponibilidade de hospedagem só podem vir de READ_OBSERVATION; "
+                "links e efeitos externos permanecem indisponíveis."
+            ),
         }
     value = json.loads(path.read_text(encoding="utf-8"))
     if type(value) is not dict:
@@ -49,13 +54,21 @@ def _knowledge(path: Path | None) -> dict[str, object]:
 def _submit(runner: SandboxConversation, session: str, message: str) -> bool:
     try:
         result = runner.submit(session_id=session, message=message)
-    except (ModelCallFailed, SandboxProtocolError, ValueError) as exc:
+    except (ModelCallFailed, ReadCallFailed, SandboxProtocolError, ValueError) as exc:
         print(f"[sandbox bloqueado] {exc}", file=sys.stderr)
         return False
     print(result.reply)
     if result.blocked_effects:
         kinds = ", ".join(item.kind for item in result.blocked_effects)
         print(f"[sandbox: {len(result.blocked_effects)} efeito(s) bloqueado(s): {kinds}]", file=sys.stderr)
+    if result.read_observation is not None:
+        observation = result.read_observation
+        print(
+            "[sandbox: leitura Cloudbeds "
+            f"status={observation.status} opções={len(observation.options)} "
+            f"hash={observation.canonical_hash()[:12]}]",
+            file=sys.stderr,
+        )
     return True
 
 
@@ -68,6 +81,7 @@ def main() -> int:
     parser.add_argument("--message")
     parser.add_argument("--knowledge", type=Path)
     parser.add_argument("--container", default="hermes-webui")
+    parser.add_argument("--cloudbeds-container", default="chapada-leads-hermes")
     parser.add_argument("--provider", default="openai-codex")
     parser.add_argument("--model", default="gpt-5.6-sol")
     args = parser.parse_args()
@@ -79,6 +93,10 @@ def main() -> int:
             container=args.container,
             provider=args.provider,
             model=args.model,
+        ),
+        reads=CloudbedsDockerRead(
+            project_root=_PROJECT_ROOT,
+            container=args.cloudbeds_container,
         ),
         knowledge=_knowledge(args.knowledge),
     )
