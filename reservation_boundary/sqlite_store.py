@@ -1584,7 +1584,9 @@ class SQLiteBoundaryStore:
                     raise IdentityConflict("aggregate replay public row bytes diverged")
 
         try:
+            fault("before_begin")
             with self._transaction():
+                fault("after_begin")
                 existing_event = execute(
                     "event_lookup",
                     "SELECT event_hash,commit_hash,turn_receipt_json,turn_receipt_hash,state_version "
