@@ -14,9 +14,9 @@
 
 ## NEXT
 
-`Task 2 — ManyChat ingress e inbox durável`
+`Task 3 — Turno canônico, Maya e consultas completas`
 
-Nenhuma tarefa posterior está autorizada antes de Task 2 ficar verde e ser commitada.
+Nenhuma tarefa posterior está autorizada antes de Task 3 ficar verde e ser commitada.
 
 ## Regra para não confundir novo e antigo
 
@@ -92,8 +92,8 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | Task | Estado | Commit |
 |---|---|---|
 | 1. Control plane e pacotes | `DONE` | `c9f19c131ce9ff80020e1c0c0a8d8262a821cbfb` |
-| 2. ManyChat ingress e inbox | `NEXT` | — |
-| 3. Turno canônico e consultas | `BLOCKED_BY_ORDER` | — |
+| 2. ManyChat ingress e inbox | `DONE` | `a2d57c4fa2938345c5ba745cdbb79c26bc292eec` |
+| 3. Turno canônico e consultas | `NEXT` | — |
 | 4. Reservas Cloudbeds/Bókun | `BLOCKED_BY_ORDER` | — |
 | 5. Iniciação Stripe/Wise/Pix | `BLOCKED_BY_ORDER` | — |
 | 6. Evidência e settlement | `BLOCKED_BY_ORDER` | — |
