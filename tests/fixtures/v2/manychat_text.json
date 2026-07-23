@@ -1,0 +1,9 @@
+{
+  "conversation_id": "mc-conversation-001",
+  "contact_id": "mc-contact-001",
+  "subscriber_id": "mc-subscriber-001",
+  "message_id": "mc-message-001",
+  "message": "Olá, quero hospedagem para duas pessoas.",
+  "occurred_at": "2026-07-23T11:59:50+00:00",
+  "channel": "whatsapp"
+}

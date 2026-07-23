@@ -349,7 +349,7 @@ def test_same_event_id_with_different_payload_is_conflict(client) -> None:
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_manychat_ingress.py
+uv run --no-project --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_manychat_ingress.py
 ```
 
 Expected: FAIL por contratos/host ausentes.
@@ -383,7 +383,7 @@ CREATE INDEX inbound_events_lead_status ON inbound_events(lead_id,status,occurre
 - [ ] **Step 5: Executar GREEN e guards**
 
 ```bash
-python -m pytest -q tests/test_v2_manychat_ingress.py
+uv run --no-project --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_manychat_ingress.py tests/test_fasttrack_boundaries.py
 python scripts/check_fasttrack_boundaries.py
 python -m py_compile v2_contracts/channel.py v2_application/inbox.py v2_adapters/manychat.py v2_host/settings.py v2_host/app.py
 git diff --check
@@ -394,9 +394,11 @@ Expected: exit 0.
 - [ ] **Step 6: Atualizar controle e commitar**
 
 ```bash
-git add v2_contracts v2_application v2_adapters v2_host tests/test_v2_manychat_ingress.py tests/fixtures/v2 docs/refactor/ACTIVE.md
+git add v2_contracts v2_application v2_adapters v2_host tests/test_v2_manychat_ingress.py tests/fixtures/v2 docs/superpowers/plans/2026-07-23-v2-fasttrack-runtime.md
 git commit -m "feat: add durable v2 manychat ingress"
 ```
+
+Depois registrar em `ACTIVE.md` o SHA do commit funcional, marcar Task 2 `DONE`, mover `NEXT` para Task 3 e criar o commit de controle `docs: advance v2 fasttrack to task 3`.
 
 ---
 
