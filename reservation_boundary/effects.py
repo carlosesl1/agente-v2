@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from enum import Enum
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import ClassVar, Final
 
 from reservation_followup.handoff import (
@@ -19,7 +19,6 @@ from reservation_followup.handoff import (
 )
 from reservation_followup.serialization import from_wire_json, to_wire_json
 from reservation_followup.types import HandoffEffectPolicy
-
 
 RESERVATION_RELAY_DOMAIN: Final = "phase8-reservation-relay-bundle-v1"
 SETTLEMENT_RELAY_DOMAIN: Final = "phase8-settlement-relay-bundle-v1"
@@ -196,8 +195,13 @@ class ReservationRelayBundle:
             self.expected_final_state_hash,
             "ReservationRelayBundle.expected_final_state_hash",
         )
-        if hashlib.sha256(self.expected_final_state).hexdigest() != self.expected_final_state_hash:
-            raise ValueError("expected_final_state_hash does not authenticate expected_final_state")
+        if (
+            hashlib.sha256(self.expected_final_state).hexdigest()
+            != self.expected_final_state_hash
+        ):
+            raise ValueError(
+                "expected_final_state_hash does not authenticate expected_final_state"
+            )
         _require_bytes(
             self.command_ledger_seed,
             "ReservationRelayBundle.command_ledger_seed",
@@ -232,12 +236,12 @@ class ReservationRelayBundle:
 
         _require_sha256(self.artifact_hash, "ReservationRelayBundle.artifact_hash")
         expected_artifact_hash = hashlib.sha256(
-            self.DOMAIN.encode("ascii")
-            + b"\x00"
-            + self.artifact_preimage_bytes()
+            self.DOMAIN.encode("ascii") + b"\x00" + self.artifact_preimage_bytes()
         ).hexdigest()
         if self.artifact_hash != expected_artifact_hash:
-            raise ValueError("artifact_hash does not authenticate relay bundle preimage")
+            raise ValueError(
+                "artifact_hash does not authenticate relay bundle preimage"
+            )
 
     def _preimage_data(self) -> dict[str, object]:
         return {
@@ -266,6 +270,139 @@ class ReservationRelayBundle:
             version=self.VERSION,
             data=self._preimage_data() | {"artifact_hash": self.artifact_hash},
         )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        genesis_state: bytes,
+        phase5_events: tuple[bytes, ...],
+        summary_outboxes: tuple[bytes, ...],
+        expected_final_state: bytes,
+        command_ledger_seed: bytes,
+        qualification_id: str | None = None,
+        scenario_id: str | None = None,
+        immutable_generation: int | None = None,
+        allocation_id: str | None = None,
+    ) -> ReservationRelayBundle:
+        final_hash = hashlib.sha256(expected_final_state).hexdigest()
+        data = {
+            "genesis_state": _b64(genesis_state),
+            "phase5_events": [_b64(value) for value in phase5_events],
+            "summary_outboxes": [_b64(value) for value in summary_outboxes],
+            "expected_final_state": _b64(expected_final_state),
+            "expected_final_state_hash": final_hash,
+            "command_ledger_seed": _b64(command_ledger_seed),
+            "qualification_id": qualification_id,
+            "scenario_id": scenario_id,
+            "immutable_generation": immutable_generation,
+            "allocation_id": allocation_id,
+        }
+        preimage = _canonical_envelope(
+            schema=cls.PREIMAGE_SCHEMA,
+            version=cls.VERSION,
+            data=data,
+        )
+        artifact_hash = hashlib.sha256(
+            cls.DOMAIN.encode("ascii") + b"\x00" + preimage
+        ).hexdigest()
+        return cls(
+            genesis_state=genesis_state,
+            phase5_events=phase5_events,
+            summary_outboxes=summary_outboxes,
+            expected_final_state=expected_final_state,
+            expected_final_state_hash=final_hash,
+            command_ledger_seed=command_ledger_seed,
+            qualification_id=qualification_id,
+            scenario_id=scenario_id,
+            immutable_generation=immutable_generation,
+            allocation_id=allocation_id,
+            artifact_hash=artifact_hash,
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> ReservationRelayBundle:
+        envelope = _load_canonical_envelope(payload, cls.__name__)
+        if set(envelope) != {"schema", "version", "data"}:
+            raise ValueError("ReservationRelayBundle envelope fields mismatch")
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+            raise ValueError("ReservationRelayBundle identity mismatch")
+        data = envelope["data"]
+        expected = {
+            "genesis_state",
+            "phase5_events",
+            "summary_outboxes",
+            "expected_final_state",
+            "expected_final_state_hash",
+            "command_ledger_seed",
+            "qualification_id",
+            "scenario_id",
+            "immutable_generation",
+            "allocation_id",
+            "artifact_hash",
+        }
+        if type(data) is not dict or set(data) != expected:
+            raise ValueError("ReservationRelayBundle fields mismatch")
+        events = data["phase5_events"]
+        outboxes = data["summary_outboxes"]
+        if type(events) is not list or type(outboxes) is not list:
+            raise TypeError("ReservationRelayBundle event/outbox fields must be arrays")
+        bundle = cls(
+            genesis_state=_unb64(data["genesis_state"], "genesis_state"),
+            phase5_events=tuple(_unb64(item, "phase5_events item") for item in events),
+            summary_outboxes=tuple(
+                _unb64(item, "summary_outboxes item") for item in outboxes
+            ),
+            expected_final_state=_unb64(
+                data["expected_final_state"], "expected_final_state"
+            ),
+            expected_final_state_hash=data["expected_final_state_hash"],
+            command_ledger_seed=_unb64(
+                data["command_ledger_seed"], "command_ledger_seed"
+            ),
+            qualification_id=data["qualification_id"],
+            scenario_id=data["scenario_id"],
+            immutable_generation=data["immutable_generation"],
+            allocation_id=data["allocation_id"],
+            artifact_hash=data["artifact_hash"],
+        )
+        if bundle.to_canonical_bytes() != payload:
+            raise ValueError("ReservationRelayBundle is not byte-canonical")
+        return bundle
+
+
+@dataclass(frozen=True, slots=True)
+class CommandRelayClaim:
+    relay_id: str
+    command_id: str
+    bundle_bytes: bytes
+    bundle_hash: str
+    source_turn_receipt_hash: str
+    target_operation_id: str
+    worker_id: str
+    fencing_token: int
+    lease_expires_at: datetime
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.relay_id, "relay_id"),
+            (self.command_id, "command_id"),
+            (self.worker_id, "worker_id"),
+        ):
+            _require_identifier(value, f"CommandRelayClaim.{name}")
+        for value, name in (
+            (self.bundle_hash, "bundle_hash"),
+            (self.source_turn_receipt_hash, "source_turn_receipt_hash"),
+            (self.target_operation_id, "target_operation_id"),
+        ):
+            _require_sha256(value, f"CommandRelayClaim.{name}")
+        _require_bytes(self.bundle_bytes, "CommandRelayClaim.bundle_bytes")
+        if type(self.fencing_token) is not int or self.fencing_token < 1:
+            raise ValueError("CommandRelayClaim.fencing_token must be >= 1")
+        _utc_text(self.lease_expires_at, "CommandRelayClaim.lease_expires_at")
+        bundle = ReservationRelayBundle.from_canonical_bytes(self.bundle_bytes)
+        if bundle.artifact_hash != self.bundle_hash:
+            raise ValueError("CommandRelayClaim bundle bytes/hash diverged")
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,12 +487,12 @@ class SettlementRelayBundle:
 
         _require_sha256(self.artifact_hash, "SettlementRelayBundle.artifact_hash")
         expected_artifact_hash = hashlib.sha256(
-            self.DOMAIN.encode("ascii")
-            + b"\x00"
-            + self.artifact_preimage_bytes()
+            self.DOMAIN.encode("ascii") + b"\x00" + self.artifact_preimage_bytes()
         ).hexdigest()
         if self.artifact_hash != expected_artifact_hash:
-            raise ValueError("artifact_hash does not authenticate relay bundle preimage")
+            raise ValueError(
+                "artifact_hash does not authenticate relay bundle preimage"
+            )
 
     def _preimage_data(self) -> dict[str, object]:
         return {
@@ -444,7 +581,9 @@ class HandoffRelayBundle:
             self.DOMAIN.encode("ascii") + b"\x00" + self.artifact_preimage_bytes()
         ).hexdigest()
         if self.artifact_hash != expected:
-            raise ValueError("artifact_hash does not authenticate handoff relay preimage")
+            raise ValueError(
+                "artifact_hash does not authenticate handoff relay preimage"
+            )
 
     def _preimage_data(self) -> dict[str, object]:
         return {
@@ -469,7 +608,37 @@ class HandoffRelayBundle:
         )
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "HandoffRelayBundle":
+    def create(
+        cls,
+        *,
+        request_bytes: bytes,
+        policy_bytes: bytes,
+        history_bytes: tuple[bytes, ...],
+        expected_final_state_hash: str,
+    ) -> HandoffRelayBundle:
+        preimage = _canonical_envelope(
+            schema=cls.PREIMAGE_SCHEMA,
+            version=cls.VERSION,
+            data={
+                "request_bytes": _b64(request_bytes),
+                "policy_bytes": _b64(policy_bytes),
+                "history_bytes": [_b64(value) for value in history_bytes],
+                "expected_final_state_hash": expected_final_state_hash,
+            },
+        )
+        artifact_hash = hashlib.sha256(
+            cls.DOMAIN.encode("ascii") + b"\x00" + preimage
+        ).hexdigest()
+        return cls(
+            request_bytes=request_bytes,
+            policy_bytes=policy_bytes,
+            history_bytes=history_bytes,
+            expected_final_state_hash=expected_final_state_hash,
+            artifact_hash=artifact_hash,
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> HandoffRelayBundle:
         envelope = _load_canonical_envelope(payload, cls.__name__)
         if set(envelope) != {"schema", "version", "data"}:
             raise ValueError("HandoffRelayBundle envelope fields mismatch")
@@ -490,9 +659,7 @@ class HandoffRelayBundle:
         bundle = cls(
             request_bytes=_unb64(data["request_bytes"], "request_bytes"),
             policy_bytes=_unb64(data["policy_bytes"], "policy_bytes"),
-            history_bytes=tuple(
-                _unb64(item, "history_bytes item") for item in history
-            ),
+            history_bytes=tuple(_unb64(item, "history_bytes item") for item in history),
             expected_final_state_hash=data["expected_final_state_hash"],
             artifact_hash=data["artifact_hash"],
         )
@@ -504,6 +671,42 @@ class HandoffRelayBundle:
 class InternalJobKind(str, Enum):
     HANDOFF = "handoff"
     LEARNING = "learning"
+
+
+@dataclass(frozen=True, slots=True)
+class InternalRelayClaim:
+    job_id: str
+    job_kind: InternalJobKind
+    artifact_bytes: bytes
+    artifact_hash: str
+    source_turn_receipt_hash: str
+    target_operation_id: str
+    worker_id: str
+    fencing_token: int
+    lease_expires_at: datetime
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.job_id, "job_id"),
+            (self.worker_id, "worker_id"),
+        ):
+            _require_identifier(value, f"InternalRelayClaim.{name}")
+        if type(self.job_kind) is not InternalJobKind:
+            raise TypeError("InternalRelayClaim.job_kind must be exact InternalJobKind")
+        for value, name in (
+            (self.artifact_hash, "artifact_hash"),
+            (self.source_turn_receipt_hash, "source_turn_receipt_hash"),
+            (self.target_operation_id, "target_operation_id"),
+        ):
+            _require_sha256(value, f"InternalRelayClaim.{name}")
+        _require_bytes(self.artifact_bytes, "InternalRelayClaim.artifact_bytes")
+        if type(self.fencing_token) is not int or self.fencing_token < 1:
+            raise ValueError("InternalRelayClaim.fencing_token must be >= 1")
+        _utc_text(self.lease_expires_at, "InternalRelayClaim.lease_expires_at")
+        if self.job_kind is InternalJobKind.HANDOFF:
+            bundle = HandoffRelayBundle.from_canonical_bytes(self.artifact_bytes)
+            if bundle.artifact_hash != self.artifact_hash:
+                raise ValueError("InternalRelayClaim handoff bytes/hash diverged")
 
 
 def target_operation_id(
@@ -632,7 +835,9 @@ class TargetOperationReceipt:
         ):
             _require_sha256(getattr(self, name), f"TargetOperationReceipt.{name}")
         if type(self.job_kind) is not InternalJobKind:
-            raise TypeError("TargetOperationReceipt.job_kind must be exact InternalJobKind")
+            raise TypeError(
+                "TargetOperationReceipt.job_kind must be exact InternalJobKind"
+            )
         _utc_text(self.committed_at, "TargetOperationReceipt.committed_at")
 
     def _data(self) -> dict[str, object]:
@@ -662,7 +867,7 @@ class TargetOperationReceipt:
         ).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "TargetOperationReceipt":
+    def from_canonical_bytes(cls, payload: bytes) -> TargetOperationReceipt:
         envelope = _load_canonical_envelope(payload, cls.__name__)
         if set(envelope) != {"schema", "version", "data"}:
             raise ValueError("TargetOperationReceipt envelope fields mismatch")

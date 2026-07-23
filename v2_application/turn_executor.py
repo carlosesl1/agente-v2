@@ -46,6 +46,10 @@ from reservation_followup import HandoffRequested
 from v2_application.conversation import V2ConversationReducer
 from v2_application.read_bridge import bridge_availability_observation
 from v2_application.reads import V2ReadService
+from v2_application.relay_worker import (
+    build_handoff_relay_bundle,
+    build_reservation_relay_bundle,
+)
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.model import AuditedModelTurn, ModelProposal, ModelRequest
@@ -312,24 +316,13 @@ def _command_relays(
     for command in commands:
         if type(command) is not ReservationCommand:
             raise TurnExecutionError("unsupported V2 command relay type")
-        wire = dumps_command(command)
-        bundle = _canonical(
-            "phase8-reservation-relay-bundle",
-            {
-                "command_id": command.command_id,
-                "command": json.loads(wire),
-            },
-        )
-        bundle_hash = _domain_hash(
-            "phase8-reservation-relay-bundle-v1",
-            bundle,
-        )
+        bundle = build_reservation_relay_bundle(command)
         result.append(
             CommandRelayWrite(
                 relay_id=_opaque("relay", aggregate_turn_id, command.command_id),
                 command_id=command.command_id,
-                bundle_bytes=bundle,
-                bundle_hash=bundle_hash,
+                bundle_bytes=bundle.to_canonical_bytes(),
+                bundle_hash=bundle.artifact_hash,
             )
         )
     return tuple(result)
@@ -341,25 +334,13 @@ def _handoff_jobs(
 ) -> tuple[InternalOutboxWrite, ...]:
     if request is None:
         return ()
-    artifact = _canonical(
-        "phase8-boundary-internal-job",
-        {
-            "job_kind": "handoff_relay",
-            "handoff_id": request.handoff_id,
-            "lead_key_hash": request.lead_key_hash,
-            "incident_key": request.incident_key,
-            "reason_code": request.reason_code.value,
-            "source_event_id": request.source_event_id,
-            "requested_at": request.requested_at.isoformat(),
-        },
-    )
-    artifact_hash = _domain_hash("phase8-boundary-internal-job-v1", artifact)
+    bundle = build_handoff_relay_bundle(request)
     return (
         InternalOutboxWrite(
             job_id=_opaque("handoff-job", aggregate_turn_id, request.handoff_id),
             job_kind="handoff_relay",
-            artifact_bytes=artifact,
-            artifact_hash=artifact_hash,
+            artifact_bytes=bundle.to_canonical_bytes(),
+            artifact_hash=bundle.artifact_hash,
             qualification_id=None,
             epoch=None,
             target_operation_id=_opaque(
@@ -530,7 +511,9 @@ class V2TurnExecutor:
             if type(second_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
             if len(second_audited.frames) != 1:
-                raise TurnExecutionError("each model call must return one audited exchange")
+                raise TurnExecutionError(
+                    "each model call must return one audited exchange"
+                )
             proposal = validate_productive_proposal(second_audited.proposal)
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")

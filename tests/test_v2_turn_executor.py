@@ -6,15 +6,24 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from reservation_boundary.conversation import ConversationProjection
-from reservation_boundary.sqlite_store import SQLiteBoundaryStore
+from reservation_boundary.effects import HandoffRelayBundle, ReservationRelayBundle
+from reservation_boundary.sqlite_store import ConcurrencyConflict, SQLiteBoundaryStore
+from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
+from reservation_execution.sqlite_store import SQLiteUnitOfWork
+from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.conversation import V2ConversationReducer
+from v2_application.public_delivery import (
+    BoundaryPublicDeliveryWorker,
+    BoundaryPublicDisposition,
+)
 from v2_application.reads import V2ReadService
+from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
     PublicTurnAuthority,
     TurnExecutionError,
     V2TurnExecutor,
 )
-from v2_contracts.channel import InboundBatch, InboundEvent
+from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -93,6 +102,18 @@ class FakeProfile:
             expires_at=now + timedelta(minutes=5),
             complete=True,
         )
+
+
+class RecordingPublicDelivery:
+    def __init__(self, *, uncertain: bool = False) -> None:
+        self.uncertain = uncertain
+        self.calls = []
+
+    def send(self, claim):
+        self.calls.append(claim)
+        if self.uncertain:
+            raise PublicDeliveryUnknown("provider response lost after call")
+        return "manychat:receipt:turn-executor-001"
 
 
 class FakeAuditedModel:
@@ -332,6 +353,103 @@ def test_atomic_executor_commits_projection_receipt_public_row_and_replays() -> 
         store.close()
 
 
+def _committed_public_store() -> SQLiteBoundaryStore:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [_proposal()])
+    _install_public_authority(store)
+    _executor(store=store, model=model, profile=FakeProfile(store)).execute(BATCH)
+    return store
+
+
+def test_boundary_public_worker_fences_then_persists_delivery_receipt() -> None:
+    store = _committed_public_store()
+    queues = SQLiteBoundaryWorkerStore(store)
+    delivery = RecordingPublicDelivery()
+    worker = BoundaryPublicDeliveryWorker(
+        boundary=queues,
+        delivery=delivery,
+        worker_id="worker:v2-public",
+        lease_ttl=timedelta(seconds=30),
+    )
+    try:
+        delivered = worker.run_once(now=NOW + timedelta(seconds=1))
+        idle = worker.run_once(now=NOW + timedelta(seconds=2))
+        assert delivered is BoundaryPublicDisposition.DELIVERED
+        assert idle is BoundaryPublicDisposition.IDLE
+        assert len(delivery.calls) == 1
+        assert store._connection.execute(
+            "SELECT status,dispatch_slots_consumed,delivery_receipt_hash "
+            "FROM boundary_public_outbox"
+        ).fetchone()[0:2] == ("delivered", 1)
+        assert store._connection.execute(
+            "SELECT state FROM boundary_dispatch_authority WHERE row_kind='allocation'"
+        ).fetchone() == ("terminal",)
+    finally:
+        store.close()
+
+
+def test_boundary_public_unknown_after_call_moves_to_manual_without_redispatch() -> (
+    None
+):
+    store = _committed_public_store()
+    queues = SQLiteBoundaryWorkerStore(store)
+    delivery = RecordingPublicDelivery(uncertain=True)
+    worker = BoundaryPublicDeliveryWorker(
+        boundary=queues,
+        delivery=delivery,
+        worker_id="worker:v2-public",
+        lease_ttl=timedelta(seconds=30),
+    )
+    try:
+        first = worker.run_once(now=NOW + timedelta(seconds=1))
+        second = worker.run_once(now=NOW + timedelta(seconds=32))
+        assert first is BoundaryPublicDisposition.MANUAL_REVIEW
+        assert second is BoundaryPublicDisposition.IDLE
+        assert len(delivery.calls) == 1
+        assert store._connection.execute(
+            "SELECT status,dispatch_slots_consumed FROM boundary_public_outbox"
+        ).fetchone() == ("manual_review", 1)
+        assert store._connection.execute(
+            "SELECT state FROM boundary_dispatch_authority WHERE row_kind='allocation'"
+        ).fetchone() == ("manual_review",)
+    finally:
+        store.close()
+
+
+def test_public_crash_after_provider_call_recovers_to_manual_without_redispatch() -> (
+    None
+):
+    store = _committed_public_store()
+    queues = SQLiteBoundaryWorkerStore(store)
+    delivery = RecordingPublicDelivery()
+    try:
+        claim = queues.claim_public_delivery(
+            worker_id="worker:v2-public-crash",
+            now=NOW + timedelta(seconds=1),
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert claim is not None
+        queues.fence_public_delivery(claim, now=NOW + timedelta(seconds=1))
+        assert delivery.send(claim) == "manychat:receipt:turn-executor-001"
+        # Simulated process death: no receipt commit and no in-process exception handler.
+        worker = BoundaryPublicDeliveryWorker(
+            boundary=queues,
+            delivery=delivery,
+            worker_id="worker:v2-public-recovery",
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert (
+            worker.run_once(now=NOW + timedelta(seconds=31))
+            is BoundaryPublicDisposition.IDLE
+        )
+        assert len(delivery.calls) == 1
+        assert store._connection.execute(
+            "SELECT status FROM boundary_public_outbox"
+        ).fetchone() == ("manual_review",)
+    finally:
+        store.close()
+
+
 def test_atomic_executor_rolls_back_every_child_row_and_allocation_on_fault() -> None:
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [_proposal()])
@@ -450,7 +568,9 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         store.close()
 
 
-def test_confirmed_turn_commits_reservation_command_and_relay_atomically() -> None:
+def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
+    tmp_path,
+) -> None:
     second_event = InboundEvent(
         event_id="event:turn-executor-002",
         lead_id=BATCH.lead_id,
@@ -547,6 +667,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically() -> No
         confirmation,
     ]
     store = SQLiteBoundaryStore.open_memory_v8()
+    queues = SQLiteBoundaryWorkerStore(store)
     model = FakeAuditedModel(store, proposals)
     profile = FakeProfile(store)
     read_port = FakeLodgingReadPort(store)
@@ -589,12 +710,70 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically() -> No
             ).fetchone()[0]
             == 1
         )
+        relay_json, relay_hash = store._connection.execute(
+            "SELECT bundle_json,bundle_hash FROM boundary_command_relays"
+        ).fetchone()
+        bundle = ReservationRelayBundle.from_canonical_bytes(relay_json.encode())
+        assert bundle.artifact_hash == relay_hash
+        claim = queues.claim_command_relay(
+            worker_id="worker:v2-relay-test",
+            now=NOW + timedelta(seconds=2),
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert claim is not None
+        assert claim.command_id == confirmed.receipt.command_rows[0][0]
+        assert claim.bundle_bytes == relay_json.encode()
+        target = SQLiteUnitOfWork.open_v6(tmp_path / "reservation-target.sqlite3")
+        try:
+            first_receipt = target.accept_boundary_reservation(
+                operation_id=claim.target_operation_id,
+                source_turn_receipt_hash=claim.source_turn_receipt_hash,
+                bundle=bundle,
+            )
+            replay_claim = queues.claim_command_relay(
+                worker_id="worker:v2-relay-recovery",
+                now=NOW + timedelta(seconds=33),
+                lease_ttl=timedelta(seconds=30),
+            )
+            assert replay_claim is not None
+            assert replay_claim.fencing_token == claim.fencing_token + 1
+            replay_receipt = target.accept_boundary_reservation(
+                operation_id=replay_claim.target_operation_id,
+                source_turn_receipt_hash=replay_claim.source_turn_receipt_hash,
+                bundle=ReservationRelayBundle.from_canonical_bytes(
+                    replay_claim.bundle_bytes
+                ),
+            )
+            assert replay_receipt == first_receipt
+            queues.complete_command_relay(
+                replay_claim,
+                replay_receipt,
+                now=NOW + timedelta(seconds=34),
+            )
+            assert target.load_command(claim.command_id) is not None
+            assert store._connection.execute(
+                "SELECT status,claim_count,target_receipt_hash "
+                "FROM boundary_command_relays"
+            ).fetchone() == (
+                "acked",
+                2,
+                replay_receipt.canonical_hash(),
+            )
+            with pytest.raises(ConcurrencyConflict, match="completion CAS"):
+                queues.complete_command_relay(
+                    claim,
+                    first_receipt,
+                    now=NOW + timedelta(seconds=3),
+                )
+        finally:
+            target.close()
     finally:
         store.close()
 
 
-def test_handoff_turn_persists_active_guard_and_one_internal_job() -> None:
+def test_handoff_turn_persists_active_guard_and_one_internal_job(tmp_path) -> None:
     store = SQLiteBoundaryStore.open_memory_v8()
+    queues = SQLiteBoundaryWorkerStore(store)
     model = FakeAuditedModel(
         store,
         [
@@ -621,6 +800,32 @@ def test_handoff_turn_persists_active_guard_and_one_internal_job() -> None:
         assert store._connection.execute(
             "SELECT job_kind,status,count(*) FROM boundary_outbox GROUP BY job_kind,status"
         ).fetchone() == ("handoff_relay", "pending", 1)
+        artifact_json, artifact_hash = store._connection.execute(
+            "SELECT artifact_json,artifact_hash FROM boundary_outbox"
+        ).fetchone()
+        bundle = HandoffRelayBundle.from_canonical_bytes(artifact_json.encode())
+        assert bundle.artifact_hash == artifact_hash
+        reservation_target = SQLiteUnitOfWork.open_v6(
+            tmp_path / "unused-reservation-target.sqlite3"
+        )
+        with SQLiteFollowupUnitOfWork.open_v2(
+            tmp_path / "followup-target.sqlite3"
+        ) as target:
+            worker = BoundaryRelayWorker(
+                boundary=queues,
+                reservation_target=reservation_target,
+                handoff_target=target,
+                worker_id="worker:v2-handoff-relay",
+                lease_ttl=timedelta(seconds=30),
+            )
+            relayed = worker.run_once(now=NOW + timedelta(seconds=1))
+            assert relayed.disposition is RelayWorkerDisposition.RELAYED
+            assert relayed.receipt is not None
+            receipt = relayed.receipt
+        reservation_target.close()
+        assert store._connection.execute(
+            "SELECT status,target_receipt_hash FROM boundary_outbox"
+        ).fetchone() == ("acked", receipt.canonical_hash())
     finally:
         store.close()
 

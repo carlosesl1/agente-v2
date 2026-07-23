@@ -62,11 +62,21 @@ class WorkerCycle:
             worker = workers[queue]
             if not callable(getattr(worker, "run_once", None)):
                 raise TypeError(f"worker for {queue.value} must expose run_once")
+            if type(worker).__name__ in {"NoopWorker", "FallbackWorker"}:
+                raise ValueError(f"noop/fallback worker is forbidden for {queue.value}")
             normalized[queue] = worker
         self._workers = normalized
 
+    @property
+    def workers(self) -> Mapping[WorkerQueue, OneShotWorker]:
+        return dict(self._workers)
+
     def run_once(self, *, now: datetime) -> WorkerCycleReport:
-        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+        if (
+            type(now) is not datetime
+            or now.tzinfo is None
+            or now.utcoffset() != timedelta(0)
+        ):
             raise ValueError("now must be an exact UTC datetime")
         items: list[WorkerCycleItem] = []
         for queue in WorkerQueue:

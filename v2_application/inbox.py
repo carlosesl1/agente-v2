@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from v2_contracts.channel import AcceptDisposition, InboundBatch, InboundEvent
-
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbound_events (
@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS inbound_events (
   payload_hash TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('pending','claimed','processed','manual_review')),
   claim_token TEXT,
-  claim_expires_at TEXT
+  claim_expires_at TEXT,
+  turn_receipt_hash TEXT,
+  completed_at TEXT
 ) STRICT;
 CREATE INDEX IF NOT EXISTS inbound_events_lead_status
 ON inbound_events(lead_id,status,occurred_at,event_id);
@@ -97,6 +99,40 @@ def _batch_id(events: tuple[InboundEvent, ...]) -> str:
     return "batch:" + digest
 
 
+@dataclass(frozen=True, slots=True)
+class InboxClaim:
+    batch: InboundBatch
+    claim_token: str
+    lease_expires_at: datetime
+
+    def __post_init__(self) -> None:
+        if type(self.batch) is not InboundBatch:
+            raise TypeError("batch must be an exact InboundBatch")
+        if type(self.claim_token) is not str or len(self.claim_token) != 32:
+            raise ValueError("claim_token must be a canonical private token")
+        _utc_text(self.lease_expires_at, "lease_expires_at")
+
+    @property
+    def batch_id(self) -> str:
+        return self.batch.batch_id
+
+    @property
+    def lead_id(self) -> str:
+        return self.batch.lead_id
+
+    @property
+    def subscriber_id(self) -> str:
+        return self.batch.subscriber_id
+
+    @property
+    def events(self) -> tuple[InboundEvent, ...]:
+        return self.batch.events
+
+    @property
+    def combined_text(self) -> str:
+        return self.batch.combined_text
+
+
 def _event_from_bytes(payload: object) -> InboundEvent:
     if type(payload) is not bytes or not payload:
         raise ValueError("persisted event payload must be non-empty bytes")
@@ -136,6 +172,18 @@ class SQLiteInbox:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(inbound_events)")
+            }
+            if "turn_receipt_hash" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_events ADD COLUMN turn_receipt_hash TEXT"
+                )
+            if "completed_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_events ADD COLUMN completed_at TEXT"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -198,13 +246,27 @@ class SQLiteInbox:
             ).fetchone()
         return int(row["count"])
 
+    def claimed_count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM inbound_events WHERE status = 'claimed'"
+            ).fetchone()
+        return int(row["count"])
+
+    def processed_count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM inbound_events WHERE status = 'processed'"
+            ).fetchone()
+        return int(row["count"])
+
     def claim_ready(
         self,
         *,
         now: datetime,
         quiet_window: timedelta,
         lease_for: timedelta,
-    ) -> InboundBatch | None:
+    ) -> InboxClaim | None:
         now_text = _utc_text(now, "now")
         quiet = _positive_delta(quiet_window, "quiet_window", allow_zero=True)
         lease = _positive_delta(lease_for, "lease_for", allow_zero=False)
@@ -269,10 +331,68 @@ class SQLiteInbox:
                 ),
             )
             connection.commit()
-            return batch
+            return InboxClaim(
+                batch=batch,
+                claim_token=claim_token,
+                lease_expires_at=now + lease,
+            )
         except BaseException:
             if connection.in_transaction:
                 connection.rollback()
             raise
         finally:
             connection.close()
+
+    def complete_claim(
+        self,
+        claim: InboxClaim,
+        *,
+        turn_receipt_hash: str,
+        now: datetime,
+    ) -> None:
+        if type(claim) is not InboxClaim:
+            raise TypeError("claim must be an exact InboxClaim")
+        if (
+            type(turn_receipt_hash) is not str
+            or len(turn_receipt_hash) != 64
+            or any(char not in "0123456789abcdef" for char in turn_receipt_hash)
+        ):
+            raise ValueError("turn_receipt_hash must be a lowercase SHA-256")
+        now_text = _utc_text(now, "now")
+        if now >= claim.lease_expires_at:
+            raise RuntimeError("inbox claim lease expired before completion")
+        event_ids = tuple(event.event_id for event in claim.events)
+        placeholders = ",".join("?" for _ in event_ids)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                f"SELECT event_id,status,claim_token FROM inbound_events "
+                f"WHERE event_id IN ({placeholders}) ORDER BY event_id",
+                event_ids,
+            ).fetchall()
+            expected_ids = tuple(sorted(event_ids))
+            if tuple(row["event_id"] for row in rows) != expected_ids or any(
+                row["status"] != "claimed" or row["claim_token"] != claim.claim_token
+                for row in rows
+            ):
+                raise RuntimeError("inbox claim is stale or divergent")
+            cursor = connection.execute(
+                f"UPDATE inbound_events SET status='processed',claim_token=NULL,"
+                f"claim_expires_at=NULL,turn_receipt_hash=?,completed_at=? "
+                f"WHERE status='claimed' AND claim_token=? "
+                f"AND event_id IN ({placeholders})",
+                (turn_receipt_hash, now_text, claim.claim_token, *event_ids),
+            )
+            if cursor.rowcount != len(event_ids):
+                raise RuntimeError("inbox completion cardinality changed")
+            connection.commit()
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+
+__all__ = ["InboxClaim", "SQLiteInbox"]
