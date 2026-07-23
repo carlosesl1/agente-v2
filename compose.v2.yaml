@@ -1,0 +1,56 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.v2
+    image: agente-v2:local
+    command: []
+    environment:
+      V2_MANYCHAT_WEBHOOK_SECRET: ${V2_MANYCHAT_WEBHOOK_SECRET:?set V2_MANYCHAT_WEBHOOK_SECRET}
+      V2_SQLITE_PATH: /data/inbox.sqlite3
+      V2_API_HOST: 0.0.0.0
+      V2_API_PORT: "8080"
+      V2_ENABLE_CLOUDBEDS_WRITES: "false"
+      V2_ENABLE_BOKUN_WRITES: "false"
+      V2_ENABLE_STRIPE_LINKS: "false"
+      V2_ENABLE_MANYCHAT_DELIVERY: "false"
+    ports:
+      - "8080:8080"
+    volumes:
+      - v2-state:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json,urllib.request;
+          assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/readyz'))['status']=='ready'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  qualification:
+    image: agente-v2:local
+    profiles: ["qualification"]
+    entrypoint: ["python", "scripts/run_v2_e2e.py"]
+    environment:
+      V2_MANYCHAT_WEBHOOK_SECRET: qualification-only
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  v2-state:

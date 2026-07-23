@@ -8,6 +8,18 @@ import os
 from pathlib import Path
 
 
+_REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
+
+
+def _env_bool(source: Mapping[str, str], name: str) -> bool:
+    raw = source.get(name, "false").strip().casefold()
+    if raw in {"false", "0"}:
+        return False
+    if raw in {"true", "1"}:
+        return True
+    raise ValueError(f"{name} must be true/false or 1/0")
+
+
 @dataclass(frozen=True, slots=True)
 class V2Settings:
     """Minimal fail-closed settings required by the ManyChat ingress."""
@@ -15,6 +27,11 @@ class V2Settings:
     webhook_secret: str
     sqlite_path: Path
     max_body_bytes: int = 65_536
+    cloudbeds_writes_enabled: bool = False
+    bokun_writes_enabled: bool = False
+    stripe_links_enabled: bool = False
+    manychat_delivery_enabled: bool = False
+    real_effects_ack: str = ""
 
     def __post_init__(self) -> None:
         if type(self.webhook_secret) is not str or not self.webhook_secret.strip():
@@ -25,6 +42,44 @@ class V2Settings:
             raise ValueError("sqlite_path must be an absolute pathlib.Path")
         if type(self.max_body_bytes) is not int or self.max_body_bytes < 1:
             raise ValueError("max_body_bytes must be a positive exact integer")
+        gates = (
+            self.cloudbeds_writes_enabled,
+            self.bokun_writes_enabled,
+            self.stripe_links_enabled,
+            self.manychat_delivery_enabled,
+        )
+        if any(type(value) is not bool for value in gates):
+            raise TypeError("real effect gates must be exact booleans")
+        if any(gates) and self.real_effects_ack != _REAL_EFFECTS_ACK:
+            raise ValueError("real effects require exact operational acknowledgment")
+        paths = tuple(self.sqlite_paths.values())
+        if len(set(paths)) != len(paths):
+            raise ValueError("sqlite owner paths must be distinct")
+
+    @property
+    def real_effect_gates(self) -> dict[str, bool]:
+        return {
+            "bokun_writes": self.bokun_writes_enabled,
+            "cloudbeds_writes": self.cloudbeds_writes_enabled,
+            "manychat_delivery": self.manychat_delivery_enabled,
+            "stripe_links": self.stripe_links_enabled,
+        }
+
+    @property
+    def all_real_effect_gates_closed(self) -> bool:
+        return not any(self.real_effect_gates.values())
+
+    @property
+    def sqlite_paths(self) -> dict[str, Path]:
+        parent = self.sqlite_path.parent
+        return {
+            "inbox": self.sqlite_path,
+            "boundary": parent / "v2-boundary.sqlite3",
+            "execution": parent / "v2-execution.sqlite3",
+            "followup": parent / "v2-followup.sqlite3",
+            "payment_initiation": parent / "v2-payment-initiation.sqlite3",
+            "public_outbox": parent / "v2-public-outbox.sqlite3",
+        }
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> V2Settings:
@@ -42,4 +97,9 @@ class V2Settings:
             webhook_secret=secret,
             sqlite_path=Path(raw_path),
             max_body_bytes=limit,
+            cloudbeds_writes_enabled=_env_bool(source, "V2_ENABLE_CLOUDBEDS_WRITES"),
+            bokun_writes_enabled=_env_bool(source, "V2_ENABLE_BOKUN_WRITES"),
+            stripe_links_enabled=_env_bool(source, "V2_ENABLE_STRIPE_LINKS"),
+            manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
+            real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),
         )

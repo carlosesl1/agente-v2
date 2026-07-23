@@ -62,6 +62,17 @@ def create_app(
     now = clock or (lambda: datetime.now(timezone.utc))
     app = FastAPI(title="Agente V2", version="0.8.0")
 
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        return {"status": "alive", "role": "api"}
+
+    @app.get("/readyz")
+    async def readyz() -> dict[str, object]:
+        return {
+            "status": "ready",
+            "real_effect_gates": settings.real_effect_gates,
+        }
+
     @app.post("/webhook/manychat")
     async def manychat_webhook(request: Request) -> JSONResponse:
         provided = request.headers.get("X-V2-Webhook-Secret", "")
