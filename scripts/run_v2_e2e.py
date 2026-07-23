@@ -11,9 +11,9 @@ import time
 
 
 SCENARIOS = (
-    "tests/test_v2_e2e.py::test_lodging_stripe_qualification_has_one_effect_per_idempotency_key",
-    "tests/test_v2_e2e.py::test_activity_pix_qualification_uses_knowledge_and_no_stripe",
-    "tests/test_v2_e2e.py::test_package_wise_qualification_keeps_components_and_units_separate",
+    "tests/test_v2_e2e.py::test_signed_lodging_stripe_webhook_to_completion",
+    "tests/test_v2_e2e.py::test_signed_activity_pix_webhook_to_completion",
+    "tests/test_v2_e2e.py::test_signed_package_wise_webhook_to_completion",
 )
 
 
@@ -32,6 +32,8 @@ def main() -> int:
         "exit_code": completed.returncode,
         "providers": "fake_only",
         "real_effects": False,
+        "signed_webhooks": True,
+        "worker_queues": 7,
         "scenarios": [
             "lodging_stripe",
             "activity_pix",

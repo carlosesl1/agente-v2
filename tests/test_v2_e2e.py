@@ -33,6 +33,7 @@ from v2_contracts.payments import (
 from v2_contracts.providers import ProviderWriteAuthorization
 from v2_host.composition import V2Container, V2Role
 from v2_host.settings import V2Settings
+from tests.v2_signed_qualification import SignedQualificationRuntime
 
 
 NOW = datetime(2026, 11, 1, 13, 0, tzinfo=timezone.utc)
@@ -50,8 +51,13 @@ class ReservationTransport:
 
     def __call__(self, operation, payload, *, idempotency_key):
         self.calls.append((operation, idempotency_key))
-        reference_field = "reservation_id" if self.provider == "cloudbeds" else "booking_id"
-        return {"status": "confirmed", reference_field: f"fake-{self.provider}-reference"}
+        reference_field = (
+            "reservation_id" if self.provider == "cloudbeds" else "booking_id"
+        )
+        return {
+            "status": "confirmed",
+            reference_field: f"fake-{self.provider}-reference",
+        }
 
 
 class StripeTransport:
@@ -90,6 +96,13 @@ def _settings(tmp_path: Path) -> V2Settings:
     return V2Settings(
         webhook_secret="qualification-secret",
         sqlite_path=tmp_path / "inbox.sqlite3",
+        stripe_webhook_secret="stripe-qualification-secret",
+        wise_webhook_secret="wise-qualification-secret",
+        pix_webhook_secret="pix-qualification-secret",
+        pix_receiver_profile_id="receiver:profile:synthetic:1",
+        wise_signer_profile_id="wise-signer:profile:synthetic:1",
+        wise_account_profile_id="wise-account:profile:synthetic:1",
+        stripe_account_profile_id="stripe-account:profile:synthetic:1",
     )
 
 
@@ -195,7 +208,10 @@ def _run_payment(
         worker_id="worker:qualification:payment",
         lease_ttl=timedelta(seconds=30),
     )
-    return tuple(worker.run_once(now=NOW + timedelta(seconds=index + 1)) for index in range(len(selections) + 1))
+    return tuple(
+        worker.run_once(now=NOW + timedelta(seconds=index + 1))
+        for index in range(len(selections) + 1)
+    )
 
 
 def _deliver(container: V2Container, message_id: str) -> ManyChatTransport:
@@ -216,8 +232,14 @@ def _deliver(container: V2Container, message_id: str) -> ManyChatTransport:
         worker_id="worker:qualification:delivery",
         lease_ttl=timedelta(seconds=30),
     )
-    assert worker.run_once(now=NOW + timedelta(seconds=1)) is PublicDeliveryDisposition.DELIVERED
-    assert worker.run_once(now=NOW + timedelta(seconds=2)) is PublicDeliveryDisposition.IDLE
+    assert (
+        worker.run_once(now=NOW + timedelta(seconds=1))
+        is PublicDeliveryDisposition.DELIVERED
+    )
+    assert (
+        worker.run_once(now=NOW + timedelta(seconds=2))
+        is PublicDeliveryDisposition.IDLE
+    )
     return transport
 
 
@@ -229,8 +251,13 @@ def test_lodging_stripe_qualification_has_one_effect_per_idempotency_key(
     try:
         _queue(container, "cloudbeds", "workflow:e2e:lodging-stripe")
         worker, transports = _reservation_worker(container, ("cloudbeds",))
-        assert worker.run_once(now=NOW).disposition is V2WorkerDisposition.EFFECT_CONFIRMED
-        assert worker.run_once(now=NOW + timedelta(seconds=1)).disposition is V2WorkerDisposition.IDLE
+        assert (
+            worker.run_once(now=NOW).disposition is V2WorkerDisposition.EFFECT_CONFIRMED
+        )
+        assert (
+            worker.run_once(now=NOW + timedelta(seconds=1)).disposition
+            is V2WorkerDisposition.IDLE
+        )
 
         service, stripe, knowledge = _payments()
         obligation = _obligation(BusinessUnit.HOSTEL, "lodging-stripe")
@@ -258,8 +285,13 @@ def test_activity_pix_qualification_uses_knowledge_and_no_stripe(
     try:
         _queue(container, "bokun", "workflow:e2e:activity-pix")
         worker, transports = _reservation_worker(container, ("bokun",))
-        assert worker.run_once(now=NOW).disposition is V2WorkerDisposition.EFFECT_CONFIRMED
-        assert worker.run_once(now=NOW + timedelta(seconds=1)).disposition is V2WorkerDisposition.IDLE
+        assert (
+            worker.run_once(now=NOW).disposition is V2WorkerDisposition.EFFECT_CONFIRMED
+        )
+        assert (
+            worker.run_once(now=NOW + timedelta(seconds=1)).disposition
+            is V2WorkerDisposition.IDLE
+        )
 
         service, stripe, knowledge = _payments()
         obligation = _obligation(BusinessUnit.AGENCY, "activity-pix")
@@ -293,7 +325,9 @@ def test_package_wise_qualification_keeps_components_and_units_separate(
             worker.run_once(now=NOW + timedelta(seconds=2)),
         )
         confirmed = tuple(
-            result.transition.state for result in reservation_results if result.transition is not None
+            result.transition.state
+            for result in reservation_results
+            if result.transition is not None
         )
 
         hostel = _obligation(BusinessUnit.HOSTEL, "package-hostel-wise")
@@ -315,7 +349,8 @@ def test_package_wise_qualification_keeps_components_and_units_separate(
                     service=state.command.payload.components[0].service,
                     business_unit=(
                         BusinessUnit.HOSTEL
-                        if state.command.payload.components[0].service.value == "lodging"
+                        if state.command.payload.components[0].service.value
+                        == "lodging"
                         else BusinessUnit.AGENCY
                     ),
                     certainty=state.outcome.certainty,
@@ -325,10 +360,22 @@ def test_package_wise_qualification_keeps_components_and_units_separate(
             obligations=(hostel, agency),
             settled_payment_ids=frozenset((hostel.payment_id, agency.payment_id)),
             required_receipts=frozenset(
-                ("reservation:hostel", "reservation:agency", "settlement:hostel", "settlement:agency", "public_delivery")
+                (
+                    "reservation:hostel",
+                    "reservation:agency",
+                    "settlement:hostel",
+                    "settlement:agency",
+                    "public_delivery",
+                )
             ),
             observed_receipts=frozenset(
-                ("reservation:hostel", "reservation:agency", "settlement:hostel", "settlement:agency", "public_delivery")
+                (
+                    "reservation:hostel",
+                    "reservation:agency",
+                    "settlement:hostel",
+                    "settlement:agency",
+                    "public_delivery",
+                )
             ),
         )
 
@@ -351,3 +398,74 @@ def test_package_wise_qualification_keeps_components_and_units_separate(
         assert len(delivery.calls) == 1
     finally:
         container.close()
+
+
+def _assert_signed_runtime(
+    tmp_path: Path, scenario: str, expected: dict[str, int]
+) -> None:
+    runtime = SignedQualificationRuntime(tmp_path, scenario)
+    try:
+        runtime.run_signed()
+        assert runtime.completed() is True
+        assert runtime.reconciled is True
+        assert runtime.provider_call_counts == expected
+        assert runtime.public_delivery_count == 1
+        assert runtime.owner_counts == {
+            "boundary": 1,
+            "execution": 1,
+            "followup": 1,
+            "inbox": 1,
+            "payment_initiation": 1,
+            "public_outbox": 1,
+        }
+        assert runtime.settings.all_real_effect_gates_closed is True
+    finally:
+        runtime.close()
+
+
+def test_signed_lodging_stripe_webhook_to_completion(tmp_path: Path) -> None:
+    _assert_signed_runtime(
+        tmp_path,
+        "lodging_stripe",
+        {
+            "cloudbeds": 1,
+            "bokun": 0,
+            "stripe": 1,
+            "wise": 0,
+            "pix": 0,
+            "settlement": 1,
+            "manychat": 1,
+        },
+    )
+
+
+def test_signed_activity_pix_webhook_to_completion(tmp_path: Path) -> None:
+    _assert_signed_runtime(
+        tmp_path,
+        "activity_pix",
+        {
+            "cloudbeds": 0,
+            "bokun": 1,
+            "stripe": 0,
+            "wise": 0,
+            "pix": 1,
+            "settlement": 1,
+            "manychat": 1,
+        },
+    )
+
+
+def test_signed_package_wise_webhook_to_completion(tmp_path: Path) -> None:
+    _assert_signed_runtime(
+        tmp_path,
+        "package_wise",
+        {
+            "cloudbeds": 1,
+            "bokun": 1,
+            "stripe": 0,
+            "wise": 2,
+            "pix": 0,
+            "settlement": 2,
+            "manychat": 1,
+        },
+    )

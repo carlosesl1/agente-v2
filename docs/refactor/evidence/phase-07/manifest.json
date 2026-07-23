@@ -1,6 +1,6 @@
 {
-  "aggregate_sha256": "ecfb8bee72dc0d75d9c6bdb69831a6631579b7d16f3b77c3e07059aa0bd784c3",
-  "file_count": 130,
+  "aggregate_sha256": "d00af160fb19b03df9ab4f17b0d1c239b25e3eb4cdc731e8638532f6614d72df",
+  "file_count": 138,
   "files": [
     {
       "path": ".github/workflows/phase7.yml",
@@ -19,8 +19,8 @@
     },
     {
       "path": "docs/refactor/README.md",
-      "sha256": "2afa2cf932daec383bf284f959c7d3781ede6ca5fdf0547465fdde908322448e",
-      "size": 2699
+      "sha256": "3c9d3d0d3c0722390683c81b84e273469f675c5c08cff031babc36aec77fef0d",
+      "size": 3002
     },
     {
       "path": "docs/refactor/evidence/README.md",
@@ -464,23 +464,38 @@
     },
     {
       "path": "pyproject.toml",
-      "sha256": "2160eb981b1ef56ce203581481f1180d5984bc4587bd49ca389ee3b14a5105fa",
-      "size": 302
+      "sha256": "e09794396c8d3879efdd69598ce4f4e109c9020158958033372c6535a09bb512",
+      "size": 605
     },
     {
       "path": "reservation_boundary/__init__.py",
-      "sha256": "862618b5e04358937fd6024b87546a170ae4747d63c039b77a0fc9a5cf09589d",
-      "size": 3022
+      "sha256": "f5f615bcd2b7f4c3708ca2ff95d0cf876771777d0c86fd742f87fae9c8a84d95",
+      "size": 3857
+    },
+    {
+      "path": "reservation_boundary/authority.py",
+      "sha256": "54cc518b8a50a895f4362e089898ae35cf0ef96ac19b9624bf32bdfb1c3fb865",
+      "size": 17121
+    },
+    {
+      "path": "reservation_boundary/conversation.py",
+      "sha256": "9171408d22a995bda84f9cc143fd42747e6cb26b74625881594ecda52e4379a9",
+      "size": 65943
     },
     {
       "path": "reservation_boundary/coordinator.py",
-      "sha256": "e3fca0516f17e56b7ed26354e2ea1357d3f39fd30e15e0e7f7f0b8b1948ad965",
-      "size": 12466
+      "sha256": "a4d083cb640b38db50af8112dd8d69549a959f1f34ccba5e03dde883e830b2c6",
+      "size": 13441
     },
     {
       "path": "reservation_boundary/dispatch.py",
-      "sha256": "10d38a82897e099ffeda05503c9d51dfd9aa42085346cad05a6769b52be5e38b",
-      "size": 14381
+      "sha256": "717db4201266825d68afac33ba01da978649bade168160a5ea5e14922518f44c",
+      "size": 22646
+    },
+    {
+      "path": "reservation_boundary/effects.py",
+      "sha256": "10568defaee9667eb49e3f7d092b36f2043d551fc080b488d037b0822028af7a",
+      "size": 34711
     },
     {
       "path": "reservation_boundary/faults.py",
@@ -503,14 +518,34 @@
       "size": 11011
     },
     {
+      "path": "reservation_boundary/public_dispatch.py",
+      "sha256": "cca05ccb5d8c184fc515bde479f274475c7716cd153eea872e2bacfcb4077b98",
+      "size": 4922
+    },
+    {
+      "path": "reservation_boundary/qualification.py",
+      "sha256": "22d5a6dc171f6b892eb14a67c9d4f7125cf4f020f4556f83e2bd66cafc4ab91a",
+      "size": 9657
+    },
+    {
+      "path": "reservation_boundary/reads.py",
+      "sha256": "04003179dbe5151445dc1dda8ea8c7a98075d35d64dacf93f387926c38899b81",
+      "size": 84998
+    },
+    {
+      "path": "reservation_boundary/sandbox.py",
+      "sha256": "f92d078f5f0ff0aedb5d63466162aaa14f7c8ee1a75a6660debd50896278eff5",
+      "size": 38625
+    },
+    {
       "path": "reservation_boundary/schema.py",
-      "sha256": "e24c536f198d34f14a07adc92cdfbc0d4b1084c4cfafb039034d59a966bb2e08",
-      "size": 8892
+      "sha256": "2aa389bc5aa108526787f86d7db4238d9d3c2ee4f480a6ba55c73d4deca2dfb5",
+      "size": 31965
     },
     {
       "path": "reservation_boundary/serialization.py",
-      "sha256": "7d1629610963876bee9663590b5d5efd2ce3360ac84df09a5c607fbc73618f07",
-      "size": 14839
+      "sha256": "2e9e5920f1ec63127931c375e2a8709809b49810d4f20560567351740ebc0534",
+      "size": 17405
     },
     {
       "path": "reservation_boundary/shadow.py",
@@ -519,13 +554,18 @@
     },
     {
       "path": "reservation_boundary/sqlite_store.py",
-      "sha256": "a43c6ed5c3de0e04a5b47ee95f280ea59b18dbb2c8bb45b6b59519ded84ce560",
-      "size": 24456
+      "sha256": "3b075f5cfb3f4cee16ac4187c08c275354bd9c32bfedfa69debeaa2e4e168a7c",
+      "size": 117234
     },
     {
       "path": "reservation_boundary/types.py",
-      "sha256": "052760a491f74d66f66cbc2a9b87a61fdcb3dd0fb78d28bd6ecf1c92bedc993f",
-      "size": 27768
+      "sha256": "8dfcb5e74c51531f1ba47042b3fa1329e232939c975a8e390b73adca09b618c8",
+      "size": 34536
+    },
+    {
+      "path": "reservation_boundary/worker_store.py",
+      "sha256": "2af3272eaf533675d5fdc8dac1b9dde8b929cdd2d1f2f7fdf4913cefaecf4841",
+      "size": 26511
     },
     {
       "path": "schemas/phase7/postgresql.sql",
@@ -589,8 +629,8 @@
     },
     {
       "path": "tests/test_phase7_coordinator.py",
-      "sha256": "328e034abeee485e687dc1c6e92ee68f0c1b23abdc67aff4c26ff1f01de1b50e",
-      "size": 14192
+      "sha256": "50e0057b0842939d0238770a3562b6a79b8205dcfa5a42cdfa2d2fee30a6c05b",
+      "size": 15624
     },
     {
       "path": "tests/test_phase7_dispatch.py",
@@ -634,8 +674,8 @@
     },
     {
       "path": "tests/test_phase7_serialization.py",
-      "sha256": "e364a3f6a576fe866606c8e1b75cbdc3ca8bc55b2bf40888ccedbfe7e7b0526e",
-      "size": 6552
+      "sha256": "f84364b8c3747c5b20fca15834e56e3c496e9f5b18c998e7b3308f999c47cb08",
+      "size": 7917
     },
     {
       "path": "tests/test_phase7_shadow.py",

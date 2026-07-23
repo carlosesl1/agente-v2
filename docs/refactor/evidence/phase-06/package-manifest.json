@@ -31,9 +31,9 @@
       "sha256": "40eeb323cfa8d27df5392b48985143d1fcc767d401b31e21443ac1618f681c23"
     },
     {
-      "bytes": 24352,
+      "bytes": 34523,
       "path": "reservation_followup/schema.py",
-      "sha256": "a2976a63303c6c7cf5257bca617ddc0f41e10a78a0f070ad559c582d465f0e4e"
+      "sha256": "455218afe086e52a61f7e304dc2cac52c7279ad2acfedd9db94934a0d6fbdb63"
     },
     {
       "bytes": 12521,
@@ -41,9 +41,9 @@
       "sha256": "fe3fae5d69a140b6795e9a6609d2709d8ac2154051e45f6477f50190009f4a9e"
     },
     {
-      "bytes": 147766,
+      "bytes": 203007,
       "path": "reservation_followup/sqlite_store.py",
-      "sha256": "a2b6b9cf833c0be7adbd32133c8ae8fbb834f68933a5183a972c9fc785a9c466"
+      "sha256": "09ab5f9f63e5731c4905415a390146b229c289f45f1f995f3d42820ef67ad609"
     },
     {
       "bytes": 32904,
