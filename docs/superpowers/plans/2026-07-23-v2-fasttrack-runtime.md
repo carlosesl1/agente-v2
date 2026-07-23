@@ -233,7 +233,7 @@ FORBIDDEN_LITERALS = (
 
 - [ ] **Step 4: Registrar pacotes e dependências de runtime**
 
-Modificar `pyproject.toml` para incluir os quatro pacotes em `[tool.phase7-wheel].packages` e adicionar:
+Modificar `pyproject.toml` para preservar os seis pacotes históricos em `[tool.phase7-wheel]`, registrar os quatro pacotes novos em `[tool.v2-fasttrack].packages` e adicionar:
 
 ```toml
 [project.optional-dependencies]
@@ -253,21 +253,28 @@ dev = ["pytest>=8.0.0"]
 Run:
 
 ```bash
-python -m pytest -q tests/test_fasttrack_boundaries.py tests/test_phase7_package.py
+uv run --with pytest python -m pytest -q tests/test_fasttrack_boundaries.py
 python scripts/check_fasttrack_boundaries.py
 python -m py_compile v2_contracts/*.py v2_application/*.py v2_adapters/*.py v2_host/*.py scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
 
-Expected: todos exit 0; guard imprime `fasttrack-boundaries: OK`.
+Expected: todos exit 0; o teste prova que `[tool.phase7-wheel]` permanece com os seis pacotes históricos; o guard imprime `fasttrack-boundaries: OK`. `tests/test_phase7_package.py` não é gate deste fast-track porque já falha no commit-base `8f73ee8b4bf40d6ea458a7fac3394aab756c1d88`: seu builder exige metadata `0.7.0`, enquanto a branch já declarava `0.8.0` antes da Task 1.
 
 - [ ] **Step 6: Atualizar controle e commitar**
 
-Em `ACTIVE.md`, marcar Task 1 `DONE`, registrar o SHA real após commit e mover `NEXT` para Task 2. Commit:
+Após os gates verdes, criar o commit funcional:
 
 ```bash
 git add AGENTS.md pyproject.toml docs/refactor docs/superpowers v2_contracts v2_application v2_adapters v2_host scripts/check_fasttrack_boundaries.py tests/test_fasttrack_boundaries.py
 git commit -m "chore: establish v2 fasttrack control plane"
+```
+
+Depois registrar em `ACTIVE.md` o SHA real desse commit, marcar Task 1 `DONE`, mover `NEXT` para Task 2 e criar um segundo commit somente de controle:
+
+```bash
+git add docs/refactor/ACTIVE.md
+git commit -m "docs: advance v2 fasttrack to task 2"
 ```
 
 ---

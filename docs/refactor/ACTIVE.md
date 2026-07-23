@@ -58,9 +58,10 @@ Para cada task do plano:
 5. implementar o mínimo para GREEN;
 6. executar selector focado, regressões diretamente afetadas e guard de fronteiras;
 7. revisar o diff da task e executar `git diff --check`;
-8. commitar a task isoladamente;
-9. atualizar neste arquivo: task concluída, commit e nova `NEXT`;
-10. continuar automaticamente para a próxima task.
+8. commitar a implementação da task isoladamente;
+9. atualizar neste arquivo: task concluída, SHA do commit funcional e nova `NEXT`;
+10. commitar essa atualização de controle separadamente, sem código funcional;
+11. continuar automaticamente para a próxima task.
 
 A execução só pode parar quando:
 
@@ -81,6 +82,10 @@ Não parar apenas para narrar progresso entre tasks verdes.
 - uma suíte integral e uma revisão final no candidato congelado;
 - sem repetir gates pesados quando os bytes relevantes não mudaram;
 - nenhum atalho em idempotência, receipts, claims, fencing ou separação LLM/kernel.
+
+## Baselines históricas excluídas dos gates ativos
+
+- `tests/test_phase7_package.py` já falha no commit-base `8f73ee8b4bf40d6ea458a7fac3394aab756c1d88`: o artefato histórico exige metadata `0.7.0`, enquanto a branch já declarava `0.8.0`. O fast-track preserva os seis pacotes de `[tool.phase7-wheel]` e usa `[tool.v2-fasttrack]`; não altera esse teste histórico.
 
 ## Estados de task
 
