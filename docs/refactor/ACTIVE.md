@@ -14,9 +14,9 @@
 
 ## NEXT
 
-`Task 5 — Iniciação financeira Stripe, Wise e Pix`
+`Task 6 — Evidência financeira, claims e settlement`
 
-Nenhuma tarefa posterior está autorizada antes de Task 5 ficar verde e ser commitada.
+Nenhuma tarefa posterior está autorizada antes de Task 6 ficar verde e ser commitada.
 
 ## Regra para não confundir novo e antigo
 
@@ -95,8 +95,8 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 2. ManyChat ingress e inbox | `DONE` | `a2d57c4fa2938345c5ba745cdbb79c26bc292eec` |
 | 3. Turno canônico e consultas | `DONE` | `b495b7c919046192210988ff5e5749cfa063c80b` |
 | 4. Reservas Cloudbeds/Bókun | `DONE` | `f2e6d3bd309381319dd6f2a2dd78b6aa14c14014` |
-| 5. Iniciação Stripe/Wise/Pix | `NEXT` | — |
-| 6. Evidência e settlement | `BLOCKED_BY_ORDER` | — |
+| 5. Iniciação Stripe/Wise/Pix | `DONE` | `728403a64a3e590c24a5c4840a7009959101c359` |
+| 6. Evidência e settlement | `NEXT` | — |
 | 7. Pós-pagamento e conclusão | `BLOCKED_BY_ORDER` | — |
 | 8. Pacote, recuperação e handoff | `BLOCKED_BY_ORDER` | — |
 | 9. Composição, E2E e qualificação | `BLOCKED_BY_ORDER` | — |
