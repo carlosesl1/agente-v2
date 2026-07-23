@@ -7,7 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from reservation_domain import ExecutionOutcome, ReservationCommand
 
-from .types import DispatchRequest, _require_hash, _require_id
+from .types import DispatchPermit, DispatchRequest, _require_hash, _require_id
 
 
 _PREPARATION_FAILURE_REASONS = frozenset(
@@ -17,6 +17,7 @@ _PREPARATION_FAILURE_REASONS = frozenset(
         "synthetic_preparation_failure",
         "synthetic_timeout",
         "unsupported_operation",
+        "write_gate_closed",
     }
 )
 
@@ -70,4 +71,20 @@ class ExecutionAdapter(Protocol):
     ) -> ExecutionOutcome: ...
 
 
-__all__ = ["PreparationFailure", "ExecutionAdapter"]
+@runtime_checkable
+class FencedExecutionAdapter(Protocol):
+    adapter_id: str
+    adapter_version: int
+
+    def prepare(self, command: ReservationCommand) -> DispatchRequest: ...
+
+    def dispatch_fenced(
+        self,
+        permit: DispatchPermit,
+        request: DispatchRequest,
+        *,
+        idempotency_key: str,
+    ) -> ExecutionOutcome: ...
+
+
+__all__ = ["PreparationFailure", "ExecutionAdapter", "FencedExecutionAdapter"]

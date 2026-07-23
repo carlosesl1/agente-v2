@@ -182,8 +182,112 @@ class ReadObservation:
             raise ValueError("expires_at must be after observed_at")
 
 
+class ProviderCertainty(str, Enum):
+    NOT_CALLED = "not_called"
+    CALLED_NO_EFFECT = "called_no_effect"
+    EFFECT_CONFIRMED = "effect_confirmed"
+    CALLED_UNKNOWN = "called_unknown"
+
+
+_PROVIDER_OPERATIONS: Final = {
+    "cloudbeds": "reserve_lodging",
+    "bokun": "book_activity",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderWriteAuthorization:
+    provider: str
+    enabled: bool
+    authorization_id: str
+
+    def __post_init__(self) -> None:
+        _text(self.provider, "provider", identifier=True)
+        if self.provider not in _PROVIDER_OPERATIONS:
+            raise ValueError("provider is outside the reservation write allowlist")
+        if type(self.enabled) is not bool:
+            raise TypeError("enabled must be an exact boolean")
+        _text(self.authorization_id, "authorization_id", identifier=True)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDispatchPermit:
+    provider: str
+    operation: str
+    command_id: str
+    idempotency_key: str
+    request_hash: str
+    payload_hash: str
+    canonical_payload: str
+    fencing_token: int
+    authorization_id: str
+
+    def __post_init__(self) -> None:
+        _text(self.provider, "provider", identifier=True)
+        if _PROVIDER_OPERATIONS.get(self.provider) != self.operation:
+            raise ValueError("provider and reservation operation do not match")
+        _text(self.command_id, "command_id", identifier=True)
+        _text(self.idempotency_key, "idempotency_key", identifier=True)
+        _text(self.authorization_id, "authorization_id", identifier=True)
+        if type(self.fencing_token) is not int or self.fencing_token < 1:
+            raise ValueError("fencing_token must be an exact positive integer")
+        if type(self.canonical_payload) is not str:
+            raise TypeError("canonical_payload must be an exact string")
+        try:
+            decoded = json.loads(self.canonical_payload)
+            canonical = json.dumps(
+                decoded,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ValueError("canonical_payload must be closed JSON") from exc
+        if type(decoded) is not dict or canonical != self.canonical_payload:
+            raise ValueError("canonical_payload must be a canonical JSON object")
+        if type(self.request_hash) is not str or _SHA256_RE.fullmatch(self.request_hash) is None:
+            raise ValueError("request_hash must bind the durable command")
+        expected_hash = hashlib.sha256(self.canonical_payload.encode("utf-8")).hexdigest()
+        if self.payload_hash != expected_hash:
+            raise ValueError("payload_hash does not bind canonical_payload")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderExecutionResult:
+    certainty: ProviderCertainty
+    normalized_status: str
+    provider_reference_fingerprint: str | None
+    evidence: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.certainty) is not ProviderCertainty:
+            raise TypeError("certainty must be an exact ProviderCertainty")
+        _text(self.normalized_status, "normalized_status", identifier=True)
+        if self.provider_reference_fingerprint is not None and (
+            type(self.provider_reference_fingerprint) is not str
+            or _SHA256_RE.fullmatch(self.provider_reference_fingerprint) is None
+        ):
+            raise ValueError("provider_reference_fingerprint must be a SHA-256 or None")
+        if type(self.evidence) is not tuple or any(
+            type(item) is not str or _SHA256_RE.fullmatch(item) is None
+            for item in self.evidence
+        ):
+            raise ValueError("evidence must contain exact SHA-256 values")
+        object.__setattr__(self, "evidence", tuple(sorted(set(self.evidence))))
+        if self.certainty is ProviderCertainty.EFFECT_CONFIRMED:
+            if self.provider_reference_fingerprint is None or not self.evidence:
+                raise ValueError("effect_confirmed requires reference and evidence")
+        elif self.provider_reference_fingerprint is not None:
+            raise ValueError("only effect_confirmed may carry a provider reference")
+
+
 __all__ = [
     "InvalidReadRequest",
+    "ProviderCertainty",
+    "ProviderDispatchPermit",
+    "ProviderExecutionResult",
+    "ProviderWriteAuthorization",
     "ReadKind",
     "ReadObservation",
     "ReadRequest",

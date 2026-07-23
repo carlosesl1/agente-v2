@@ -11,10 +11,17 @@ from v2_adapters._provider_common import (
     binding_hash,
     exact_dict,
     observed_window,
+    reservation_result,
     text,
     validated_adapter,
 )
-from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
+from v2_contracts.providers import (
+    ProviderDispatchPermit,
+    ProviderExecutionResult,
+    ReadKind,
+    ReadObservation,
+    ReadRequest,
+)
 
 
 _AMOUNT_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
@@ -124,4 +131,22 @@ class CloudbedsReadAdapter:
         )
 
 
-__all__ = ["CloudbedsReadAdapter"]
+class CloudbedsReservationPort:
+    provider = "cloudbeds"
+
+    def __init__(self, transport) -> None:
+        if not callable(transport):
+            raise TypeError("transport must be callable")
+        self._transport = transport
+
+    def execute(self, permit: ProviderDispatchPermit) -> ProviderExecutionResult:
+        return reservation_result(
+            permit=permit,
+            provider=self.provider,
+            operation="reserve_lodging",
+            reference_field="reservation_id",
+            transport=self._transport,
+        )
+
+
+__all__ = ["CloudbedsReadAdapter", "CloudbedsReservationPort"]

@@ -8,7 +8,7 @@ from enum import Enum
 
 from reservation_domain import ExecutionCertainty, ExecutionOutcome
 
-from .adapter import ExecutionAdapter, PreparationFailure
+from .adapter import ExecutionAdapter, FencedExecutionAdapter, PreparationFailure
 from .sqlite_store import PersistedTransition, SQLiteUnitOfWork
 from .types import PreparationDisposition
 
@@ -90,10 +90,17 @@ class CommandWorker:
             )
         permit = self._store.fence_dispatch(claim, request, now=now)
         try:
-            outcome = self._adapter.dispatch(
-                request,
-                idempotency_key=claim.command.idempotency_key,
-            )
+            if isinstance(self._adapter, FencedExecutionAdapter):
+                outcome = self._adapter.dispatch_fenced(
+                    permit,
+                    request,
+                    idempotency_key=claim.command.idempotency_key,
+                )
+            else:
+                outcome = self._adapter.dispatch(
+                    request,
+                    idempotency_key=claim.command.idempotency_key,
+                )
             if (
                 type(outcome) is not ExecutionOutcome
                 or outcome.command_id != claim.command.command_id

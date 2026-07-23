@@ -569,7 +569,7 @@ Depois registrar esse SHA em `ACTIVE.md`, mover `NEXT` para Task 4 e criar o com
 
 **Interfaces:**
 - Consumes: `ReservationCommand`, `OfferSnapshot`, workers/ledgers existentes.
-- Produces: `CloudbedsReservationPort.execute(ProviderDispatchPermit) -> ExecutionOutcome`; `BokunReservationPort.execute(ProviderDispatchPermit) -> ExecutionOutcome`; worker único por comando.
+- Produces: `CloudbedsReservationPort.execute(ProviderDispatchPermit) -> ProviderExecutionResult`; `BokunReservationPort.execute(ProviderDispatchPermit) -> ProviderExecutionResult`; a camada `v2_application` converte o resultado neutro em `ExecutionOutcome`; worker único por comando.
 
 - [ ] **Step 1: Escrever RED dos dois providers e pacote sem split inseguro**
 
@@ -619,7 +619,7 @@ def test_model_supplied_provider_payload_is_rejected(runtime) -> None:
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_reservations.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_reservations.py
 ```
 
 Expected: FAIL porque os adapters de write e composição não existem.
@@ -628,18 +628,18 @@ Expected: FAIL porque os adapters de write e composição não existem.
 
 Cloudbeds deriva payload da option vinculada e dados canônicos do hóspede; Bókun deriva cart e submit da option vinculada. Ambos exigem `ProviderDispatchPermit`, idempotency key do command ledger e write gate por provider. O método retorna somente:
 
-O outcome usa o `ExecutionOutcome` canônico existente e aceita exatamente as certezas `NOT_CALLED`, `CALLED_NO_EFFECT`, `CALLED_UNKNOWN` ou `EFFECT_CONFIRMED`, com request hash, provider reference fingerprint e evidência de claim validados pelo construtor.
+O port técnico retorna `ProviderExecutionResult` neutro; `v2_application` o converte para o `ExecutionOutcome` canônico existente. Ambos aceitam exatamente as certezas `NOT_CALLED`, `CALLED_NO_EFFECT`, `CALLED_UNKNOWN` ou `EFFECT_CONFIRMED`, com request hash do command, payload hash derivado, provider reference fingerprint e evidência de claim validados pelos construtores.
 
 Erro antes de dispatch pode liberar claim conforme orçamento finito. Qualquer timeout/erro após fence registra `CALLED_UNKNOWN` e encerra auto-retry.
 
 - [ ] **Step 4: Fechar package allocation**
 
-Uma confirmação combinada cria dois commands dentro da mesma decisão/commit, um por componente. Cada command possui provider, ledger, fence e outcome próprios. Se o segundo falhar, o primeiro não é repetido; package progress deriva dos dois outcomes e pode exigir compensação/handoff.
+Uma confirmação combinada chama `ReservationAllocator.expand_commands(...)` antes do commit e cria dois commands na mesma tupla da decisão atômica, um por componente. Cada command possui provider, ledger, fence e outcome próprios. Se o segundo falhar, o primeiro não é repetido; package progress deriva dos dois outcomes e pode exigir compensação/handoff.
 
 - [ ] **Step 5: Executar GREEN e regressões de execução**
 
 ```bash
-python -m pytest -q tests/test_v2_reservations.py tests/test_phase5_worker.py tests/test_phase5_reconciliation.py tests/test_phase8_tool_dispatch.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_reservations.py tests/test_phase5_worker.py tests/test_phase5_reconciliation.py tests/test_phase8_tool_dispatch.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -648,10 +648,14 @@ Expected: exit 0, incluindo assert de `provider_calls <= 1`.
 
 - [ ] **Step 6: Atualizar controle e commitar**
 
+Criar primeiro o commit funcional:
+
 ```bash
-git add v2_contracts v2_application v2_adapters reservation_execution reservation_boundary tests docs/refactor/ACTIVE.md
+git add v2_contracts v2_application v2_adapters reservation_execution tests docs/superpowers/plans
 git commit -m "feat: execute v2 lodging and activity reservations"
 ```
+
+Depois registrar esse SHA em `ACTIVE.md`, mover `NEXT` para Task 5 e criar o commit de controle separado, sem código funcional.
 
 ---
 
