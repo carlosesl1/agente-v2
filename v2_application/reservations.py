@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Final
 
 from reservation_domain import (
@@ -23,6 +23,11 @@ from reservation_domain.signature import (
     subject_signature,
 )
 from reservation_execution import DispatchPermit, DispatchRequest, PreparationFailure
+from v2_application.reads import (
+    PrivateBindingMismatch,
+    PrivateBindingUnavailable,
+    PrivateOfferBindingResolver,
+)
 from v2_contracts.ports import CommercialEffectGuard, ReservationPort
 from v2_contracts.providers import (
     ProviderCertainty,
@@ -40,6 +45,10 @@ _PROVIDER_OPERATION: Final = {
     "cloudbeds": ReservationOperation.RESERVE_LODGING,
     "bokun": ReservationOperation.BOOK_ACTIVITY,
 }
+_PRIVATE_PROVIDER_FIELDS: Final = {
+    "cloudbeds": frozenset(("room_rate_id", "room_type_id")),
+    "bokun": frozenset(("bokun_product_id",)),
+}
 _CERTAINTY: Final = {
     ProviderCertainty.NOT_CALLED: ExecutionCertainty.NOT_CALLED,
     ProviderCertainty.CALLED_NO_EFFECT: ExecutionCertainty.CALLED_NO_EFFECT,
@@ -48,7 +57,11 @@ _CERTAINTY: Final = {
 }
 
 
-def _provider_payload(command: ReservationCommand, provider: str) -> str:
+def _provider_payload(
+    command: ReservationCommand,
+    provider: str,
+    private_binding: dict[str, str] | None = None,
+) -> str:
     if len(command.payload.components) != 1:
         raise DispatchRejected("provider command must bind exactly one component")
     component = command.payload.components[0]
@@ -65,10 +78,13 @@ def _provider_payload(command: ReservationCommand, provider: str) -> str:
         "operation": command.operation.value,
         "offer": {
             "binding": component.provider_ref,
+            "private_binding": private_binding or {},
             "offer_id": component.offer_id,
             "start_date": component.start_date.isoformat(),
             "end_date": (
-                component.end_date.isoformat() if component.end_date is not None else None
+                component.end_date.isoformat()
+                if component.end_date is not None
+                else None
             ),
             "start_time": component.start_time,
             "party": {
@@ -107,6 +123,66 @@ def _provider_payload(command: ReservationCommand, provider: str) -> str:
     )
 
 
+def _prepared_payload(
+    command: ReservationCommand, private_binding: dict[str, str]
+) -> str:
+    value = {
+        "schema": "v2-reservation-prepared-v2",
+        "command": json.loads(dumps_command(command)),
+        "private_binding_hash": command.payload.components[0].provider_ref,
+        "private_binding": private_binding,
+    }
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _load_prepared_payload(
+    canonical_payload: str,
+    provider: str,
+) -> tuple[ReservationCommand, dict[str, str] | None]:
+    decoded = json.loads(canonical_payload)
+    if (
+        type(decoded) is not dict
+        or decoded.get("schema") != "v2-reservation-prepared-v2"
+    ):
+        return loads_command(canonical_payload), None
+    if set(decoded) != {
+        "schema",
+        "command",
+        "private_binding_hash",
+        "private_binding",
+    }:
+        raise DispatchRejected("prepared reservation fields mismatch")
+    command_value = decoded["command"]
+    private_binding = decoded["private_binding"]
+    if type(command_value) is not dict or type(private_binding) is not dict:
+        raise DispatchRejected("prepared reservation payload has invalid objects")
+    if set(private_binding) != _PRIVATE_PROVIDER_FIELDS[provider] or any(
+        type(name) is not str or type(value) is not str or not value
+        for name, value in private_binding.items()
+    ):
+        raise DispatchRejected("prepared reservation private binding is invalid")
+    command_wire = json.dumps(
+        command_value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    command = loads_command(command_wire)
+    if (
+        len(command.payload.components) != 1
+        or decoded["private_binding_hash"] != command.payload.components[0].provider_ref
+    ):
+        raise DispatchRejected("prepared reservation private binding hash diverged")
+    return command, private_binding
+
+
 @dataclass(frozen=True, slots=True)
 class ReservationAllocation:
     source_command_id: str
@@ -132,9 +208,10 @@ class ReservationAllocator:
         if command.operation is not ReservationOperation.RESERVE_PACKAGE:
             return ReservationAllocation(command.command_id, (command,))
         by_service = {item.service: item for item in command.payload.components}
-        if set(by_service) != {ServiceKind.LODGING, ServiceKind.ACTIVITY} or len(
-            command.payload.components
-        ) != 2:
+        if (
+            set(by_service) != {ServiceKind.LODGING, ServiceKind.ACTIVITY}
+            or len(command.payload.components) != 2
+        ):
             raise DispatchRejected("package must contain one lodging and one activity")
         allocated = []
         for service in (ServiceKind.LODGING, ServiceKind.ACTIVITY):
@@ -199,6 +276,9 @@ class V2ReservationExecutionAdapter:
         provider: str,
         port: ReservationPort,
         authorization: ProviderWriteAuthorization,
+        binding_resolver: PrivateOfferBindingResolver | None = None,
+        clock=None,
+        require_private_binding: bool = True,
     ) -> None:
         if provider not in _PROVIDER_OPERATION:
             raise ValueError("provider is outside the V2 reservation allowlist")
@@ -210,10 +290,22 @@ class V2ReservationExecutionAdapter:
             raise TypeError("authorization must be exact ProviderWriteAuthorization")
         if authorization.provider != provider:
             raise ValueError("authorization provider mismatch")
+        if (binding_resolver is None) != (clock is None):
+            raise ValueError("binding_resolver and clock must be configured together")
+        if type(require_private_binding) is not bool:
+            raise TypeError("require_private_binding must be an exact bool")
+        if binding_resolver is not None and (
+            type(binding_resolver) is not PrivateOfferBindingResolver
+            or not callable(getattr(clock, "now", None))
+        ):
+            raise TypeError("private binding preparation requires resolver and clock")
         self.provider = provider
         self.adapter_id = f"v2-{provider}-reservation"
         self._port = port
         self._authorization = authorization
+        self._binding_resolver = binding_resolver
+        self._clock = clock
+        self._require_private_binding = require_private_binding
 
     @property
     def operation(self) -> ReservationOperation:
@@ -226,10 +318,27 @@ class V2ReservationExecutionAdapter:
             raise PreparationFailure("unsupported_operation", False, ())
         if not self._authorization.enabled:
             raise PreparationFailure("write_gate_closed", False, ())
-        return DispatchRequest.from_command(
-            command,
-            dumps_command(command),
-        )
+        if self._binding_resolver is None and self._require_private_binding:
+            raise PreparationFailure("private_binding_resolver_unavailable", False, ())
+        payload = dumps_command(command)
+        if self._binding_resolver is not None:
+            if len(command.payload.components) != 1:
+                raise PreparationFailure("private_binding_component_count", False, ())
+            try:
+                binding = self._binding_resolver.resolve(
+                    command.payload.components[0],
+                    now=self._clock.now(),
+                )
+            except PrivateBindingUnavailable as exc:
+                raise PreparationFailure(
+                    "private_binding_unavailable", True, ()
+                ) from exc
+            except PrivateBindingMismatch as exc:
+                raise PreparationFailure("private_binding_mismatch", False, ()) from exc
+            if binding.provider != self.provider:
+                raise DispatchRejected("private binding provider mismatch")
+            payload = _prepared_payload(command, binding.private_payload())
+        return DispatchRequest.from_command(command, payload)
 
     def dispatch_fenced(
         self,
@@ -247,11 +356,16 @@ class V2ReservationExecutionAdapter:
             or request.idempotency_key != idempotency_key
         ):
             raise DispatchRejected("durable permit does not bind the prepared request")
-        command = loads_command(request.canonical_payload)
+        command, private_binding = _load_prepared_payload(
+            request.canonical_payload,
+            self.provider,
+        )
         if command.command_id != request.command_id:
             raise DispatchRejected("prepared command identity changed after fencing")
-        provider_payload = _provider_payload(command, self.provider)
-        provider_payload_hash = hashlib.sha256(provider_payload.encode("utf-8")).hexdigest()
+        provider_payload = _provider_payload(command, self.provider, private_binding)
+        provider_payload_hash = hashlib.sha256(
+            provider_payload.encode("utf-8")
+        ).hexdigest()
         provider_permit = ProviderDispatchPermit(
             provider=self.provider,
             operation=self.operation.value,

@@ -321,6 +321,7 @@ class TypedFact:
             "end_date": DateSlot,
             "adults": IntegerSlot,
             "children": IntegerSlot,
+            "payment_method": StringSlot,
         }
         expected = expected_types.get(self.name)
         if expected is None:
@@ -329,10 +330,20 @@ class TypedFact:
             raise TypeError("TypedFact.value does not match its Phase 8 fact name")
         if self.name == "language" and _LOCALE_RE.fullmatch(self.value.value) is None:
             raise ValueError("language fact must use a canonical locale")
-        if self.name == "service" and self.value.value not in ("hostel", "agency"):
-            raise ValueError("service fact must be hostel or agency")
+        if self.name == "service" and self.value.value not in (
+            "hostel",
+            "agency",
+            "package",
+        ):
+            raise ValueError("service fact must be hostel, agency or package")
         if self.name == "adults" and self.value.value < 1:
             raise ValueError("adults fact must be >= 1")
+        if self.name == "payment_method" and self.value.value not in (
+            "stripe",
+            "wise",
+            "pix",
+        ):
+            raise ValueError("payment_method fact is outside the closed catalog")
 
     def to_canonical_bytes(self) -> bytes:
         if self.frame_commitment_hash is None:

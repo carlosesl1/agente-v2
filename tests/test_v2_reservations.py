@@ -108,6 +108,7 @@ def _worker(
         provider="cloudbeds",
         port=port,
         authorization=_authorization("cloudbeds", enabled=enabled),
+        require_private_binding=False,
     )
     return V2ReservationWorker(
         store=store,

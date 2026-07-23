@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
-import json
+from decimal import Decimal
 
 import pytest
 
+from reservation_domain import Money, OfferSnapshot, Party, ServiceKind
 from v2_adapters.bokun import BokunReadAdapter
 from v2_adapters.cloudbeds import CloudbedsReadAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
-from v2_application.reads import StaleObservation, V2ReadService
+from v2_application.reads import (
+    PrivateBindingMismatch,
+    PrivateOfferBindingResolver,
+    StaleObservation,
+    V2ReadService,
+)
 from v2_contracts.providers import InvalidReadRequest, ReadKind, ReadRequest
-
 
 NOW = datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc)
 LODGING_REQUEST = ReadRequest(
@@ -151,3 +157,46 @@ def test_stale_observation_cannot_authorize_selection() -> None:
 
     with pytest.raises(StaleObservation):
         reads.accept(observation, now=NOW + timedelta(seconds=2))
+
+
+def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> None:
+    provider_state = {"amount": "400.00"}
+
+    def transport(operation, payload):
+        assert operation == "activity"
+        return {
+            **payload,
+            "bokun_product_id": "bokun-private-001",
+            "product_public_name": "Buracão",
+            "total_amount": provider_state["amount"],
+            "currency": "BRL",
+            "available": True,
+        }
+
+    adapter = BokunReadAdapter(
+        transport=transport,
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+    observation = adapter.read(ACTIVITY_REQUEST)
+    component = OfferSnapshot(
+        offer_id=observation.public_payload["offer_id"],
+        lookup_id=(f"lookup:{ACTIVITY_REQUEST.product_id}:{observation.request_hash}"),
+        service=ServiceKind.ACTIVITY,
+        provider_ref=observation.private_binding_hash,
+        public_label=observation.public_payload["product_public_name"],
+        start_date=ACTIVITY_REQUEST.activity_date,
+        end_date=None,
+        start_time=None,
+        party=Party(adults=ACTIVITY_REQUEST.participants, children=0),
+        total=Money(amount=Decimal("400.00"), currency="BRL"),
+        available=True,
+    )
+    resolver = PrivateOfferBindingResolver({ServiceKind.ACTIVITY: adapter})
+
+    binding = resolver.resolve(component, now=NOW)
+    assert binding.private_payload() == {"bokun_product_id": "bokun-private-001"}
+
+    provider_state["amount"] = "401.00"
+    with pytest.raises(PrivateBindingMismatch, match="commercial binding"):
+        resolver.resolve(component, now=NOW)

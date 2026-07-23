@@ -126,6 +126,7 @@ def _reservation_worker(
                 provider=provider,
                 port=port,
                 authorization=_authorization(provider),
+                require_private_binding=False,
             )
         )
     return (

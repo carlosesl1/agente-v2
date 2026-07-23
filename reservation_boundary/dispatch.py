@@ -54,7 +54,6 @@ from reservation_boundary.types import (
     StateCommitArguments,
     StringSlot,
     StripeLinkArguments,
-    ToolArguments,
     ToolDispatchRequest,
     TurnPlanReason,
     TypedFact,
@@ -209,6 +208,7 @@ _STATE_FACT_TYPES: Final = MappingProxyType(
         "end_date": DateSlot,
         "adults": IntegerSlot,
         "children": IntegerSlot,
+        "payment_method": StringSlot,
     }
 )
 _NORMALIZED_COMMAND_METADATA: Final = MappingProxyType(

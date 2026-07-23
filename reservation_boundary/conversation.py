@@ -386,6 +386,7 @@ class ConversationProjection:
             "end_date": 3,
             "adults": 4,
             "children": 5,
+            "payment_method": 6,
         }
         fact_positions: list[int] = []
         for fact in self.facts:
@@ -1337,6 +1338,7 @@ class MayaTurnProposal:
             "end_date": 3,
             "adults": 4,
             "children": 5,
+            "payment_method": 6,
         }
         fact_positions = tuple(fact_order[item.name] for item in self.facts)
         if (

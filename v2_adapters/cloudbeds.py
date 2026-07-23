@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import re
+from datetime import timedelta
 from typing import Final
 
 from v2_adapters._provider_common import (
@@ -15,6 +15,7 @@ from v2_adapters._provider_common import (
     text,
     validated_adapter,
 )
+from v2_contracts.private_offers import PrivateOfferBinding, PrivateOfferQuery
 from v2_contracts.providers import (
     ProviderDispatchPermit,
     ProviderExecutionResult,
@@ -23,14 +24,15 @@ from v2_contracts.providers import (
     ReadRequest,
 )
 
-
 _AMOUNT_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
 _CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
 
 
 class CloudbedsReadAdapter:
     def __init__(self, *, transport, clock, ttl: timedelta) -> None:
-        self._transport, self._clock, self._ttl = validated_adapter(transport, clock, ttl)
+        self._transport, self._clock, self._ttl = validated_adapter(
+            transport, clock, ttl
+        )
 
     def read(self, request: ReadRequest) -> ReadObservation:
         if type(request) is not ReadRequest:
@@ -40,6 +42,77 @@ class CloudbedsReadAdapter:
         if request.kind is ReadKind.ROOM_DESCRIPTION:
             return self._room_description(request)
         raise TypeError("Cloudbeds adapter supports only lodging reads")
+
+    def resolve(self, query: PrivateOfferQuery) -> PrivateOfferBinding:
+        if type(query) is not PrivateOfferQuery or query.service != "lodging":
+            raise TypeError("Cloudbeds private resolver requires a lodging query")
+        payload = {
+            "check_in": query.start_date.isoformat(),
+            "check_out": query.end_date.isoformat(),
+            "adults": query.adults,
+            "children": query.children,
+        }
+        response = exact_dict(self._transport("lodging", payload), "Cloudbeds response")
+        raw_options = response.get("options")
+        if type(raw_options) is not list or not raw_options:
+            raise ProviderReadError("Cloudbeds response requires at least one option")
+        private_options = []
+        selected = None
+        for raw in raw_options:
+            option = exact_dict(raw, "Cloudbeds option")
+            if any(option.get(name) != value for name, value in payload.items()):
+                raise ProviderReadError("Cloudbeds option failed request binding")
+            private = {
+                "room_type_id": text(option.get("room_type_id"), "room_type_id"),
+                "room_rate_id": text(option.get("room_rate_id"), "room_rate_id"),
+            }
+            private_options.append(private)
+            option_hash = binding_hash(
+                {"request_hash": query.request_hash, "provider": private}
+            )
+            if "offer:" + option_hash[:32] == query.offer_id:
+                if selected is not None:
+                    raise ProviderReadError("Cloudbeds private offer is not unique")
+                selected = (option, private)
+        set_hash = binding_hash(
+            {"request_hash": query.request_hash, "options": private_options}
+        )
+        if selected is None:
+            raise ProviderReadError("Cloudbeds private offer no longer exists")
+        option, private = selected
+        amount = text(option.get("total_amount"), "total_amount")
+        currency = text(option.get("currency"), "currency")
+        available_units = option.get("available_units")
+        if (
+            _AMOUNT_RE.fullmatch(amount) is None
+            or _CURRENCY_RE.fullmatch(currency) is None
+        ):
+            raise ProviderReadError("Cloudbeds amount or currency is not canonical")
+        if type(available_units) is not int or available_units < 0:
+            raise ProviderReadError("available_units must be non-negative")
+        observed_at, expires_at = observed_window(self._clock, self._ttl)
+        resolved_query = PrivateOfferQuery(
+            service="lodging",
+            offer_id=query.offer_id,
+            request_hash=query.request_hash,
+            binding_hash=set_hash,
+            canonical_product_id=None,
+            start_date=query.start_date,
+            end_date=query.end_date,
+            start_time=None,
+            adults=payload["adults"],
+            children=payload["children"],
+            total_amount=amount,
+            currency=currency,
+            available=available_units > 0,
+        )
+        return PrivateOfferBinding(
+            provider="cloudbeds",
+            query=resolved_query,
+            observed_at=observed_at,
+            expires_at=expires_at,
+            provider_fields=tuple(sorted(private.items())),
+        )
 
     def _lodging(self, request: ReadRequest) -> ReadObservation:
         query = {
