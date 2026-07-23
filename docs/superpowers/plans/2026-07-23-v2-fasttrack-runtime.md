@@ -741,27 +741,27 @@ def test_economic_change_increments_only_financial_version(runtime) -> None:
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_payment_initiation.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_payment_initiation.py
 ```
 
-Expected: FAIL por adapters/contratos ausentes e Stripe ainda `BLOCKED_UNMIGRATED` no catálogo.
+Expected: FAIL por adapters/contratos ausentes e pelo ledger de iniciação ainda inexistente.
 
 - [ ] **Step 3: Implementar Stripe link como efeito durável**
 
-Extrair comportamento técnico de `services/stripe_client.py` e testes sanitizados. O worker recebe obrigação já autorizada, escolhe conta por `BusinessUnit`, cria metadata mínima vinculada a `payment_id`, `anchor_id`, `amount_minor`, `currency` e `economic_version`, e grava receipt antes da mensagem pública. Link nunca é gerado por texto da Maya.
+Extrair comportamento técnico de `services/stripe_client.py` e testes sanitizados, registrando o hash em `docs/refactor/extraction-evidence/task5-payment-initiation.md`. O worker recebe obrigação já autorizada, escolhe conta por `BusinessUnit`, cria metadata mínima vinculada a `payment_id`, `anchor_id`, `amount_minor`, `currency` e `economic_version`, e grava receipt antes da mensagem pública. Link nunca é gerado por texto da Maya.
 
 - [ ] **Step 4: Implementar Wise expectation e Pix instructions**
 
 Wise registra expectativa vinculada sem fazer settlement. Pix retorna somente instrução da autoridade knowledge, receiver profile e valor da obrigação. Stripe, Wise e Pix usam tipos discriminados diferentes; nenhuma função aceita `dict[str, Any]` como contrato público.
 
-- [ ] **Step 5: Liberar catálogo somente após migração real**
+- [ ] **Step 5: Manter catálogo histórico bloqueado e compor somente o caminho V2**
 
-Em `reservation_boundary/dispatch.py`, mudar Stripe de `BLOCKED_UNMIGRATED` para o novo command apenas após os testes do adapter estarem verdes. Wise verification continua bloqueado até Task 6; o método de instrução Wise é separado da verificação.
+Os tools Stripe de `reservation_boundary/dispatch.py` permanecem `BLOCKED_UNMIGRATED`: eles pertencem à interface histórica e não representam o novo command de iniciação. O V2 usa exclusivamente `v2_application.payments`, seu ledger `queue → claim → fence → receipt/manual_review` e os adapters tipados. Wise verification continua bloqueado até Task 6; instrução Wise é separada da verificação.
 
 - [ ] **Step 6: Executar GREEN e regressões financeiras**
 
 ```bash
-python -m pytest -q tests/test_v2_payment_initiation.py tests/test_phase6_payment.py tests/test_phase6_payment_outbox.py tests/test_phase8_tool_dispatch.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_payment_initiation.py tests/test_phase6_payment.py tests/test_phase6_payment_outbox.py tests/test_phase8_tool_dispatch.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -770,10 +770,14 @@ Expected: exit 0.
 
 - [ ] **Step 7: Atualizar controle e commitar**
 
+Criar primeiro o commit funcional:
+
 ```bash
-git add v2_contracts v2_application v2_adapters reservation_followup reservation_boundary tests docs/refactor/ACTIVE.md
+git add v2_contracts v2_application v2_adapters tests docs/refactor/extraction-evidence docs/superpowers/plans
 git commit -m "feat: initiate v2 stripe wise and pix payments"
 ```
+
+Depois registrar esse SHA em `ACTIVE.md`, mover `NEXT` para Task 6 e criar o commit de controle separado, sem código funcional.
 
 ---
 
