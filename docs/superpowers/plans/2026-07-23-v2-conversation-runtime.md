@@ -283,6 +283,8 @@ git commit -m "feat: commit v2 conversation turns atomically"
 
 ### Task 4: Inbox and relay workers
 
+**Status:** COMPLETE on 2026-07-23. Evidence: `docs/refactor/extraction-evidence/task9-runtime-task4.md`.
+
 **Files:**
 - Create: `v2_application/inbox_worker.py`
 - Create: `v2_application/relay_worker.py`
@@ -293,7 +295,7 @@ git commit -m "feat: commit v2 conversation turns atomically"
 - Produces: concrete `InboxTurnWorker.run_once(now)`, `BoundaryRelayWorker.run_once(now)`, and seven-stage `WorkerCycle` entries.
 - Consumes: existing inbox leases, v8 internal jobs, execution/payment/public owner ports.
 
-- [ ] **Step 1: Write RED for inbox replay and relay exactly once**
+- [x] **Step 1: Write RED for inbox replay and relay exactly once**
 
 ```python
 def test_inbox_crash_after_turn_commit_and_relay_replays_without_duplicates():
@@ -304,7 +306,7 @@ def test_inbox_crash_after_turn_commit_and_relay_replays_without_duplicates():
     assert execution.command_count(COMMAND_ID) == 1
 ```
 
-- [ ] **Step 2: Write RED that no stage is noop/fallback**
+- [x] **Step 2: Write RED that no stage is noop/fallback**
 
 ```python
 def test_worker_composition_has_seven_concrete_stages(container):
@@ -313,23 +315,23 @@ def test_worker_composition_has_seven_concrete_stages(container):
     assert all(type(worker).__name__ not in {"NoopWorker", "FallbackWorker"} for worker in cycle.workers.values())
 ```
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_inbox_relay_workers.py
 ```
 
-- [ ] **Step 4: Implement concrete workers**
+- [x] **Step 4: Implement concrete workers**
 
 Complete inbox claims only after a committed/replayed receipt. Relay canonical boundary command/relay/public rows using deterministic target IDs and existing store APIs. Store attempts/leases in the v8 internal outbox rows. Refuse `build_worker_cycle` if any provider or stage is absent.
 
-- [ ] **Step 5: Run GREEN and worker regressions**
+- [x] **Step 5: Run GREEN and worker regressions**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_inbox_relay_workers.py tests/test_v2_worker_main.py tests/test_v2_completion.py tests/test_phase5_reconciliation.py tests/test_phase6_reconciliation.py
 ```
 
-- [ ] **Step 6: Guard/lint/commit**
+- [x] **Step 6: Guard/lint/commit**
 
 ```bash
 python scripts/check_fasttrack_boundaries.py
