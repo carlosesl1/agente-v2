@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
@@ -16,6 +17,20 @@ from v2_host.settings import V2Settings
 class V2Role(str, Enum):
     API = "api"
     WORKER = "worker"
+
+
+@dataclass(frozen=True, slots=True)
+class V2Readiness:
+    status: str
+    role: V2Role
+    owner_counts: dict[str, int]
+    real_effect_gates: dict[str, bool]
+
+    def __post_init__(self) -> None:
+        if self.status not in {"ready", "not_ready"}:
+            raise ValueError("readiness status is outside the closed grammar")
+        if type(self.role) is not V2Role:
+            raise TypeError("readiness role must be exact V2Role")
 
 
 class V2Container:
@@ -105,6 +120,34 @@ class V2Container:
             "public_outbox": int(self.public_outbox is not None),
         }
 
+    def readiness(self) -> V2Readiness:
+        counts = self.owner_counts()
+        expected = {
+            V2Role.API: {
+                "boundary": 0,
+                "execution": 0,
+                "followup": 0,
+                "inbox": 1,
+                "payment_initiation": 0,
+                "public_outbox": 0,
+            },
+            V2Role.WORKER: {
+                "boundary": 1,
+                "execution": 1,
+                "followup": 1,
+                "inbox": 1,
+                "payment_initiation": 1,
+                "public_outbox": 1,
+            },
+        }[self.role]
+        ready = counts == expected and self.settings.financial_webhooks_configured
+        return V2Readiness(
+            status="ready" if ready else "not_ready",
+            role=self.role,
+            owner_counts=counts,
+            real_effect_gates=self.settings.real_effect_gates,
+        )
+
     def close(self) -> None:
         if self._closed:
             return
@@ -120,4 +163,4 @@ class V2Container:
         self._closed = True
 
 
-__all__ = ["V2Container", "V2Role"]
+__all__ = ["V2Container", "V2Readiness", "V2Role"]

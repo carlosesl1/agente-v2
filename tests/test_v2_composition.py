@@ -17,6 +17,13 @@ def _settings(tmp_path: Path) -> V2Settings:
     return V2Settings(
         webhook_secret="test-webhook-secret",
         sqlite_path=tmp_path / "inbox.sqlite3",
+        stripe_webhook_secret="stripe-test-secret",
+        wise_webhook_secret="wise-test-secret",
+        pix_webhook_secret="pix-test-secret",
+        pix_receiver_profile_id="receiver:pix-test",
+        wise_signer_profile_id="signer:wise-test",
+        wise_account_profile_id="account:wise-test",
+        stripe_account_profile_id="account:stripe-test",
     )
 
 
@@ -89,6 +96,8 @@ def test_api_role_exposes_health_and_readiness_without_opening_gates(
         assert readiness.status_code == 200
         assert readiness.json() == {
             "status": "ready",
+            "role": "api",
+            "owner_counts": client.app.state.v2_container.owner_counts(),
             "real_effect_gates": settings.real_effect_gates,
         }
         assert client.app.state.v2_container.role is V2Role.API

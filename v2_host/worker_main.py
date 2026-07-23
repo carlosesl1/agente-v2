@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+import os
+import time
 from typing import Protocol
 
 
@@ -89,10 +91,63 @@ class WorkerCycle:
         return WorkerCycleReport(tuple(items))
 
 
+def build_worker_cycle(
+    container: object, workers: Mapping[WorkerQueue, OneShotWorker]
+) -> WorkerCycle:
+    from v2_host.composition import V2Container, V2Role
+
+    if type(container) is not V2Container:
+        raise TypeError("container must be exact V2Container")
+    if container.role is not V2Role.WORKER:
+        raise ValueError("worker cycle requires the worker role")
+    if container.readiness().status != "ready":
+        raise RuntimeError("worker container is not ready")
+    return WorkerCycle(workers)
+
+
+def _load_worker_factory(path: str):
+    if path == "v2_host.qualification_workers:build_worker_set":
+        from v2_host.qualification_workers import build_worker_set
+
+        return build_worker_set
+    raise ValueError("V2_WORKER_FACTORY is outside the closed factory allowlist")
+
+
+def main() -> None:
+    from v2_host.composition import V2Container, V2Role
+    from v2_host.settings import V2Settings
+
+    settings = V2Settings.from_env()
+    factory_path = os.environ.get("V2_WORKER_FACTORY", "")
+    factory = _load_worker_factory(factory_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        workers = factory(container=container, settings=settings)
+        cycle = build_worker_cycle(container, workers)
+        raw_interval = os.environ.get("V2_WORKER_INTERVAL_SECONDS", "0.25")
+        try:
+            interval = float(raw_interval)
+        except ValueError as exc:
+            raise ValueError("V2_WORKER_INTERVAL_SECONDS must be numeric") from exc
+        if interval <= 0 or interval > 60:
+            raise ValueError("V2_WORKER_INTERVAL_SECONDS must be in (0, 60]")
+        while True:
+            cycle.run_once(now=datetime.now(timezone.utc))
+            time.sleep(interval)
+    finally:
+        container.close()
+
+
 __all__ = [
     "OneShotWorker",
     "WorkerCycle",
     "WorkerCycleItem",
     "WorkerCycleReport",
     "WorkerQueue",
+    "build_worker_cycle",
+    "main",
 ]
+
+
+if __name__ == "__main__":
+    main()

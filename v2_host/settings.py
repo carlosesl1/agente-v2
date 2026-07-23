@@ -26,6 +26,13 @@ class V2Settings:
 
     webhook_secret: str
     sqlite_path: Path
+    stripe_webhook_secret: str = ""
+    wise_webhook_secret: str = ""
+    pix_webhook_secret: str = ""
+    pix_receiver_profile_id: str = ""
+    wise_signer_profile_id: str = ""
+    wise_account_profile_id: str = ""
+    stripe_account_profile_id: str = ""
     max_body_bytes: int = 65_536
     cloudbeds_writes_enabled: bool = False
     bokun_writes_enabled: bool = False
@@ -38,6 +45,23 @@ class V2Settings:
             raise ValueError("webhook_secret is required")
         if "\x00" in self.webhook_secret:
             raise ValueError("webhook_secret may not contain NUL")
+        financial_values = (
+            self.stripe_webhook_secret,
+            self.wise_webhook_secret,
+            self.pix_webhook_secret,
+            self.pix_receiver_profile_id,
+            self.wise_signer_profile_id,
+            self.wise_account_profile_id,
+            self.stripe_account_profile_id,
+        )
+        if any(type(value) is not str or "\x00" in value for value in financial_values):
+            raise ValueError("financial webhook settings must be NUL-free exact text")
+        if any(bool(value) for value in financial_values) and not all(
+            bool(value) for value in financial_values
+        ):
+            raise ValueError(
+                "financial webhook secrets and trust profiles are all-or-none"
+            )
         if not isinstance(self.sqlite_path, Path) or not self.sqlite_path.is_absolute():
             raise ValueError("sqlite_path must be an absolute pathlib.Path")
         if type(self.max_body_bytes) is not int or self.max_body_bytes < 1:
@@ -70,6 +94,20 @@ class V2Settings:
         return not any(self.real_effect_gates.values())
 
     @property
+    def financial_webhooks_configured(self) -> bool:
+        return all(
+            (
+                self.stripe_webhook_secret,
+                self.wise_webhook_secret,
+                self.pix_webhook_secret,
+                self.pix_receiver_profile_id,
+                self.wise_signer_profile_id,
+                self.wise_account_profile_id,
+                self.stripe_account_profile_id,
+            )
+        )
+
+    @property
     def sqlite_paths(self) -> dict[str, Path]:
         parent = self.sqlite_path.parent
         return {
@@ -96,6 +134,13 @@ class V2Settings:
         return cls(
             webhook_secret=secret,
             sqlite_path=Path(raw_path),
+            stripe_webhook_secret=source.get("V2_STRIPE_WEBHOOK_SECRET", ""),
+            wise_webhook_secret=source.get("V2_WISE_WEBHOOK_SECRET", ""),
+            pix_webhook_secret=source.get("V2_PIX_WEBHOOK_SECRET", ""),
+            pix_receiver_profile_id=source.get("V2_PIX_RECEIVER_PROFILE_ID", ""),
+            wise_signer_profile_id=source.get("V2_WISE_SIGNER_PROFILE_ID", ""),
+            wise_account_profile_id=source.get("V2_WISE_ACCOUNT_PROFILE_ID", ""),
+            stripe_account_profile_id=source.get("V2_STRIPE_ACCOUNT_PROFILE_ID", ""),
             max_body_bytes=limit,
             cloudbeds_writes_enabled=_env_bool(source, "V2_ENABLE_CLOUDBEDS_WRITES"),
             bokun_writes_enabled=_env_bool(source, "V2_ENABLE_BOKUN_WRITES"),

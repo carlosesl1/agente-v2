@@ -2,23 +2,65 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
+from datetime import datetime
 import os
 
 from fastapi import FastAPI
 
+from reservation_followup import PaymentEvidenceTrust
+from v2_application.financial_webhooks import (
+    FinancialEvidenceAcceptor,
+    FinancialProvider,
+    HmacFinancialWebhookVerifier,
+)
 from v2_host.app import create_app
 from v2_host.composition import V2Container, V2Role
 from v2_host.settings import V2Settings
 
 
-def build_api_app(settings: V2Settings) -> FastAPI:
+def build_api_app(
+    settings: V2Settings,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> FastAPI:
     if type(settings) is not V2Settings:
         raise TypeError("settings must be exact V2Settings")
+    if not settings.financial_webhooks_configured:
+        raise ValueError("API role requires complete financial webhook configuration")
     container = V2Container.open(settings=settings, role=V2Role.API)
     try:
-        app = create_app(settings, container.inbox)
+        trust = PaymentEvidenceTrust(
+            pix_receiver_profile_id=settings.pix_receiver_profile_id,
+            wise_signer_profile_id=settings.wise_signer_profile_id,
+            wise_account_profile_id=settings.wise_account_profile_id,
+            stripe_account_profile_id=settings.stripe_account_profile_id,
+        )
+        secrets = {
+            FinancialProvider.STRIPE: settings.stripe_webhook_secret,
+            FinancialProvider.WISE: settings.wise_webhook_secret,
+            FinancialProvider.PIX: settings.pix_webhook_secret,
+        }
+        verifiers = {
+            provider: HmacFinancialWebhookVerifier(
+                provider=provider,
+                secret=secret,
+                trust=trust,
+            )
+            for provider, secret in secrets.items()
+        }
+        app = create_app(
+            settings,
+            container.inbox,
+            clock=clock,
+            financial_verifiers=verifiers,
+            financial_evidence_acceptor=FinancialEvidenceAcceptor(
+                settings.sqlite_paths["followup"]
+            ),
+            readiness=container.readiness,
+            require_financial_webhooks=True,
+        )
     except BaseException:
         container.close()
         raise
