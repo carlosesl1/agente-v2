@@ -18,7 +18,7 @@
 
 Nenhuma tarefa posterior está autorizada antes de Task 9 ficar verde e ser commitada.
 
-Checkpoint interno ativo: Runtime Task 5 — webhooks financeiros autenticados, correlação de receipts e composition root completo. O reducer/resolução privada foram concluídos em `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; o executor auditado e `commit_turn_v8` atômico em `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays/public fence em `c1967075eb012adf97715f7698617abc2daa1226`.
+Checkpoint interno ativo: Runtime Task 6 — E2Es assinados, factory de qualificação, imagem endurecida e gate final. O reducer/resolução privada foram concluídos em `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; o executor auditado e `commit_turn_v8` atômico em `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays/public fence em `c1967075eb012adf97715f7698617abc2daa1226`; API/worker composition em `d9b3cf09b54e6f4c93f4ae39e7900c65d0eb0e79`.
 
 ### Decisão de topologia da Task 7
 
@@ -105,7 +105,7 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
 | 7. Pós-pagamento e conclusão | `DONE` | `85a2eab93b9b6d812226f3ec1c9e526563c3ef4d` |
 | 8. Pacote, recuperação e handoff | `DONE` | `d948717533f4081239ebf91c948db1ebbb9f0f83` |
-| 9. Composição, E2E e qualificação | `NEXT` | host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; reducer runtime `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; executor v8 `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays `c1967075eb012adf97715f7698617abc2daa1226`; host financeiro pendente |
+| 9. Composição, E2E e qualificação | `NEXT` | host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; reducer runtime `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; executor v8 `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays `c1967075eb012adf97715f7698617abc2daa1226`; host financeiro `d9b3cf09b54e6f4c93f4ae39e7900c65d0eb0e79`; E2E/imagem finais pendentes |
 
 ## Gate de publicação
 

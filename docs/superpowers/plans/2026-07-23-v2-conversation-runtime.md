@@ -345,6 +345,8 @@ git commit -m "feat: compose durable v2 inbox and relay workers"
 
 ### Task 5: Financial webhooks, receipt correlation and complete host
 
+**Status:** COMPLETE on 2026-07-23. Evidence: `docs/refactor/extraction-evidence/task9-runtime-task5.md`.
+
 **Files:**
 - Modify: `v2_host/settings.py`
 - Modify: `v2_host/app.py`
@@ -357,7 +359,7 @@ git commit -m "feat: compose durable v2 inbox and relay workers"
 **Interfaces:**
 - Produces: authenticated provider-specific webhook routes, `build_worker_cycle`, API/worker roles in one image, and receipt-derived completion query.
 
-- [ ] **Step 1: Write RED for authenticated evidence**
+- [x] **Step 1: Write RED for authenticated evidence**
 
 ```python
 def test_financial_webhook_verifies_before_persist_and_replays():
@@ -370,7 +372,7 @@ def test_financial_webhook_verifies_before_persist_and_replays():
     assert followup.evidence_count(EVIDENCE_ID) == 1
 ```
 
-- [ ] **Step 2: Write RED for owner counts/readiness**
+- [x] **Step 2: Write RED for owner counts/readiness**
 
 ```python
 def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness():
@@ -380,23 +382,23 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness():
     assert settings.all_real_effect_gates_closed
 ```
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' python -m pytest -q tests/test_v2_complete_host.py
 ```
 
-- [ ] **Step 4: Implement strict webhook and role composition**
+- [x] **Step 4: Implement strict webhook and role composition**
 
 Use provider verification ports before normalized evidence creation. Open short-lived followup UOWs in API request scope. Build worker ports from settings only when all required fake/real configurations are exact. Add worker service to compose with the same image and a different module command. `/readyz` reports role-specific store authentication and closed gate map.
 
-- [ ] **Step 5: Run GREEN and host regressions**
+- [x] **Step 5: Run GREEN and host regressions**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' python -m pytest -q tests/test_v2_complete_host.py tests/test_v2_composition.py tests/test_v2_manychat_ingress.py tests/test_v2_payment_evidence.py
 ```
 
-- [ ] **Step 6: Guard/lint/commit**
+- [x] **Step 6: Guard/lint/commit**
 
 ```bash
 python scripts/check_fasttrack_boundaries.py
