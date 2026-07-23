@@ -16,7 +16,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 | 5. Comando e execução duráveis | **concluída e publicada; seis workflows verdes** | Retirar writes do turno síncrono da LLM |
 | 6. Handoff e pagamentos | **concluída e publicada; sete workflows verdes** | Separar workflows e side effects obrigatórios/opcionais |
 | 7. Migração das fronteiras | **concluída e publicada; revisão 3/3 e CI terminal verde** | Fazer runner/plugin/executor usarem o mesmo kernel |
-| 8. Shadow, canary e rollout | **design aprovado; plano/quarentena em revisão; Slice 0 bloqueado** | Corrigir a fronteira operacional antes de qualquer build e depois validar o mesmo child digest gradualmente |
+| 8. Fast-track operacional, shadow e rollout | **arquitetura aprovada; plano rápido ativo; implementação não iniciada** | Compor host V2 próprio, extrair adapters, fechar o fluxo completo e validar rollout gradual |
 | 9. Remoção do legado | bloqueada | Eliminar metadata, aliases e policies duplicadas |
 
 ## Documentos canônicos
@@ -31,6 +31,9 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 8. `decisions/` — decisões arquiteturais aceitas.
 9. `evidence/` — evidência sanitizada e verificável.
 10. `phases/` — execução e encerramento de cada fase.
+11. `ACTIVE.md` — única autoridade sobre a tarefa atualmente executável e o próximo gate.
+
+Os documentos históricos continuam válidos como evidência e contexto, mas não autorizam trabalho. Durante o fast-track, `ACTIVE.md` aponta a única especificação e o único plano executável.
 
 ## Regra de avanço
 

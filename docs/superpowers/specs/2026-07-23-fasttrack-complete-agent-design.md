@@ -3,7 +3,7 @@
 - Data: 2026-07-23
 - Branch: `phase8-shadow-canary-rollout`
 - Base funcional do sandbox: `b8fdd9280cc289d8bf53573d3a987bddb0478ae7`
-- Status: desenho recomendado adotado após timeout de confirmação, aguardando revisão escrita de Carlos
+- Status: arquitetura aprovada por Carlos em 2026-07-23; implementação ainda não iniciada
 - Rollout: `NO-GO`
 
 ## 1. Objetivo
@@ -52,9 +52,9 @@ Para pacote combinado, a conversa e a confirmação comercial são unificadas, m
 
 ## 4. Abordagem escolhida
 
-### 4.1 V2 como controle; runtime atual como adaptador operacional
+### 4.1 V2 com host próprio; runtime atual somente como fonte de extração
 
-O Agente v2 será owner de:
+O Agente v2 terá processo, configuração, banco, API e workers próprios. Ele será owner de:
 
 - conversa e fatos canônicos;
 - progresso comercial derivado;
@@ -65,21 +65,35 @@ O Agente v2 será owner de:
 - autorização e estado de reservas/pagamentos;
 - decisão de conclusão ou handoff.
 
-O runtime `/home/ubuntu/chapada-leads-hermes` será reaproveitado inicialmente apenas atrás de adapters estreitos para:
+O runtime `/home/ubuntu/chapada-leads-hermes` é fonte operacional somente leitura durante a extração. O V2 não pode importar seus namespaces, apontar `PYTHONPATH` para ele, executar seu agente/planner ou usar seu `LeadState`. Somente o comportamento técnico necessário será extraído para adapters versionados dentro deste repositório:
 
-- consultas Cloudbeds/Bókun;
-- criação Cloudbeds/Bókun;
-- geração de links Stripe por conta correta;
-- recepção e verificação de webhooks Stripe/Wise;
-- validação mecânica de comprovante Pix;
-- confirmação de pagamento no provider;
-- ManyChat e efeitos pós-pagamento.
+- `v2_adapters/cloudbeds.py` para consultas, reservas, links e settlement do hostel;
+- `v2_adapters/bokun.py` para consultas, reservas e settlement da agência;
+- `v2_adapters/stripe.py`, `wise.py` e `pix.py` para operações financeiras;
+- `v2_adapters/manychat.py` para transporte de entrada e saída;
+- `v2_adapters/knowledge.py` para o Cérebro autorizado;
+- `v2_adapters/hermes_model.py` para a Maya sem capabilities de provider.
 
 Não haverá dispatcher genérico controlado pelo modelo. Cada adapter consome um comando tipado autorizado pelo kernel e devolve um outcome tipado com certeza de execução.
 
-### 4.2 Alternativas rejeitadas
+### 4.2 Estrutura de pacotes
 
-- Migrar todos os SDKs/providers para o repositório V2 antes do primeiro uso: mais limpo, porém lento e duplicaria integrações existentes.
+```text
+v2_contracts     → stdlib; contratos neutros e ports
+reservation_*   → kernel existente tratado como uma cápsula interna
+v2_application   → v2_contracts + reservation_*
+v2_adapters      → v2_contracts; nunca importa application ou reservation_*
+v2_host          → composition root; liga application e adapters
+```
+
+O caminho produtivo começa somente em `v2_host`. Os ciclos históricos entre pacotes `reservation_*` não serão ampliados nem exigirão uma reescrita total antes da entrega. Eles ficam encapsulados como um único nó interno; contratos novos são acíclicos e a separação interna do kernel pode evoluir depois, com testes de caracterização.
+
+API e workers usam a mesma imagem e a mesma versão dos contratos, mas rodam como processos separados. SQLite é a store inicial; a aplicação depende de ports para permitir PostgreSQL posteriormente sem alterar o domínio.
+
+### 4.3 Alternativas rejeitadas
+
+- Importar ou executar o runtime legado como dependência do V2: rápido no primeiro dia, porém preservaria dois control planes e tornaria o deploy não reproduzível.
+- Reescrever todos os SDKs e o kernel antes do primeiro uso: mais limpo em teoria, porém lento e sem ganho comercial imediato.
 - Melhorar apenas o agente live e deixar o V2 em sandbox: mais rápido no curtíssimo prazo, mas preservaria os dois control planes e as causas da refatoração.
 
 ## 5. Fluxo ponta a ponta

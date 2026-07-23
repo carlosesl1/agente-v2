@@ -6,7 +6,12 @@ Este repositório é a trilha limpa e auditável da refatoração Agente v2. O s
 
 ## Disciplina obrigatória
 
-- Execute somente a fase declarada como ativa em `docs/refactor/README.md`.
+- Leia primeiro `docs/refactor/ACTIVE.md` e execute somente sua tarefa `NEXT`. Se `NEXT` não existir ou estiver bloqueada, pare sem escolher trabalho por conta própria.
+- A cadeia de autoridade é: `AGENTS.md` → `docs/refactor/ACTIVE.md` → especificação ativa → plano ativo. Documentos antigos são somente referência e não podem substituir essa cadeia.
+- Continue pelas tarefas do plano na ordem, atualizando `ACTIVE.md` após cada commit verde. Pare somente diante de blocker material, gate que falhou, decisão comercial ausente ou autorização de efeito real.
+- Use sempre a worktree/branch declarada em `ACTIVE.md`; não implemente o fast-track em `main` nem em `/home/ubuntu/chapada-leads-hermes`.
+- `/home/ubuntu/chapada-leads-hermes` é fonte somente leitura para extração. É proibido importá-lo, editar seu código, usar seu agente/planner/LeadState ou executá-lo como backend do V2.
+- Antes de cada commit, execute o guard de fronteiras indicado pelo plano; imports proibidos bloqueiam avanço.
 - Antes de editar código funcional, identifique o owner da regra e escreva o teste que falha.
 - Não avance de fase sem atualizar: deliverables, evidências, riscos, decisões e critérios de aceite.
 - Não esconda falhas intermediárias; registre causa, impacto e substituição da evidência.
