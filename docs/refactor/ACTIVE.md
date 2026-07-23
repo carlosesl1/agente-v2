@@ -14,9 +14,9 @@
 
 ## NEXT
 
-`Task 7 — Pós-pagamento, mensagem pública e conclusão`
+`Task 8 — Pacote combinado, recuperação e handoff excepcional`
 
-Nenhuma tarefa posterior está autorizada antes de Task 7 ficar verde e ser commitada.
+Nenhuma tarefa posterior está autorizada antes de Task 8 ficar verde e ser commitada.
 
 ### Decisão de topologia da Task 7
 
@@ -101,8 +101,8 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 4. Reservas Cloudbeds/Bókun | `DONE` | `f2e6d3bd309381319dd6f2a2dd78b6aa14c14014` |
 | 5. Iniciação Stripe/Wise/Pix | `DONE` | `728403a64a3e590c24a5c4840a7009959101c359` |
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
-| 7. Pós-pagamento e conclusão | `NEXT` | — |
-| 8. Pacote, recuperação e handoff | `BLOCKED_BY_ORDER` | — |
+| 7. Pós-pagamento e conclusão | `DONE` | `85a2eab93b9b6d812226f3ec1c9e526563c3ef4d` |
+| 8. Pacote, recuperação e handoff | `NEXT` | — |
 | 9. Composição, E2E e qualificação | `BLOCKED_BY_ORDER` | — |
 
 ## Gate de publicação
