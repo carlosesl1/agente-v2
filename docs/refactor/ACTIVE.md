@@ -103,7 +103,7 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
 | 7. Pós-pagamento e conclusão | `DONE` | `85a2eab93b9b6d812226f3ec1c9e526563c3ef4d` |
 | 8. Pacote, recuperação e handoff | `DONE` | `d948717533f4081239ebf91c948db1ebbb9f0f83` |
-| 9. Composição, E2E e qualificação | `NEXT` | — |
+| 9. Composição, E2E e qualificação | `NEXT` | checkpoint host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; kernel/worker pendentes |
 
 ## Gate de publicação
 
