@@ -2,7 +2,7 @@
 
 ## Autoridade
 
-- Estado: `READY_TO_IMPLEMENT`
+- Estado: `IMPLEMENTING`
 - Branch obrigatória: `phase8-shadow-canary-rollout`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
 - Especificação ativa: `docs/superpowers/specs/2026-07-23-fasttrack-complete-agent-design.md`
@@ -14,9 +14,9 @@
 
 ## NEXT
 
-`Task 1 — Control plane mecânico e pacotes do V2`
+`Task 2 — ManyChat ingress e inbox durável`
 
-Nenhuma outra tarefa está autorizada antes de Task 1 ficar verde e ser commitada.
+Nenhuma tarefa posterior está autorizada antes de Task 2 ficar verde e ser commitada.
 
 ## Regra para não confundir novo e antigo
 
@@ -91,8 +91,8 @@ Não parar apenas para narrar progresso entre tasks verdes.
 
 | Task | Estado | Commit |
 |---|---|---|
-| 1. Control plane e pacotes | `NEXT` | — |
-| 2. ManyChat ingress e inbox | `BLOCKED_BY_ORDER` | — |
+| 1. Control plane e pacotes | `DONE` | `c9f19c131ce9ff80020e1c0c0a8d8262a821cbfb` |
+| 2. ManyChat ingress e inbox | `NEXT` | — |
 | 3. Turno canônico e consultas | `BLOCKED_BY_ORDER` | — |
 | 4. Reservas Cloudbeds/Bókun | `BLOCKED_BY_ORDER` | — |
 | 5. Iniciação Stripe/Wise/Pix | `BLOCKED_BY_ORDER` | — |
