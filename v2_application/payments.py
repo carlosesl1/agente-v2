@@ -10,6 +10,12 @@ import json
 from pathlib import Path
 import sqlite3
 
+from reservation_followup import PaymentEvidenceRecorded
+from reservation_followup.payment import PixVisualEvidence
+from reservation_followup.sqlite_store import (
+    IdentityConflict as FollowupIdentityConflict,
+    SQLiteFollowupUnitOfWork,
+)
 from v2_contracts.payments import (
     BusinessUnit,
     DueKind,
@@ -106,6 +112,75 @@ class PaymentService:
             economic_version=selected.obligation.economic_version + 1,
         )
         return PaymentSelection(obligation, selected.method)
+
+
+class EvidenceConflict(ValueError):
+    """One global evidence identity was reused for a divergent payment target."""
+
+
+class EvidenceDisposition(str, Enum):
+    ACCEPTED = "accepted"
+    DUPLICATE = "duplicate"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceAcceptance:
+    payment_id: str
+    claim_key: str
+    disposition: EvidenceDisposition
+    visual_evidence_accepted: bool
+    bank_settlement_confirmed: bool
+
+    def __post_init__(self) -> None:
+        if type(self.disposition) is not EvidenceDisposition:
+            raise TypeError("disposition must be exact EvidenceDisposition")
+        if type(self.visual_evidence_accepted) is not bool:
+            raise TypeError("visual_evidence_accepted must be exact bool")
+        if self.bank_settlement_confirmed is not False:
+            raise ValueError("evidence acceptance cannot claim bank settlement")
+
+
+class V2PaymentEvidenceGateway:
+    """Delegate verified evidence to the mature atomic global-claim ledger."""
+
+    def __init__(self, store: SQLiteFollowupUnitOfWork) -> None:
+        if type(store) is not SQLiteFollowupUnitOfWork:
+            raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
+        self._store = store
+
+    def accept(
+        self,
+        *,
+        payment_id: str,
+        expected_revision: int,
+        event: PaymentEvidenceRecorded,
+    ) -> EvidenceAcceptance:
+        if type(event) is not PaymentEvidenceRecorded:
+            raise TypeError("event must be exact PaymentEvidenceRecorded")
+        if event.payment_id != payment_id:
+            raise EvidenceConflict("evidence event targets another payment")
+        try:
+            transition = self._store.claim_payment_evidence(
+                payment_id,
+                expected_revision,
+                event,
+            )
+        except FollowupIdentityConflict as exc:
+            raise EvidenceConflict("global payment evidence identity conflict") from exc
+        verified = transition.state.verified_evidence
+        if verified is None:
+            raise RuntimeError("claimed payment evidence is missing from resulting state")
+        return EvidenceAcceptance(
+            payment_id=payment_id,
+            claim_key=verified.claim_key,
+            disposition=(
+                EvidenceDisposition.ACCEPTED
+                if transition.commands
+                else EvidenceDisposition.DUPLICATE
+            ),
+            visual_evidence_accepted=type(event.evidence) is PixVisualEvidence,
+            bank_settlement_confirmed=False,
+        )
 
 
 class PaymentInitiationDisposition(str, Enum):
@@ -425,9 +500,13 @@ class PaymentInitiationWorker:
 
 
 __all__ = [
+    "EvidenceAcceptance",
+    "EvidenceConflict",
+    "EvidenceDisposition",
     "PaymentInitiationDisposition",
     "PaymentInitiationResult",
     "PaymentInitiationWorker",
     "PaymentService",
     "SQLitePaymentInitiationStore",
+    "V2PaymentEvidenceGateway",
 ]
