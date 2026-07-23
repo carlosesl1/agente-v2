@@ -39,6 +39,8 @@ The existing `SQLiteInbox` remains the ingress owner. A concrete `InboxTurnWorke
 
 `effect_proposals` are removed from the productive path rather than trusted or silently discarded. A model response carrying an effect proposal is rejected. This prevents an ambiguous second command grammar.
 
+The productive model port returns an `AuditedModelTurn`, not a bare proposal. It contains the exact `ModelProposal`, ordered request/response frame commitments and a closure bound to the final frame. `HermesModelAdapter` derives these values from the exact child-process stdin/stdout bytes it already observes. The application never manufactures transcript hashes after the model call, and the existing simple `ModelPort` remains available only to isolated contract tests.
+
 ### 3. Private customer-profile read
 
 A new `CustomerProfileReadPort` receives the canonical `manychat:<subscriber_id>` lead ID and returns a `PrivateCustomerBinding` containing:
@@ -67,7 +69,9 @@ It produces a capability-free `V2ConversationDecision` containing the next `Conv
 
 The reducer uses the existing reservation-domain reducer to move through search, lookup, selection, draft, summary and confirmation. It does not reconstruct domain state from flags. Public offers become canonical domain offer snapshots while private provider IDs stay in the read binding cache. Customer facts are built only from `PrivateCustomerBinding`. Economic terms are built from the closed payment-method fact. On explicit confirmation, the reservation domain produces the authoritative `ReservationCommand`; `ToolDispatch` may verify its binding but may not manufacture it.
 
-For a package, the reducer emits one package summary and one confirmation. The existing `ReservationAllocator` expands the resulting package command into lodging and activity commands. Separate business-unit obligations are derived after confirmed component outcomes.
+The current read adapters expose a private binding hash but intentionally do not retain raw provider IDs. Production therefore uses a `PrivateOfferBindingResolver` during reservation preparation, before the dispatch fence. It repeats the exact provider read from the canonical command query, recomputes public offer IDs and the private binding hash, and returns raw IDs only when all bindings still match. The fenced canonical provider payload contains the resolved private IDs; a mismatch is a terminal pre-provider failure. No raw-ID cache or second state owner is introduced.
+
+The existing reservation-domain reducer produces single-service commands only. Package authorization is owned by a deterministic `PackageCommandCoordinator` in the boundary layer: after both selected single-service drafts are ready, it computes one package subject signature and one `RESERVE_PACKAGE` command with the existing `subject_signature` and `command_identity` functions. The public summary and explicit confirmation bind that package signature/version. The existing `ReservationAllocator` then expands the authorized package command into lodging and activity commands. Separate business-unit obligations are derived after confirmed component outcomes.
 
 ### 5. Atomic v8 commit
 
@@ -83,6 +87,8 @@ The host uses `SQLiteBoundaryStore.commit_turn_v8` for one atomic commit of:
 - the authenticated turn receipt.
 
 No model or provider runs inside that transaction. Exact replay returns the existing receipt. A divergent payload under the same aggregate turn ID is an identity conflict and enters manual review.
+
+`SQLiteBoundaryStore` gains read-only access to the latest authenticated `ConversationProjection` and transcript receipt graph for a lead. The projection remains a v8 artifact under the boundary owner; it is not copied into a parallel V2 state table.
 
 ### 6. Relay and worker composition
 
@@ -129,6 +135,8 @@ Provider-specific webhook verification precedes evidence normalization. Accepted
 - Any model effect proposal is rejected in the productive path.
 - Private customer fields never occur in `ModelRequest`, public observation serialization, reply chunks or logs.
 - Missing/expired profile binding cannot produce a summary or command.
+- Audited model frames recompose from exact child stdin/stdout and bind the Maya closure.
+- Private offer resolution rejects any changed offer ID, amount, dates, party or binding hash before fence.
 
 ### Reducer tests
 

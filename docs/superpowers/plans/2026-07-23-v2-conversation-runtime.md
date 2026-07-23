@@ -128,11 +128,13 @@ git commit -m "feat: close v2 model grammar and private profile"
 - Create: `v2_application/conversation.py`
 - Modify: `v2_application/reads.py`
 - Modify: `v2_application/reservations.py`
+- Modify: `reservation_boundary/conversation.py`
+- Modify: `reservation_boundary/dispatch.py`
 - Create: `tests/test_v2_conversation_reducer.py`
 
 **Interfaces:**
 - Consumes: authenticated `BoundaryState`, productive `ModelProposal`, tuple of public `ReadObservation`, private provider bindings, `PrivateCustomerBinding`, UTC instant.
-- Produces: `V2ConversationDecision(next_state, projection, commands, public_reply, handoff_request, receipt_requirements)`.
+- Produces: `V2ConversationDecision(next_state, projection, commands, public_reply, handoff_request, receipt_requirements)`, `PrivateOfferBindingResolver`, and `PackageCommandCoordinator`.
 
 - [ ] **Step 1: Write RED for no-command states**
 
@@ -158,6 +160,12 @@ def test_package_has_one_summary_one_confirmation_and_two_allocated_components()
     decision = drive_to_confirmation(service="package", payment_method="wise")
     assert decision.commands[0].operation is ReservationOperation.RESERVE_PACKAGE
     assert len(ReservationAllocator().allocate(decision.commands[0]).commands) == 2
+
+def test_private_offer_resolution_rechecks_all_bindings_before_fence():
+    resolved = resolver.resolve(LODGING_COMMAND, now=NOW)
+    assert resolved.offer_id == LODGING_COMMAND.payload.components[0].offer_id
+    with pytest.raises(PrivateBindingMismatch):
+        changed_price_resolver.resolve(LODGING_COMMAND, now=NOW)
 ```
 
 - [ ] **Step 3: Run RED**
@@ -170,7 +178,7 @@ Expected: fails because `V2ConversationReducer` does not exist.
 
 - [ ] **Step 4: Implement reducer as a pure state machine**
 
-Use existing reservation-domain constructors/reducer for `StartSearch`, `LookupRecorded`, `OfferChosen`, `DraftRequested`, summary preparation and explicit confirmation. Build `CustomerFacts` only from `PrivateCustomerBinding`; build `EconomicTerms` only from the closed payment-method fact. Join public offer IDs to private bindings through `V2ReadCoordinator`; never accept model provider IDs. Represent profile prompt history by prior public receipt kind in boundary history, not a boolean field.
+Use existing reservation-domain constructors/reducer for `StartSearch`, `LookupRecorded`, `OfferChosen`, `DraftRequested`, summary preparation and explicit confirmation. Build `CustomerFacts` only from `PrivateCustomerBinding`; build `EconomicTerms` only from the closed payment-method fact. The projection persists public facts as authenticated v8 artifacts. For simple services, the domain reducer produces the command. `PackageCommandCoordinator` creates one deterministic package command from the two ready drafts using existing signature/identity helpers. `PrivateOfferBindingResolver` repeats the canonical provider read during adapter preparation and returns raw IDs only after offer/date/party/amount/binding equality; it never writes a cache. Represent profile prompt history by prior public receipt kind in boundary history, not a boolean field.
 
 - [ ] **Step 5: Run GREEN and domain/property regressions**
 
@@ -196,11 +204,13 @@ git commit -m "feat: add deterministic v2 conversation reducer"
 
 **Files:**
 - Create: `v2_application/turn_executor.py`
+- Modify: `v2_contracts/model.py`
+- Modify: `v2_adapters/hermes_model.py`
 - Modify: `reservation_boundary/sqlite_store.py`
 - Create: `tests/test_v2_turn_executor.py`
 
 **Interfaces:**
-- Produces: `V2TurnExecutor.execute(batch, model, reads, profile, now) -> V2CommittedTurn`.
+- Produces: `AuditedModelTurn`, `AuditedModelPort.complete_audited(request)`, and `V2TurnExecutor.execute(batch, model, reads, profile, now) -> V2CommittedTurn`.
 - Uses: `SQLiteBoundaryStore.commit_turn_v8` with exact artifacts, relays, internal jobs, public rows and `TurnReceipt`.
 
 - [ ] **Step 1: Write RED for model-outside-transaction and exact replay**
@@ -212,6 +222,11 @@ def test_turn_executor_calls_model_outside_transaction_and_replays_receipt():
     assert first.receipt == second.receipt
     assert model.calls == 1
     assert store.turn_receipt_count(LEAD_ID, BATCH.batch_id) == 1
+
+def test_audited_model_turn_binds_exact_child_stdin_stdout():
+    audited = model.complete_audited(MODEL_REQUEST)
+    assert audited.frames[-1].response_hash == sha256(CHILD_STDOUT).hexdigest()
+    assert audited.closure.final_seq == audited.frames[-1].sequence
 ```
 
 - [ ] **Step 2: Write RED for crash boundaries**
@@ -232,7 +247,7 @@ uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_tur
 
 - [ ] **Step 4: Implement the executor**
 
-Load/acquire the boundary fence in a short transaction, call profile/read/model outside transactions, run the pure reducer, build canonical Phase 8 artifacts and one receipt, then call `commit_turn_v8` once. Add only read-only count/load methods required for idempotent replay; do not add a new table family.
+Load/acquire the boundary fence and latest authenticated `ConversationProjection` in a short transaction. `HermesModelAdapter.complete_audited` derives request/response transcript commitments and closure from the exact child stdin/stdout bytes. Call profile/read/model outside transactions, run the pure reducer, build canonical Phase 8 artifacts and one receipt, then call `commit_turn_v8` once. Add only read-only projection/receipt/count methods required for idempotent replay; do not add a new table family.
 
 - [ ] **Step 5: Run GREEN and v8 semantic regressions**
 
