@@ -412,6 +412,8 @@ git commit -m "feat: complete v2 api and worker composition"
 
 ### Task 6: Signed-webhook E2E, image and final gate
 
+**Status:** COMPLETE on 2026-07-23. Final functional commit: `45b2fe4c488653c9ea0d3dd7432bdd3c3bca39cd`.
+
 **Files:**
 - Modify: `tests/test_v2_e2e.py`
 - Modify: `scripts/run_v2_e2e.py`
@@ -422,7 +424,7 @@ git commit -m "feat: complete v2 api and worker composition"
 **Interfaces:**
 - Produces: three mandatory webhook-to-completion fake-provider scenarios and final Task 9 evidence.
 
-- [ ] **Step 1: Replace direct-store qualification with signed webhook scenarios**
+- [x] **Step 1: Replace direct-store qualification with signed webhook scenarios**
 
 Each test posts a signed ManyChat payload, runs the concrete seven-stage cycle to idle, posts verified settlement evidence when applicable, runs to idle again, and asserts:
 
@@ -436,7 +438,7 @@ assert runtime.settings.all_real_effect_gates_closed is True
 
 Keep exact scenarios: lodging+Stripe, activity+Pix, package+Wise.
 
-- [ ] **Step 2: Run the three E2Es on host**
+- [x] **Step 2: Run the three E2Es on host**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' python scripts/run_v2_e2e.py
@@ -444,7 +446,7 @@ uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'htt
 
 Expected JSON: `status=passed`, `providers=fake_only`, `real_effects=false`.
 
-- [ ] **Step 3: Run repository-wide final suite and static gates**
+- [x] **Step 3: Run repository-wide final suite and static gates**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' --with 'pydantic>=2.8.0' python -m pytest -q
@@ -456,7 +458,7 @@ git diff --check
 
 Expected: all green. `tests/test_phase7_package.py` remains excluded only if it still asserts historical metadata `0.7.0`; record the exact reason and run every other test.
 
-- [ ] **Step 4: Build and qualify the image**
+- [x] **Step 4: Build and qualify the image**
 
 ```bash
 docker build -f Dockerfile.v2 -t agente-v2:task9-final .
@@ -467,7 +469,7 @@ docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=128m \
 
 Expected: image build guard green and runner `status=passed` as UID 10001.
 
-- [ ] **Step 5: Review and commit functional candidate**
+- [x] **Step 5: Review and commit functional candidate**
 
 ```bash
 git diff --check
@@ -475,7 +477,7 @@ git add v2_contracts v2_application v2_adapters v2_host tests scripts Dockerfile
 git commit -m "feat: complete standalone v2 agent runtime"
 ```
 
-- [ ] **Step 6: Record Task 9 in a separate control commit**
+- [x] **Step 6: Record Task 9 in a separate control commit**
 
 Update `docs/refactor/ACTIVE.md` with the functional SHA, set Task 9 `DONE`, remove `NEXT`, retain rollout `NO-GO`, then:
 

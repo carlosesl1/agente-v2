@@ -2,7 +2,7 @@
 
 ## Autoridade
 
-- Estado: `IMPLEMENTING`
+- Estado: `IMPLEMENTED_LOCAL_QUALIFIED`
 - Branch obrigatória: `phase8-shadow-canary-rollout`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
 - Especificação ativa: `docs/superpowers/specs/2026-07-23-fasttrack-complete-agent-design.md`
@@ -12,13 +12,11 @@
 - Provider writes reais: `BLOQUEADOS`
 - ManyChat público real: `BLOQUEADO`
 
-## NEXT
+## IMPLEMENTAÇÃO CONCLUÍDA
 
-`Task 9 — Composição, E2E e qualificação`
+Tasks 1–9 estão `DONE`. Candidato funcional final: `45b2fe4c488653c9ea0d3dd7432bdd3c3bca39cd`.
 
-Nenhuma tarefa posterior está autorizada antes de Task 9 ficar verde e ser commitada.
-
-Checkpoint interno ativo: Runtime Task 6 — E2Es assinados, factory de qualificação, imagem endurecida e gate final. O reducer/resolução privada foram concluídos em `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; o executor auditado e `commit_turn_v8` atômico em `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays/public fence em `c1967075eb012adf97715f7698617abc2daa1226`; API/worker composition em `d9b3cf09b54e6f4c93f4ae39e7900c65d0eb0e79`.
+Não existe nova task de implementação autorizada. O próximo avanço possível é exclusivamente operacional e exige nova solicitação/aprovação explícita; rollout, deploy, restart, writes reais e ManyChat público continuam `NO-GO`/bloqueados.
 
 ### Decisão de topologia da Task 7
 
@@ -92,6 +90,9 @@ Não parar apenas para narrar progresso entre tasks verdes.
 ## Baselines históricas excluídas dos gates ativos
 
 - `tests/test_phase7_package.py` já falha no commit-base `8f73ee8b4bf40d6ea458a7fac3394aab756c1d88`: o artefato histórico exige metadata `0.7.0`, enquanto a branch já declarava `0.8.0`. O fast-track preserva os seis pacotes de `[tool.phase7-wheel]` e usa `[tool.v2-fasttrack]`; não altera esse teste histórico.
+- `tests/test_phase7_closeout.py::Phase7EntryContractTests::test_wheel_bootstrap_is_closed_and_stdlib_only` mantém o mesmo pin histórico `0.7.0`.
+- `tests/test_phase7_closeout.py::Phase7CloseoutContractTests::test_evidence_validator_reflects_current_terminal_artifacts` exige `closed_imports` e `package_version` da Phase 7 anterior à composição V2.
+- `tests/test_phase8_entry.py::Phase8EntryTests::test_phase_index_keeps_slice_zero_and_rollout_closed` exige a frase de índice pré-fast-track `design aprovado`, substituída pelo estado canônico de fast-track ativo.
 
 ## Estados de task
 
@@ -105,14 +106,14 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
 | 7. Pós-pagamento e conclusão | `DONE` | `85a2eab93b9b6d812226f3ec1c9e526563c3ef4d` |
 | 8. Pacote, recuperação e handoff | `DONE` | `d948717533f4081239ebf91c948db1ebbb9f0f83` |
-| 9. Composição, E2E e qualificação | `NEXT` | host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; reducer runtime `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; executor v8 `ba19de547f57d568575d31f90c386b840915a815`; inbox/relays `c1967075eb012adf97715f7698617abc2daa1226`; host financeiro `d9b3cf09b54e6f4c93f4ae39e7900c65d0eb0e79`; E2E/imagem finais pendentes |
+| 9. Composição, E2E e qualificação | `DONE` | `45b2fe4c488653c9ea0d3dd7432bdd3c3bca39cd`; imagem `sha256:f3247f69bd16bccc623fbc0508db2acb1ab44e23631a11dc07737282ba742ece` |
 
 ## Gate de publicação
 
 Nenhuma task individual autoriza uso público. A primeira liberação externa exige cumulativamente:
 
 - Tasks 1–9 concluídas;
-- suíte integral verde no mesmo commit;
+- suíte ativa integral verde no mesmo commit, com exclusões históricas exatas registradas acima;
 - imagem única construída do commit aprovado;
 - writes e delivery fechados no dark canary;
 - conversas completas de hospedagem, passeio e pacote com providers fake;

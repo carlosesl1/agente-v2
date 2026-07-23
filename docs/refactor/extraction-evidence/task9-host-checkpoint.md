@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 Status: FUNCTIONALLY COMPLETE; rollout remains `NO-GO`
-Functional candidate commit: recorded by the following control commit in `docs/refactor/ACTIVE.md`
+Functional candidate commit: `45b2fe4c488653c9ea0d3dd7432bdd3c3bca39cd`
 
 ## Final runtime
 
@@ -88,13 +88,13 @@ Image:
 
 ```text
 agente-v2:task9-final
-sha256:47c1c2779cc121be9deb825e32e39bc3a592c74c886eb777c5edfa771779d43f
+sha256:f3247f69bd16bccc623fbc0508db2acb1ab44e23631a11dc07737282ba742ece
 ```
 
 The signed runner passed inside the image under the final security envelope:
 
 ```text
-3 passed, 1 warning in 3.04s
+3 passed, 1 warning in 3.05s
 uid=10001
 gid=10001
 /app read-only
