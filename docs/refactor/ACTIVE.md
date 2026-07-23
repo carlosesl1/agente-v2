@@ -2,7 +2,7 @@
 
 ## Autoridade
 
-- Estado: `IMPLEMENTING_BLOCKED`
+- Estado: `IMPLEMENTING`
 - Branch obrigatória: `phase8-shadow-canary-rollout`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
 - Especificação ativa: `docs/superpowers/specs/2026-07-23-fasttrack-complete-agent-design.md`
@@ -18,14 +18,9 @@
 
 Nenhuma tarefa posterior está autorizada antes de Task 7 ficar verde e ser commitada.
 
-### Bloqueio material da Task 7
+### Decisão de topologia da Task 7
 
-O plano pede `CompletionPolicy` global e `v2_host.worker_main` antes de definir, na Task 9, o composition root e a topologia que correlaciona os receipts atualmente separados entre reservation execution, payment follow-up e public delivery. Implementar conclusão agora exigiria escolher sem contrato entre:
-
-1. criar um segundo store/owner de completion; ou
-2. mover a correlação/composição para Task 9 e manter Task 7 como policy/outbox local.
-
-A opção 1 viola estado/autoridade únicos. A recomendação é a opção 2, mas ela altera a divisão aceita entre Tasks 7 e 9 e requer decisão explícita antes de continuar.
+Task 7 implementa somente `CompletionPolicy` pura e outbox público local/durável. Task 9 correlaciona os receipts dos stores existentes no composition root. Não será criado store global paralelo de completion.
 
 ## Regra para não confundir novo e antigo
 
@@ -106,7 +101,7 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 4. Reservas Cloudbeds/Bókun | `DONE` | `f2e6d3bd309381319dd6f2a2dd78b6aa14c14014` |
 | 5. Iniciação Stripe/Wise/Pix | `DONE` | `728403a64a3e590c24a5c4840a7009959101c359` |
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
-| 7. Pós-pagamento e conclusão | `BLOCKED_CONTRACT` | — |
+| 7. Pós-pagamento e conclusão | `NEXT` | — |
 | 8. Pacote, recuperação e handoff | `BLOCKED_BY_ORDER` | — |
 | 9. Composição, E2E e qualificação | `BLOCKED_BY_ORDER` | — |
 
