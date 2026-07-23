@@ -210,9 +210,13 @@ git commit -m "feat: add deterministic v2 conversation reducer"
 
 ### Task 3: Atomic v8 turn executor
 
+**Status:** COMPLETE on 2026-07-23. Evidence: `docs/refactor/extraction-evidence/task9-runtime-task3.md`.
+
 **Files:**
 - Create: `v2_application/turn_executor.py`
+- Create: `v2_application/read_bridge.py`
 - Modify: `v2_contracts/model.py`
+- Modify: `v2_contracts/providers.py`
 - Modify: `v2_adapters/hermes_model.py`
 - Modify: `reservation_boundary/sqlite_store.py`
 - Create: `tests/test_v2_turn_executor.py`
@@ -221,7 +225,7 @@ git commit -m "feat: add deterministic v2 conversation reducer"
 - Produces: `AuditedModelTurn`, `AuditedModelPort.complete_audited(request)`, and `V2TurnExecutor.execute(batch, model, reads, profile, now) -> V2CommittedTurn`.
 - Uses: `SQLiteBoundaryStore.commit_turn_v8` with exact artifacts, relays, internal jobs, public rows and `TurnReceipt`.
 
-- [ ] **Step 1: Write RED for model-outside-transaction and exact replay**
+- [x] **Step 1: Write RED for model-outside-transaction and exact replay**
 
 ```python
 def test_turn_executor_calls_model_outside_transaction_and_replays_receipt():
@@ -237,7 +241,7 @@ def test_audited_model_turn_binds_exact_child_stdin_stdout():
     assert audited.closure.final_seq == audited.frames[-1].sequence
 ```
 
-- [ ] **Step 2: Write RED for crash boundaries**
+- [x] **Step 2: Write RED for crash boundaries**
 
 ```python
 def test_crash_after_commit_before_inbox_completion_reuses_turn():
@@ -247,17 +251,17 @@ def test_crash_after_commit_before_inbox_completion_reuses_turn():
     assert store.internal_job_count(receipt.aggregate_turn_id) == EXPECTED_JOBS
 ```
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_turn_executor.py
 ```
 
-- [ ] **Step 4: Implement the executor**
+- [x] **Step 4: Implement the executor**
 
 Load/acquire the boundary fence and latest authenticated `ConversationProjection` in a short transaction. `HermesModelAdapter.complete_audited` derives request/response transcript commitments and closure from the exact child stdin/stdout bytes. Call profile/read/model outside transactions, run the pure reducer, build canonical Phase 8 artifacts and one receipt, then call `commit_turn_v8` once. Add only read-only projection/receipt/count methods required for idempotent replay; do not add a new table family.
 
-- [ ] **Step 5: Run GREEN and v8 semantic regressions**
+- [x] **Step 5: Run GREEN and v8 semantic regressions**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_turn_executor.py tests/test_phase8_boundary_schema_v8.py tests/test_phase8_boundary_semantic_scan.py
@@ -265,7 +269,7 @@ uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_tur
 
 Expected: PASS.
 
-- [ ] **Step 6: Guard/lint/commit**
+- [x] **Step 6: Guard/lint/commit**
 
 ```bash
 python scripts/check_fasttrack_boundaries.py
