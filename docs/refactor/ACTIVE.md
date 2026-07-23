@@ -14,9 +14,9 @@
 
 ## NEXT
 
-`Task 4 — Reservas duráveis Cloudbeds e Bókun`
+`Task 5 — Iniciação financeira Stripe, Wise e Pix`
 
-Nenhuma tarefa posterior está autorizada antes de Task 4 ficar verde e ser commitada.
+Nenhuma tarefa posterior está autorizada antes de Task 5 ficar verde e ser commitada.
 
 ## Regra para não confundir novo e antigo
 
@@ -94,8 +94,8 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 1. Control plane e pacotes | `DONE` | `c9f19c131ce9ff80020e1c0c0a8d8262a821cbfb` |
 | 2. ManyChat ingress e inbox | `DONE` | `a2d57c4fa2938345c5ba745cdbb79c26bc292eec` |
 | 3. Turno canônico e consultas | `DONE` | `b495b7c919046192210988ff5e5749cfa063c80b` |
-| 4. Reservas Cloudbeds/Bókun | `NEXT` | — |
-| 5. Iniciação Stripe/Wise/Pix | `BLOCKED_BY_ORDER` | — |
+| 4. Reservas Cloudbeds/Bókun | `DONE` | `f2e6d3bd309381319dd6f2a2dd78b6aa14c14014` |
+| 5. Iniciação Stripe/Wise/Pix | `NEXT` | — |
 | 6. Evidência e settlement | `BLOCKED_BY_ORDER` | — |
 | 7. Pós-pagamento e conclusão | `BLOCKED_BY_ORDER` | — |
 | 8. Pacote, recuperação e handoff | `BLOCKED_BY_ORDER` | — |
