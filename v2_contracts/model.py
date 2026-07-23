@@ -16,8 +16,17 @@ _ALLOWED_INTENTS: Final = frozenset(
     ("inform", "select", "adjust", "confirm", "request_handoff")
 )
 _ALLOWED_FACTS: Final = frozenset(
-    ("language", "service", "start_date", "end_date", "adults", "children")
+    (
+        "language",
+        "service",
+        "start_date",
+        "end_date",
+        "adults",
+        "children",
+        "payment_method",
+    )
 )
+_ALLOWED_PAYMENT_METHODS: Final = frozenset(("stripe", "wise", "pix"))
 
 
 class InvalidModelProposal(ValueError):
@@ -59,6 +68,11 @@ class ModelFact:
             raise InvalidModelProposal("fact name is outside the V2 catalog")
         if self.name in ("language", "service"):
             _text(self.value, f"fact {self.name}")
+        elif self.name == "payment_method":
+            if type(self.value) is not str or self.value not in _ALLOWED_PAYMENT_METHODS:
+                raise InvalidModelProposal(
+                    "fact payment_method must be stripe, wise or pix"
+                )
         elif self.name in ("start_date", "end_date"):
             if type(self.value) is not date:
                 raise InvalidModelProposal(f"fact {self.name} must be an exact date")

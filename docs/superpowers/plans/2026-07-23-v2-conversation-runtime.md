@@ -105,7 +105,7 @@ def validate_productive_proposal(proposal: ModelProposal) -> ModelProposal:
 - [ ] **Step 5: Run GREEN and ingress/model regressions**
 
 ```bash
-uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' python -m pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_turns.py tests/test_v2_manychat_ingress.py
+uv run --no-project --with 'pytest>=8.0.0' --with 'fastapi>=0.115.0' --with 'httpx>=0.27.0' python -m pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_turns.py tests/test_v2_reads.py tests/test_v2_manychat_ingress.py
 ```
 
 Expected: PASS.

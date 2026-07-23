@@ -29,6 +29,16 @@ from v2_contracts.ports import ModelPort
 from v2_contracts.providers import ReadKind, ReadObservation
 
 
+def validate_productive_proposal(proposal: ModelProposal) -> ModelProposal:
+    if type(proposal) is not ModelProposal:
+        raise InvalidModelProposal("productive proposal must be exact ModelProposal")
+    if proposal.effect_proposals:
+        if proposal.read_requests:
+            raise InvalidModelProposal("model cannot mix read and effect proposals")
+        raise InvalidModelProposal("productive model path rejects effect proposals")
+    return proposal
+
+
 class _ModelIntent:
     def __init__(
         self,
@@ -48,8 +58,6 @@ class _ModelIntent:
         round_number = 0
         proposal = self._complete(request, observations, round_number)
         while proposal.read_requests:
-            if proposal.effect_proposals:
-                raise InvalidModelProposal("model cannot mix read and effect proposals")
             current_kinds = tuple(item.kind for item in proposal.read_requests)
             if len(current_kinds) != len(set(current_kinds)):
                 raise InvalidModelProposal("model proposed duplicate read kinds in one cycle")
@@ -89,9 +97,7 @@ class _ModelIntent:
             raise InvalidModelProposal("model returned a noncanonical proposal")
         if proposal.source_event_id != request.source_event_id:
             raise InvalidModelProposal("model proposal does not bind the source event")
-        if proposal.read_requests and proposal.effect_proposals:
-            raise InvalidModelProposal("model cannot mix read and effect proposals")
-        return proposal
+        return validate_productive_proposal(proposal)
 
     @staticmethod
     def _intent(proposal: ModelProposal) -> ConversationIntent:
@@ -187,4 +193,4 @@ class V2TurnService:
         )
 
 
-__all__ = ["V2TurnService"]
+__all__ = ["V2TurnService", "validate_productive_proposal"]
