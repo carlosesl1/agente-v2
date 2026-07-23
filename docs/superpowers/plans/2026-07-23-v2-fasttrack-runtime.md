@@ -455,7 +455,7 @@ Adicionar em `test_phase7_coordinator.py` uma regressão equivalente que falha n
 - [ ] **Step 2: Executar RED focado**
 
 ```bash
-python -m pytest -q tests/test_phase7_coordinator.py::CoordinatorTests::test_intent_runs_outside_turn_transaction tests/test_v2_turns.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_phase7_coordinator.py::Phase7CoordinatorTests::test_intent_runs_outside_turn_transaction tests/test_v2_turns.py
 ```
 
 Expected: a regressão do coordinator falha antes da correção.
@@ -491,7 +491,7 @@ services/cloudbeds.py + tools/cloudbeds_tools.py + tools/cloudbeds_v2_tools.py
 services/bokun.py + tools/bokun_tools.py + tools/bokun_v2_tools.py
 ```
 
-Antes de copiar comportamento, registrar SHA-256 dos arquivos lidos em `docs/refactor/evidence/fasttrack-adapter-source.json`. Os adapters novos usam HTTPX/stdlib e contratos V2; não importam os módulos acima. Cloudbeds e Bókun retornam opções canônicas com IDs privados apenas no binding interno. Bókun recebe exclusivamente `tour_product_id` canônico.
+Antes de copiar comportamento, registrar SHA-256 dos arquivos lidos em `docs/refactor/extraction-evidence/task3-read-adapters.md`. Os adapters novos usam transports HTTP injetados/stdlib e contratos V2; não importam os módulos acima. Cloudbeds e Bókun retornam opções canônicas com IDs privados apenas no binding interno. Bókun recebe exclusivamente `tour_product_id` canônico. Os caminhos reais encontrados e qualquer caminho previsto mas ausente devem constar nessa evidência, sem presumir arquivos.
 
 - [ ] **Step 6: Provar conversa completa somente leitura**
 
@@ -533,7 +533,7 @@ def test_model_cannot_mix_read_and_effect_proposal(runtime) -> None:
 Run:
 
 ```bash
-python -m pytest -q tests/test_phase7_coordinator.py tests/test_v2_turns.py tests/test_v2_reads.py tests/test_phase8_fasttrack_sandbox.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_phase7_coordinator.py tests/test_v2_turns.py tests/test_v2_reads.py tests/test_phase8_fasttrack_sandbox.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -542,10 +542,14 @@ Expected: exit 0. Milestone interno: HTTP local conversa com providers fake e re
 
 - [ ] **Step 7: Atualizar controle e commitar**
 
+Criar primeiro o commit funcional:
+
 ```bash
-git add reservation_boundary v2_contracts v2_application v2_adapters tests docs/refactor/ACTIVE.md docs/refactor/evidence/fasttrack-adapter-source.json
+git add reservation_boundary v2_contracts v2_application v2_adapters tests docs/refactor/extraction-evidence docs/superpowers/plans
 git commit -m "feat: connect canonical v2 turns and provider reads"
 ```
+
+Depois registrar esse SHA em `ACTIVE.md`, mover `NEXT` para Task 4 e criar o commit de controle separado, sem código funcional.
 
 ---
 

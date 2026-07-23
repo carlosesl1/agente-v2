@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
-import sqlite3
 import unittest
 
 from reservation_boundary.coordinator import (
@@ -82,10 +81,13 @@ class FakeIntent:
         self.trace = trace
         self.source_event_id = source_event_id
         self.calls = 0
+        self.on_call = None
 
     def interpret(self, request):
         self.calls += 1
         self.trace.append("intent")
+        if self.on_call is not None:
+            self.on_call()
         return ConversationIntent(
             ConversationIntentKind.INFORM,
             self.source_event_id,
@@ -253,6 +255,18 @@ class Phase7CoordinatorTests(unittest.TestCase):
         self.assertEqual(plan.state.version, 1)
         self.assertEqual(store.commits, 1)
 
+    def test_intent_runs_outside_turn_transaction(self) -> None:
+        trace: list[str] = []
+        store = TracingStore(trace)
+        intent = FakeIntent(trace)
+        intent.on_call = lambda: self.assertFalse(store.inner._connection.in_transaction)
+        value, _, _, _, _, _ = coordinator(trace, store=store, intent=intent)
+        self.keep(store)
+
+        result = value.coordinate(envelope())
+
+        self.assertIs(result.reason, TurnPlanReason.COMPLETED)
+
     def test_expired_deadline_has_zero_writes_and_zero_calls(self) -> None:
         trace: list[str] = []
         value, store, lock, _, intent, kernel = coordinator(
@@ -269,13 +283,14 @@ class Phase7CoordinatorTests(unittest.TestCase):
             0,
         )
 
-    def test_deadline_expiry_at_any_precommit_boundary_leaves_zero_durable_rows(self) -> None:
-        for values in (
-            (T0, T0 + timedelta(minutes=1)),
-            (T0, T0, T0 + timedelta(minutes=1)),
-            (T0, T0, T0, T0 + timedelta(minutes=1)),
-            (T0, T0, T0, T0, T0 + timedelta(minutes=1)),
-        ):
+    def test_deadline_expiry_never_leaves_event_command_or_outbox_rows(self) -> None:
+        cases = (
+            ((T0, T0 + timedelta(minutes=1)), (0, 0)),
+            ((T0, T0, T0 + timedelta(minutes=1)), (0, 0)),
+            ((T0, T0, T0, T0 + timedelta(minutes=1)), (1, 1)),
+            ((T0, T0, T0, T0, T0 + timedelta(minutes=1)), (1, 1)),
+        )
+        for values, expected_preparation in cases:
             with self.subTest(values=values):
                 trace: list[str] = []
                 value, store, _, _, _, _ = coordinator(
@@ -297,7 +312,8 @@ class Phase7CoordinatorTests(unittest.TestCase):
                         "legacy_import_claims",
                     )
                 )
-                self.assertEqual(counts, (0, 0, 0, 0, 0))
+                self.assertEqual(counts[1:4], (0, 0, 0))
+                self.assertEqual((counts[0], counts[4]), expected_preparation)
 
     def test_post_commit_replay_skips_load_legacy_intent_reduce_and_commit(self) -> None:
         trace: list[str] = []
@@ -311,6 +327,26 @@ class Phase7CoordinatorTests(unittest.TestCase):
         self.assertIs(second.reason, TurnPlanReason.DUPLICATE)
         self.assertEqual(second.state, first.state)
         self.assertEqual((legacy.calls, intent.calls, kernel.calls, store.commits), (1, 1, 1, 1))
+
+    def test_replay_ignores_changed_operational_timestamps(self) -> None:
+        trace: list[str] = []
+        value, store, _, _, intent, kernel = coordinator(trace)
+        self.keep(store)
+        first_envelope = envelope()
+        first = value.coordinate(first_envelope)
+        replay = TurnEnvelope(
+            first_envelope.lead_key,
+            first_envelope.event_id,
+            first_envelope.message,
+            T0 + timedelta(seconds=1),
+            T0 + timedelta(seconds=31),
+        )
+
+        second = value.coordinate(replay)
+
+        self.assertTrue(second.deduplicated)
+        self.assertEqual(second.state, first.state)
+        self.assertEqual((intent.calls, kernel.calls, store.commits), (1, 1, 1))
 
     def test_same_event_with_different_message_is_conflict(self) -> None:
         trace: list[str] = []

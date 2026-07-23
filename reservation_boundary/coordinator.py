@@ -5,12 +5,13 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import datetime, timedelta
+import hashlib
+import json
 from typing import Protocol
 
 from reservation_domain import ReservationCommand
 from reservation_followup import PaymentSettlementCommand
 
-from reservation_boundary.serialization import semantic_hash
 from reservation_boundary.sqlite_store import IdentityConflict, StateNotFound
 from reservation_boundary.types import (
     BoundaryCommit,
@@ -93,6 +94,13 @@ class BoundaryStorePort(Protocol):
         claimed_at: datetime,
     ) -> VersionedBoundaryState: ...
 
+    def create_genesis(
+        self,
+        lead_key: str,
+        *,
+        claimed_at: datetime,
+    ) -> VersionedBoundaryState: ...
+
     def acquire_fence(self, lead_key: str) -> tuple[VersionedBoundaryState, int]: ...
 
     def commit(self, **kwargs: object) -> VersionedBoundaryState: ...
@@ -129,6 +137,22 @@ def _before_deadline(now: datetime, deadline: datetime) -> None:
     exact_now = _utc(now, "clock.now")
     if exact_now >= deadline:
         raise TurnDeadlineExceeded("turn deadline exceeded")
+
+
+def _event_content_hash(envelope: TurnEnvelope) -> str:
+    identity = json.dumps(
+        {
+            "event_id": envelope.event_id,
+            "lead_key": envelope.lead_key,
+            "locale": envelope.message.locale,
+            "text": envelope.message.text,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(b"phase7-turn-event-content-v2\0" + identity).hexdigest()
 
 
 def _validate_decision(
@@ -193,12 +217,14 @@ class TurnCoordinator:
         *,
         lock: TurnLockPort,
         store: BoundaryStorePort,
-        legacy_reader: LegacyReaderPort,
-        importer: ImporterPort,
+        legacy_reader: LegacyReaderPort | None = None,
+        importer: ImporterPort | None = None,
         intent: IntentPort,
         kernel: KernelPort,
         clock: ClockPort,
     ) -> None:
+        if (legacy_reader is None) != (importer is None):
+            raise TypeError("legacy_reader and importer must both be present or absent")
         self._lock = lock
         self._store = store
         self._legacy_reader = legacy_reader
@@ -217,6 +243,13 @@ class TurnCoordinator:
             return self._store.load_state(envelope.lead_key)
         except StateNotFound:
             pass
+        if self._legacy_reader is None and self._importer is None:
+            return self._store.create_genesis(
+                envelope.lead_key,
+                claimed_at=claimed_at,
+            )
+        assert self._legacy_reader is not None
+        assert self._importer is not None
         snapshot = self._legacy_reader.read_snapshot(envelope.lead_key)
         if snapshot is None or type(snapshot) is not LegacyLeadSnapshot:
             raise TurnImportRejected(
@@ -250,7 +283,7 @@ class TurnCoordinator:
             raise TypeError("envelope must be the exact TurnEnvelope type")
         started_at = self._clock.now()
         _before_deadline(started_at, envelope.deadline)
-        event_hash = semantic_hash(envelope)
+        event_hash = _event_content_hash(envelope)
         claim = self._lock.claim(
             lead_key=envelope.lead_key,
             event_id=envelope.event_id,
@@ -277,41 +310,44 @@ class TurnCoordinator:
                     TurnPlanReason.DUPLICATE,
                 )
 
-            guard = lambda: _before_deadline(self._clock.now(), envelope.deadline)
+            def guard() -> None:
+                _before_deadline(self._clock.now(), envelope.deadline)
+
             with self._store.turn_transaction(deadline_guard=guard):
                 current = self._load_or_import(envelope, claimed_at=started_at)
                 current, fencing_token = self._store.acquire_fence(envelope.lead_key)
-                _before_deadline(self._clock.now(), envelope.deadline)
-                request = IntentRequest(
-                    current.state,
-                    envelope.message,
+
+            request = IntentRequest(
+                current.state,
+                envelope.message,
+                envelope.event_id,
+                envelope.deadline,
+            )
+            intent = self._intent.interpret(request)
+            if type(intent) is not ConversationIntent or intent.source_event_id != envelope.event_id:
+                raise InvalidIntent("intent does not bind the source event")
+            decision = _validate_decision(
+                current,
+                envelope.event_id,
+                self._kernel.reduce(current.state, intent),
+            )
+            commit_time = self._clock.now()
+            _before_deadline(commit_time, envelope.deadline)
+            next_state = replace(
+                decision.state,
+                version=current.version + 1,
+                processed_event_ids=(
+                    *decision.state.processed_event_ids,
                     envelope.event_id,
-                    envelope.deadline,
-                )
-                intent = self._intent.interpret(request)
-                if type(intent) is not ConversationIntent or intent.source_event_id != envelope.event_id:
-                    raise InvalidIntent("intent does not bind the source event")
-                decision = _validate_decision(
-                    current,
-                    envelope.event_id,
-                    self._kernel.reduce(current.state, intent),
-                )
-                commit_time = self._clock.now()
-                _before_deadline(commit_time, envelope.deadline)
-                next_state = replace(
-                    decision.state,
-                    version=current.version + 1,
-                    processed_event_ids=(
-                        *decision.state.processed_event_ids,
-                        envelope.event_id,
-                    ),
-                )
-                boundary_commit = BoundaryCommit(
-                    next_state,
-                    decision.commands,
-                    decision.outbox,
-                    (),
-                )
+                ),
+            )
+            boundary_commit = BoundaryCommit(
+                next_state,
+                decision.commands,
+                decision.outbox,
+                (),
+            )
+            with self._store.turn_transaction(deadline_guard=guard):
                 persisted = self._store.commit(
                     event_id=envelope.event_id,
                     event_hash=event_hash,

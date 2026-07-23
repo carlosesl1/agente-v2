@@ -178,6 +178,32 @@ def test_claim_ready_groups_one_lead_in_order_and_leases_it(
     )
     assert second is not None
     assert second.lead_id == "manychat:lead-b"
+    assert second.events == (events[1],)
+
+
+def test_expired_lease_reclaims_the_same_deterministic_batch_id(tmp_path: Path) -> None:
+    inbox = SQLiteInbox(tmp_path / "inbox.sqlite3")
+    event = parse_manychat_payload(
+        {**TEXT_PAYLOAD, "message_id": "lease-event-001"},
+        received_at=NOW,
+    )
+    assert inbox.accept(event) is AcceptDisposition.ACCEPTED
+
+    first = inbox.claim_ready(
+        now=NOW,
+        quiet_window=timedelta(0),
+        lease_for=timedelta(seconds=10),
+    )
+    second = inbox.claim_ready(
+        now=NOW + timedelta(seconds=11),
+        quiet_window=timedelta(0),
+        lease_for=timedelta(seconds=10),
+    )
+
+    assert first is not None
+    assert second is not None
+    assert second.batch_id == first.batch_id
+    assert second.events == first.events
 
 
 def test_settings_require_secret_and_absolute_store_path(tmp_path: Path) -> None:

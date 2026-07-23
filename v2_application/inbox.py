@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -82,6 +83,18 @@ def _event_bytes(event: InboundEvent) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _batch_id(events: tuple[InboundEvent, ...]) -> str:
+    identity = json.dumps(
+        [[event.event_id, event.payload_hash] for event in events],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = hashlib.sha256(b"v2-inbound-batch-v1\0" + identity).hexdigest()
+    return "batch:" + digest
 
 
 def _event_from_bytes(payload: object) -> InboundEvent:
@@ -247,7 +260,7 @@ class SQLiteInbox:
             if cursor.rowcount != len(event_ids):
                 raise RuntimeError("claim cardinality changed inside write transaction")
             batch = InboundBatch(
-                batch_id=claim_token,
+                batch_id=_batch_id(events),
                 lead_id=events[0].lead_id,
                 subscriber_id=events[0].subscriber_id,
                 events=events,

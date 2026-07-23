@@ -41,7 +41,6 @@ from reservation_boundary.types import (
     BoundaryCommit,
     BoundaryState,
     KernelDecision,
-    OutboxMessage,
     ImportDisposition,
     ImportResult,
     LegacyLeadSnapshot,
@@ -1611,6 +1610,48 @@ class SQLiteBoundaryStore:
             (exact_lead_key, exact_event_id, command_id),
         ).fetchone()
         return row == (command_type, command_json, _sha(command_json))
+
+    def create_genesis(
+        self,
+        lead_key: str,
+        *,
+        claimed_at: datetime,
+    ) -> VersionedBoundaryState:
+        """Create an empty native V2 state without any legacy import claim."""
+
+        exact_lead_key = _require_id(lead_key, "lead_key")
+        instant = _utc_text(claimed_at, "claimed_at")
+        state = BoundaryState(7, exact_lead_key, 0, None, None, (), ())
+        state_json = to_wire_json(state)
+        state_hash = semantic_hash(state)
+        try:
+            with self._transaction():
+                existing = self._connection.execute(
+                    "SELECT version,state_json,state_hash FROM boundary_state WHERE lead_key=?",
+                    (exact_lead_key,),
+                ).fetchone()
+                if existing is not None:
+                    return self._versioned_from_row(
+                        existing,
+                        expected_lead_key=exact_lead_key,
+                    )
+                self._connection.execute(
+                    "INSERT INTO boundary_state "
+                    "(lead_key, version, state_json, state_hash, fencing_token, created_at, updated_at) "
+                    "VALUES (?, 0, ?, ?, 0, ?, ?)",
+                    (exact_lead_key, state_json, state_hash, instant, instant),
+                )
+                return VersionedBoundaryState(state, 0, state_hash)
+        except sqlite3.IntegrityError as exc:
+            raise IdentityConflict("native genesis violated durable identity") from exc
+
+    def turn_receipt_count(self, event_id: str) -> int:
+        exact_event_id = _require_id(event_id, "event_id")
+        row = self._connection.execute(
+            "SELECT COUNT(*) FROM boundary_events WHERE event_id=?",
+            (exact_event_id,),
+        ).fetchone()
+        return int(row[0])
 
     def import_genesis(
         self,

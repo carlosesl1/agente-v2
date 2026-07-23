@@ -1,0 +1,115 @@
+"""Direct Bókun read adapter restricted to canonical product IDs."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+import re
+from typing import Final
+
+from v2_adapters._provider_common import (
+    ProviderReadError,
+    binding_hash,
+    exact_dict,
+    observed_window,
+    text,
+    validated_adapter,
+)
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
+
+
+_AMOUNT_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
+_CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
+
+
+class BokunReadAdapter:
+    def __init__(self, *, transport, clock, ttl: timedelta) -> None:
+        self._transport, self._clock, self._ttl = validated_adapter(transport, clock, ttl)
+
+    def read(self, request: ReadRequest) -> ReadObservation:
+        if type(request) is not ReadRequest:
+            raise TypeError("request must be an exact ReadRequest")
+        if request.kind is ReadKind.ACTIVITY:
+            return self._activity(request)
+        if request.kind is ReadKind.ACTIVITY_DESCRIPTION:
+            return self._description(request)
+        raise TypeError("Bókun adapter supports only activity reads")
+
+    def _activity(self, request: ReadRequest) -> ReadObservation:
+        query = {
+            "product_id": request.product_id,
+            "activity_date": request.activity_date.isoformat(),
+            "participants": request.participants,
+        }
+        response = exact_dict(self._transport("activity", query), "Bókun response")
+        if response.get("product_id") not in (None, request.product_id):
+            raise ProviderReadError("Bókun response failed canonical product binding")
+        provider_product_id = text(
+            response.get("bokun_product_id"), "bokun_product_id"
+        )
+        amount = text(response.get("total_amount"), "total_amount")
+        currency = text(response.get("currency"), "currency")
+        available = response.get("available")
+        if _AMOUNT_RE.fullmatch(amount) is None or _CURRENCY_RE.fullmatch(currency) is None:
+            raise ProviderReadError("Bókun amount or currency is not canonical")
+        if type(available) is not bool:
+            raise ProviderReadError("Bókun available must be an exact bool")
+        private_hash = binding_hash(
+            {
+                "request_hash": request.canonical_hash(),
+                "bokun_product_id": provider_product_id,
+            }
+        )
+        public = {
+            **query,
+            "offer_id": "offer:" + private_hash[:32],
+            "product_public_name": text(
+                response.get("product_public_name"), "product_public_name"
+            ),
+            "total_amount": amount,
+            "currency": currency,
+            "available": available,
+        }
+        observed_at, expires_at = observed_window(self._clock, self._ttl)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="bokun",
+            observed_at=observed_at,
+            expires_at=expires_at,
+            public_payload=public,
+            private_binding_hash=private_hash,
+        )
+
+    def _description(self, request: ReadRequest) -> ReadObservation:
+        response = exact_dict(
+            self._transport(
+                "activity_description", {"product_id": request.product_id}
+            ),
+            "Bókun description",
+        )
+        provider_product_id = text(
+            response.get("bokun_product_id"), "bokun_product_id"
+        )
+        public = {
+            "product_id": request.product_id,
+            "product_public_name": text(
+                response.get("product_public_name"), "product_public_name"
+            ),
+            "description": text(response.get("description"), "description"),
+        }
+        observed_at, expires_at = observed_window(self._clock, self._ttl)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="bokun",
+            observed_at=observed_at,
+            expires_at=expires_at,
+            public_payload=public,
+            private_binding_hash=binding_hash(
+                {
+                    "request_hash": request.canonical_hash(),
+                    "bokun_product_id": provider_product_id,
+                }
+            ),
+        )
+
+
+__all__ = ["BokunReadAdapter"]
