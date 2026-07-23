@@ -3,16 +3,88 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
-from typing import Final
+from typing import Final, Protocol
 
-from v2_contracts.channel import InboundEvent
+from v2_contracts.channel import (
+    InboundEvent,
+    PublicDeliveryNotCalled,
+    PublicDeliveryUnknown,
+)
 
 
 class ManyChatPayloadError(ValueError):
     """Raised when a ManyChat payload cannot become a safe V2 event."""
+
+
+class ManyChatTransportNotCalled(RuntimeError):
+    """Transport proved that no HTTP request reached ManyChat."""
+
+
+@dataclass(frozen=True, slots=True)
+class ManyChatTransportResponse:
+    provider_message_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.provider_message_id) is not str
+            or not self.provider_message_id.strip()
+            or self.provider_message_id != self.provider_message_id.strip()
+        ):
+            raise ValueError("provider_message_id must be canonical non-empty text")
+
+
+class ManyChatTransport(Protocol):
+    def send_text(
+        self,
+        *,
+        subscriber_id: str,
+        text: str,
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse: ...
+
+
+class PublicMessageClaim(Protocol):
+    outbox_id: str
+    lead_id: str
+    text: str
+
+
+class ManyChatDeliveryAdapter:
+    """Turn one fenced public outbox claim into one narrow ManyChat send."""
+
+    def __init__(self, transport: ManyChatTransport) -> None:
+        if not callable(getattr(transport, "send_text", None)):
+            raise TypeError("transport must expose send_text")
+        self._transport = transport
+
+    def send(self, claim: PublicMessageClaim) -> str:
+        outbox_id = getattr(claim, "outbox_id", None)
+        lead_id = getattr(claim, "lead_id", None)
+        text = getattr(claim, "text", None)
+        if type(outbox_id) is not str or not outbox_id:
+            raise PublicDeliveryNotCalled("claim lacks a stable outbox identity")
+        if type(lead_id) is not str or not lead_id.startswith("manychat:"):
+            raise PublicDeliveryNotCalled("claim is not bound to a ManyChat lead")
+        subscriber_id = lead_id.removeprefix("manychat:")
+        if not subscriber_id or type(text) is not str or not text.strip():
+            raise PublicDeliveryNotCalled("claim lacks a sendable subscriber or text")
+        try:
+            response = self._transport.send_text(
+                subscriber_id=subscriber_id,
+                text=text,
+                idempotency_key=outbox_id,
+            )
+        except ManyChatTransportNotCalled as exc:
+            raise PublicDeliveryNotCalled(str(exc)) from exc
+        except Exception as exc:
+            raise PublicDeliveryUnknown("ManyChat delivery outcome is unknown") from exc
+        if type(response) is not ManyChatTransportResponse:
+            raise PublicDeliveryUnknown("ManyChat returned an invalid delivery response")
+        return response.provider_message_id
 
 
 _MISSING: Final = object()

@@ -10,6 +10,8 @@ from pathlib import Path
 import re
 import sqlite3
 
+from v2_contracts.channel import PublicDeliveryNotCalled, PublicDeliveryUnknown
+
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 
@@ -108,25 +110,45 @@ class PublicDeliveryDisposition(str, Enum):
     IDLE = "idle"
     DELIVERED = "delivered"
     RETRYABLE_FAILURE = "retryable_failure"
+    MANUAL_REVIEW = "manual_review"
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS public_outbox (
+_CREATE_PUBLIC_OUTBOX = """
+CREATE TABLE public_outbox (
   outbox_id TEXT PRIMARY KEY,
   release_id TEXT NOT NULL,
   lead_id TEXT NOT NULL,
   source_message_id TEXT NOT NULL,
   chunk_index INTEGER NOT NULL,
   text TEXT NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('pending','leased','delivered')),
+  status TEXT NOT NULL CHECK(status IN ('pending','leased','delivered','manual_review')),
   claim_owner TEXT,
   fencing_token INTEGER NOT NULL DEFAULT 0,
   lease_expires_at TEXT,
   receipt_id TEXT,
   updated_at TEXT NOT NULL,
   UNIQUE(release_id, chunk_index)
-) STRICT;
+) STRICT
 """
+_SCHEMA = _CREATE_PUBLIC_OUTBOX.replace(
+    "CREATE TABLE public_outbox",
+    "CREATE TABLE IF NOT EXISTS public_outbox",
+    1,
+) + ";"
+_PUBLIC_OUTBOX_COLUMNS = (
+    "outbox_id",
+    "release_id",
+    "lead_id",
+    "source_message_id",
+    "chunk_index",
+    "text",
+    "status",
+    "claim_owner",
+    "fencing_token",
+    "lease_expires_at",
+    "receipt_id",
+    "updated_at",
+)
 
 
 def _utc(value: object, name: str) -> str:
@@ -142,6 +164,36 @@ def _outbox_id(reply: PublicReply, index: int) -> str:
     return "public:" + hashlib.sha256(material).hexdigest()[:32]
 
 
+def _migrate_checkpoint_schema(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='public_outbox'"
+    ).fetchone()
+    if row is None or "'manual_review'" in row[0]:
+        return
+    actual_columns = tuple(
+        item[1] for item in connection.execute("PRAGMA table_info(public_outbox)")
+    )
+    if actual_columns != _PUBLIC_OUTBOX_COLUMNS:
+        raise RuntimeError("public outbox checkpoint schema is not migratable")
+    columns = ",".join(_PUBLIC_OUTBOX_COLUMNS)
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute(
+            "ALTER TABLE public_outbox RENAME TO public_outbox_checkpoint"
+        )
+        connection.execute(_CREATE_PUBLIC_OUTBOX)
+        connection.execute(
+            f"INSERT INTO public_outbox ({columns}) "
+            f"SELECT {columns} FROM public_outbox_checkpoint"
+        )
+        connection.execute("DROP TABLE public_outbox_checkpoint")
+        connection.execute("COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+
+
 class PublicOutboxStore:
     def __init__(self, path: Path) -> None:
         if not isinstance(path, Path) or not path.is_absolute():
@@ -151,6 +203,7 @@ class PublicOutboxStore:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(_SCHEMA)
+        _migrate_checkpoint_schema(self._connection)
 
     def close(self) -> None:
         self._connection.close()
@@ -242,6 +295,16 @@ class PublicOutboxStore:
         if cursor.rowcount != 1:
             raise RuntimeError("public delivery claim is stale")
 
+    def mark_manual_review(self, claim: PublicClaim, *, now: datetime) -> None:
+        now_text = _utc(now, "now")
+        cursor = self._connection.execute(
+            "UPDATE public_outbox SET status='manual_review',claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
+            "WHERE outbox_id=? AND status='leased' AND claim_owner=? AND fencing_token=?",
+            (now_text, claim.outbox_id, claim.worker_id, claim.fencing_token),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("public delivery claim is stale")
+
     def delivered_count(self, release_id: str) -> int:
         return self._connection.execute(
             "SELECT count(*) FROM public_outbox WHERE release_id=? AND status='delivered'",
@@ -251,6 +314,11 @@ class PublicOutboxStore:
     def pending_count(self) -> int:
         return self._connection.execute(
             "SELECT count(*) FROM public_outbox WHERE status='pending'"
+        ).fetchone()[0]
+
+    def manual_review_count(self) -> int:
+        return self._connection.execute(
+            "SELECT count(*) FROM public_outbox WHERE status='manual_review'"
         ).fetchone()[0]
 
 
@@ -275,9 +343,18 @@ class PublicDeliveryWorker:
             return PublicDeliveryDisposition.IDLE
         try:
             receipt = self._delivery.send(claim)
-        except Exception:
+        except PublicDeliveryNotCalled:
             self._store.release(claim, now=now)
             return PublicDeliveryDisposition.RETRYABLE_FAILURE
+        except PublicDeliveryUnknown:
+            self._store.mark_manual_review(claim, now=now)
+            return PublicDeliveryDisposition.MANUAL_REVIEW
+        except Exception:
+            self._store.mark_manual_review(claim, now=now)
+            return PublicDeliveryDisposition.MANUAL_REVIEW
+        if type(receipt) is not str or _ID_RE.fullmatch(receipt) is None:
+            self._store.mark_manual_review(claim, now=now)
+            return PublicDeliveryDisposition.MANUAL_REVIEW
         self._store.complete(claim, receipt, now=now)
         return PublicDeliveryDisposition.DELIVERED
 
@@ -286,6 +363,8 @@ __all__ = [
     "CompletionContext",
     "CompletionPolicy",
     "CompletionStatus",
+    "PublicDeliveryNotCalled",
+    "PublicDeliveryUnknown",
     "PublicDeliveryWorker",
     "PublicOutboxStore",
     "PublicReply",

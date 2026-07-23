@@ -50,6 +50,14 @@ class AcceptDisposition(str, Enum):
     CONFLICT = "conflict"
 
 
+class PublicDeliveryNotCalled(RuntimeError):
+    """Delivery failed with proof that no channel request was attempted."""
+
+
+class PublicDeliveryUnknown(RuntimeError):
+    """A channel request may have happened and must not be retried automatically."""
+
+
 @dataclass(frozen=True, slots=True)
 class InboundEvent:
     """Normalized event accepted from a channel adapter."""

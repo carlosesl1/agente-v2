@@ -912,11 +912,10 @@ Criar o commit funcional da fachada/integração e, depois dos gates, registrar 
 **Files:**
 - Create: `v2_application/completion.py`
 - Create: `tests/test_v2_completion.py`
+- Create: `tests/test_v2_worker_main.py`
+- Modify: `v2_contracts/channel.py`
 - Modify: `v2_adapters/manychat.py`
-- Modify: `v2_application/workers.py`
 - Create: `v2_host/worker_main.py`
-- Modify: `reservation_followup/handoff.py`
-- Modify: `reservation_followup/workers.py`
 - Modify: `docs/refactor/ACTIVE.md`
 
 **Interfaces:**
@@ -964,39 +963,44 @@ def test_completed_requires_all_required_receipts(runtime) -> None:
     assert runtime.completion.evaluate(WORKFLOW_ID).value == "pending"
 
 
-def test_new_message_after_completed_starts_followup_without_erasing_history(runtime) -> None:
-    before = runtime.store.history(WORKFLOW_ID)
-    next_workflow = runtime.turns.handle(FOLLOWUP_BATCH)
-    assert runtime.store.history(WORKFLOW_ID) == before
-    assert next_workflow.workflow_id != WORKFLOW_ID
+def test_manychat_pre_send_failure_requeues_but_unknown_never_resends(runtime) -> None:
+    assert runtime.run_delivery("not_called").value == "retryable_failure"
+    assert runtime.run_delivery("unknown").value == "manual_review"
+    assert runtime.run_delivery("unknown").value == "idle"
+
+
+def test_worker_cycle_isolates_one_queue_failure_without_retrying_it(runtime) -> None:
+    report = runtime.worker_cycle.run_once(now=NOW)
+    assert report.calls_per_queue == EXPECTED_ONE_CALL
+    assert report.public_delivery_ran_after_settlement_failure is True
 ```
 
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_completion.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_completion.py tests/test_v2_worker_main.py
 ```
 
-Expected: FAIL por completion policy e ManyChat delivery port ausentes.
+Expected: FAIL por completion policy, ManyChat delivery port e worker cycle ausentes.
 
 - [ ] **Step 3: Implementar projection e outboxes**
 
-`CompletionPolicy.evaluate(workflow)` retorna `PENDING`, `COMPLETED` ou `MANUAL_REVIEW` a partir de receipts, nunca do texto da Maya. `PublicReply` contém chunks públicos e chave idempotente `release_id:lead_id:message_id:channel`. Worker ManyChat grava receipt por chunk; falha antes de send permite retry, resultado incerto bloqueia resend automático.
+`CompletionPolicy.evaluate(workflow)` retorna `PENDING`, `COMPLETED` ou `MANUAL_REVIEW` a partir de receipts, nunca do texto da Maya. Task 7 mantém policy e outbox local; Task 9 correlaciona receipts entre stores no composition root. `PublicReply` contém chunks públicos e chave idempotente `release_id:lead_id:message_id:channel`. Worker ManyChat grava receipt por chunk; falha comprovadamente anterior a send permite retry, resultado incerto vira `manual_review` e bloqueia resend automático. O store migra o schema do checkpoint anterior antes de aceitar esse novo estado.
 
 - [ ] **Step 4: Implementar processo de workers**
 
-`v2_host.worker_main` executa lotes pequenos e independentes nesta ordem:
+`v2_host.worker_main.WorkerCycle` executa lotes pequenos e independentes nesta ordem:
 
 ```text
 inbox → reservation → payment initiation → settlement → post-payment → public delivery → reconciliation
 ```
 
-Cada `run_once` processa no máximo um claim por fila. Ausência de trabalho retorna `idle`; erro de uma fila não abre capability de outra.
+Cada `run_once` processa no máximo um claim por fila. Ausência de trabalho retorna `idle`; erro de uma fila não abre capability de outra. O entrypoint composto e o loop de processo são ligados somente na Task 9, quando existir o único composition root.
 
 - [ ] **Step 5: Executar GREEN e regressões de outbox**
 
 ```bash
-python -m pytest -q tests/test_v2_completion.py tests/test_phase5_outbox.py tests/test_phase6_handoff_worker.py tests/test_phase6_payment_outbox.py tests/test_phase8_followup_outbox_v2.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_completion.py tests/test_v2_worker_main.py tests/test_phase5_outbox.py tests/test_phase6_handoff_worker.py tests/test_phase6_payment_outbox.py tests/test_phase8_followup_outbox_v2.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -1005,10 +1009,7 @@ Expected: exit 0.
 
 - [ ] **Step 6: Atualizar controle e commitar**
 
-```bash
-git add v2_application v2_adapters v2_host reservation_followup tests docs/refactor/ACTIVE.md
-git commit -m "feat: complete v2 post payment and public delivery"
-```
+Criar primeiro o commit funcional de policy/outbox/adapter/worker local. Depois registrar seu SHA em `ACTIVE.md`, mover `NEXT` para Task 8 e criar um commit de controle separado. A continuidade após `completed`, que depende de correlacionar os stores existentes, permanece explicitamente no composition root da Task 9.
 
 ---
 
