@@ -18,6 +18,8 @@
 
 Nenhuma tarefa posterior está autorizada antes de Task 9 ficar verde e ser commitada.
 
+Checkpoint interno ativo: Runtime Task 3 — executor de turno e `commit_turn_v8` atômico. O reducer conversacional determinístico e a resolução privada pré-fence foram concluídos em `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`.
+
 ### Decisão de topologia da Task 7
 
 Task 7 implementa somente `CompletionPolicy` pura e outbox público local/durável. Task 9 correlaciona os receipts dos stores existentes no composition root. Não será criado store global paralelo de completion.
@@ -103,7 +105,7 @@ Não parar apenas para narrar progresso entre tasks verdes.
 | 6. Evidência e settlement | `DONE` | `73a40bb0f3717d30a51bc2dced7c4c870b9e0ea6` |
 | 7. Pós-pagamento e conclusão | `DONE` | `85a2eab93b9b6d812226f3ec1c9e526563c3ef4d` |
 | 8. Pacote, recuperação e handoff | `DONE` | `d948717533f4081239ebf91c948db1ebbb9f0f83` |
-| 9. Composição, E2E e qualificação | `NEXT` | checkpoint host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; kernel/worker pendentes |
+| 9. Composição, E2E e qualificação | `NEXT` | host/E2E/image `33b43d32fbea1fd21024718b1536dbec623e6e9f`; reducer/runtime Task 2 `aee4e8a05468a2bad3fecd2a58dc50c03fc5feb9`; executor/worker pendentes |
 
 ## Gate de publicação
 

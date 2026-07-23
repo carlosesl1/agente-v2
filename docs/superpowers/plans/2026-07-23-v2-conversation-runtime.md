@@ -124,19 +124,27 @@ git commit -m "feat: close v2 model grammar and private profile"
 
 ### Task 2: Deterministic conversation reducer
 
+**Status:** COMPLETE on 2026-07-23. Evidence: `docs/refactor/extraction-evidence/task9-runtime-task2.md`.
+
 **Files:**
+- Create: `v2_contracts/private_offers.py`
 - Create: `v2_application/conversation.py`
 - Modify: `v2_application/reads.py`
 - Modify: `v2_application/reservations.py`
+- Modify: `v2_adapters/cloudbeds.py`
+- Modify: `v2_adapters/bokun.py`
 - Modify: `reservation_boundary/conversation.py`
 - Modify: `reservation_boundary/dispatch.py`
+- Modify: `reservation_boundary/types.py`
+- Modify: `reservation_execution/adapter.py`
 - Create: `tests/test_v2_conversation_reducer.py`
+- Modify: `tests/test_v2_reads.py`
 
 **Interfaces:**
 - Consumes: authenticated `BoundaryState`, productive `ModelProposal`, tuple of public `ReadObservation`, private provider bindings, `PrivateCustomerBinding`, UTC instant.
 - Produces: `V2ConversationDecision(next_state, projection, commands, public_reply, handoff_request, receipt_requirements)`, `PrivateOfferBindingResolver`, and `PackageCommandCoordinator`.
 
-- [ ] **Step 1: Write RED for no-command states**
+- [x] **Step 1: Write RED for no-command states**
 
 ```python
 def test_incomplete_profile_and_stale_confirmation_never_emit_command():
@@ -147,7 +155,7 @@ def test_incomplete_profile_and_stale_confirmation_never_emit_command():
     assert stale.commands == ()
 ```
 
-- [ ] **Step 2: Write RED for authoritative single/package commands**
+- [x] **Step 2: Write RED for authoritative single/package commands**
 
 ```python
 def test_confirmed_summary_emits_domain_command_only():
@@ -168,19 +176,19 @@ def test_private_offer_resolution_rechecks_all_bindings_before_fence():
         changed_price_resolver.resolve(LODGING_COMMAND, now=NOW)
 ```
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_conversation_reducer.py
 ```
 
-Expected: fails because `V2ConversationReducer` does not exist.
+Observed: collection failed with `ModuleNotFoundError: No module named 'v2_application.conversation'`.
 
-- [ ] **Step 4: Implement reducer as a pure state machine**
+- [x] **Step 4: Implement reducer as a pure state machine**
 
-Use existing reservation-domain constructors/reducer for `StartSearch`, `LookupRecorded`, `OfferChosen`, `DraftRequested`, summary preparation and explicit confirmation. Build `CustomerFacts` only from `PrivateCustomerBinding`; build `EconomicTerms` only from the closed payment-method fact. The projection persists public facts as authenticated v8 artifacts. For simple services, the domain reducer produces the command. `PackageCommandCoordinator` creates one deterministic package command from the two ready drafts using existing signature/identity helpers. `PrivateOfferBindingResolver` repeats the canonical provider read during adapter preparation and returns raw IDs only after offer/date/party/amount/binding equality; it never writes a cache. Represent profile prompt history by prior public receipt kind in boundary history, not a boolean field.
+Use existing reservation-domain constructors/reducer for `StartSearch`, `LookupRecorded`, `OfferChosen`, `DraftRequested`, summary preparation and explicit confirmation. Build `CustomerFacts` only from `PrivateCustomerBinding`; build `EconomicTerms` only from the closed payment-method fact. The projection persists public facts as authenticated v8 artifacts. For simple services, the domain reducer produces the command. `PackageCommandCoordinator` combines two ready drafts into one confirmation subject; the existing domain reducer remains the sole command authority and emits `RESERVE_PACKAGE` only after that summary is explicitly confirmed against fresh reads. `PrivateOfferBindingResolver` repeats the canonical provider read during adapter preparation and returns raw IDs only after offer/date/party/amount/binding equality; it never writes a cache. Represent profile prompt history by prior public receipt kind in boundary history, not a boolean field.
 
-- [ ] **Step 5: Run GREEN and domain/property regressions**
+- [x] **Step 5: Run GREEN and domain/property regressions**
 
 ```bash
 uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_conversation_reducer.py tests/test_phase2_properties.py tests/test_v2_reservations.py tests/test_v2_recovery.py
@@ -188,7 +196,7 @@ uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_con
 
 Expected: PASS.
 
-- [ ] **Step 6: Guard/lint/commit**
+- [x] **Step 6: Guard/lint/commit**
 
 ```bash
 python scripts/check_fasttrack_boundaries.py
