@@ -27,4 +27,8 @@ class ReservationPort(Protocol):
     def execute(self, permit: ProviderDispatchPermit) -> ProviderExecutionResult: ...
 
 
-__all__ = ["ModelPort", "ReadPort", "ReservationPort"]
+class CommercialEffectGuard(Protocol):
+    def allows_workflow(self, workflow_id: str) -> bool: ...
+
+
+__all__ = ["CommercialEffectGuard", "ModelPort", "ReadPort", "ReservationPort"]

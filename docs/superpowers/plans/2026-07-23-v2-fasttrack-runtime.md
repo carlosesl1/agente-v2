@@ -1016,14 +1016,15 @@ Criar primeiro o commit funcional de policy/outbox/adapter/worker local. Depois 
 ### Task 8: Pacote combinado, recuperação e handoff excepcional
 
 **Files:**
-- Create: `tests/test_v2_package_recovery.py`
-- Modify: `v2_application/turns.py`
+- Create: `tests/test_v2_recovery.py`
+- Create: `v2_application/recovery.py`
 - Modify: `v2_application/reservations.py`
-- Modify: `v2_application/payments.py`
-- Modify: `v2_application/completion.py`
 - Modify: `v2_application/workers.py`
-- Modify: `v2_host/worker_main.py`
-- Modify: `docs/refactor/ACTIVE.md`
+- Modify: `v2_contracts/ports.py`
+- Modify: `reservation_execution/adapter.py`
+- Modify: `reservation_followup/sqlite_store.py`
+- Modify: `tests/test_v2_reservations.py`
+- Create: `docs/refactor/extraction-evidence/task8-package-recovery.md`
 
 **Interfaces:**
 - Consumes: todos os workflows das Tasks 2–7.
@@ -1032,68 +1033,33 @@ Criar primeiro o commit funcional de policy/outbox/adapter/worker local. Depois 
 - [ ] **Step 1: Escrever matriz RED de falhas compostas**
 
 ```python
-# tests/test_v2_package_recovery.py
+# tests/test_v2_recovery.py
 
-def test_package_uses_one_summary_one_confirmation_two_reservation_ledgers(runtime) -> None:
-    runtime.confirm(PACKAGE_SUMMARY)
-    assert runtime.store.summary_count(PACKAGE_WORKFLOW_ID) == 1
-    assert runtime.store.confirmation_count(PACKAGE_WORKFLOW_ID) == 1
-    assert runtime.store.reservation_ledger_count(PACKAGE_WORKFLOW_ID) == 2
-
-
-def test_hostel_success_agency_unknown_never_repeats_hostel(runtime) -> None:
-    runtime.run_package(HOSTEL_CONFIRMED_AGENCY_UNKNOWN)
-    runtime.reconciler.run_once(now=NOW)
-    assert runtime.provider_log.count(HOSTEL_COMMAND_ID) == 1
-    assert runtime.store.package_status(PACKAGE_WORKFLOW_ID) == "manual_review"
+def test_package_restart_never_redispatches_confirmed_component() -> None:
+    progress = PackageRecoveryPolicy().derive(...)
+    assert HOSTEL_COMMAND_ID in progress.confirmed_command_ids
+    assert progress.dispatchable_command_ids == frozenset({AGENCY_COMMAND_ID})
 
 
-def test_two_business_units_never_share_receiver_or_financial_claim(runtime) -> None:
-    obligations = runtime.store.payment_obligations(PACKAGE_WORKFLOW_ID)
-    assert obligations[0].receiver_profile_id != obligations[1].receiver_profile_id
-    assert obligations[0].claim_namespace != obligations[1].claim_namespace
+def test_unknown_package_component_requires_manual_review_without_redispatch() -> None:
+    progress = PackageRecoveryPolicy().derive(...)
+    assert progress.status.value == "manual_review"
+    assert progress.dispatchable_command_ids == frozenset()
 
 
-def test_restart_before_fence_requeues_safely(runtime) -> None:
-    runtime.crash_before_fence(LODGING_COMMAND)
-    reopened = runtime.reopen()
-    assert reopened.reservation_worker.run_once(now=AFTER_LEASE).disposition.value == "effect_confirmed"
-    assert len(reopened.provider_log) == 1
-
-
-def test_restart_after_fence_reconciles_without_provider_call(runtime) -> None:
-    runtime.crash_after_fence(LODGING_COMMAND)
-    reopened = runtime.reopen()
-    reopened.reconciler.run_once(now=AFTER_LEASE)
-    assert reopened.provider_log == []
-    assert reopened.store.command_status(LODGING_COMMAND.command_id) == "manual_review"
-
-
-def test_discount_request_creates_one_handoff_and_no_write(runtime) -> None:
-    runtime.turns.handle(DISCOUNT_REQUEST_BATCH)
-    assert runtime.store.handoff_count(WORKFLOW_ID) == 1
-    assert runtime.provider_log == []
-
-
-def test_active_handoff_blocks_all_commercial_effects(runtime) -> None:
-    runtime.activate_handoff(WORKFLOW_ID)
-    with pytest.raises(ActiveHandoff):
-        runtime.dispatch(LODGING_COMMAND)
-    assert runtime.provider_log == []
-
-
-def test_handoff_acknowledgement_is_public_safe_and_idempotent(runtime) -> None:
-    runtime.activate_handoff(WORKFLOW_ID)
-    runtime.activate_handoff(WORKFLOW_ID)
-    messages = runtime.store.public_messages(WORKFLOW_ID)
-    assert len(messages) == 1
-    assert "internal" not in messages[0].text.lower()
+def test_discount_handoff_is_single_restart_safe_and_blocks_effects(tmp_path) -> None:
+    first = coordinator.open_exception_once(...)
+    replay = reopened_coordinator.open_exception_once(...)
+    assert first.created is True
+    assert replay.created is False
+    with pytest.raises(CommercialEffectBlocked):
+        guard.assert_allowed(lead_id=LEAD_ID)
 ```
 
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_package_recovery.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_recovery.py
 ```
 
 Expected: FAIL nos gaps de package/handoff/restart.
@@ -1104,12 +1070,12 @@ Não persistir flags paralelas como `hostel_done` ou `agency_done`. Derivar prog
 
 - [ ] **Step 4: Implementar reconciler capability-free**
 
-Pré-fence expirado pode liberar claim. Pós-fence sem outcome consulta apenas receipts/read-back seguros e nunca chama create/settlement novamente. Incerteza preservada cria um handoff único e bloqueia effects subsequentes.
+Task 8 reutiliza `reservation_execution.reconciliation.Reconciler` e `reservation_followup.reconciliation.PaymentReconciler`; não cria reconciler nem ledger paralelo. Pré-fence expirado libera claim nos owners existentes. Pós-fence expirado vira unknown/manual review sem receber capability de provider. `HandoffCoordinator` usa o store maduro. `V2ReservationWorker` exige um `CommercialEffectGuard` e o consulta antes do fence; handoff ativo termina a preparação como `NOT_CALLED`, com zero dispatch slot. Task 9 deve usar o mesmo guard também no admission path de pagamentos.
 
 - [ ] **Step 5: Executar GREEN e regressões de crash**
 
 ```bash
-python -m pytest -q tests/test_v2_package_recovery.py tests/test_phase5_reconciliation.py tests/test_phase6_reconciliation.py tests/test_phase6_concurrency.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_recovery.py tests/test_v2_reservations.py tests/test_v2_payment_initiation.py tests/test_v2_payment_evidence.py tests/test_v2_completion.py tests/test_phase5_worker.py tests/test_phase5_reconciliation.py tests/test_phase6_reconciliation.py tests/test_phase6_handoff_worker.py tests/test_phase6_sqlite_store.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -1118,10 +1084,7 @@ Expected: exit 0.
 
 - [ ] **Step 6: Atualizar controle e commitar**
 
-```bash
-git add v2_application v2_host tests docs/refactor/ACTIVE.md
-git commit -m "feat: close v2 package recovery and handoff"
-```
+Criar primeiro o commit funcional de package projection, leitura de handoff ativo, coordinator/guard e testes. Depois registrar o SHA em `ACTIVE.md`, mover `NEXT` para Task 9 e criar um commit de controle separado.
 
 ---
 

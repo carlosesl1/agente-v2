@@ -23,7 +23,7 @@ from reservation_domain.signature import (
     subject_signature,
 )
 from reservation_execution import DispatchPermit, DispatchRequest, PreparationFailure
-from v2_contracts.ports import ReservationPort
+from v2_contracts.ports import CommercialEffectGuard, ReservationPort
 from v2_contracts.providers import (
     ProviderCertainty,
     ProviderDispatchPermit,
@@ -296,19 +296,34 @@ class RoutingReservationExecutionAdapter:
     adapter_id = "v2-reservation-router"
     adapter_version = 1
 
-    def __init__(self, adapters: tuple[V2ReservationExecutionAdapter, ...]) -> None:
+    def __init__(
+        self,
+        adapters: tuple[V2ReservationExecutionAdapter, ...],
+        effect_guard: CommercialEffectGuard,
+    ) -> None:
         if type(adapters) is not tuple or not adapters:
             raise ValueError("adapters must be a non-empty exact tuple")
         if any(type(item) is not V2ReservationExecutionAdapter for item in adapters):
             raise TypeError("adapters must contain exact V2 reservation adapters")
+        if not callable(getattr(effect_guard, "allows_workflow", None)):
+            raise TypeError("effect_guard must implement CommercialEffectGuard")
         mapping = {item.operation: item for item in adapters}
         if len(mapping) != len(adapters):
             raise ValueError("one adapter per reservation operation is required")
         self._adapters = mapping
+        self._effect_guard = effect_guard
 
     def prepare(self, command: ReservationCommand) -> DispatchRequest:
         if type(command) is not ReservationCommand:
             raise DispatchRejected("prepare requires an exact ReservationCommand")
+        try:
+            allowed = self._effect_guard.allows_workflow(command.workflow_id)
+        except Exception as exc:
+            raise PreparationFailure("effect_guard_unavailable", True, ()) from exc
+        if type(allowed) is not bool:
+            raise PreparationFailure("effect_guard_unavailable", True, ())
+        if not allowed:
+            raise PreparationFailure("active_handoff", False, ())
         adapter = self._adapters.get(command.operation)
         if adapter is None:
             raise PreparationFailure("unsupported_operation", False, ())

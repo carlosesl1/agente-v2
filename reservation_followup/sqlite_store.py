@@ -48,7 +48,6 @@ from .payment import (
     SettlementFinished,
     SettlementOutcome,
     SettlementStarted,
-    VerifiedPaymentEvidence,
     new_payment,
     reduce_payment,
     validate_evidence,
@@ -1852,6 +1851,67 @@ class SQLiteFollowupUnitOfWork:
             return self._load_handoff(handoff_id)[0]
         except sqlite3.Error as exc:
             raise _sqlite_error(exc, "load_handoff") from exc
+
+    def find_active_handoff_by_lead_hash(
+        self,
+        lead_key_hash: str,
+    ) -> HandoffWorkflow | None:
+        """Return the single queue-active handoff for a lead, if one exists."""
+
+        self._ensure_open()
+        if not _is_digest(lead_key_hash):
+            raise ValueError("lead_key_hash must be an exact SHA-256 digest")
+        try:
+            rows = tuple(
+                self._connection.execute(
+                    "SELECT handoff_id FROM handoff_workflows "
+                    "WHERE lead_key_hash=? AND status IN "
+                    "('requested','active','acknowledgement_pending',"
+                    "'acknowledged','manual_review') "
+                    "ORDER BY created_at, handoff_id",
+                    (lead_key_hash,),
+                )
+            )
+            if len(rows) > 1:
+                raise DataCorruption("lead has more than one queue-active handoff")
+            if not rows:
+                return None
+            state = self._load_handoff(rows[0][0])[0]
+        except sqlite3.Error as exc:
+            raise _sqlite_error(exc, "find_active_handoff_by_lead_hash") from exc
+        if state.request.lead_key_hash != lead_key_hash or not state.queue_active:
+            raise DataCorruption("active handoff index disagrees with canonical state")
+        return state
+
+    def find_active_handoff_by_incident_key(
+        self,
+        incident_key: str,
+    ) -> HandoffWorkflow | None:
+        """Return an incident's queue-active handoff without scanning state JSON."""
+
+        self._ensure_open()
+        incident_key = _require_id(incident_key, "incident_key")
+        try:
+            row = self._connection.execute(
+                "SELECT handoff_id, status FROM handoff_workflows WHERE incident_key=?",
+                (incident_key,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row[1] not in {
+                "requested",
+                "active",
+                "acknowledgement_pending",
+                "acknowledged",
+                "manual_review",
+            }:
+                return None
+            state = self._load_handoff(row[0])[0]
+        except sqlite3.Error as exc:
+            raise _sqlite_error(exc, "find_active_handoff_by_incident_key") from exc
+        if state.request.incident_key != incident_key or not state.queue_active:
+            raise DataCorruption("incident lookup disagrees with canonical handoff state")
+        return state
 
     def _insert_handoff_event(
         self,

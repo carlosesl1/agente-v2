@@ -12,8 +12,10 @@ from .types import DispatchPermit, DispatchRequest, _require_hash, _require_id
 
 _PREPARATION_FAILURE_REASONS = frozenset(
     {
+        "active_handoff",
         "command_serialization_failed",
         "command_validation_failed",
+        "effect_guard_unavailable",
         "synthetic_preparation_failure",
         "synthetic_timeout",
         "unsupported_operation",

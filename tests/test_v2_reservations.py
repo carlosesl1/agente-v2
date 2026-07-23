@@ -54,6 +54,16 @@ class FakeReservationPort:
         return self.action
 
 
+class FakeCommercialEffectGuard:
+    def __init__(self, blocked_workflow_ids: frozenset[str] = frozenset()) -> None:
+        self.blocked_workflow_ids = blocked_workflow_ids
+        self.calls: list[str] = []
+
+    def allows_workflow(self, workflow_id: str) -> bool:
+        self.calls.append(workflow_id)
+        return workflow_id not in self.blocked_workflow_ids
+
+
 def _authorization(provider: str, *, enabled: bool = True) -> ProviderWriteAuthorization:
     return ProviderWriteAuthorization(
         provider=provider,
@@ -92,6 +102,7 @@ def _worker(
     port: FakeReservationPort,
     *,
     enabled: bool = True,
+    blocked_workflow_ids: frozenset[str] = frozenset(),
 ) -> V2ReservationWorker:
     adapter = V2ReservationExecutionAdapter(
         provider="cloudbeds",
@@ -101,6 +112,7 @@ def _worker(
     return V2ReservationWorker(
         store=store,
         adapters=(adapter,),
+        effect_guard=FakeCommercialEffectGuard(blocked_workflow_ids),
         worker_id="worker:v2-reservation",
         lease_ttl=timedelta(seconds=30),
     )
@@ -156,6 +168,28 @@ def test_closed_write_gate_stops_before_fence_and_provider_call(tmp_path: Path) 
             "SELECT dispatch_slots_consumed FROM execution_ledger"
         ).fetchone()
         assert ledger == (0,)
+    finally:
+        store.close()
+
+
+def test_active_handoff_stops_queued_command_before_fence_and_provider(
+    tmp_path: Path,
+) -> None:
+    store = _queued_cloudbeds_store(tmp_path)
+    port = FakeReservationPort("cloudbeds", _result(ProviderCertainty.EFFECT_CONFIRMED))
+    worker = _worker(
+        store,
+        port,
+        blocked_workflow_ids=frozenset({"workflow:v2-task4-lodging"}),
+    )
+    try:
+        result = worker.run_once(now=NOW)
+
+        assert result.disposition is V2WorkerDisposition.NOT_CALLED
+        assert port.calls == []
+        assert store._connection.execute(
+            "SELECT dispatch_slots_consumed, status FROM execution_ledger"
+        ).fetchone() == (0, "outcome_recorded")
     finally:
         store.close()
 

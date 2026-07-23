@@ -13,6 +13,7 @@ from v2_application.reservations import (
     RoutingReservationExecutionAdapter,
     V2ReservationExecutionAdapter,
 )
+from v2_contracts.ports import CommercialEffectGuard
 
 
 class V2WorkerDisposition(str, Enum):
@@ -36,10 +37,11 @@ class V2ReservationWorker:
         *,
         store: SQLiteUnitOfWork,
         adapters: tuple[V2ReservationExecutionAdapter, ...],
+        effect_guard: CommercialEffectGuard,
         worker_id: str,
         lease_ttl: timedelta,
     ) -> None:
-        router = RoutingReservationExecutionAdapter(adapters)
+        router = RoutingReservationExecutionAdapter(adapters, effect_guard)
         self._worker = CommandWorker(
             store=store,
             adapter=router,
