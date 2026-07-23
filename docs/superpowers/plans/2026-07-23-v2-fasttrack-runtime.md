@@ -799,10 +799,10 @@ Depois registrar esse SHA em `ACTIVE.md`, mover `NEXT` para Task 6 e criar o com
 - Modify: `docs/refactor/ACTIVE.md`
 
 **Interfaces:**
-- Consumes: webhook assinado Stripe/Wise ou comprovante Pix; `PaymentObligation` persistida.
-- Produces: `VerifiedPaymentEvidence`; claim global; `PaymentSettlementCommand`; `SettlementOutcome`.
+- Consumes: `PaymentEvidenceRecorded` já produzida por adapter de assinatura/prova verificado; `PaymentObligation` persistida.
+- Produces: claim global; `PaymentSettlementCommand`; `SettlementOutcome`. Os endpoints de bytes brutos apenas compõem esses adapters no `v2_host` da Task 9, sem segundo ledger.
 
-- [ ] **Step 1: Escrever RED para assinatura, binding e replay**
+- [ ] **Step 1: Escrever RED para binding, claim global, replay e timeout pós-fence**
 
 ```python
 # tests/test_v2_payment_evidence.py
@@ -861,14 +861,14 @@ def test_settlement_timeout_after_fence_never_redispatches(runtime) -> None:
 - [ ] **Step 2: Executar RED**
 
 ```bash
-python -m pytest -q tests/test_v2_payment_evidence.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_payment_evidence.py
 ```
 
-Expected: FAIL porque webhooks V2 e evidências discriminadas não estão conectados.
+Expected: FAIL porque a fachada V2 ainda não delega ao claim global da Fase 6.
 
-- [ ] **Step 3: Implementar ingress financeiro**
+- [ ] **Step 3: Compor evidência verificada sem duplicar validadores**
 
-Adicionar endpoints autenticados:
+`V2PaymentEvidenceGateway` aceita somente `PaymentEvidenceRecorded` já verificada pelos contratos discriminados maduros (`VerifiedStripeEvent`, `VerifiedWiseCredit`, `PixVisualEvidence`) e delega atomicamente a `SQLiteFollowupUnitOfWork.claim_payment_evidence`. Assinatura sobre bytes brutos e extração Pix continuam nos adapters técnicos auditados; as rotas abaixo serão composition-only na Task 9:
 
 ```text
 POST /webhook/stripe/{business_unit}
@@ -876,7 +876,7 @@ POST /webhook/wise/{business_unit}
 POST /webhook/pix-proof
 ```
 
-Stripe e Wise validam assinatura sobre bytes brutos antes do parse. Pix aceita media já ingerida, extrai prova em processo sem capability e revalida mecanicamente receiver, valor, moeda, status e E2E. Nenhum endpoint executa settlement inline; todos persistem evidence/evento idempotente.
+Nenhuma rota executa settlement inline e não existe um segundo ledger V2 de evidência.
 
 - [ ] **Step 4: Implementar claims e settlement worker**
 
@@ -889,12 +889,12 @@ bank_settlement_confirmed = False
 
 A projeção pública usa “comprovante validado e pagamento aceito para processamento”, nunca confirmação bancária.
 
-- [ ] **Step 5: Liberar Wise verification e executar GREEN**
+- [ ] **Step 5: Manter tool histórico bloqueado e executar GREEN**
 
-Somente depois dos REDs verdes, migrar `wise_verificar_pagamento` no dispatch. Run:
+`wise_verificar_pagamento` permanece bloqueado no catálogo histórico: o V2 usa o gateway de evidência e o settlement worker tipado da Fase 6, não o executor genérico de tools. Run:
 
 ```bash
-python -m pytest -q tests/test_v2_payment_evidence.py tests/test_phase6_payment_claims.py tests/test_phase6_payment_worker.py tests/test_phase8_phase6_v2.py
+uv run --no-project --with 'pytest>=8.0.0' python -m pytest -q tests/test_v2_payment_evidence.py tests/test_phase6_payment_claims.py tests/test_phase6_payment_worker.py tests/test_phase8_phase6_v2.py
 python scripts/check_fasttrack_boundaries.py
 git diff --check
 ```
@@ -903,10 +903,7 @@ Expected: exit 0.
 
 - [ ] **Step 6: Atualizar controle e commitar**
 
-```bash
-git add v2_contracts v2_application v2_adapters v2_host reservation_followup reservation_boundary tests docs/refactor/ACTIVE.md
-git commit -m "feat: verify and settle v2 payments"
-```
+Criar o commit funcional da fachada/integração e, depois dos gates, registrar seu SHA em `ACTIVE.md`, mover `NEXT` para Task 7 e criar um commit de controle separado, sem código funcional.
 
 ---
 
