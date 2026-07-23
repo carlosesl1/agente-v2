@@ -97,6 +97,13 @@ def test_lodging_read_binds_dates_occupancy_price_and_private_offer_id() -> None
     ]
 
 
+def test_query_hash_is_stable_across_new_request_id_but_request_hash_is_not() -> None:
+    reread = replace(LODGING_REQUEST, request_id="read-lodging-002")
+
+    assert reread.canonical_hash() != LODGING_REQUEST.canonical_hash()
+    assert reread.query_hash() == LODGING_REQUEST.query_hash()
+
+
 def test_activity_read_requires_canonical_product_id() -> None:
     reads = BokunReadAdapter(
         transport=lambda operation, payload: {},
@@ -181,7 +188,9 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
     observation = adapter.read(ACTIVITY_REQUEST)
     component = OfferSnapshot(
         offer_id=observation.public_payload["offer_id"],
-        lookup_id=(f"lookup:{ACTIVITY_REQUEST.product_id}:{observation.request_hash}"),
+        lookup_id=(
+            f"lookup:{ACTIVITY_REQUEST.product_id}:{ACTIVITY_REQUEST.query_hash()}"
+        ),
         service=ServiceKind.ACTIVITY,
         provider_ref=observation.private_binding_hash,
         public_label=observation.public_payload["product_public_name"],

@@ -70,7 +70,7 @@ class CloudbedsReadAdapter:
             option_hash = binding_hash(
                 {"request_hash": query.request_hash, "provider": private}
             )
-            if "offer:" + option_hash[:32] == query.offer_id:
+            if "offer:" + option_hash == query.offer_id:
                 if selected is not None:
                     raise ProviderReadError("Cloudbeds private offer is not unique")
                 selected = (option, private)
@@ -138,7 +138,7 @@ class CloudbedsReadAdapter:
                 "room_rate_id": room_rate_id,
             }
             option_binding = binding_hash(
-                {"request_hash": request.canonical_hash(), "provider": private}
+                {"request_hash": request.query_hash(), "provider": private}
             )
             amount = text(option.get("total_amount"), "total_amount")
             currency = text(option.get("currency"), "currency")
@@ -151,7 +151,7 @@ class CloudbedsReadAdapter:
                 raise ProviderReadError("available_units must be non-negative")
             public_options.append(
                 {
-                    "offer_id": "offer:" + option_binding[:32],
+                    "offer_id": "offer:" + option_binding,
                     "room_public_name": text(
                         option.get("room_public_name"), "room_public_name"
                     ),
@@ -173,7 +173,7 @@ class CloudbedsReadAdapter:
             expires_at=expires_at,
             public_payload=public,
             private_binding_hash=binding_hash(
-                {"request_hash": request.canonical_hash(), "options": private_options}
+                {"request_hash": request.query_hash(), "options": private_options}
             ),
         )
 
@@ -199,7 +199,7 @@ class CloudbedsReadAdapter:
             expires_at=expires_at,
             public_payload=public,
             private_binding_hash=binding_hash(
-                {"request_hash": request.canonical_hash(), "offer_id": request.offer_id}
+                {"request_hash": request.query_hash(), "offer_id": request.offer_id}
             ),
         )
 

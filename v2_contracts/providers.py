@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from enum import Enum
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from enum import Enum
 from typing import Any, Final
-
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -38,7 +37,11 @@ def _text(value: object, name: str, *, identifier: bool = False) -> str:
 
 
 def _utc(value: object, name: str) -> datetime:
-    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() != timedelta(0):
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() != timedelta(0)
+    ):
         raise ValueError(f"{name} must be an exact UTC datetime")
     return value
 
@@ -83,8 +86,14 @@ class ReadRequest:
             if _LOCALE_RE.fullmatch(locale) is None:
                 raise InvalidReadRequest("locale must be canonical")
             self._require_none(
-                "check_in", "check_out", "adults", "children", "product_id",
-                "activity_date", "participants", "offer_id",
+                "check_in",
+                "check_out",
+                "adults",
+                "children",
+                "product_id",
+                "activity_date",
+                "participants",
+                "offer_id",
             )
         elif self.kind is ReadKind.LODGING:
             if type(self.check_in) is not date or type(self.check_out) is not date:
@@ -94,30 +103,59 @@ class ReadRequest:
             if type(self.adults) is not int or self.adults < 1:
                 raise InvalidReadRequest("adults must be a positive exact integer")
             if type(self.children) is not int or self.children < 0:
-                raise InvalidReadRequest("children must be a non-negative exact integer")
+                raise InvalidReadRequest(
+                    "children must be a non-negative exact integer"
+                )
             self._require_none(
-                "query", "locale", "product_id", "activity_date", "participants", "offer_id",
+                "query",
+                "locale",
+                "product_id",
+                "activity_date",
+                "participants",
+                "offer_id",
             )
         elif self.kind is ReadKind.ACTIVITY:
             self._require_product()
             if type(self.activity_date) is not date:
                 raise InvalidReadRequest("activity_date must be an exact date")
             if type(self.participants) is not int or self.participants < 1:
-                raise InvalidReadRequest("participants must be a positive exact integer")
+                raise InvalidReadRequest(
+                    "participants must be a positive exact integer"
+                )
             self._require_none(
-                "query", "locale", "check_in", "check_out", "adults", "children", "offer_id",
+                "query",
+                "locale",
+                "check_in",
+                "check_out",
+                "adults",
+                "children",
+                "offer_id",
             )
         elif self.kind is ReadKind.ROOM_DESCRIPTION:
             _text(self.offer_id, "offer_id", identifier=True)
             self._require_none(
-                "query", "locale", "check_in", "check_out", "adults", "children",
-                "product_id", "activity_date", "participants",
+                "query",
+                "locale",
+                "check_in",
+                "check_out",
+                "adults",
+                "children",
+                "product_id",
+                "activity_date",
+                "participants",
             )
         else:
             self._require_product()
             self._require_none(
-                "query", "locale", "check_in", "check_out", "adults", "children",
-                "activity_date", "participants", "offer_id",
+                "query",
+                "locale",
+                "check_in",
+                "check_out",
+                "adults",
+                "children",
+                "activity_date",
+                "participants",
+                "offer_id",
             )
 
     def _require_product(self) -> None:
@@ -138,8 +176,16 @@ class ReadRequest:
             "kind": self.kind.value,
         }
         for name in (
-            "query", "locale", "check_in", "check_out", "adults", "children",
-            "product_id", "activity_date", "participants", "offer_id",
+            "query",
+            "locale",
+            "check_in",
+            "check_out",
+            "adults",
+            "children",
+            "product_id",
+            "activity_date",
+            "participants",
+            "offer_id",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -153,7 +199,22 @@ class ReadRequest:
         ).encode("utf-8")
 
     def canonical_hash(self) -> str:
-        return hashlib.sha256(b"v2-read-request-v1\0" + self.to_canonical_bytes()).hexdigest()
+        return hashlib.sha256(
+            b"v2-read-request-v1\0" + self.to_canonical_bytes()
+        ).hexdigest()
+
+    def query_hash(self) -> str:
+        """Stable commercial query identity that deliberately excludes request_id."""
+        values = json.loads(self.to_canonical_bytes())
+        del values["request_id"]
+        payload = json.dumps(
+            values,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(b"v2-read-query-v1\0" + payload).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,17 +227,23 @@ class ReadObservation:
     private_binding_hash: str
 
     def __post_init__(self) -> None:
-        if type(self.request_hash) is not str or _SHA256_RE.fullmatch(self.request_hash) is None:
+        if (
+            type(self.request_hash) is not str
+            or _SHA256_RE.fullmatch(self.request_hash) is None
+        ):
             raise ValueError("request_hash must be a lowercase SHA-256")
         _text(self.provider, "provider", identifier=True)
         observed = _utc(self.observed_at, "observed_at")
         expires = _utc(self.expires_at, "expires_at")
         if type(self.public_payload) is not dict:
             raise TypeError("public_payload must be an exact dict")
-        object.__setattr__(self, "public_payload", _closed_json(self.public_payload, "public_payload"))
-        if type(self.private_binding_hash) is not str or _SHA256_RE.fullmatch(
-            self.private_binding_hash
-        ) is None:
+        object.__setattr__(
+            self, "public_payload", _closed_json(self.public_payload, "public_payload")
+        )
+        if (
+            type(self.private_binding_hash) is not str
+            or _SHA256_RE.fullmatch(self.private_binding_hash) is None
+        ):
             raise ValueError("private_binding_hash must be a lowercase SHA-256")
         if expires <= observed:
             raise ValueError("expires_at must be after observed_at")
@@ -246,9 +313,14 @@ class ProviderDispatchPermit:
             raise ValueError("canonical_payload must be closed JSON") from exc
         if type(decoded) is not dict or canonical != self.canonical_payload:
             raise ValueError("canonical_payload must be a canonical JSON object")
-        if type(self.request_hash) is not str or _SHA256_RE.fullmatch(self.request_hash) is None:
+        if (
+            type(self.request_hash) is not str
+            or _SHA256_RE.fullmatch(self.request_hash) is None
+        ):
             raise ValueError("request_hash must bind the durable command")
-        expected_hash = hashlib.sha256(self.canonical_payload.encode("utf-8")).hexdigest()
+        expected_hash = hashlib.sha256(
+            self.canonical_payload.encode("utf-8")
+        ).hexdigest()
         if self.payload_hash != expected_hash:
             raise ValueError("payload_hash does not bind canonical_payload")
 

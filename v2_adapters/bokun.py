@@ -71,7 +71,7 @@ class BokunReadAdapter:
                 "bokun_product_id": provider_product_id,
             }
         )
-        offer_id = "offer:" + private_hash[:32]
+        offer_id = "offer:" + private_hash
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         resolved_query = PrivateOfferQuery(
             service="activity",
@@ -118,13 +118,13 @@ class BokunReadAdapter:
             raise ProviderReadError("Bókun available must be an exact bool")
         private_hash = binding_hash(
             {
-                "request_hash": request.canonical_hash(),
+                "request_hash": request.query_hash(),
                 "bokun_product_id": provider_product_id,
             }
         )
         public = {
             **query,
-            "offer_id": "offer:" + private_hash[:32],
+            "offer_id": "offer:" + private_hash,
             "product_public_name": text(
                 response.get("product_public_name"), "product_public_name"
             ),
@@ -164,7 +164,7 @@ class BokunReadAdapter:
             public_payload=public,
             private_binding_hash=binding_hash(
                 {
-                    "request_hash": request.canonical_hash(),
+                    "request_hash": request.query_hash(),
                     "bokun_product_id": provider_product_id,
                 }
             ),

@@ -45,10 +45,16 @@ from reservation_domain import (
 from reservation_domain import (
     reduce as reduce_domain,
 )
+from reservation_followup import (
+    HandoffEffectPolicy,
+    HandoffReasonCode,
+    HandoffRequested,
+    HandoffWorkflow,
+)
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.profile import PrivateCustomerBinding
-from v2_contracts.providers import ReadObservation
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _FACT_ORDER = {
@@ -88,7 +94,7 @@ class V2ConversationDecision:
     projection: ConversationProjection
     commands: tuple[ReservationCommand, ...]
     public_reply: ConversationReply
-    handoff_request: str | None = None
+    handoff_request: HandoffRequested | None = None
     receipt_requirements: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -102,8 +108,11 @@ class V2ConversationDecision:
             raise TypeError("commands must contain exact ReservationCommand values")
         if type(self.public_reply) is not ConversationReply:
             raise TypeError("public_reply must be exact ConversationReply")
-        if self.handoff_request is not None and type(self.handoff_request) is not str:
-            raise TypeError("handoff_request must be exact text or None")
+        if (
+            self.handoff_request is not None
+            and type(self.handoff_request) is not HandoffRequested
+        ):
+            raise TypeError("handoff_request must be exact HandoffRequested or None")
         if type(self.receipt_requirements) is not tuple or any(
             type(item) is not str or not item for item in self.receipt_requirements
         ):
@@ -139,6 +148,29 @@ def _model_fact_slot(fact: ModelFact):
     raise ConversationReductionError("model fact is outside the projection catalog")
 
 
+def typed_facts_from_proposal(
+    proposal: ModelProposal,
+    *,
+    frame_commitment_hash: str,
+) -> tuple[TypedFact, ...]:
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    if (
+        type(frame_commitment_hash) is not str
+        or _HASH_RE.fullmatch(frame_commitment_hash) is None
+    ):
+        raise ValueError("frame_commitment_hash must be a lowercase SHA-256")
+    facts = tuple(
+        TypedFact(
+            name=fact.name,
+            value=_model_fact_slot(fact),
+            frame_commitment_hash=frame_commitment_hash,
+        )
+        for fact in proposal.facts
+    )
+    return tuple(sorted(facts, key=lambda item: _FACT_ORDER[item.name]))
+
+
 def _merge_projection(
     projection: ConversationProjection,
     proposal: ModelProposal,
@@ -147,12 +179,11 @@ def _merge_projection(
     stage: ConversationStage | None = None,
 ) -> ConversationProjection:
     existing = {item.name: item for item in projection.facts}
-    for fact in proposal.facts:
-        existing[fact.name] = TypedFact(
-            name=fact.name,
-            value=_model_fact_slot(fact),
-            frame_commitment_hash=fact_commitment_hash,
-        )
+    for fact in typed_facts_from_proposal(
+        proposal,
+        frame_commitment_hash=fact_commitment_hash,
+    ):
+        existing[fact.name] = fact
     facts = tuple(sorted(existing.values(), key=lambda item: _FACT_ORDER[item.name]))
     values = {item.name: item.value.value for item in facts}
     service = values.get("service")
@@ -287,8 +318,8 @@ def _offer_and_query(
     if not (observation.observed_at <= now < observation.expires_at):
         raise ConversationReductionError("read observation is stale or from the future")
     payload = _selected_payload(observation, target_offer_id)
+    product_id = None
     if observation.provider == "cloudbeds":
-        lookup_id = "lookup:" + observation.request_hash
         service = ServiceKind.LODGING
         start_date = _date_value(payload.get("check_in"), "check_in")
         end_date = _date_value(payload.get("check_out"), "check_out")
@@ -302,7 +333,6 @@ def _offer_and_query(
         product_id = payload.get("product_id")
         if type(product_id) is not str or not product_id:
             raise ConversationReductionError("activity product_id is invalid")
-        lookup_id = f"lookup:{product_id}:{observation.request_hash}"
         service = ServiceKind.ACTIVITY
         start_date = _date_value(payload.get("activity_date"), "activity_date")
         end_date = None
@@ -332,6 +362,25 @@ def _offer_and_query(
         start_time=None,
         party=party,
     )
+    if service is ServiceKind.LODGING:
+        stable_query_hash = ReadRequest(
+            request_id="stable-query",
+            kind=ReadKind.LODGING,
+            check_in=start_date,
+            check_out=end_date,
+            adults=adults,
+            children=children,
+        ).query_hash()
+        lookup_id = "lookup:" + stable_query_hash
+    else:
+        stable_query_hash = ReadRequest(
+            request_id="stable-query",
+            kind=ReadKind.ACTIVITY,
+            product_id=product_id,
+            activity_date=start_date,
+            participants=adults,
+        ).query_hash()
+        lookup_id = f"lookup:{product_id}:{stable_query_hash}"
     offer = OfferSnapshot(
         offer_id=target_offer_id,
         lookup_id=lookup_id,
@@ -374,6 +423,19 @@ def _replace_boundary(
         handoff=state.handoff,
         payments=state.payments,
         processed_event_ids=processed,
+    )
+
+
+def _consume_without_workflow_transition(
+    state: BoundaryState,
+    source_event_id: str,
+) -> BoundaryState:
+    if source_event_id in state.processed_event_ids:
+        raise ConversationReductionError("source event is already processed")
+    return replace(
+        state,
+        version=state.version + 1,
+        processed_event_ids=state.processed_event_ids + (source_event_id,),
     )
 
 
@@ -495,9 +557,60 @@ class V2ConversationReducer:
             proposal,
             fact_commitment_hash=fact_commitment_hash,
         )
+        if proposal.intent == "request_handoff":
+            if state.handoff is None:
+                handoff_request = HandoffRequested(
+                    handoff_id=_identity(
+                        state.lead_key,
+                        proposal.source_event_id,
+                        prefix="handoff",
+                    ),
+                    lead_key_hash=hashlib.sha256(
+                        b"v2-handoff-lead-v1\x00" + state.lead_key.encode("utf-8")
+                    ).hexdigest(),
+                    incident_key=_identity(
+                        proposal.source_event_id,
+                        prefix="incident",
+                    ),
+                    reason_code=HandoffReasonCode.CUSTOMER_REQUESTED,
+                    source_event_id=proposal.source_event_id,
+                    reservation_anchor=None,
+                    requested_at=instant,
+                )
+                handoff = HandoffWorkflow.from_request(
+                    handoff_request,
+                    HandoffEffectPolicy.default_email_disabled(),
+                )
+                next_state = replace(
+                    _consume_without_workflow_transition(
+                        state,
+                        proposal.source_event_id,
+                    ),
+                    handoff=handoff,
+                )
+            else:
+                handoff_request = None
+                next_state = _consume_without_workflow_transition(
+                    state,
+                    proposal.source_event_id,
+                )
+            return V2ConversationDecision(
+                next_state=next_state,
+                projection=replace(merged, stage=ConversationStage.CLOSING),
+                commands=(),
+                public_reply=ConversationReply(
+                    "handoff",
+                    proposal.reply_chunks
+                    or ("Vou encaminhar seu atendimento para uma pessoa.",),
+                ),
+                handoff_request=handoff_request,
+                receipt_requirements=("handoff_relay",),
+            )
         if not _profile_ready(profile, instant):
             return V2ConversationDecision(
-                next_state=state,
+                next_state=_consume_without_workflow_transition(
+                    state, proposal.source_event_id
+                ),
                 projection=merged,
                 commands=(),
                 public_reply=ConversationReply(
@@ -507,11 +620,30 @@ class V2ConversationReducer:
                 receipt_requirements=("profile_completion",),
             )
 
+        if state.handoff is not None and proposal.intent in {"select", "confirm"}:
+            return V2ConversationDecision(
+                next_state=_consume_without_workflow_transition(
+                    state,
+                    proposal.source_event_id,
+                ),
+                projection=replace(merged, stage=ConversationStage.CLOSING),
+                commands=(),
+                public_reply=ConversationReply(
+                    "handoff",
+                    (
+                        "Seu atendimento humano continua ativo; não vou executar efeitos.",
+                    ),
+                ),
+                receipt_requirements=("handoff_effect_guard",),
+            )
+
         workflow = state.workflow
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "confirm":
             if proposal.confirmed_summary_version != workflow.draft.version:
                 return V2ConversationDecision(
-                    next_state=state,
+                    next_state=_consume_without_workflow_transition(
+                        state, proposal.source_event_id
+                    ),
                     projection=merged,
                     commands=(),
                     public_reply=ConversationReply(
@@ -522,7 +654,9 @@ class V2ConversationReducer:
                 )
             if workflow.draft.customer != _customer(profile):
                 return V2ConversationDecision(
-                    next_state=state,
+                    next_state=_consume_without_workflow_transition(
+                        state, proposal.source_event_id
+                    ),
                     projection=merged,
                     commands=(),
                     public_reply=ConversationReply(
@@ -533,7 +667,9 @@ class V2ConversationReducer:
                 )
             if not _reads_bind_draft(workflow, reads, now=instant):
                 return V2ConversationDecision(
-                    next_state=state,
+                    next_state=_consume_without_workflow_transition(
+                        state, proposal.source_event_id
+                    ),
                     projection=merged,
                     commands=(),
                     public_reply=ConversationReply(
@@ -687,7 +823,9 @@ class V2ConversationReducer:
             )
 
         return V2ConversationDecision(
-            next_state=state,
+            next_state=_consume_without_workflow_transition(
+                state, proposal.source_event_id
+            ),
             projection=merged,
             commands=(),
             public_reply=_generic_reply(proposal),
@@ -700,4 +838,5 @@ __all__ = [
     "PackageCommandCoordinator",
     "V2ConversationDecision",
     "V2ConversationReducer",
+    "typed_facts_from_proposal",
 ]

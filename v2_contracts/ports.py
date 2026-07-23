@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from v2_contracts.model import ModelProposal, ModelRequest
+from v2_contracts.model import AuditedModelTurn, ModelProposal, ModelRequest
 from v2_contracts.providers import (
     ProviderDispatchPermit,
     ProviderExecutionResult,
@@ -15,6 +15,10 @@ from v2_contracts.providers import (
 
 class ModelPort(Protocol):
     def complete(self, request: ModelRequest) -> ModelProposal: ...
+
+
+class AuditedModelPort(Protocol):
+    def complete_audited(self, request: ModelRequest) -> AuditedModelTurn: ...
 
 
 class ReadPort(Protocol):
@@ -31,4 +35,10 @@ class CommercialEffectGuard(Protocol):
     def allows_workflow(self, workflow_id: str) -> bool: ...
 
 
-__all__ = ["CommercialEffectGuard", "ModelPort", "ReadPort", "ReservationPort"]
+__all__ = [
+    "AuditedModelPort",
+    "CommercialEffectGuard",
+    "ModelPort",
+    "ReadPort",
+    "ReservationPort",
+]

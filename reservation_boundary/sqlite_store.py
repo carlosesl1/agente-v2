@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
+import re
+import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import hashlib
-import json
 from pathlib import Path
-import re
-import sqlite3
 from typing import ClassVar, Protocol
 
-from reservation_domain import ReservationCommand, dumps_command
-from reservation_execution import OutboxMessage
-from reservation_followup import (
-    PaymentSettlementCommand,
-    to_wire_json as to_phase6_wire_json,
+from reservation_boundary.conversation import (
+    ConversationProjection,
+    ConversationStage,
+    DesiredService,
+    MayaTurnClosure,
+    PublicReplyChunk,
+    PublicRoute,
+    SourceEventIdentity,
+    TranscriptCommitment,
 )
-
+from reservation_boundary.reads import ReadObservation
 from reservation_boundary.schema import (
     BOUNDARY_V8_TABLES,
     TABLE_NAMES,
@@ -29,24 +33,29 @@ from reservation_boundary.schema import (
     render_sqlite_v8,
     sqlite_v8_schema_fingerprint,
 )
-from reservation_boundary.conversation import (
-    MayaTurnClosure,
-    PublicReplyChunk,
-    SourceEventIdentity,
-    TranscriptCommitment,
+from reservation_boundary.serialization import (
+    from_wire_json,
+    semantic_hash,
+    to_wire_json,
 )
-from reservation_boundary.reads import ReadObservation
-from reservation_boundary.serialization import from_wire_json, semantic_hash, to_wire_json
 from reservation_boundary.types import (
     BoundaryCommit,
     BoundaryState,
-    KernelDecision,
     ImportDisposition,
     ImportResult,
+    KernelDecision,
     LegacyLeadSnapshot,
+    TypedFact,
     VersionedBoundaryState,
 )
-
+from reservation_domain import ReservationCommand, dumps_command
+from reservation_execution import OutboxMessage
+from reservation_followup import (
+    PaymentSettlementCommand,
+)
+from reservation_followup import (
+    to_wire_json as to_phase6_wire_json,
+)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -483,13 +492,13 @@ class TurnReceipt:
         ).hexdigest()
 
     @classmethod
-    def create(cls, **values: object) -> "TurnReceipt":
+    def create(cls, **values: object) -> TurnReceipt:
         if "artifact_hash" in values:
             raise TypeError("TurnReceipt.create derives artifact_hash")
         return cls(**values)
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "TurnReceipt":
+    def from_canonical_bytes(cls, payload: bytes) -> TurnReceipt:
         envelope = _receipt_load_json(payload, "TurnReceipt")
         if set(envelope) != {"schema", "version", "data"}:
             raise ValueError("TurnReceipt envelope fields mismatch")
@@ -755,6 +764,40 @@ class PublicOutboxWrite:
         _receipt_utc(self.deadline_at, "PublicOutboxWrite.deadline_at")
 
 
+def _runtime_projection_from_maya_data(data: dict[str, object]) -> ConversationProjection:
+    raw_facts = data.get("facts")
+    if type(raw_facts) is not list or any(type(item) is not dict for item in raw_facts):
+        raise ValueError("runtime Maya facts cannot reconstruct projection")
+    facts = tuple(TypedFact.from_canonical_bytes(_receipt_json(item)) for item in raw_facts)
+    values = {item.name: item.value.value for item in facts}
+    locale = values.get("language")
+    if type(locale) is not str:
+        raise ValueError("runtime projection has no authenticated locale")
+    try:
+        route = PublicRoute(data["route"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("runtime projection route is invalid") from exc
+    stage = {
+        PublicRoute.RECEPTIONIST: ConversationStage.RECEPTIONIST,
+        PublicRoute.HOSTEL: ConversationStage.HOSTEL,
+        PublicRoute.AGENCY: ConversationStage.AGENCY,
+        PublicRoute.CLOSING: ConversationStage.CLOSING,
+        PublicRoute.HANDOFF: ConversationStage.CLOSING,
+    }.get(route)
+    if stage is None:
+        raise ValueError("runtime projection route cannot carry state")
+    service = values.get("service")
+    if service == "hostel":
+        desired = (DesiredService.HOSTEL,)
+    elif service == "agency":
+        desired = (DesiredService.AGENCY,)
+    elif service == "package":
+        desired = (DesiredService.HOSTEL, DesiredService.AGENCY)
+    else:
+        desired = ()
+    return ConversationProjection(stage, desired, locale, facts, None)
+
+
 def _validate_v8_artifact_graph(
     *,
     receipt: TurnReceipt,
@@ -879,6 +922,12 @@ def _validate_v8_artifact_graph(
         or proposal_artifact.artifact_hash != receipt.maya_proposal_hash
     ):
         raise ValueError("v8 transcript/closure/proposal binding diverged")
+    if proposal_artifact.frame_reference is not None:
+        if proposal_artifact.frame_reference != frames[-1].canonical_hash():
+            raise ValueError("runtime Maya proposal frame reference diverged")
+        runtime_projection = _runtime_projection_from_maya_data(proposal)
+        if runtime_projection.canonical_hash() != receipt.behavior_state_snapshot_digest:
+            raise ValueError("runtime Maya proposal projection binding diverged")
     if tuple(chunk.ordinal for chunk in public_chunks) != tuple(range(len(public_chunks))):
         raise ValueError("v8 public chunks are not contiguous")
     if any(
@@ -1329,7 +1378,7 @@ class SQLiteBoundaryStore:
         self._savepoint_counter = 0
 
     @classmethod
-    def open_memory(cls) -> "SQLiteBoundaryStore":
+    def open_memory(cls) -> SQLiteBoundaryStore:
         connection = sqlite3.connect(":memory:", isolation_level=None, timeout=5.0)
         try:
             connection.execute("PRAGMA foreign_keys = ON")
@@ -1343,7 +1392,7 @@ class SQLiteBoundaryStore:
             raise
 
     @classmethod
-    def open_memory_v8(cls) -> "SQLiteBoundaryStore":
+    def open_memory_v8(cls) -> SQLiteBoundaryStore:
         connection = sqlite3.connect(":memory:", isolation_level=None, timeout=5.0)
         try:
             connection.execute("PRAGMA foreign_keys = ON")
@@ -1357,7 +1406,7 @@ class SQLiteBoundaryStore:
             raise
 
     @classmethod
-    def open_path_v8(cls, path: Path) -> "SQLiteBoundaryStore":
+    def open_path_v8(cls, path: Path) -> SQLiteBoundaryStore:
         if not isinstance(path, Path):
             raise TypeError("path must be an exact pathlib.Path")
         if path.exists() and not path.is_file():
@@ -1392,7 +1441,7 @@ class SQLiteBoundaryStore:
             raise
 
     @classmethod
-    def open_readonly_v8(cls, path: Path) -> "SQLiteBoundaryStore":
+    def open_readonly_v8(cls, path: Path) -> SQLiteBoundaryStore:
         if not isinstance(path, Path):
             raise TypeError("path must be a pathlib.Path")
         if not path.is_file():
@@ -1413,7 +1462,7 @@ class SQLiteBoundaryStore:
             raise
 
     @classmethod
-    def open_path(cls, path: Path) -> "SQLiteBoundaryStore":
+    def open_path(cls, path: Path) -> SQLiteBoundaryStore:
         if not isinstance(path, Path):
             raise TypeError("path must be an exact pathlib.Path")
         if path.exists() and not path.is_file():
@@ -1455,7 +1504,7 @@ class SQLiteBoundaryStore:
             raise
 
     @classmethod
-    def open_readonly(cls, path: Path) -> "SQLiteBoundaryStore":
+    def open_readonly(cls, path: Path) -> SQLiteBoundaryStore:
         if not isinstance(path, Path):
             raise TypeError("path must be a pathlib.Path")
         if not path.is_file():
@@ -1647,11 +1696,82 @@ class SQLiteBoundaryStore:
 
     def turn_receipt_count(self, event_id: str) -> int:
         exact_event_id = _require_id(event_id, "event_id")
+        identity_column = "aggregate_turn_id" if self._schema_version == 8 else "event_id"
         row = self._connection.execute(
-            "SELECT COUNT(*) FROM boundary_events WHERE event_id=?",
+            f"SELECT COUNT(*) FROM boundary_events WHERE {identity_column}=?",
             (exact_event_id,),
         ).fetchone()
         return int(row[0])
+
+    def load_turn_receipt(self, aggregate_turn_id: str) -> TurnReceipt | None:
+        """Load and authenticate one v8 receipt by aggregate identity."""
+        self._ensure_open()
+        if self._schema_version != 8:
+            raise BoundaryStoreError("turn receipts require an authenticated v8 store")
+        exact_id = _require_id(aggregate_turn_id, "aggregate_turn_id")
+        rows = self._connection.execute(
+            "SELECT turn_receipt_json,turn_receipt_hash FROM boundary_events "
+            "WHERE aggregate_turn_id=?",
+            (exact_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise DataCorruption("aggregate turn identity is not globally unique")
+        payload = rows[0][0].encode("utf-8")
+        receipt = TurnReceipt.from_canonical_bytes(payload)
+        if receipt.aggregate_turn_id != exact_id or receipt.artifact_hash != rows[0][1]:
+            raise DataCorruption("stored turn receipt identity diverged")
+        return receipt
+
+    def latest_turn_receipt_hash(self, lead_key: str) -> str | None:
+        """Return the authenticated receipt-chain head for one lead."""
+        self._ensure_open()
+        exact_lead = _require_id(lead_key, "lead_key")
+        row = self._connection.execute(
+            "SELECT turn_receipt_hash FROM boundary_events WHERE lead_key=? "
+            "ORDER BY state_version DESC LIMIT 1",
+            (exact_lead,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _require_hash(row[0], "stored turn receipt hash")
+
+    def load_latest_conversation_projection(
+        self,
+        lead_key: str,
+    ) -> ConversationProjection | None:
+        """Reconstruct the latest projection from its authenticated Maya artifact."""
+        self._ensure_open()
+        exact_lead = _require_id(lead_key, "lead_key")
+        row = self._connection.execute(
+            "SELECT a.artifact_json,e.turn_receipt_json FROM boundary_turn_artifacts a "
+            "JOIN boundary_events e ON e.lead_key=a.lead_key "
+            "AND e.aggregate_turn_id=a.aggregate_turn_id "
+            "WHERE a.lead_key=? AND a.artifact_kind='maya_proposal' "
+            "ORDER BY e.state_version DESC LIMIT 1",
+            (exact_lead,),
+        ).fetchone()
+        if row is None:
+            return None
+        proposal = _receipt_load_json(row[0].encode("utf-8"), "Maya proposal")
+        if (
+            proposal.get("schema") != "phase8-maya-turn-proposal"
+            or proposal.get("version") != 1
+            or type(proposal.get("data")) is not dict
+        ):
+            raise DataCorruption("stored Maya proposal cannot reconstruct projection")
+        data = proposal["data"]
+        try:
+            projection = _runtime_projection_from_maya_data(data)
+        except (TypeError, ValueError) as exc:
+            raise DataCorruption(
+                "stored Maya proposal cannot reconstruct projection"
+            ) from exc
+        receipt = TurnReceipt.from_canonical_bytes(row[1].encode("utf-8"))
+        if projection.canonical_hash() != receipt.behavior_state_snapshot_digest:
+            raise DataCorruption("runtime projection/receipt binding diverged")
+        return projection
 
     def import_genesis(
         self,

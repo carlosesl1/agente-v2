@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date
+import hashlib
 import json
 import subprocess
-from typing import Callable, Final
+from collections.abc import Callable
+from datetime import date
+from typing import Final
 
 from v2_contracts.model import (
+    AuditedModelTurn,
     EffectProposal,
     InvalidModelProposal,
     ModelFact,
@@ -15,7 +18,6 @@ from v2_contracts.model import (
     ModelRequest,
 )
 from v2_contracts.providers import ReadKind, ReadRequest
-
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
 _RESPONSE_FIELDS: Final = frozenset(
@@ -153,14 +155,18 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
             source_event_id=decoded["source_event_id"],
             intent=decoded["intent"],
             reply_chunks=tuple(_tuple_items(decoded["reply_chunks"], "reply_chunks")),
-            facts=tuple(_fact(item) for item in _tuple_items(decoded["facts"], "facts")),
+            facts=tuple(
+                _fact(item) for item in _tuple_items(decoded["facts"], "facts")
+            ),
             read_requests=tuple(
                 _read_request(item)
                 for item in _tuple_items(decoded["read_requests"], "read_requests")
             ),
             effect_proposals=tuple(
                 _effect(item)
-                for item in _tuple_items(decoded["effect_proposals"], "effect_proposals")
+                for item in _tuple_items(
+                    decoded["effect_proposals"], "effect_proposals"
+                )
             ),
             target_offer_id=decoded["target_offer_id"],
             confirmed_summary_version=decoded["confirmed_summary_version"],
@@ -178,10 +184,15 @@ class HermesModelAdapter:
         command: tuple[str, ...],
         system_prompt: str,
         timeout: int,
+        transcript_key: bytes,
         run: Callable[..., object] = subprocess.run,
     ) -> None:
-        if type(command) is not tuple or not command or any(
-            type(item) is not str or not item or "\x00" in item for item in command
+        if (
+            type(command) is not tuple
+            or not command
+            or any(
+                type(item) is not str or not item or "\x00" in item for item in command
+            )
         ):
             raise ValueError("command must be a non-empty exact string tuple")
         if type(system_prompt) is not str or not system_prompt.strip():
@@ -190,18 +201,25 @@ class HermesModelAdapter:
             raise ValueError("timeout must be a positive exact integer")
         if not callable(run):
             raise TypeError("run must be callable")
+        if type(transcript_key) is not bytes or len(transcript_key) < 32:
+            raise ValueError("transcript_key must contain at least 32 exact bytes")
         self._command = command
         self._system_prompt = system_prompt
         self._timeout = timeout
+        self._transcript_key = transcript_key
         self._run = run
 
     def complete(self, request: ModelRequest) -> ModelProposal:
+        return self.complete_audited(request).proposal
+
+    def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
         if type(request) is not ModelRequest:
             raise TypeError("request must be an exact ModelRequest")
+        stdin_bytes = _request_wire(request, self._system_prompt)
         try:
             result = self._run(
                 self._command,
-                input=_request_wire(request, self._system_prompt),
+                input=stdin_bytes,
                 capture_output=True,
                 timeout=self._timeout,
                 check=False,
@@ -211,8 +229,14 @@ class HermesModelAdapter:
         returncode = getattr(result, "returncode", None)
         stdout = getattr(result, "stdout", None)
         stderr = getattr(result, "stderr", None)
-        if type(returncode) is not int or type(stdout) is not bytes or type(stderr) is not bytes:
-            raise InvalidModelProposal("Hermes child returned an invalid process result")
+        if (
+            type(returncode) is not int
+            or type(stdout) is not bytes
+            or type(stderr) is not bytes
+        ):
+            raise InvalidModelProposal(
+                "Hermes child returned an invalid process result"
+            )
         if returncode != 0:
             detail = stderr.decode("utf-8", errors="replace").strip()[-500:]
             raise InvalidModelProposal(detail or f"Hermes child exited {returncode}")
@@ -222,7 +246,15 @@ class HermesModelAdapter:
         response = stdout[marker_at + len(_RESULT_MARKER) :]
         if not response or len(response) > 128 * 1024:
             raise InvalidModelProposal("Hermes model response size is invalid")
-        return _proposal(response, request.source_event_id)
+        proposal = _proposal(response, request.source_event_id)
+        return AuditedModelTurn.from_exchange(
+            proposal=proposal,
+            stdin_bytes=stdin_bytes,
+            stdout_bytes=stdout,
+            response_bytes=response,
+            transcript_key=self._transcript_key,
+            ephemeral_session_id="uds:" + hashlib.sha256(stdin_bytes).hexdigest()[:32],
+        )
 
 
 __all__ = ["HermesModelAdapter"]

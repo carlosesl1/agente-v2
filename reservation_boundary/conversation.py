@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from enum import Enum
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, Final
 
 from reservation_boundary.effects import ReservationRelayBundle
@@ -327,7 +327,7 @@ class ReservationExecutionProjection:
     def from_canonical_bytes(
         cls,
         payload: bytes,
-    ) -> "ReservationExecutionProjection":
+    ) -> ReservationExecutionProjection:
         data = _load_contract_data(
             payload,
             "ReservationExecutionProjection",
@@ -433,7 +433,7 @@ class ConversationProjection:
         ).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "ConversationProjection":
+    def from_canonical_bytes(cls, payload: bytes) -> ConversationProjection:
         data = _load_contract_data(
             payload,
             "ConversationProjection",
@@ -513,7 +513,7 @@ class SourceEventIdentity:
         return hashlib.sha256(preimage).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "SourceEventIdentity":
+    def from_canonical_bytes(cls, payload: bytes) -> SourceEventIdentity:
         data = _load_contract_data(
             payload,
             "SourceEventIdentity",
@@ -627,7 +627,7 @@ class MayaTurnRequest:
         return hashlib.sha256(preimage).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "MayaTurnRequest":
+    def from_canonical_bytes(cls, payload: bytes) -> MayaTurnRequest:
         data = _load_contract_data(
             payload,
             "MayaTurnRequest",
@@ -743,6 +743,27 @@ class PublicReplyChunk:
         return hashlib.sha256(
             self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         ).hexdigest()
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> PublicReplyChunk:
+        data = _load_contract_data(
+            payload,
+            "PublicReplyChunk",
+            schema=cls.SCHEMA,
+            version=cls.VERSION,
+            fields=frozenset(
+                ("aggregate_turn_id", "ordinal", "text", "source_closure_hash")
+            ),
+        )
+        chunk = cls(
+            aggregate_turn_id=data["aggregate_turn_id"],
+            ordinal=data["ordinal"],
+            text=data["text"],
+            source_closure_hash=data["source_closure_hash"],
+        )
+        if chunk.to_canonical_bytes() != payload:
+            raise ValueError("PublicReplyChunk is not byte-canonical")
+        return chunk
 
 
 class Capability(str, Enum):
@@ -870,7 +891,7 @@ class CapabilityPolicy:
         ).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "CapabilityPolicy":
+    def from_canonical_bytes(cls, payload: bytes) -> CapabilityPolicy:
         data = _load_contract_data(
             payload,
             "CapabilityPolicy",
@@ -1126,7 +1147,7 @@ class MayaIntentClosure:
         return hashlib.sha256(preimage).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "MayaIntentClosure":
+    def from_canonical_bytes(cls, payload: bytes) -> MayaIntentClosure:
         data = _load_contract_data(
             payload,
             "MayaIntentClosure",
@@ -1241,7 +1262,7 @@ class MayaTurnClosure:
         return hashlib.sha256(preimage).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "MayaTurnClosure":
+    def from_canonical_bytes(cls, payload: bytes) -> MayaTurnClosure:
         data = _load_contract_data(
             payload,
             "MayaTurnClosure",
@@ -1290,7 +1311,7 @@ class MayaTurnProposal:
 
     aggregate_turn_id: str
     intent_closure: MayaIntentClosure
-    read_observations: tuple["ReadObservation", ...]
+    read_observations: tuple[ReadObservation, ...]
     facts: tuple[TypedFact, ...]
     normalized_tool_proposals: tuple[NormalizedToolProposal, ...]
     learning_proposals: tuple[LearningProposal, ...]
@@ -1436,7 +1457,7 @@ class MayaTurnProposal:
         cls,
         *,
         accepted_closure: MayaTurnClosure,
-        read_observations: tuple["ReadObservation", ...],
+        read_observations: tuple[ReadObservation, ...],
         facts: tuple[TypedFact, ...],
         normalized_tool_proposals: tuple[NormalizedToolProposal, ...],
         learning_proposals: tuple[LearningProposal, ...],
@@ -1604,7 +1625,7 @@ class TranscriptCommitment:
         return hashlib.sha256(preimage).hexdigest()
 
     @classmethod
-    def from_canonical_bytes(cls, payload: bytes) -> "TranscriptCommitment":
+    def from_canonical_bytes(cls, payload: bytes) -> TranscriptCommitment:
         data = _load_contract_data(
             payload,
             "TranscriptCommitment",

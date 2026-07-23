@@ -194,7 +194,23 @@ def _ready_state(*, service: ServiceKind, workflow_id: str) -> ReadyToSummarizeS
         else ACTIVITY_BINDING_HASH
     )
     offer_id = LODGING_OFFER_ID if service is ServiceKind.LODGING else ACTIVITY_OFFER_ID
-    request_hash = "3" * 64 if service is ServiceKind.LODGING else "4" * 64
+    if service is ServiceKind.LODGING:
+        request_hash = ReadRequest(
+            request_id="stable-query",
+            kind=ReadKind.LODGING,
+            check_in=query.start_date,
+            check_out=query.end_date,
+            adults=2,
+            children=0,
+        ).query_hash()
+    else:
+        request_hash = ReadRequest(
+            request_id="stable-query",
+            kind=ReadKind.ACTIVITY,
+            product_id="product:buracao-001",
+            activity_date=query.start_date,
+            participants=2,
+        ).query_hash()
     lookup_id = (
         f"lookup:{request_hash}"
         if service is ServiceKind.LODGING

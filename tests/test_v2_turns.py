@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+import hashlib
 import json
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -19,7 +21,6 @@ from v2_contracts.model import (
     ModelRequest,
 )
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
-
 
 NOW = datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc)
 LODGING_REQUEST = ReadRequest(
@@ -91,7 +92,9 @@ class FakeReadPort:
 
 
 class FakeModel:
-    def __init__(self, store: SQLiteBoundaryStore, proposals: list[ModelProposal]) -> None:
+    def __init__(
+        self, store: SQLiteBoundaryStore, proposals: list[ModelProposal]
+    ) -> None:
         self.store = store
         self.proposals = proposals
         self.requests = []
@@ -151,9 +154,12 @@ def test_model_and_read_run_without_open_sqlite_transaction() -> None:
         assert len(model.requests) == 2
         assert len(model.requests[1].observations) == 1
         assert len(read_port.calls) == 1
-        assert store._connection.execute(
-            "SELECT count(*) FROM legacy_import_claims"
-        ).fetchone()[0] == 0
+        assert (
+            store._connection.execute(
+                "SELECT count(*) FROM legacy_import_claims"
+            ).fetchone()[0]
+            == 0
+        )
     finally:
         store.close()
 
@@ -233,10 +239,11 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         command=("hermes-model-child",),
         system_prompt="Você é Maya. Retorne somente o contrato fechado.",
         timeout=30,
+        transcript_key=b"t" * 32,
         run=run,
     )
 
-    proposal = adapter.complete(
+    audited = adapter.complete_audited(
         ModelRequest(
             request_id="batch-001:model:1",
             lead_id="manychat:lead-001",
@@ -247,6 +254,7 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
             observations=(observation,),
         )
     )
+    proposal = audited.proposal
 
     sent = captured["input"].decode()
     assert proposal.reply_chunks == ("A suíte está disponível.",)
@@ -256,3 +264,15 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
     assert observation.private_binding_hash not in sent
     assert "token" not in sent.lower()
     assert "api_key" not in sent.lower()
+    assert (
+        audited.frames[0].request_hash == hashlib.sha256(captured["input"]).hexdigest()
+    )
+    assert (
+        audited.frames[0].stdout_hash
+        == hashlib.sha256(b"PHASE8_RESULT\x00" + response).hexdigest()
+    )
+    assert audited.frames[0].response_bytes == response
+    assert audited.closure.final_seq == 1
+    assert audited.closure.zero_requests_in_flight is True
+    with pytest.raises(ValueError, match="byte hash mismatch"):
+        replace(audited.frames[0], stdout_bytes=audited.frames[0].stdout_bytes + b"x")
