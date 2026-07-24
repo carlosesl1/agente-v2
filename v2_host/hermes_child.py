@@ -92,7 +92,7 @@ def run(
         raise ValueError("Hermes CLI command is required")
     request = _closed_request(stdin_bytes)
     result = execute(
-        (*argv, "--toolsets", "", "--max-turns", "1", "-z", _prompt(request)),
+        (*argv, "--toolsets", "", "--max-turns", "1", "-q", _prompt(request)),
         capture_output=True,
         timeout=120,
         check=False,

@@ -50,7 +50,7 @@ def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> No
     assert json.loads(output.split(b"\x00", 1)[1]) == proposal
     assert captured["command"][:3] == ("hermes", "--profile", "leads")
     assert captured["command"][3:7] == ("--toolsets", "", "--max-turns", "1")
-    assert captured["command"][7] == "-z"
+    assert captured["command"][7] == "-q"
     assert "Do not call tools or perform effects" in captured["command"][8]
     assert captured["kwargs"] == {
         "capture_output": True,
