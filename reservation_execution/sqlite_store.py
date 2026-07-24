@@ -2441,6 +2441,13 @@ class SQLiteUnitOfWork:
                 "WHERE ledger.status IN ('queued', 'preparing') "
                 "AND ledger.dispatch_slots_consumed=0 "
                 "AND (ledger.claim_owner IS NULL OR ledger.lease_expires_at<=?) "
+                "AND NOT EXISTS (SELECT 1 FROM reservation_commands AS sibling "
+                "JOIN execution_ledger AS sibling_ledger "
+                "ON sibling_ledger.command_id=sibling.command_id "
+                "WHERE sibling.draft_id=command.draft_id "
+                "AND sibling.draft_version=command.draft_version "
+                "AND sibling.command_id<>command.command_id "
+                "AND sibling_ledger.status IN ('preparing','dispatch_fenced')) "
                 "ORDER BY command.created_at, ledger.command_id LIMIT 1",
                 (now.isoformat(),),
             ).fetchone()
@@ -2504,6 +2511,50 @@ class SQLiteUnitOfWork:
                 state=state,
                 ledger=updated,
             )
+
+    def list_outcome_projection_inputs(
+        self,
+    ) -> tuple[tuple[ReservationCommand, LedgerSnapshot], ...]:
+        """Return one consistent read-only snapshot for downstream projection."""
+
+        self._ensure_open()
+        self._connection.execute("BEGIN")
+        try:
+            command_ids = tuple(
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT command.command_id FROM reservation_commands AS command "
+                    "JOIN execution_ledger AS ledger "
+                    "ON ledger.command_id=command.command_id "
+                    "ORDER BY command.draft_id,command.draft_version,command.command_id"
+                )
+            )
+            result = tuple(
+                (self.load_command(command_id), self.load_ledger(command_id))
+                for command_id in command_ids
+            )
+            self._connection.execute("COMMIT")
+            return result
+        except BaseException:
+            if self._connection.in_transaction:
+                self._connection.execute("ROLLBACK")
+            raise
+
+    def preparation_block(self, command_id: str) -> tuple[str, str] | None:
+        """Return a pre-fence package stop reason and durable peer evidence."""
+
+        command = self.load_command(command_id)
+        row = self._connection.execute(
+            "SELECT sibling_ledger.outcome_hash "
+            "FROM reservation_commands AS sibling "
+            "JOIN execution_ledger AS sibling_ledger "
+            "ON sibling_ledger.command_id=sibling.command_id "
+            "WHERE sibling.draft_id=? AND sibling.draft_version=? "
+            "AND sibling.command_id<>? AND sibling_ledger.status='manual_review' "
+            "LIMIT 1",
+            (command.draft_id, command.draft_version, command.command_id),
+        ).fetchone()
+        return None if row is None else ("package_peer_manual_review", row[0])
 
     def renew_command_lease(
         self,

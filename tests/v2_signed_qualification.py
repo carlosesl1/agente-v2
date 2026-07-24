@@ -161,6 +161,12 @@ class QualificationReconciliationStage:
         return "idle"
 
 
+class QualificationIdleStage:
+    def run_once(self, *, now: datetime):
+        del now
+        return "idle"
+
+
 @dataclass(frozen=True, slots=True)
 class ScenarioShape:
     reservation_providers: tuple[str, ...]
@@ -309,6 +315,7 @@ class SignedQualificationRuntime:
                 lease_ttl=timedelta(seconds=30),
             ),
             WorkerQueue.RESERVATION: self.reservation_worker,
+            WorkerQueue.OUTCOME_PROJECTOR: QualificationIdleStage(),
             WorkerQueue.PAYMENT_INITIATION: self.payment_worker,
             WorkerQueue.SETTLEMENT: self.settlement_worker,
             WorkerQueue.POST_PAYMENT: self.post_payment_worker,

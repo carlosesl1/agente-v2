@@ -16,6 +16,7 @@ _PREPARATION_FAILURE_REASONS = frozenset(
         "booking_profile_incomplete",
         "canary_passenger_count_unsupported",
         "command_serialization_failed",
+        "package_peer_manual_review",
         "command_validation_failed",
         "effect_guard_unavailable",
         "private_binding_component_count",

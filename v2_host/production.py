@@ -28,6 +28,7 @@ from v2_adapters.provider_http import (
 )
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
@@ -426,10 +427,23 @@ def build_worker_set(
         if settings.stripe_links_enabled
         else ClosedCapabilityWorker("payment_initiation")
     )
+    outcome_projector: object = (
+        ReservationOutcomeProjector(
+            execution=container.execution,
+            payment_store=container.payment_initiation,
+            receiver_profiles={
+                BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
+                BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
+            },
+        )
+        if settings.stripe_links_enabled
+        else ClosedCapabilityWorker("outcome_projector")
+    )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
         WorkerQueue.RESERVATION: reservation_worker,
+        WorkerQueue.OUTCOME_PROJECTOR: outcome_projector,
         WorkerQueue.PAYMENT_INITIATION: payment_worker,
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
         WorkerQueue.POST_PAYMENT: ClosedCapabilityWorker("post_payment_delivery"),
@@ -468,6 +482,9 @@ def build_worker_set(
             "boundary_relay": "ready",
             "manychat_delivery": "closed",
             "payment_initiation": (
+                "ready" if settings.stripe_links_enabled else "closed"
+            ),
+            "outcome_projector": (
                 "ready" if settings.stripe_links_enabled else "closed"
             ),
             "stripe_test_links": (

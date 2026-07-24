@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import date, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -28,6 +28,10 @@ from v2_application.reservations import (
     DispatchRejected,
     ReservationAllocator,
     V2ReservationExecutionAdapter,
+)
+from v2_application.relay_worker import (
+    build_reservation_relay_bundle,
+    reservation_target_operation_id,
 )
 from v2_application.turn_executor import _execution_commands
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
@@ -197,7 +201,7 @@ def test_active_handoff_stops_queued_command_before_fence_and_provider(
         store.close()
 
 
-def _package_command() -> ReservationCommand:
+def _package_command(*, booking_profile: bool = False) -> ReservationCommand:
     lodging = _lookup("cloudbeds").offers[0]
     activity = _lookup("bokun").offers[0]
     activity = replace(activity, total=Money(activity.total.amount, lodging.total.currency))
@@ -206,8 +210,10 @@ def _package_command() -> ReservationCommand:
         customer_ref="customer:v2-package-001",
         full_name="Carlos Synthetic",
         email="carlos.synthetic@example.invalid",
-        phone_e164="+99900000000",
+        phone_e164="+12025550123",
         country_code="ZZ",
+        birth_date=date(1990, 1, 2) if booking_profile else None,
+        gender="m" if booking_profile else None,
     )
     terms = EconomicTerms(payment_method="card")
     signature = subject_signature(
@@ -254,6 +260,72 @@ def test_package_allocation_produces_two_provider_commands_as_one_batch() -> Non
     assert ReservationAllocator().allocate(package) == allocation
     assert ReservationAllocator().expand_commands((package,)) == allocation.commands
     assert _execution_commands((package,)) == allocation.commands
+
+
+def test_package_peer_is_stopped_before_fence_after_unknown_outcome(
+    tmp_path: Path,
+) -> None:
+    package = _package_command(booking_profile=True)
+    children = ReservationAllocator().allocate(package).commands
+    ordered = tuple(sorted(children, key=lambda item: item.command_id))
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "package-stop.sqlite3")
+    try:
+        for child in children:
+            bundle = build_reservation_relay_bundle(child)
+            source_hash = hashlib.sha256(child.command_id.encode()).hexdigest()
+            store.accept_boundary_reservation(
+                operation_id=reservation_target_operation_id(
+                    bundle_hash=bundle.artifact_hash,
+                    source_turn_receipt_hash=source_hash,
+                ),
+                source_turn_receipt_hash=source_hash,
+                bundle=bundle,
+            )
+        provider_by_operation = {
+            ReservationOperation.RESERVE_LODGING: "cloudbeds",
+            ReservationOperation.BOOK_ACTIVITY: "bokun",
+        }
+        first_provider = provider_by_operation[ordered[0].operation]
+        ports = {
+            provider: FakeReservationPort(
+                provider,
+                _result(
+                    ProviderCertainty.CALLED_UNKNOWN
+                    if provider == first_provider
+                    else ProviderCertainty.EFFECT_CONFIRMED
+                ),
+            )
+            for provider in ("cloudbeds", "bokun")
+        }
+        worker = V2ReservationWorker(
+            store=store,
+            adapters=tuple(
+                V2ReservationExecutionAdapter(
+                    provider=provider,
+                    port=ports[provider],
+                    authorization=_authorization(provider),
+                    require_private_binding=False,
+                )
+                for provider in ("cloudbeds", "bokun")
+            ),
+            effect_guard=FakeCommercialEffectGuard(),
+            worker_id="worker:v2-package-stop",
+            lease_ttl=timedelta(seconds=30),
+        )
+
+        first = worker.run_once(now=NOW + timedelta(seconds=1))
+        second = worker.run_once(now=NOW + timedelta(seconds=2))
+
+        assert first.disposition is V2WorkerDisposition.MANUAL_REVIEW
+        assert second.disposition is V2WorkerDisposition.NOT_CALLED
+        assert sum(len(port.calls) for port in ports.values()) == 1
+        assert store._connection.execute(
+            "SELECT status,dispatch_slots_consumed FROM execution_ledger "
+            "WHERE command_id=?",
+            (ordered[1].command_id,),
+        ).fetchone() == ("outcome_recorded", 0)
+    finally:
+        store.close()
 
 
 def test_bokun_missing_booking_profile_fails_before_fence() -> None:

@@ -83,6 +83,10 @@ class CommandWorker:
         if claim is None:
             return WorkerResult(disposition=WorkerDisposition.IDLE)
         try:
+            block = self._store.preparation_block(claim.command.command_id)
+            if block is not None:
+                reason, evidence = block
+                raise PreparationFailure(reason, False, (evidence,))
             request = self._adapter.prepare(claim.command)
         except PreparationFailure as failure:
             return WorkerResult.from_preparation(

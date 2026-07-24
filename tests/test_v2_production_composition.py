@@ -20,6 +20,7 @@ from v2_host.production import (
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue, _load_worker_factory
 from v2_application.payments import PaymentInitiationWorker
+from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.workers import V2ReservationWorker
 
@@ -259,10 +260,12 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             container=stripe_container,
             settings=stripe_enabled,
         )
-        assert (
-            type(stripe_workers[WorkerQueue.PAYMENT_INITIATION])
-            is PaymentInitiationWorker
-        )
+        assert type(
+            stripe_workers[WorkerQueue.PAYMENT_INITIATION]
+        ) is PaymentInitiationWorker
+        assert type(
+            stripe_workers[WorkerQueue.OUTCOME_PROJECTOR]
+        ) is ReservationOutcomeProjector
         assert (
             stripe_container.readiness().capabilities["stripe_test_links"]
             == "ready"
