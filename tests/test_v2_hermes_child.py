@@ -49,9 +49,13 @@ def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> No
     assert output.startswith(b"PHASE8_RESULT\x00")
     assert json.loads(output.split(b"\x00", 1)[1]) == proposal
     assert captured["command"][:3] == ("hermes", "--profile", "leads")
-    assert captured["command"][3:7] == ("--toolsets", "", "--max-turns", "1")
-    assert captured["command"][7] == "-q"
-    assert "Do not call tools or perform effects" in captured["command"][8]
+    assert captured["command"][3:5] == ("--toolsets", "")
+    assert captured["command"][5] == "-z"
+    assert "Do not call tools or perform effects" in captured["command"][6]
+    assert "v2-model-proposal-v2" in captured["command"][6]
+    assert "v2-model-proposal-v1" not in captured["command"][6]
+    assert "--max-turns" not in captured["command"]
+    assert "-q" not in captured["command"]
     assert captured["kwargs"] == {
         "capture_output": True,
         "timeout": 120,
