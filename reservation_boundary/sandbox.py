@@ -26,6 +26,7 @@ _ROUTES: Final = frozenset(("recepcionista", "hostel", "agencia", "fechamento", 
 _REPLY_TYPES: Final = frozenset(("ask_more", "qualify", "answer", "handoff", "no_reply"))
 _FACT_NAMES: Final = frozenset(("language", "service", "start_date", "end_date", "adults", "children"))
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
+DEFAULT_SANDBOX_MODEL: Final = "gpt-5.6-luna"
 
 
 class SandboxProtocolError(ValueError):
@@ -877,7 +878,7 @@ class HermesDockerModel:
         project_root: Path,
         container: str = "hermes-webui",
         provider: str = "openai-codex",
-        model: str = "gpt-5.6-sol",
+        model: str = DEFAULT_SANDBOX_MODEL,
         timeout: int = 180,
         run: Callable[..., _CompletedProcess] = _run_command,
     ) -> None:
@@ -935,6 +936,7 @@ class HermesDockerModel:
 __all__ = (
     "BlockedEffect",
     "CloudbedsDockerRead",
+    "DEFAULT_SANDBOX_MODEL",
     "EffectProposal",
     "HermesDockerModel",
     "LodgingAvailabilityObservation",

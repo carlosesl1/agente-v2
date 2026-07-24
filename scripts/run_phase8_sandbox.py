@@ -15,6 +15,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from reservation_boundary.sandbox import (
     CloudbedsDockerRead,
+    DEFAULT_SANDBOX_MODEL,
     HermesDockerModel,
     ModelCallFailed,
     ReadCallFailed,
@@ -83,7 +84,7 @@ def main() -> int:
     parser.add_argument("--container", default="hermes-webui")
     parser.add_argument("--cloudbeds-container", default="chapada-leads-hermes")
     parser.add_argument("--provider", default="openai-codex")
-    parser.add_argument("--model", default="gpt-5.6-sol")
+    parser.add_argument("--model", default=DEFAULT_SANDBOX_MODEL)
     args = parser.parse_args()
 
     runner = SandboxConversation(

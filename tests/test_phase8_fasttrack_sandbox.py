@@ -643,6 +643,19 @@ class FastTrackSandboxTests(unittest.TestCase):
             {"messages": [["user", "oi"]], "system_prompt": "isolado"},
         )
 
+        default_model = HermesDockerModel(
+            project_root=Path("/workspace/project"),
+            run=fake_run,
+        )
+        default_model.complete(
+            system_prompt="isolado",
+            messages=(("user", "oi"),),
+        )
+        self.assertEqual(
+            calls[1][0][-4:],
+            ("--provider", "openai-codex", "--model", "gpt-5.6-luna"),
+        )
+
         failing = HermesDockerModel(
             project_root=Path("/workspace/project"),
             run=lambda *_args, **_kwargs: _RunResult(1, b"", b"auth failed"),
