@@ -26,6 +26,7 @@ _ROUTES: Final = frozenset(("recepcionista", "hostel", "agencia", "fechamento", 
 _REPLY_TYPES: Final = frozenset(("ask_more", "qualify", "answer", "handoff", "no_reply"))
 _FACT_NAMES: Final = frozenset(("language", "service", "start_date", "end_date", "adults", "children"))
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
+_PRODUCT_ID_RE: Final = re.compile(r"^product:[a-z0-9][a-z0-9._-]{0,127}$")
 DEFAULT_SANDBOX_MODEL: Final = "gpt-5.6-luna"
 
 
@@ -97,6 +98,56 @@ class LodgingAvailabilityReadRequest:
 
     def to_canonical_bytes(self) -> bytes:
         return _canonical_json(self.to_mapping())
+
+    @property
+    def kind(self) -> str:
+        return "lodging_availability"
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityAvailabilityReadRequest:
+    product_id: str
+    activity_date: str
+    participants: int
+
+    @classmethod
+    def from_mapping(cls, value: object) -> "ActivityAvailabilityReadRequest":
+        if type(value) is not dict or set(value) != {"kind", "arguments"}:
+            raise SandboxProtocolError("activity read request fields mismatch")
+        if value["kind"] != "activity_availability":
+            raise SandboxProtocolError("activity read request kind mismatch")
+        arguments = value["arguments"]
+        expected = {"product_id", "activity_date", "participants"}
+        if type(arguments) is not dict or set(arguments) != expected:
+            raise SandboxProtocolError("activity read arguments mismatch")
+        product_id = _text(arguments["product_id"], "product_id")
+        if _PRODUCT_ID_RE.fullmatch(product_id) is None:
+            raise SandboxProtocolError("product_id must be a canonical product ID")
+        activity_date = _iso_date(arguments["activity_date"], "activity_date")
+        participants = _bounded_int(
+            arguments["participants"], "participants", minimum=1, maximum=20
+        )
+        return cls(product_id, activity_date, participants)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "arguments": {
+                "activity_date": self.activity_date,
+                "participants": self.participants,
+                "product_id": self.product_id,
+            },
+            "kind": "activity_availability",
+        }
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_json(self.to_mapping())
+
+    @property
+    def kind(self) -> str:
+        return "activity_availability"
+
+
+SandboxReadRequest = LodgingAvailabilityReadRequest | ActivityAvailabilityReadRequest
 
 
 _OBSERVATION_SCHEMA: Final = "phase8-sandbox-lodging-observation-v1"
@@ -189,6 +240,123 @@ class LodgingAvailabilityObservation:
             b"phase8-sandbox-lodging-observation-v1\x00"
             + self.to_canonical_bytes()
         ).hexdigest()
+
+    @property
+    def kind(self) -> str:
+        return "lodging_availability"
+
+
+_ACTIVITY_OBSERVATION_SCHEMA: Final = "phase8-sandbox-activity-observation-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityAvailabilityObservation:
+    status: str
+    activity_date: str
+    participants: int
+    product_public_name: str
+    availability_confirmed: bool
+    price_confirmed: bool
+    total_amount: str | None
+    currency: str | None
+    public_summary: str
+    raw_provider_payload_returned: bool = False
+
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> "ActivityAvailabilityObservation":
+        parsed = _parse_json(payload)
+        expected = {
+            "activity_date",
+            "availability_confirmed",
+            "currency",
+            "participants",
+            "price_confirmed",
+            "product_public_name",
+            "public_summary",
+            "raw_provider_payload_returned",
+            "schema",
+            "status",
+            "total_amount",
+        }
+        if type(parsed) is not dict or set(parsed) != expected:
+            raise SandboxProtocolError("activity observation fields mismatch")
+        if parsed["schema"] != _ACTIVITY_OBSERVATION_SCHEMA:
+            raise SandboxProtocolError("activity observation schema mismatch")
+        status = _text(parsed["status"], "activity observation status")
+        if status not in _OBSERVATION_STATUSES:
+            raise SandboxProtocolError("activity observation status is outside the closed set")
+        activity_date = _iso_date(parsed["activity_date"], "observation.activity_date")
+        participants = _bounded_int(
+            parsed["participants"], "observation.participants", minimum=1, maximum=20
+        )
+        public_name = _text(parsed["product_public_name"], "product_public_name")
+        availability = parsed["availability_confirmed"]
+        price = parsed["price_confirmed"]
+        if type(availability) is not bool or type(price) is not bool:
+            raise SandboxProtocolError("activity observation flags must be exact booleans")
+        if parsed["raw_provider_payload_returned"] is not False:
+            raise SandboxProtocolError("raw provider payload must remain false")
+        amount = parsed["total_amount"]
+        currency = parsed["currency"]
+        if price:
+            amount = _text(amount, "activity total_amount")
+            if re.fullmatch(r"(?:0|[1-9][0-9]{0,8})\.[0-9]{2}", amount) is None:
+                raise SandboxProtocolError("activity total_amount must be canonical money")
+            currency = _text(currency, "activity currency")
+            if re.fullmatch(r"[A-Z]{3}", currency) is None:
+                raise SandboxProtocolError("activity currency must be uppercase ISO-like text")
+        elif amount is not None or currency is not None:
+            raise SandboxProtocolError("unconfirmed activity price must not expose money")
+        if status == "ok" and not availability:
+            raise SandboxProtocolError("ok activity observation requires availability")
+        if status != "ok" and (availability or price):
+            raise SandboxProtocolError("non-ok activity observation cannot claim availability")
+        summary = _text(parsed["public_summary"], "public_summary")
+        observation = cls(
+            status,
+            activity_date,
+            participants,
+            public_name,
+            availability,
+            price,
+            amount,
+            currency,
+            summary,
+            False,
+        )
+        if observation.to_canonical_bytes() != payload:
+            raise SandboxProtocolError("activity observation must be canonical JSON")
+        return observation
+
+    def to_canonical_bytes(self) -> bytes:
+        return _canonical_json(
+            {
+                "activity_date": self.activity_date,
+                "availability_confirmed": self.availability_confirmed,
+                "currency": self.currency,
+                "participants": self.participants,
+                "price_confirmed": self.price_confirmed,
+                "product_public_name": self.product_public_name,
+                "public_summary": self.public_summary,
+                "raw_provider_payload_returned": False,
+                "schema": _ACTIVITY_OBSERVATION_SCHEMA,
+                "status": self.status,
+                "total_amount": self.total_amount,
+            }
+        )
+
+    def canonical_hash(self) -> str:
+        return hashlib.sha256(
+            b"phase8-sandbox-activity-observation-v1\x00"
+            + self.to_canonical_bytes()
+        ).hexdigest()
+
+    @property
+    def kind(self) -> str:
+        return "activity_availability"
+
+
+SandboxReadObservation = LodgingAvailabilityObservation | ActivityAvailabilityObservation
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -364,7 +532,7 @@ class SandboxModelResponse:
     reply_type: str
     reply: str
     facts: tuple[tuple[str, object], ...]
-    read_requests: tuple[LodgingAvailabilityReadRequest, ...]
+    read_requests: tuple[SandboxReadRequest, ...]
     effect_proposals: tuple[EffectProposal, ...]
 
     @classmethod
@@ -417,11 +585,25 @@ class SandboxModelResponse:
             seen_facts.add(name)
 
         raw_reads = parsed["read_requests"]
-        if type(raw_reads) is not list or len(raw_reads) > 1:
-            raise SandboxProtocolError("read_requests must contain at most one item")
-        read_requests = tuple(
-            LodgingAvailabilityReadRequest.from_mapping(item) for item in raw_reads
-        )
+        if type(raw_reads) is not list or len(raw_reads) > 2:
+            raise SandboxProtocolError("read_requests must contain at most two items")
+        read_requests_list: list[SandboxReadRequest] = []
+        seen_read_kinds: set[str] = set()
+        for item in raw_reads:
+            if type(item) is not dict:
+                raise SandboxProtocolError("read request must be an object")
+            kind = item.get("kind")
+            if kind == "lodging_availability":
+                request: SandboxReadRequest = LodgingAvailabilityReadRequest.from_mapping(item)
+            elif kind == "activity_availability":
+                request = ActivityAvailabilityReadRequest.from_mapping(item)
+            else:
+                raise SandboxProtocolError("read request kind is outside the closed set")
+            if request.kind in seen_read_kinds:
+                raise SandboxProtocolError("read request kind is duplicated")
+            seen_read_kinds.add(request.kind)
+            read_requests_list.append(request)
+        read_requests = tuple(read_requests_list)
 
         raw_effects = parsed["effect_proposals"]
         if type(raw_effects) is not list:
@@ -934,6 +1116,8 @@ class HermesDockerModel:
 
 
 __all__ = (
+    "ActivityAvailabilityObservation",
+    "ActivityAvailabilityReadRequest",
     "BlockedEffect",
     "CloudbedsDockerRead",
     "DEFAULT_SANDBOX_MODEL",
@@ -948,6 +1132,8 @@ __all__ = (
     "SandboxModelResponse",
     "SandboxProtocolError",
     "SandboxReadPort",
+    "SandboxReadObservation",
+    "SandboxReadRequest",
     "SandboxTurnResult",
     "SQLiteSandboxStore",
 )

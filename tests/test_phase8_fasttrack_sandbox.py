@@ -88,6 +88,24 @@ def _observation(
     )
 
 
+def _activity_observation(**overrides: object) -> bytes:
+    value: dict[str, object] = {
+        "activity_date": "2026-08-05",
+        "availability_confirmed": True,
+        "currency": "BRL",
+        "participants": 2,
+        "price_confirmed": True,
+        "product_public_name": "Buracão",
+        "public_summary": "Encontrei disponibilidade para o passeio.",
+        "raw_provider_payload_returned": False,
+        "schema": "phase8-sandbox-activity-observation-v1",
+        "status": "ok",
+        "total_amount": "700.00",
+    }
+    value.update(overrides)
+    return _canonical(value)
+
+
 class _QueueModel:
     def __init__(self, *responses: bytes, before_call=None) -> None:
         self.responses = list(responses)
@@ -135,6 +153,92 @@ class _RunResult:
 
 
 class FastTrackSandboxTests(unittest.TestCase):
+    def test_activity_contract_request_is_id_only_closed_and_canonical(self) -> None:
+        request_mapping = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+
+        request = sandbox.ActivityAvailabilityReadRequest.from_mapping(request_mapping)
+
+        self.assertEqual(request.product_id, "product:buracao")
+        self.assertEqual(request.activity_date, "2026-08-05")
+        self.assertEqual(request.participants, 2)
+        self.assertEqual(request.to_canonical_bytes(), _canonical(request_mapping))
+        hostile = (
+            {**request_mapping, "tour_name": "Buracão"},
+            {**request_mapping, "arguments": {**request_mapping["arguments"], "tour_name": "Buracão"}},
+            {**request_mapping, "arguments": {**request_mapping["arguments"], "participants": True}},
+            {**request_mapping, "arguments": {**request_mapping["arguments"], "activity_date": "05/08/2026"}},
+            {**request_mapping, "arguments": {**request_mapping["arguments"], "product_id": "Buracão"}},
+        )
+        for item in hostile:
+            with self.subTest(item=item):
+                with self.assertRaises(SandboxProtocolError):
+                    sandbox.ActivityAvailabilityReadRequest.from_mapping(item)
+
+    def test_activity_contract_observation_strips_ids_and_closes_price(self) -> None:
+        observation = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _activity_observation()
+        )
+
+        self.assertEqual(observation.product_public_name, "Buracão")
+        self.assertTrue(observation.availability_confirmed)
+        self.assertTrue(observation.price_confirmed)
+        self.assertEqual(observation.total_amount, "700.00")
+        self.assertEqual(observation.to_canonical_bytes(), _activity_observation())
+        self.assertRegex(observation.canonical_hash(), r"^[0-9a-f]{64}$")
+        for private_field in ("product_id", "bokun_product_id", "availability_id", "raw_payload"):
+            value = json.loads(_activity_observation())
+            value[private_field] = "private"
+            with self.subTest(private_field=private_field):
+                with self.assertRaises(SandboxProtocolError):
+                    sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+                        _canonical(value)
+                    )
+        with self.assertRaises(SandboxProtocolError):
+            sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+                _activity_observation(total_amount="700", price_confirmed=True)
+            )
+
+    def test_activity_contract_model_response_allows_one_of_each_read_kind(self) -> None:
+        lodging = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-05",
+                "check_out": "2026-08-06",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        activity = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+
+        response = sandbox.SandboxModelResponse.from_canonical_bytes(
+            _response_with_reads([lodging, activity])
+        )
+
+        self.assertEqual(
+            tuple(type(item) for item in response.read_requests),
+            (sandbox.LodgingAvailabilityReadRequest, sandbox.ActivityAvailabilityReadRequest),
+        )
+        for invalid in ([activity, activity], [lodging, lodging], [lodging, activity, lodging]):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(SandboxProtocolError):
+                    sandbox.SandboxModelResponse.from_canonical_bytes(
+                        _response_with_reads(invalid)
+                    )
+
     def test_lodging_read_request_is_closed_and_canonical(self) -> None:
         payload = _response_with_reads(
             [
