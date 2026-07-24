@@ -71,15 +71,20 @@ def canonical_subject(
     ordered = tuple(sorted(components, key=lambda item: item.offer_id))
     if not ordered:
         raise ValueError("canonical subject requires components")
+    customer_payload = {
+        "customer_ref": customer.customer_ref,
+        "full_name": customer.full_name,
+        "email": customer.email,
+        "phone_e164": customer.phone_e164,
+        "country_code": customer.country_code,
+    }
+    if customer.birth_date is not None:
+        customer_payload["birth_date"] = customer.birth_date.isoformat()
+    if customer.gender is not None:
+        customer_payload["gender"] = customer.gender
     return {
         "components": [_offer_payload(item) for item in ordered],
-        "customer": {
-            "customer_ref": customer.customer_ref,
-            "full_name": customer.full_name,
-            "email": customer.email,
-            "phone_e164": customer.phone_e164,
-            "country_code": customer.country_code,
-        },
+        "customer": customer_payload,
         "terms": _terms_payload(terms),
     }
 

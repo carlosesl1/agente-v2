@@ -28,6 +28,12 @@ _ALLOWED_FACTS: Final = frozenset(
         "adults",
         "children",
         "payment_method",
+        "full_name",
+        "email",
+        "phone_e164",
+        "country_code",
+        "birth_date",
+        "gender",
     )
 )
 _ALLOWED_PAYMENT_METHODS: Final = frozenset(("stripe", "wise", "pix"))
@@ -70,7 +76,7 @@ class ModelFact:
     def __post_init__(self) -> None:
         if self.name not in _ALLOWED_FACTS:
             raise InvalidModelProposal("fact name is outside the V2 catalog")
-        if self.name in ("language", "service"):
+        if self.name in ("language", "service", "full_name"):
             _text(self.value, f"fact {self.name}")
         elif self.name == "payment_method":
             if (
@@ -80,9 +86,30 @@ class ModelFact:
                 raise InvalidModelProposal(
                     "fact payment_method must be stripe, wise or pix"
                 )
-        elif self.name in ("start_date", "end_date", "activity_date"):
+        elif self.name in ("start_date", "end_date", "activity_date", "birth_date"):
             if type(self.value) is not date:
                 raise InvalidModelProposal(f"fact {self.name} must be an exact date")
+        elif self.name == "email":
+            if (
+                type(self.value) is not str
+                or self.value != self.value.strip()
+                or self.value.count("@") != 1
+                or any(char.isspace() for char in self.value)
+            ):
+                raise InvalidModelProposal("fact email must be canonical")
+        elif self.name == "phone_e164":
+            if type(self.value) is not str or re.fullmatch(
+                r"\+[1-9][0-9]{7,14}", self.value
+            ) is None:
+                raise InvalidModelProposal("fact phone_e164 must be canonical")
+        elif self.name == "country_code":
+            if type(self.value) is not str or re.fullmatch(
+                r"[A-Z]{2}", self.value
+            ) is None:
+                raise InvalidModelProposal("fact country_code must be ISO alpha-2")
+        elif self.name == "gender":
+            if self.value not in ("m", "f"):
+                raise InvalidModelProposal("fact gender must be m or f")
         elif type(self.value) is not int or self.value < (
             1 if self.name == "adults" else 0
         ):
@@ -110,6 +137,7 @@ class ModelRequest:
     locale: str
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
+    state_facts: tuple[ModelFact, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
@@ -127,6 +155,12 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "observations must contain exact ReadObservation values"
             )
+        if type(self.state_facts) is not tuple or any(
+            type(item) is not ModelFact for item in self.state_facts
+        ):
+            raise InvalidModelProposal("state_facts must contain exact ModelFact values")
+        if len({item.name for item in self.state_facts}) != len(self.state_facts):
+            raise InvalidModelProposal("state_facts must have unique names")
 
 
 @dataclass(frozen=True, slots=True)

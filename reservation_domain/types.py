@@ -160,6 +160,8 @@ class CustomerFacts:
     email: str
     phone_e164: str
     country_code: str
+    birth_date: date | None = None
+    gender: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -189,6 +191,10 @@ class CustomerFacts:
         object.__setattr__(self, "email", email)
         object.__setattr__(self, "phone_e164", phone)
         object.__setattr__(self, "country_code", country)
+        if self.birth_date is not None:
+            _require_date(self.birth_date, "customer.birth_date")
+        if self.gender is not None and self.gender not in ("m", "f"):
+            raise ValueError("customer.gender must be m, f or None")
 
 
 @dataclass(frozen=True, slots=True)

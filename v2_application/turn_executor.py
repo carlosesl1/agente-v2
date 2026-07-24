@@ -52,7 +52,7 @@ from v2_application.relay_worker import (
 )
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
-from v2_contracts.model import AuditedModelTurn, ModelProposal, ModelRequest
+from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 
@@ -308,6 +308,15 @@ def _command_rows(commands: tuple[object, ...]) -> tuple[tuple[str, str], ...]:
     return tuple(rows)
 
 
+def _state_model_facts(
+    projection: ConversationProjection,
+) -> tuple[ModelFact, ...]:
+    return tuple(
+        ModelFact(item.name, item.value.value)
+        for item in projection.facts
+    )
+
+
 def _command_relays(
     aggregate_turn_id: str,
     commands: tuple[object, ...],
@@ -479,6 +488,7 @@ class V2TurnExecutor:
             message=batch.combined_text,
             locale=self._locale,
             state_version=current.version,
+            state_facts=_state_model_facts(projection),
         )
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
@@ -506,6 +516,7 @@ class V2TurnExecutor:
                 locale=self._locale,
                 state_version=current.version,
                 observations=v2_observations,
+                state_facts=_state_model_facts(projection),
             )
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:

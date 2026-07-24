@@ -66,6 +66,12 @@ _FACT_ORDER = {
     "adults": 5,
     "children": 6,
     "payment_method": 7,
+    "full_name": 8,
+    "email": 9,
+    "phone_e164": 10,
+    "country_code": 11,
+    "birth_date": 12,
+    "gender": 13,
 }
 
 
@@ -140,9 +146,18 @@ def _event_id(source_event_id: str, event_kind: str) -> str:
 
 
 def _model_fact_slot(fact: ModelFact):
-    if fact.name in ("language", "service", "payment_method"):
+    if fact.name in (
+        "language",
+        "service",
+        "payment_method",
+        "full_name",
+        "email",
+        "phone_e164",
+        "country_code",
+        "gender",
+    ):
         return StringSlot(fact.value)
-    if fact.name in ("start_date", "end_date", "activity_date"):
+    if fact.name in ("start_date", "end_date", "activity_date", "birth_date"):
         return DateSlot(fact.value)
     if fact.name in ("adults", "children"):
         return IntegerSlot(fact.value)
@@ -206,30 +221,44 @@ def _merge_projection(
     )
 
 
-def _profile_ready(profile: PrivateCustomerBinding, now: datetime) -> bool:
-    return bool(profile.complete and profile.observed_at <= now < profile.expires_at)
+def _projection_values(projection: ConversationProjection) -> dict[str, object]:
+    return {item.name: item.value.value for item in projection.facts}
 
 
-def _customer(profile: PrivateCustomerBinding) -> CustomerFacts:
-    if not profile.complete:
-        raise ConversationReductionError(
-            "incomplete profile cannot create customer facts"
-        )
-    values = (
-        profile.full_name,
-        profile.email,
-        profile.phone_e164,
-        profile.country_code,
-    )
-    if any(type(value) is not str for value in values):
+def _customer(
+    profile: PrivateCustomerBinding,
+    projection: ConversationProjection,
+) -> CustomerFacts:
+    facts = _projection_values(projection)
+    full_name = profile.full_name or facts.get("full_name")
+    email = profile.email or facts.get("email")
+    phone = profile.phone_e164 or facts.get("phone_e164")
+    country = profile.country_code or facts.get("country_code")
+    if any(type(value) is not str for value in (full_name, email, phone, country)):
         raise ConversationReductionError("complete profile has missing customer facts")
     return CustomerFacts(
         customer_ref=profile.binding_id,
-        full_name=profile.full_name,
-        email=profile.email,
-        phone_e164=profile.phone_e164,
-        country_code=profile.country_code,
+        full_name=full_name,
+        email=email,
+        phone_e164=phone,
+        country_code=country,
+        birth_date=facts.get("birth_date"),
+        gender=facts.get("gender"),
     )
+
+
+def _profile_ready(
+    profile: PrivateCustomerBinding,
+    projection: ConversationProjection,
+    now: datetime,
+) -> bool:
+    if not profile.observed_at <= now < profile.expires_at:
+        return False
+    try:
+        _customer(profile, projection)
+    except (ConversationReductionError, TypeError, ValueError):
+        return False
+    return True
 
 
 def _proposal_values(proposal: ModelProposal) -> dict[str, object]:
@@ -682,7 +711,7 @@ class V2ConversationReducer:
                 handoff_request=handoff_request,
                 receipt_requirements=("handoff_relay",),
             )
-        if not _profile_ready(profile, instant):
+        if not _profile_ready(profile, merged, instant):
             return V2ConversationDecision(
                 next_state=_consume_without_workflow_transition(
                     state, proposal.source_event_id
@@ -692,6 +721,27 @@ class V2ConversationReducer:
                 public_reply=ConversationReply(
                     "profile_completion",
                     ("Complete seus dados no perfil para eu continuar com segurança.",),
+                ),
+                receipt_requirements=("profile_completion",),
+            )
+
+        customer = _customer(profile, merged)
+        if (
+            proposal.intent == "select"
+            and DesiredService.AGENCY in merged.desired_services
+            and (customer.birth_date is None or customer.gender is None)
+        ):
+            return V2ConversationDecision(
+                next_state=_consume_without_workflow_transition(
+                    state, proposal.source_event_id
+                ),
+                projection=merged,
+                commands=(),
+                public_reply=ConversationReply(
+                    "profile_completion",
+                    (
+                        "Para reservar o passeio, preciso da data de nascimento e gênero cadastral.",
+                    ),
                 ),
                 receipt_requirements=("profile_completion",),
             )
@@ -728,7 +778,7 @@ class V2ConversationReducer:
                     ),
                     receipt_requirements=("stale_confirmation",),
                 )
-            if workflow.draft.customer != _customer(profile):
+            if workflow.draft.customer != _customer(profile, merged):
                 return V2ConversationDecision(
                     next_state=_consume_without_workflow_transition(
                         state, proposal.source_event_id
@@ -838,7 +888,7 @@ class V2ConversationReducer:
             workflow_id = _identity(
                 state.lead_key, proposal.source_event_id, prefix="workflow"
             )
-            customer = _customer(profile)
+            customer = _customer(profile, merged)
             terms = EconomicTerms(payment_method=payment_method, add_ons=())
             lodging_state = _ready_component(
                 workflow_id=_identity(workflow_id, "lodging", prefix="workflow"),
@@ -982,7 +1032,7 @@ class V2ConversationReducer:
                     event_id=_event_id(proposal.source_event_id, "draft"),
                     occurred_at=instant,
                     draft_id=_identity(workflow_id, offer.offer_id, prefix="draft"),
-                    customer=_customer(profile),
+                    customer=_customer(profile, merged),
                     terms=EconomicTerms(payment_method=payment_method, add_ons=()),
                 ),
             ).state

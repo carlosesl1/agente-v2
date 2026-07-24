@@ -323,6 +323,12 @@ class TypedFact:
             "adults": IntegerSlot,
             "children": IntegerSlot,
             "payment_method": StringSlot,
+            "full_name": StringSlot,
+            "email": StringSlot,
+            "phone_e164": StringSlot,
+            "country_code": StringSlot,
+            "birth_date": DateSlot,
+            "gender": StringSlot,
         }
         expected = expected_types.get(self.name)
         if expected is None:

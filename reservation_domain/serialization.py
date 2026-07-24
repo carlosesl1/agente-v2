@@ -16,6 +16,7 @@ from .types import (
     SCHEMA_VERSION,
     STATE_TYPES,
     DomainEvent,
+    CustomerFacts,
     Event,
     ExecutionOutcome,
     ReservationCommand,
@@ -45,7 +46,15 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _encode(value: Any) -> Any:
     if is_dataclass(value):
-        return {field.name: _encode(getattr(value, field.name)) for field in fields(value)}
+        encoded = {
+            field.name: _encode(getattr(value, field.name)) for field in fields(value)
+        }
+        if type(value) is CustomerFacts:
+            if value.birth_date is None:
+                encoded.pop("birth_date")
+            if value.gender is None:
+                encoded.pop("gender")
+        return encoded
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):
@@ -66,19 +75,20 @@ def _decode_dataclass(cls: type, value: Any):
         raise ValueError(f"{cls.__name__} data must be an object")
     expected = {field.name for field in fields(cls)}
     actual = set(value)
-    if actual != expected:
+    optional = {"birth_date", "gender"} if cls is CustomerFacts else set()
+    if actual - optional != expected - optional or not actual <= expected:
         missing = sorted(expected - actual)
         unknown = sorted(actual - expected)
         raise ValueError(
             f"{cls.__name__} fields mismatch; missing={missing}, unknown={unknown}"
         )
     hints = _cached_type_hints(cls)
-    return cls(
-        **{
-            field.name: _decode_value(hints[field.name], value[field.name])
-            for field in fields(cls)
-        }
-    )
+    decoded = {
+        field.name: _decode_value(hints[field.name], value[field.name])
+        for field in fields(cls)
+        if field.name in value
+    }
+    return cls(**decoded)
 
 
 def _decode_value(annotation: Any, value: Any) -> Any:

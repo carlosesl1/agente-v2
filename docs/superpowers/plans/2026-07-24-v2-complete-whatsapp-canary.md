@@ -150,7 +150,7 @@ Reject live Stripe key prefixes, expired windows, multiple subscribers, write ga
 - Test: `tests/test_v2_bokun_write_transport.py` (new)
 - Modify: `tests/test_v2_reservations.py`
 
-**Step 1 — RED:** Assert canonical `product:buracao` binds to configured Bókun product and price category IDs, availability facts bind to the command, and cart + checkout operate under one fenced command. Prove cart uncertainty prevents checkout and enters manual review; checkout uncertainty after cart also enters manual review; no blind retry.
+**Step 1 — RED:** Assert canonical `product:buracao` binds to configured Bókun product, private start-time/rate/pricing IDs and availability facts; cart + checkout + submit operate under one fenced command. Prove missing birth date/gender are collected in parent-owned state before dispatch, passenger count is strict, cart uncertainty prevents checkout, checkout/submit uncertainty enters manual review, and there is no blind retry.
 
 **Step 2 — GREEN:** Implement `BokunReservationHttpTransport` using the exact cart/session/checkout contract derived from the existing API reference, with deterministic sub-operation idempotency keys and sanitized booking DTOs.
 

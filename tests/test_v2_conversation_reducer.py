@@ -511,6 +511,8 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
             ModelFact("adults", 2),
             ModelFact("children", 0),
             ModelFact("payment_method", "stripe"),
+            ModelFact("birth_date", date(1990, 1, 2)),
+            ModelFact("gender", "m"),
         ),
         target_offer_ids=(LODGING_OFFER_ID, ACTIVITY_OFFER_ID),
         read_requests=(),

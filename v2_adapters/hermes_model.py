@@ -104,6 +104,18 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "state_version": request.state_version,
         "observations": observations,
     }
+    if request.state_facts:
+        user_payload["state_facts"] = [
+            {
+                "name": item.name,
+                "value": (
+                    item.value.isoformat()
+                    if isinstance(item.value, date)
+                    else item.value
+                ),
+            }
+            for item in request.state_facts
+        ]
     return _canonical(
         {
             "system_prompt": system_prompt,
@@ -117,7 +129,7 @@ def _fact(value: object) -> ModelFact:
         raise InvalidModelProposal("model fact fields mismatch")
     name = value["name"]
     fact_value = value["value"]
-    if name in ("start_date", "end_date", "activity_date"):
+    if name in ("start_date", "end_date", "activity_date", "birth_date"):
         if type(fact_value) is not str:
             raise InvalidModelProposal("date fact must be an ISO string")
         try:
