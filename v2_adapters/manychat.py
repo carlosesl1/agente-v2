@@ -20,6 +20,53 @@ class ManyChatPayloadError(ValueError):
     """Raised when a ManyChat payload cannot become a safe V2 event."""
 
 
+@dataclass(frozen=True, slots=True)
+class SubscriberAllowlist:
+    """Authorize only explicit ManyChat subscriber identities.
+
+    Contact ids and phone numbers are deliberately ignored: they may corroborate
+    an identity elsewhere, but they never grant ingress authority.
+    """
+
+    subscriber_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.subscriber_ids) is not tuple or any(
+            type(value) is not str
+            or not value
+            or value != value.strip()
+            or not value.isdecimal()
+            for value in self.subscriber_ids
+        ):
+            raise ValueError("subscriber_ids must be an exact tuple of decimal strings")
+        if len(set(self.subscriber_ids)) != len(self.subscriber_ids):
+            raise ValueError("subscriber_ids may not contain duplicates")
+
+    def allows(self, payload: Mapping[str, object]) -> bool:
+        if not self.subscriber_ids:
+            return True
+        if not isinstance(payload, Mapping):
+            return False
+        subscriber = _mapping(payload.get("subscriber"))
+        explicit_values = (
+            payload.get("subscriber_id", _MISSING),
+            payload.get("subscriberId", _MISSING),
+            subscriber.get("id", _MISSING),
+        )
+        candidates: list[str] = []
+        for value in explicit_values:
+            if value is _MISSING:
+                continue
+            canonical = _explicit_subscriber_id(value)
+            if canonical is None:
+                return False
+            candidates.append(canonical)
+        if not candidates:
+            return False
+        allowed = set(self.subscriber_ids)
+        return all(candidate in allowed for candidate in candidates)
+
+
 class ManyChatTransportNotCalled(RuntimeError):
     """Transport proved that no HTTP request reached ManyChat."""
 
@@ -107,6 +154,14 @@ _MISSING: Final = object()
 
 def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _explicit_subscriber_id(value: object) -> str | None:
+    if type(value) is str and value.strip() and value.strip().isdecimal():
+        return value.strip()
+    if type(value) is int and value >= 0:
+        return str(value)
+    return None
 
 
 def _first_text(*values: object) -> str:

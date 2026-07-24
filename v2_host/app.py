@@ -10,7 +10,11 @@ import json
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from v2_adapters.manychat import ManyChatPayloadError, parse_manychat_payload
+from v2_adapters.manychat import (
+    ManyChatPayloadError,
+    SubscriberAllowlist,
+    parse_manychat_payload,
+)
 from v2_application.financial_webhooks import (
     FinancialProvider,
     FinancialWebhookInvalid,
@@ -110,6 +114,7 @@ def create_app(
     ):
         raise ValueError("complete API role requires every financial webhook port")
     now = clock or (lambda: datetime.now(timezone.utc))
+    subscriber_allowlist = SubscriberAllowlist(settings.allowed_subscriber_ids)
     app = FastAPI(title="Agente V2", version="0.8.0")
 
     @app.get("/healthz")
@@ -148,6 +153,8 @@ def create_app(
             return bounded
         try:
             payload = _load_json_object(bounded)
+            if not subscriber_allowlist.allows(payload):
+                return JSONResponse(status_code=403, content={"status": "forbidden"})
             event = parse_manychat_payload(payload, now())
         except ManyChatPayloadError:
             return JSONResponse(status_code=422, content={"status": "invalid"})
