@@ -158,7 +158,7 @@ def test_bokun_transport_requires_capacity_for_all_participants() -> None:
                 request=request,
                 json=[
                     {
-                        "availabilityCount": 1,
+                        "capacityCount": 1,
                         "available": True,
                         "date": "2026-08-10",
                         "pricesByRate": [

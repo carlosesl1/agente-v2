@@ -980,6 +980,7 @@ class SandboxConversation:
                     raise SandboxProtocolError(
                         "activity product is outside the private knowledge catalog"
                     )
+            for request in response.read_requests:
                 observation = self._reads.read(request)
                 if (
                     type(request) is LodgingAvailabilityReadRequest

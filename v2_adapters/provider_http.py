@@ -386,7 +386,13 @@ class BokunHTTPTransport:
     def _available(item: Mapping[str, object], participants: int) -> bool:
         if item.get("soldOut") is True or item.get("unavailable") is True or item.get("available") is False:
             return False
-        units = _integer(item, "availabilityCount", "availability", "seatsAvailable")
+        units = _integer(
+            item,
+            "availabilityCount",
+            "capacityCount",
+            "availability",
+            "seatsAvailable",
+        )
         return units is None or units >= participants
 
     @staticmethod

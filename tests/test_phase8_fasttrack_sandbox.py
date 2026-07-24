@@ -1082,6 +1082,53 @@ class FastTrackSandboxTests(unittest.TestCase):
             self.assertEqual(store.load_messages("catalog-denied"), ())
             self.assertEqual(store.read_observation_count("catalog-denied"), 0)
 
+    def test_hybrid_catalog_prevalidation_happens_before_any_provider_read(self) -> None:
+        lodging_request = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-05",
+                "check_out": "2026-08-06",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        invalid_activity_request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:other",
+            },
+            "kind": "activity_availability",
+        }
+        lodging = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+        activity = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _activity_observation()
+        )
+        reads = _RoutingRead(
+            {
+                "activity_availability": activity,
+                "lodging_availability": lodging,
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([lodging_request, invalid_activity_request])
+                ),
+                reads=reads,
+                knowledge=source_runner._knowledge(None),
+            )
+
+            with self.assertRaises(SandboxProtocolError):
+                runner.submit(session_id="hybrid-catalog-denied", message="Consulte os dois")
+
+            self.assertEqual(reads.calls, [])
+            self.assertEqual(store.load_messages("hybrid-catalog-denied"), ())
+
     def test_public_observations_reject_internal_id_shaped_labels(self) -> None:
         with self.assertRaises(SandboxProtocolError):
             sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
