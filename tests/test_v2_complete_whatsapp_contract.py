@@ -18,6 +18,7 @@ def _base(tmp_path: Path) -> dict[str, str]:
         "V2_RUNTIME_MODE": "controlled_write",
         "V2_CLOUDBEDS_API_KEY": "cb-read",
         "V2_CLOUDBEDS_PROPERTY_ID": "property",
+        "V2_CLOUDBEDS_SOURCE_ID": "source",
         "V2_BOKUN_ACCESS_KEY": "bk-read",
         "V2_BOKUN_SECRET_KEY": "bk-secret",
         "V2_BOKUN_PRODUCT_MAP_JSON": '{"product:buracao":"123"}',

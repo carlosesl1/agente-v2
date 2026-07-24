@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -18,6 +19,9 @@ from v2_host.production import (
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue, _load_worker_factory
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
+from v2_application.workers import V2ReservationWorker
+
+REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 
 
 def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
@@ -34,6 +38,7 @@ def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
         "runtime_mode": RuntimeMode.DARK_READ_ONLY,
         "cloudbeds_api_key": "cloudbeds-secret",
         "cloudbeds_property_id": "property-1",
+        "cloudbeds_source_id": "source-1",
         "bokun_access_key": "bokun-access",
         "bokun_secret_key": "bokun-secret",
         "bokun_product_map": {"product:buracao": "913372"},
@@ -162,6 +167,34 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert container.readiness().status == "ready"
     finally:
         container.close()
+
+    enabled = replace(
+        settings,
+        cloudbeds_writes_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    enabled_container = V2Container.open(settings=enabled, role=V2Role.WORKER)
+    try:
+        enabled_workers = build_worker_set(
+            container=enabled_container,
+            settings=enabled,
+        )
+        assert type(enabled_workers[WorkerQueue.RESERVATION]) is V2ReservationWorker
+        assert (
+            enabled_container.readiness().capabilities["reservation_writes"]
+            == "ready"
+        )
+        assert enabled.real_effect_gates == {
+            "cloudbeds_writes": True,
+            "bokun_writes": False,
+            "stripe_links": False,
+            "manychat_delivery": False,
+            "manychat_handoff": False,
+        }
+    finally:
+        enabled_container.close()
 
 
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:

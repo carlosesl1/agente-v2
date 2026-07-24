@@ -29,7 +29,7 @@ from v2_contracts.providers import ReadKind, ReadRequest
 
 
 class ProviderHTTPError(RuntimeError):
-    """Provider read failed without exposing credentials or raw response data."""
+    """Provider call failed without exposing credentials or raw response data."""
 
 
 def _text(value: object) -> str | None:
@@ -115,6 +115,34 @@ def _json_response(response: httpx.Response, *, provider: str) -> object:
         raise ProviderHTTPError(f"{provider} HTTP response failed{suffix}") from exc
 
 
+def _exact_object(
+    value: object,
+    *,
+    fields: frozenset[str],
+    name: str,
+) -> dict[str, object]:
+    if type(value) is not dict or set(value) != fields:
+        raise ProviderHTTPError(f"{name} fields mismatch")
+    return value
+
+
+def _cloudbeds_reference(value: object) -> str | None:
+    if isinstance(value, Mapping):
+        direct = _first(value, "reservationID", "reservationId", "reservation_id")
+        if direct is not None:
+            return direct
+        for nested in value.values():
+            found = _cloudbeds_reference(nested)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _cloudbeds_reference(nested)
+            if found is not None:
+                return found
+    return None
+
+
 class CloudbedsHTTPTransport:
     """Call Cloudbeds v1.3/v1.2 read endpoints and return the closed V2 DTO."""
 
@@ -123,6 +151,7 @@ class CloudbedsHTTPTransport:
         *,
         api_key: str,
         property_id: str,
+        source_id: str = "",
         base_url: str = "https://api.cloudbeds.com",
         timeout_seconds: float = 10.0,
         client: httpx.Client | None = None,
@@ -133,6 +162,7 @@ class CloudbedsHTTPTransport:
             raise ValueError("Cloudbeds base URL must use HTTPS")
         self._api_key = api_key
         self._property_id = property_id
+        self._source_id = source_id
         self._base_url = re.sub(r"/api/v\d+(?:\.\d+)?/?$", "", base_url.rstrip("/"))
         self._timeout = timeout_seconds
         self._client = client or httpx.Client()
@@ -156,12 +186,217 @@ class CloudbedsHTTPTransport:
             raise ProviderHTTPError("Cloudbeds provider reported an unsuccessful read")
         return result
 
-    def __call__(self, operation: str, payload: dict[str, object]) -> dict[str, object]:
+    def __call__(
+        self,
+        operation: str,
+        payload: dict[str, object],
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
         if operation == "lodging":
+            if idempotency_key is not None:
+                raise ProviderHTTPError("Cloudbeds read forbids an idempotency key")
             return self._lodging(payload)
         if operation == "room_description":
+            if idempotency_key is not None:
+                raise ProviderHTTPError("Cloudbeds read forbids an idempotency key")
             return self._room_description(payload)
-        raise ProviderHTTPError("unsupported Cloudbeds read operation")
+        if operation == "reserve_lodging":
+            return self._reserve_lodging(payload, idempotency_key=idempotency_key)
+        raise ProviderHTTPError("unsupported Cloudbeds operation")
+
+    def _reserve_lodging(
+        self,
+        payload: dict[str, object],
+        *,
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
+        if not self._source_id:
+            raise ProviderHTTPError("Cloudbeds write source is not configured")
+        if (
+            type(idempotency_key) is not str
+            or not idempotency_key
+            or "\x00" in idempotency_key
+        ):
+            raise ProviderHTTPError("Cloudbeds write requires an idempotency key")
+        dispatch = _exact_object(
+            payload,
+            fields=frozenset(
+                ("schema", "command_id", "operation", "offer", "customer", "terms")
+            ),
+            name="Cloudbeds dispatch",
+        )
+        if (
+            dispatch["schema"] != "v2-reservation-dispatch-v1"
+            or dispatch["operation"] != "reserve_lodging"
+            or type(dispatch["command_id"]) is not str
+        ):
+            raise ProviderHTTPError("Cloudbeds dispatch identity mismatch")
+        offer = _exact_object(
+            dispatch["offer"],
+            fields=frozenset(
+                (
+                    "binding",
+                    "private_binding",
+                    "offer_id",
+                    "start_date",
+                    "end_date",
+                    "start_time",
+                    "party",
+                    "amount",
+                    "currency",
+                )
+            ),
+            name="Cloudbeds offer",
+        )
+        private = _exact_object(
+            offer["private_binding"],
+            fields=frozenset(("room_type_id", "room_rate_id")),
+            name="Cloudbeds private binding",
+        )
+        party = _exact_object(
+            offer["party"],
+            fields=frozenset(("adults", "children")),
+            name="Cloudbeds party",
+        )
+        customer = _exact_object(
+            dispatch["customer"],
+            fields=frozenset(
+                (
+                    "customer_ref",
+                    "full_name",
+                    "email",
+                    "phone_e164",
+                    "country_code",
+                )
+            ),
+            name="Cloudbeds customer",
+        )
+        terms = _exact_object(
+            dispatch["terms"],
+            fields=frozenset(("payment_method", "add_ons")),
+            name="Cloudbeds terms",
+        )
+        start_date = _text(offer["start_date"])
+        end_date = _text(offer["end_date"])
+        try:
+            check_in = date.fromisoformat(start_date or "")
+            check_out = date.fromisoformat(end_date or "")
+        except ValueError as exc:
+            raise ProviderHTTPError("Cloudbeds stay dates are invalid") from exc
+        if check_out <= check_in or offer["start_time"] is not None:
+            raise ProviderHTTPError("Cloudbeds stay interval is invalid")
+        adults = party["adults"]
+        children = party["children"]
+        if (
+            type(adults) is not int
+            or adults < 1
+            or type(children) is not int
+            or children < 0
+        ):
+            raise ProviderHTTPError("Cloudbeds party is invalid")
+        room_type_id = _text(private["room_type_id"])
+        room_rate_id = _text(private["room_rate_id"])
+        if not room_type_id or not room_rate_id:
+            raise ProviderHTTPError("Cloudbeds private binding is incomplete")
+        amount = _amount(offer["amount"])
+        currency = _currency(offer["currency"])
+        if (
+            amount is None
+            or type(offer["amount"]) is not str
+            or offer["amount"] != f"{amount:.2f}"
+            or currency != "BRL"
+        ):
+            raise ProviderHTTPError("Cloudbeds amount/currency is invalid")
+        full_name = _text(customer["full_name"])
+        if full_name is None:
+            raise ProviderHTTPError("Cloudbeds guest name is missing")
+        name_parts = full_name.split()
+        if len(name_parts) < 2:
+            raise ProviderHTTPError("Cloudbeds guest name requires first and last name")
+        email = _text(customer["email"])
+        phone = _text(customer["phone_e164"])
+        country = _text(customer["country_code"])
+        if (
+            email is None
+            or email.count("@") != 1
+            or phone is None
+            or re.fullmatch(r"\+[1-9][0-9]{7,14}", phone) is None
+            or country is None
+            or re.fullmatch(r"[A-Z]{2}", country) is None
+        ):
+            raise ProviderHTTPError("Cloudbeds guest fields are invalid")
+        if terms["add_ons"] != []:
+            raise ProviderHTTPError("Cloudbeds reservation write does not accept add-ons")
+        payment_method = {
+            "stripe": "credit_card",
+            "wise": "cash",
+            "pix": "cash",
+        }.get(terms["payment_method"])
+        if payment_method is None:
+            raise ProviderHTTPError("Cloudbeds payment method is invalid")
+        compact = lambda value: json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        form = {
+            "propertyID": self._property_id,
+            "sourceID": self._source_id,
+            "startDate": start_date,
+            "endDate": end_date,
+            "guestFirstName": name_parts[0],
+            "guestLastName": " ".join(name_parts[1:]),
+            "guestEmail": email,
+            "guestPhone": phone,
+            "guestCountry": country,
+            "rooms": compact([{"roomTypeID": room_type_id, "quantity": 1}]),
+            "adults": compact([{"roomTypeID": room_type_id, "quantity": adults}]),
+            "children": compact(
+                [{"roomTypeID": room_type_id, "quantity": children}]
+            ),
+            "paymentMethod": payment_method,
+        }
+        try:
+            response = self._client.post(
+                self._base_url + "/api/v1.1/postReservation",
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "X-Idempotency-Key": idempotency_key,
+                },
+                data=form,
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise ProviderHTTPError("Cloudbeds write result is ambiguous") from exc
+        try:
+            response_payload = response.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            if 400 <= response.status_code < 500 and response.status_code != 409:
+                return {"status": "rejected"}
+            raise ProviderHTTPError("Cloudbeds write result is ambiguous") from exc
+        reservation_id = _cloudbeds_reference(response_payload)
+        if reservation_id is None:
+            if 400 <= response.status_code < 500 and response.status_code != 409:
+                return {"status": "rejected"}
+            if (
+                200 <= response.status_code < 300
+                and isinstance(response_payload, Mapping)
+                and response_payload.get("success") is False
+            ):
+                return {"status": "rejected"}
+            raise ProviderHTTPError("Cloudbeds write result is ambiguous")
+        readback = self._get(
+            "/api/v1.1/getReservation",
+            {
+                "propertyID": self._property_id,
+                "reservationID": reservation_id,
+            },
+        )
+        if _cloudbeds_reference(readback) != reservation_id:
+            raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        return {"status": "confirmed", "reservation_id": reservation_id}
 
     def _lodging(self, payload: dict[str, object]) -> dict[str, object]:
         query = {

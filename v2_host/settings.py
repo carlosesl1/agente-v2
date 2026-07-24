@@ -251,6 +251,8 @@ class V2Settings:
         if self.stripe_links_enabled:
             if not self.stripe_secret_key.startswith(("sk_test_", "rk_test_")):
                 raise ValueError("Stripe link creation requires a test Stripe key")
+        if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
+            raise ValueError("Cloudbeds writes require cloudbeds_source_id")
         if type(self.bokun_product_map) is not dict or any(
             type(key) is not str or not key or type(value) is not str or not value
             for key, value in self.bokun_product_map.items()

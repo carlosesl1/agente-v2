@@ -11,11 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from reservation_execution.reconciliation import Reconciler
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
+from reservation_domain import ServiceKind
+from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
 from v2_adapters.bokun import BokunReadAdapter
-from v2_adapters.cloudbeds import CloudbedsReadAdapter
+from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
 from v2_adapters.manychat_profile import ManyChatProfileAdapter
@@ -27,9 +28,15 @@ from v2_adapters.provider_http import (
 )
 from v2_application.inbox_worker import InboxTurnWorker
 from v2_application.relay_worker import BoundaryRelayWorker
-from v2_application.reads import V2ReadService
+from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
+from v2_application.reservations import V2ReservationExecutionAdapter
+from v2_application.workers import V2ReservationWorker
 from v2_application.turn_executor import V2TurnExecutor
-from v2_contracts.providers import ReadKind, ReadRequest
+from v2_contracts.providers import (
+    ProviderWriteAuthorization,
+    ReadKind,
+    ReadRequest,
+)
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.public_authority import ManifestPublicAuthorityResolver
@@ -40,6 +47,24 @@ from v2_host.worker_main import WorkerQueue
 class UTCClock:
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
+
+
+class ControlledEffectGuard:
+    """Re-evaluate the immutable kill-switch/window contract for every claim."""
+
+    def __init__(self, *, settings: V2Settings, clock: UTCClock) -> None:
+        if type(settings) is not V2Settings or type(clock) is not UTCClock:
+            raise TypeError("controlled effect guard requires exact settings and clock")
+        self._settings = settings
+        self._clock = clock
+
+    def allows_workflow(self, workflow_id: str) -> bool:
+        if type(workflow_id) is not str or not workflow_id:
+            return False
+        return (
+            self._settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+            and self._settings.write_window_is_open(now=self._clock.now())
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +247,50 @@ def _build_inbox_worker(
     )
 
 
+def _build_cloudbeds_reservation_worker(
+    *,
+    container: V2Container,
+    settings: V2Settings,
+) -> V2ReservationWorker:
+    if container.execution is None:
+        raise ValueError("reservation execution owner is unavailable")
+    if not settings.cloudbeds_writes_enabled:
+        raise ValueError("Cloudbeds reservation worker requires its explicit gate")
+    clock = UTCClock()
+    transport = CloudbedsHTTPTransport(
+        api_key=settings.cloudbeds_api_key,
+        property_id=settings.cloudbeds_property_id,
+        source_id=settings.cloudbeds_source_id,
+        base_url=settings.cloudbeds_base_url,
+    )
+    read_port = CloudbedsReadAdapter(
+        transport=transport,
+        clock=clock,
+        ttl=timedelta(minutes=5),
+    )
+    resolver = PrivateOfferBindingResolver({ServiceKind.LODGING: read_port})
+    adapter = V2ReservationExecutionAdapter(
+        provider="cloudbeds",
+        port=CloudbedsReservationPort(transport),
+        authorization=ProviderWriteAuthorization(
+            provider="cloudbeds",
+            enabled=True,
+            authorization_id=(
+                "authorization:cloudbeds:" + settings.candidate_git_sha[:16]
+            ),
+        ),
+        binding_resolver=resolver,
+        clock=clock,
+    )
+    return V2ReservationWorker(
+        store=container.execution,
+        adapters=(adapter,),
+        effect_guard=ControlledEffectGuard(settings=settings, clock=clock),
+        worker_id="worker:reservation",
+        lease_ttl=timedelta(seconds=30),
+    )
+
+
 def build_worker_set(
     *, container: V2Container, settings: V2Settings
 ) -> dict[WorkerQueue, object]:
@@ -232,9 +301,14 @@ def build_worker_set(
     if settings.runtime_mode is RuntimeMode.API_ONLY:
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
-    if (
-        settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
-        and not settings.all_real_effect_gates_closed
+    unsupported_controlled_gates = (
+        settings.bokun_writes_enabled,
+        settings.stripe_links_enabled,
+        settings.manychat_delivery_enabled,
+        settings.manychat_handoff_enabled,
+    )
+    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE and any(
+        unsupported_controlled_gates
     ):
         raise RuntimeError(
             "controlled-write graph is closed until every enabled effect transport is installed"
@@ -261,10 +335,18 @@ def build_worker_set(
         worker_id="worker:boundary-relay",
         lease_ttl=timedelta(seconds=30),
     )
+    reservation_worker: object = (
+        _build_cloudbeds_reservation_worker(
+            container=container,
+            settings=settings,
+        )
+        if settings.cloudbeds_writes_enabled
+        else ClosedCapabilityWorker("reservation_writes")
+    )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
-        WorkerQueue.RESERVATION: ClosedCapabilityWorker("reservation_writes"),
+        WorkerQueue.RESERVATION: reservation_worker,
         WorkerQueue.PAYMENT_INITIATION: ClosedCapabilityWorker("payment_initiation"),
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
         WorkerQueue.POST_PAYMENT: ClosedCapabilityWorker("post_payment_delivery"),
@@ -303,7 +385,9 @@ def build_worker_set(
             "boundary_relay": "ready",
             "manychat_delivery": "closed",
             "payment_initiation": "closed",
-            "reservation_writes": "closed",
+            "reservation_writes": (
+                "ready" if settings.cloudbeds_writes_enabled else "closed"
+            ),
             "settlement_writes": "closed",
             "reconciliation": "ready",
         }
