@@ -286,3 +286,48 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
     assert audited.closure.zero_requests_in_flight is True
     with pytest.raises(ValueError, match="byte hash mismatch"):
         replace(audited.frames[0], stdout_bytes=audited.frames[0].stdout_bytes + b"x")
+
+
+def test_hermes_adapter_normalizes_reply_boundaries_but_rejects_empty() -> None:
+    def proposal(reply: str) -> bytes:
+        return json.dumps(
+            {
+                "schema": "v2-model-proposal-v1",
+                "source_event_id": "event:normalize-001",
+                "intent": "inform",
+                "reply_chunks": [reply],
+                "facts": [],
+                "read_requests": [],
+                "effect_proposals": [],
+                "target_offer_id": None,
+                "confirmed_summary_version": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
+    responses = [proposal("  Olá!  \n"), proposal(" \n ")]
+
+    def run(command, *, input, capture_output, timeout, check, env):
+        return Completed(b"PHASE8_RESULT\x00" + responses.pop(0))
+
+    adapter = HermesModelAdapter(
+        command=("hermes-model-child",),
+        system_prompt="Return closed V2 JSON.",
+        timeout=30,
+        transcript_key=b"n" * 32,
+        run=run,
+        environ={"PATH": "/usr/bin"},
+    )
+    request = ModelRequest(
+        request_id="model-request:normalize-001",
+        lead_id="manychat:normalize-001",
+        source_event_id="event:normalize-001",
+        message="Oi",
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    assert adapter.complete(request).reply_chunks == ("Olá!",)
+    with pytest.raises(InvalidModelProposal, match="reply_chunks"):
+        adapter.complete(request)

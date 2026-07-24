@@ -196,7 +196,10 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         return ModelProposal(
             source_event_id=decoded["source_event_id"],
             intent=decoded["intent"],
-            reply_chunks=tuple(_tuple_items(decoded["reply_chunks"], "reply_chunks")),
+            reply_chunks=tuple(
+                item.strip() if type(item) is str else item
+                for item in _tuple_items(decoded["reply_chunks"], "reply_chunks")
+            ),
             facts=tuple(
                 _fact(item) for item in _tuple_items(decoded["facts"], "facts")
             ),
