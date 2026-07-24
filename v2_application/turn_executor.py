@@ -50,6 +50,7 @@ from v2_application.relay_worker import (
     build_handoff_relay_bundle,
     build_reservation_relay_bundle,
 )
+from v2_application.reservations import ReservationAllocator
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
@@ -306,6 +307,16 @@ def _command_rows(commands: tuple[object, ...]) -> tuple[tuple[str, str], ...]:
         wire = dumps_command(command)
         rows.append((command.command_id, hashlib.sha256(wire.encode()).hexdigest()))
     return tuple(rows)
+
+
+def _execution_commands(
+    commands: tuple[object, ...],
+) -> tuple[ReservationCommand, ...]:
+    if type(commands) is not tuple or any(
+        type(command) is not ReservationCommand for command in commands
+    ):
+        raise TurnExecutionError("unsupported V2 execution command type")
+    return ReservationAllocator().expand_commands(commands)
 
 
 def _state_model_facts(
@@ -576,14 +587,15 @@ class V2TurnExecutor:
         if decision.next_state.version != current.version + 1:
             raise TurnExecutionError("reducer did not advance state exactly once")
         facts = decision.projection.facts
+        execution_commands = _execution_commands(decision.commands)
         kernel = KernelDecision(
             decision.next_state,
-            decision.commands,
+            execution_commands,
             (),
             (),
             (),
         )
-        commit = BoundaryCommit(decision.next_state, decision.commands, (), ())
+        commit = BoundaryCommit(decision.next_state, execution_commands, (), ())
         kernel_bytes = to_wire_json(kernel).encode("utf-8")
         kernel_hash = semantic_hash(kernel)
 
@@ -747,8 +759,8 @@ class V2TurnExecutor:
                 ),
             ]
         )
-        command_rows = _command_rows(decision.commands)
-        command_relays = _command_relays(batch.batch_id, decision.commands)
+        command_rows = _command_rows(execution_commands)
+        command_relays = _command_relays(batch.batch_id, execution_commands)
         internal_jobs = _handoff_jobs(batch.batch_id, decision.handoff_request)
         commit_now = self._clock.now()
         if (

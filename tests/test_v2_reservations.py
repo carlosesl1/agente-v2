@@ -29,6 +29,7 @@ from v2_application.reservations import (
     ReservationAllocator,
     V2ReservationExecutionAdapter,
 )
+from v2_application.turn_executor import _execution_commands
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
 from v2_contracts.providers import (
     ProviderCertainty,
@@ -245,9 +246,14 @@ def test_package_allocation_produces_two_provider_commands_as_one_batch() -> Non
         ReservationOperation.BOOK_ACTIVITY,
     )
     assert len({command.command_id for command in allocation.commands}) == 2
+    assert len({command.workflow_id for command in allocation.commands}) == 2
+    assert all(
+        command.workflow_id != package.workflow_id for command in allocation.commands
+    )
     assert all(len(command.payload.components) == 1 for command in allocation.commands)
     assert ReservationAllocator().allocate(package) == allocation
     assert ReservationAllocator().expand_commands((package,)) == allocation.commands
+    assert _execution_commands((package,)) == allocation.commands
 
 
 def test_bokun_missing_booking_profile_fails_before_fence() -> None:

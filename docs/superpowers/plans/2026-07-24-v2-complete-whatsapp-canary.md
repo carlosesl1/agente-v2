@@ -118,7 +118,7 @@ Reject live Stripe key prefixes, expired windows, multiple subscribers, write ga
 
 **Step 1 — RED:** Assert worker catalog includes a distinct relay owner, and that reservation workers never inspect boundary tables directly. Assert duplicate restart cycles produce one reservation command.
 
-**Step 2 — GREEN:** Add `boundary_relay` queue with lease/heartbeat/readiness. Compose the existing `BoundaryRelayWorker`; its target store performs deterministic parent-to-child allocation when accepting the Phase 5 bundle.
+**Step 2 — GREEN:** Add `boundary_relay` queue with lease/heartbeat/readiness. During the atomic turn commit, expand an accepted package into deterministic provider-child commands with distinct child workflow IDs; then compose the existing `BoundaryRelayWorker` so each child is persisted independently in Phase 5.
 
 **Step 3 — Verify crash/restart/fencing and commit.**
 

@@ -234,6 +234,15 @@ class ReservationAllocator:
         for service in (ServiceKind.LODGING, ServiceKind.ACTIVITY):
             component = by_service[service]
             components = (component,)
+            child_workflow_id = (
+                "workflow:component:"
+                + hashlib.sha256(
+                    b"v2-package-component-workflow-v1\0"
+                    + command.workflow_id.encode("utf-8")
+                    + b"\0"
+                    + service.value.encode("ascii")
+                ).hexdigest()[:40]
+            )
             signature = subject_signature(
                 components=components,
                 customer=command.payload.customer,
@@ -241,7 +250,7 @@ class ReservationAllocator:
             )
             operation = operation_for_components(components)
             command_id, idempotency_key = command_identity(
-                workflow_id=command.workflow_id,
+                workflow_id=child_workflow_id,
                 draft_id=command.draft_id,
                 draft_version=command.draft_version,
                 signature=signature,
@@ -251,7 +260,7 @@ class ReservationAllocator:
                 ReservationCommand(
                     command_id=command_id,
                     idempotency_key=idempotency_key,
-                    workflow_id=command.workflow_id,
+                    workflow_id=child_workflow_id,
                     draft_id=command.draft_id,
                     draft_version=command.draft_version,
                     subject_signature=signature,
