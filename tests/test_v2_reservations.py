@@ -19,6 +19,7 @@ from reservation_domain import (
     ReservationOperation,
 )
 from reservation_domain.signature import command_identity, subject_signature
+from reservation_execution import PreparationFailure
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from tests.phase5_helpers import T0, _lookup, persist_script, workflow_events
 from v2_adapters.bokun import BokunReservationPort
@@ -247,6 +248,24 @@ def test_package_allocation_produces_two_provider_commands_as_one_batch() -> Non
     assert all(len(command.payload.components) == 1 for command in allocation.commands)
     assert ReservationAllocator().allocate(package) == allocation
     assert ReservationAllocator().expand_commands((package,)) == allocation.commands
+
+
+def test_bokun_missing_booking_profile_fails_before_fence() -> None:
+    activity = ReservationAllocator().allocate(_package_command()).commands[1]
+    adapter = V2ReservationExecutionAdapter(
+        provider="bokun",
+        port=FakeReservationPort(
+            "bokun", _result(ProviderCertainty.EFFECT_CONFIRMED)
+        ),
+        authorization=_authorization("bokun"),
+        require_private_binding=False,
+    )
+
+    with pytest.raises(PreparationFailure) as raised:
+        adapter.prepare(activity)
+
+    assert raised.value.reason == "booking_profile_incomplete"
+    assert raised.value.retryable is False
 
 
 def test_model_supplied_provider_payload_is_rejected_before_provider() -> None:

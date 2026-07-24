@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from reservation_domain import ReservationOperation
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import (
     ClosedCapabilityWorker,
@@ -195,6 +196,47 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         }
     finally:
         enabled_container.close()
+
+    bokun_enabled = replace(
+        settings,
+        bokun_writes_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    bokun_container = V2Container.open(
+        settings=bokun_enabled,
+        role=V2Role.WORKER,
+    )
+    try:
+        bokun_workers = build_worker_set(
+            container=bokun_container,
+            settings=bokun_enabled,
+        )
+        reservation = bokun_workers[WorkerQueue.RESERVATION]
+        assert type(reservation) is V2ReservationWorker
+        assert set(reservation._worker._adapter._adapters) == {
+            ReservationOperation.BOOK_ACTIVITY
+        }
+        assert bokun_container.readiness().capabilities["reservation_writes"] == "ready"
+    finally:
+        bokun_container.close()
+
+    both_enabled = replace(bokun_enabled, cloudbeds_writes_enabled=True)
+    both_container = V2Container.open(settings=both_enabled, role=V2Role.WORKER)
+    try:
+        both_workers = build_worker_set(
+            container=both_container,
+            settings=both_enabled,
+        )
+        reservation = both_workers[WorkerQueue.RESERVATION]
+        assert type(reservation) is V2ReservationWorker
+        assert set(reservation._worker._adapter._adapters) == {
+            ReservationOperation.RESERVE_LODGING,
+            ReservationOperation.BOOK_ACTIVITY,
+        }
+    finally:
+        both_container.close()
 
 
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:

@@ -13,6 +13,8 @@ from .types import DispatchPermit, DispatchRequest, _require_hash, _require_id
 _PREPARATION_FAILURE_REASONS = frozenset(
     {
         "active_handoff",
+        "booking_profile_incomplete",
+        "canary_passenger_count_unsupported",
         "command_serialization_failed",
         "command_validation_failed",
         "effect_guard_unavailable",

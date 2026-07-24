@@ -26,6 +26,19 @@ from v2_contracts.providers import (
 
 _AMOUNT_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
 _CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
+_BOOKING_PRIVATE_FIELDS: Final = (
+    "bokun_product_id",
+    "start_time_id",
+    "rate_id",
+    "pricing_category_id",
+)
+
+
+def _private_booking_fields(response: dict[str, object]) -> dict[str, str]:
+    return {
+        name: text(response.get(name), name)
+        for name in _BOOKING_PRIVATE_FIELDS
+    }
 
 
 class BokunReadAdapter:
@@ -54,7 +67,7 @@ class BokunReadAdapter:
         response = exact_dict(self._transport("activity", payload), "Bókun response")
         if response.get("product_id") not in (None, query.canonical_product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
-        provider_product_id = text(response.get("bokun_product_id"), "bokun_product_id")
+        private = _private_booking_fields(response)
         amount = text(response.get("total_amount"), "total_amount")
         currency = text(response.get("currency"), "currency")
         available = response.get("available")
@@ -68,7 +81,7 @@ class BokunReadAdapter:
         private_hash = binding_hash(
             {
                 "request_hash": query.request_hash,
-                "bokun_product_id": provider_product_id,
+                **private,
             }
         )
         offer_id = "offer:" + private_hash
@@ -93,7 +106,7 @@ class BokunReadAdapter:
             query=resolved_query,
             observed_at=observed_at,
             expires_at=expires_at,
-            provider_fields=(("bokun_product_id", provider_product_id),),
+            provider_fields=tuple(sorted(private.items())),
         )
 
     def _activity(self, request: ReadRequest) -> ReadObservation:
@@ -105,7 +118,7 @@ class BokunReadAdapter:
         response = exact_dict(self._transport("activity", query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
-        provider_product_id = text(response.get("bokun_product_id"), "bokun_product_id")
+        private = _private_booking_fields(response)
         amount = text(response.get("total_amount"), "total_amount")
         currency = text(response.get("currency"), "currency")
         available = response.get("available")
@@ -119,7 +132,7 @@ class BokunReadAdapter:
         private_hash = binding_hash(
             {
                 "request_hash": request.query_hash(),
-                "bokun_product_id": provider_product_id,
+                **private,
             }
         )
         public = {

@@ -47,7 +47,14 @@ _PROVIDER_OPERATION: Final = {
 }
 _PRIVATE_PROVIDER_FIELDS: Final = {
     "cloudbeds": frozenset(("room_rate_id", "room_type_id")),
-    "bokun": frozenset(("bokun_product_id",)),
+    "bokun": frozenset(
+        (
+            "bokun_product_id",
+            "start_time_id",
+            "rate_id",
+            "pricing_category_id",
+        )
+    ),
 }
 _CERTAINTY: Final = {
     ProviderCertainty.NOT_CALLED: ExecutionCertainty.NOT_CALLED,
@@ -100,6 +107,16 @@ def _provider_payload(
             "email": customer.email,
             "phone_e164": customer.phone_e164,
             "country_code": customer.country_code,
+            **(
+                {"birth_date": customer.birth_date.isoformat()}
+                if customer.birth_date is not None and provider == "bokun"
+                else {}
+            ),
+            **(
+                {"gender": customer.gender}
+                if customer.gender is not None and provider == "bokun"
+                else {}
+            ),
         },
         "terms": {
             "payment_method": terms.payment_method,
@@ -318,6 +335,15 @@ class V2ReservationExecutionAdapter:
             raise PreparationFailure("unsupported_operation", False, ())
         if not self._authorization.enabled:
             raise PreparationFailure("write_gate_closed", False, ())
+        if self.provider == "bokun":
+            customer = command.payload.customer
+            component = command.payload.components[0]
+            if customer.birth_date is None or customer.gender is None:
+                raise PreparationFailure("booking_profile_incomplete", False, ())
+            if component.party.adults + component.party.children != 1:
+                raise PreparationFailure(
+                    "canary_passenger_count_unsupported", False, ()
+                )
         if self._binding_resolver is None and self._require_private_binding:
             raise PreparationFailure("private_binding_resolver_unavailable", False, ())
         payload = dumps_command(command)

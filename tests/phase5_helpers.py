@@ -110,7 +110,7 @@ def _lookup(provider: str):
             start_date=date(2026, 11, 11),
             end_date=None,
             start_time=None,
-            party=Party(adults=2, children=0),
+            party=Party(adults=1, children=0),
         )
         transport = FinalFixtureTransport(
             (
@@ -182,6 +182,8 @@ def workflow_events(
                 ),
                 phone_e164="+999" + "0" * 8,
                 country_code="ZZ",
+                birth_date=(date(1990, 1, 2) if provider == "bokun" else None),
+                gender=("m" if provider == "bokun" else None),
             ),
             terms=EconomicTerms(payment_method="card"),
         ),

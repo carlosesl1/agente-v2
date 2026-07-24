@@ -174,6 +174,9 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
         return {
             **payload,
             "bokun_product_id": "bokun-private-001",
+            "start_time_id": "start-private-001",
+            "rate_id": "rate-private-001",
+            "pricing_category_id": "category-private-001",
             "product_public_name": "Buracão",
             "total_amount": provider_state["amount"],
             "currency": "BRL",
@@ -204,7 +207,12 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
     resolver = PrivateOfferBindingResolver({ServiceKind.ACTIVITY: adapter})
 
     binding = resolver.resolve(component, now=NOW)
-    assert binding.private_payload() == {"bokun_product_id": "bokun-private-001"}
+    assert binding.private_payload() == {
+        "bokun_product_id": "bokun-private-001",
+        "pricing_category_id": "category-private-001",
+        "rate_id": "rate-private-001",
+        "start_time_id": "start-private-001",
+    }
 
     provider_state["amount"] = "401.00"
     with pytest.raises(PrivateBindingMismatch, match="commercial binding"):

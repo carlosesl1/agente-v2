@@ -12,7 +12,14 @@ _AMOUNT_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.[0-9]{2}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _PROVIDER_FIELDS = {
     "cloudbeds": frozenset(("room_rate_id", "room_type_id")),
-    "bokun": frozenset(("bokun_product_id",)),
+    "bokun": frozenset(
+        (
+            "bokun_product_id",
+            "start_time_id",
+            "rate_id",
+            "pricing_category_id",
+        )
+    ),
 }
 
 

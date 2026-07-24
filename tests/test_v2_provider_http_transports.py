@@ -96,6 +96,7 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
                 json=[
                     {
                         "date": "2026-08-10",
+                        "startTimeId": "start-1",
                         "available": True,
                         "availabilityCount": 6,
                         "pricesByRate": [
@@ -137,6 +138,9 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
     assert result == {
         "product_id": "tour:buracao",
         "bokun_product_id": "913372",
+        "start_time_id": "start-1",
+        "rate_id": "rate-1",
+        "pricing_category_id": "857489",
         "product_public_name": "Roteiro do Buracão",
         "total_amount": "600.00",
         "currency": "BRL",

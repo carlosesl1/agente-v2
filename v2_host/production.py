@@ -15,7 +15,7 @@ from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import ServiceKind
 from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
-from v2_adapters.bokun import BokunReadAdapter
+from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
@@ -247,44 +247,78 @@ def _build_inbox_worker(
     )
 
 
-def _build_cloudbeds_reservation_worker(
+def _build_reservation_worker(
     *,
     container: V2Container,
     settings: V2Settings,
 ) -> V2ReservationWorker:
     if container.execution is None:
         raise ValueError("reservation execution owner is unavailable")
-    if not settings.cloudbeds_writes_enabled:
-        raise ValueError("Cloudbeds reservation worker requires its explicit gate")
+    if not (settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled):
+        raise ValueError("reservation worker requires an explicit provider gate")
     clock = UTCClock()
-    transport = CloudbedsHTTPTransport(
-        api_key=settings.cloudbeds_api_key,
-        property_id=settings.cloudbeds_property_id,
-        source_id=settings.cloudbeds_source_id,
-        base_url=settings.cloudbeds_base_url,
-    )
-    read_port = CloudbedsReadAdapter(
-        transport=transport,
-        clock=clock,
-        ttl=timedelta(minutes=5),
-    )
-    resolver = PrivateOfferBindingResolver({ServiceKind.LODGING: read_port})
-    adapter = V2ReservationExecutionAdapter(
-        provider="cloudbeds",
-        port=CloudbedsReservationPort(transport),
-        authorization=ProviderWriteAuthorization(
-            provider="cloudbeds",
-            enabled=True,
-            authorization_id=(
-                "authorization:cloudbeds:" + settings.candidate_git_sha[:16]
-            ),
-        ),
-        binding_resolver=resolver,
-        clock=clock,
-    )
+    adapters: list[V2ReservationExecutionAdapter] = []
+    if settings.cloudbeds_writes_enabled:
+        cloudbeds_transport = CloudbedsHTTPTransport(
+            api_key=settings.cloudbeds_api_key,
+            property_id=settings.cloudbeds_property_id,
+            source_id=settings.cloudbeds_source_id,
+            base_url=settings.cloudbeds_base_url,
+        )
+        cloudbeds_read_port = CloudbedsReadAdapter(
+            transport=cloudbeds_transport,
+            clock=clock,
+            ttl=timedelta(minutes=5),
+        )
+        adapters.append(
+            V2ReservationExecutionAdapter(
+                provider="cloudbeds",
+                port=CloudbedsReservationPort(cloudbeds_transport),
+                authorization=ProviderWriteAuthorization(
+                    provider="cloudbeds",
+                    enabled=True,
+                    authorization_id=(
+                        "authorization-v2-lodging-" + settings.candidate_git_sha[:16]
+                    ),
+                ),
+                binding_resolver=PrivateOfferBindingResolver(
+                    {ServiceKind.LODGING: cloudbeds_read_port}
+                ),
+                clock=clock,
+            )
+        )
+    if settings.bokun_writes_enabled:
+        bokun_transport = BokunHTTPTransport(
+            access_key=settings.bokun_access_key,
+            secret_key=settings.bokun_secret_key,
+            product_map=settings.bokun_product_map,
+            base_url=settings.bokun_base_url,
+        )
+        bokun_read_port = BokunReadAdapter(
+            transport=bokun_transport,
+            clock=clock,
+            ttl=timedelta(minutes=5),
+        )
+        adapters.append(
+            V2ReservationExecutionAdapter(
+                provider="bokun",
+                port=BokunReservationPort(bokun_transport),
+                authorization=ProviderWriteAuthorization(
+                    provider="bokun",
+                    enabled=True,
+                    authorization_id=(
+                        "authorization-v2-activity-" + settings.candidate_git_sha[:16]
+                    ),
+                ),
+                binding_resolver=PrivateOfferBindingResolver(
+                    {ServiceKind.ACTIVITY: bokun_read_port}
+                ),
+                clock=clock,
+            )
+        )
     return V2ReservationWorker(
         store=container.execution,
-        adapters=(adapter,),
+        adapters=tuple(adapters),
         effect_guard=ControlledEffectGuard(settings=settings, clock=clock),
         worker_id="worker:reservation",
         lease_ttl=timedelta(seconds=30),
@@ -302,7 +336,6 @@ def build_worker_set(
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
     unsupported_controlled_gates = (
-        settings.bokun_writes_enabled,
         settings.stripe_links_enabled,
         settings.manychat_delivery_enabled,
         settings.manychat_handoff_enabled,
@@ -336,11 +369,11 @@ def build_worker_set(
         lease_ttl=timedelta(seconds=30),
     )
     reservation_worker: object = (
-        _build_cloudbeds_reservation_worker(
+        _build_reservation_worker(
             container=container,
             settings=settings,
         )
-        if settings.cloudbeds_writes_enabled
+        if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
         else ClosedCapabilityWorker("reservation_writes")
     )
     workers: dict[WorkerQueue, object] = {
@@ -386,7 +419,9 @@ def build_worker_set(
             "manychat_delivery": "closed",
             "payment_initiation": "closed",
             "reservation_writes": (
-                "ready" if settings.cloudbeds_writes_enabled else "closed"
+                "ready"
+                if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
+                else "closed"
             ),
             "settlement_writes": "closed",
             "reconciliation": "ready",
