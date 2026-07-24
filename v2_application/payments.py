@@ -310,6 +310,62 @@ def _offer_bytes(offer: PaymentMethodOffer) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
+    if type(raw) is not bytes:
+        raise RuntimeError("payment initiation result has invalid private bytes")
+    try:
+        value = json.loads(raw)
+        if value["type"] == "stripe_link":
+            if set(value) != {
+                "type",
+                "payment_id",
+                "reservation_anchor_id",
+                "account_profile_id",
+                "economic_version",
+                "public_url",
+                "provider_reference_fingerprint",
+                "receipt_hash",
+                "settled",
+            }:
+                raise ValueError("Stripe result fields mismatch")
+            return StripePaymentLink(
+                payment_id=value["payment_id"],
+                reservation_anchor_id=value["reservation_anchor_id"],
+                account_profile_id=value["account_profile_id"],
+                economic_version=value["economic_version"],
+                public_url=value["public_url"],
+                provider_reference_fingerprint=value[
+                    "provider_reference_fingerprint"
+                ],
+                receipt_hash=value["receipt_hash"],
+                settled=value["settled"],
+            )
+        if value["type"] == "instruction":
+            if set(value) != {
+                "type",
+                "payment_id",
+                "reservation_anchor_id",
+                "method",
+                "receiver_profile_id",
+                "economic_version",
+                "public_text",
+                "settled",
+            }:
+                raise ValueError("instruction result fields mismatch")
+            return PaymentInstruction(
+                payment_id=value["payment_id"],
+                reservation_anchor_id=value["reservation_anchor_id"],
+                method=PaymentMethod(value["method"]),
+                receiver_profile_id=value["receiver_profile_id"],
+                economic_version=value["economic_version"],
+                public_text=value["public_text"],
+                settled=value["settled"],
+            )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("payment initiation result is corrupt") from exc
+    raise RuntimeError("payment initiation result type is outside the closed catalog")
+
+
 _RESULT_CIPHERTEXT_PREFIX = b"v2-payment-result-aesgcm-v1\0"
 
 
@@ -329,6 +385,34 @@ class SQLitePaymentInitiationStore:
 
     def close(self) -> None:
         self._connection.close()
+
+    def completed_offers(self) -> tuple[PaymentMethodOffer, ...]:
+        rows = self._connection.execute(
+            "SELECT initiation_id,result_json,result_hash FROM payment_initiations "
+            "WHERE status='completed' ORDER BY initiation_id"
+        ).fetchall()
+        offers = []
+        for initiation_id, result_blob, result_hash in rows:
+            if type(result_blob) is not bytes or not result_blob.startswith(
+                _RESULT_CIPHERTEXT_PREFIX
+            ):
+                raise RuntimeError("completed payment result is not private ciphertext")
+            if hashlib.sha256(result_blob).hexdigest() != result_hash:
+                raise RuntimeError("completed payment ciphertext hash diverged")
+            encrypted = result_blob[len(_RESULT_CIPHERTEXT_PREFIX) :]
+            if len(encrypted) <= 12:
+                raise RuntimeError("completed payment ciphertext is truncated")
+            nonce, ciphertext = encrypted[:12], encrypted[12:]
+            try:
+                raw = self._result_cipher.decrypt(
+                    nonce,
+                    ciphertext,
+                    initiation_id.encode("utf-8"),
+                )
+            except Exception as exc:
+                raise RuntimeError("completed payment ciphertext is invalid") from exc
+            offers.append(_offer_from_bytes(raw))
+        return tuple(offers)
 
     def enqueue(self, selection: PaymentSelection, *, now: datetime) -> bool:
         raw = _selection_bytes(selection)

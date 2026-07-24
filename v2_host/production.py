@@ -28,6 +28,7 @@ from v2_adapters.provider_http import (
 )
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.completion_projector import CompletionProjector
 from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
@@ -439,6 +440,20 @@ def build_worker_set(
         if settings.stripe_links_enabled
         else ClosedCapabilityWorker("outcome_projector")
     )
+    completion_projector: object = (
+        CompletionProjector(
+            execution=container.execution,
+            payment_store=container.payment_initiation,
+            public_store=container.public_outbox,
+            subscriber_id=settings.allowed_subscriber_ids[0],
+            account_profiles={
+                BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
+                BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
+            },
+        )
+        if settings.stripe_links_enabled
+        else ClosedCapabilityWorker("completion_projector")
+    )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
@@ -446,7 +461,7 @@ def build_worker_set(
         WorkerQueue.OUTCOME_PROJECTOR: outcome_projector,
         WorkerQueue.PAYMENT_INITIATION: payment_worker,
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
-        WorkerQueue.POST_PAYMENT: ClosedCapabilityWorker("post_payment_delivery"),
+        WorkerQueue.POST_PAYMENT: completion_projector,
         WorkerQueue.PUBLIC_DELIVERY: ClosedCapabilityWorker("manychat_delivery"),
         WorkerQueue.RECONCILIATION: ReconciliationStage(
             container=container,
@@ -485,6 +500,9 @@ def build_worker_set(
                 "ready" if settings.stripe_links_enabled else "closed"
             ),
             "outcome_projector": (
+                "ready" if settings.stripe_links_enabled else "closed"
+            ),
+            "completion_projector": (
                 "ready" if settings.stripe_links_enabled else "closed"
             ),
             "stripe_test_links": (
