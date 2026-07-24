@@ -319,6 +319,7 @@ class TypedFact:
             "service": StringSlot,
             "start_date": DateSlot,
             "end_date": DateSlot,
+            "activity_date": DateSlot,
             "adults": IntegerSlot,
             "children": IntegerSlot,
             "payment_method": StringSlot,

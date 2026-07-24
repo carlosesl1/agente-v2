@@ -120,7 +120,7 @@ class _ModelIntent:
 def _typed_fact(fact: ModelFact) -> TypedFact:
     if fact.name in ("language", "service"):
         value = StringSlot(fact.value)
-    elif fact.name in ("start_date", "end_date"):
+    elif fact.name in ("start_date", "end_date", "activity_date"):
         if type(fact.value) is not date:
             raise InvalidModelProposal("date fact changed type")
         value = DateSlot(fact.value)

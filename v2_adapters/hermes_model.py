@@ -42,7 +42,7 @@ _CHILD_ENV_ALLOWLIST: Final = frozenset(
         "XDG_CONFIG_HOME",
     }
 )
-_RESPONSE_FIELDS: Final = frozenset(
+_RESPONSE_FIELDS_V1: Final = frozenset(
     (
         "schema",
         "source_event_id",
@@ -55,6 +55,7 @@ _RESPONSE_FIELDS: Final = frozenset(
         "confirmed_summary_version",
     )
 )
+_RESPONSE_FIELDS_V2: Final = frozenset((*_RESPONSE_FIELDS_V1, "target_offer_ids"))
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -116,7 +117,7 @@ def _fact(value: object) -> ModelFact:
         raise InvalidModelProposal("model fact fields mismatch")
     name = value["name"]
     fact_value = value["value"]
-    if name in ("start_date", "end_date"):
+    if name in ("start_date", "end_date", "activity_date"):
         if type(fact_value) is not str:
             raise InvalidModelProposal("date fact must be an ISO string")
         try:
@@ -166,10 +167,17 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         decoded = json.loads(payload, object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, UnicodeError) as exc:
         raise InvalidModelProposal("model response is not valid JSON") from exc
-    if type(decoded) is not dict or set(decoded) != _RESPONSE_FIELDS:
+    if type(decoded) is not dict:
         raise InvalidModelProposal("model response fields mismatch")
-    if decoded["schema"] != "v2-model-proposal-v1":
+    schema = decoded.get("schema")
+    if schema == "v2-model-proposal-v1":
+        expected_fields = _RESPONSE_FIELDS_V1
+    elif schema == "v2-model-proposal-v2":
+        expected_fields = _RESPONSE_FIELDS_V2
+    else:
         raise InvalidModelProposal("model response schema mismatch")
+    if set(decoded) != expected_fields:
+        raise InvalidModelProposal("model response fields mismatch")
     if decoded["source_event_id"] != source_event_id:
         raise InvalidModelProposal("model response source event mismatch")
     try:
@@ -192,6 +200,13 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
             ),
             target_offer_id=decoded["target_offer_id"],
             confirmed_summary_version=decoded["confirmed_summary_version"],
+            target_offer_ids=(
+                tuple(
+                    _tuple_items(decoded["target_offer_ids"], "target_offer_ids")
+                )
+                if schema == "v2-model-proposal-v2"
+                else ()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if type(exc) is InvalidModelProposal:

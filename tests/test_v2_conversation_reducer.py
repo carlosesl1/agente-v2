@@ -497,6 +497,84 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert type(decision.next_state.workflow) is ExecutionQueuedState
 
 
+def test_runtime_package_selection_builds_one_bound_summary_then_two_child_commands() -> None:
+    proposal = ModelProposal(
+        source_event_id="event:select-package-runtime",
+        intent="select",
+        reply_chunks=("Encontrei hospedagem e passeio.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "package"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("activity_date", date(2026, 8, 11)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        target_offer_ids=(LODGING_OFFER_ID, ACTIVITY_OFFER_ID),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    selected = V2ConversationReducer().reduce(
+        state=_boundary(),
+        projection=_projection(package=True),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(_lodging_read(), _activity_read()),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert selected.commands == ()
+    assert type(selected.next_state.workflow) is AwaitingConfirmationState
+    assert len(selected.next_state.workflow.draft.components) == 2
+    assert selected.public_reply.kind == "summary"
+    public_text = " ".join(selected.public_reply.chunks)
+    assert "Suíte Casal" in public_text
+    assert "Buracão" in public_text
+    assert "product:" not in public_text
+    assert LODGING_OFFER_ID not in public_text
+    assert ACTIVITY_OFFER_ID not in public_text
+
+    awaiting = selected.next_state.workflow
+    confirmed = V2ConversationReducer().reduce(
+        state=selected.next_state,
+        projection=selected.projection,
+        proposal=ModelProposal(
+            source_event_id="event:confirm-package-runtime",
+            intent="confirm",
+            reply_chunks=("Sim, pode reservar.",),
+            facts=(
+                ModelFact("language", "pt-BR"),
+                ModelFact("service", "package"),
+                ModelFact("start_date", date(2026, 8, 10)),
+                ModelFact("end_date", date(2026, 8, 12)),
+                ModelFact("activity_date", date(2026, 8, 11)),
+                ModelFact("adults", 2),
+                ModelFact("children", 0),
+                ModelFact("payment_method", "stripe"),
+            ),
+            confirmed_summary_version=awaiting.draft.version,
+            read_requests=(),
+            effect_proposals=(),
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(), _activity_read()),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert len(confirmed.commands) == 1
+    assert confirmed.commands[0].operation is ReservationOperation.RESERVE_PACKAGE
+    children = ReservationAllocator().allocate(confirmed.commands[0]).commands
+    assert tuple(item.operation for item in children) == (
+        ReservationOperation.RESERVE_LODGING,
+        ReservationOperation.BOOK_ACTIVITY,
+    )
+    assert len({item.idempotency_key for item in children}) == 2
+
+
 def test_package_has_one_summary_one_confirmation_and_two_allocated_components() -> (
     None
 ):

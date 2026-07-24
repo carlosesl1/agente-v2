@@ -91,8 +91,8 @@ Reject live Stripe key prefixes, expired windows, multiple subscribers, write ga
 - Modify: `v2_application/conversation.py`
 - Modify: `v2_application/turn_executor.py`
 - Modify: `v2_adapters/hermes_model.py`
-- Modify: `v2_contracts/models.py`
-- Modify: `tests/test_v2_conversation.py`
+- Modify: `v2_contracts/model.py`
+- Modify: `tests/test_v2_conversation_reducer.py`
 - Modify: `tests/test_v2_turn_executor.py`
 - Test: `tests/test_v2_package_confirmation.py` (new)
 

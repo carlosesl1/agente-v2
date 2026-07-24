@@ -24,6 +24,7 @@ _ALLOWED_FACTS: Final = frozenset(
         "service",
         "start_date",
         "end_date",
+        "activity_date",
         "adults",
         "children",
         "payment_method",
@@ -79,7 +80,7 @@ class ModelFact:
                 raise InvalidModelProposal(
                     "fact payment_method must be stripe, wise or pix"
                 )
-        elif self.name in ("start_date", "end_date"):
+        elif self.name in ("start_date", "end_date", "activity_date"):
             if type(self.value) is not date:
                 raise InvalidModelProposal(f"fact {self.name} must be an exact date")
         elif type(self.value) is not int or self.value < (
@@ -138,6 +139,7 @@ class ModelProposal:
     effect_proposals: tuple[EffectProposal, ...]
     target_offer_id: str | None = None
     confirmed_summary_version: int | None = None
+    target_offer_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -170,10 +172,47 @@ class ModelProposal:
             )
         if self.target_offer_id is not None:
             _text(self.target_offer_id, "target_offer_id", identifier=True)
-        if self.intent == "select" and self.target_offer_id is None:
-            raise InvalidModelProposal("select intent requires target_offer_id")
-        if self.intent != "select" and self.target_offer_id is not None:
-            raise InvalidModelProposal("target_offer_id is allowed only for select")
+            if not self.target_offer_id.startswith("offer:"):
+                raise InvalidModelProposal("target_offer_id must be a public offer ID")
+        if type(self.target_offer_ids) is not tuple or any(
+            type(item) is not str for item in self.target_offer_ids
+        ):
+            raise InvalidModelProposal(
+                "target_offer_ids must contain exact public offer IDs"
+            )
+        for target in self.target_offer_ids:
+            _text(target, "target_offer_ids item", identifier=True)
+            if not target.startswith("offer:"):
+                raise InvalidModelProposal(
+                    "target_offer_ids must contain only public offer IDs"
+                )
+        if self.target_offer_ids and (
+            len(self.target_offer_ids) != 2
+            or len(set(self.target_offer_ids)) != len(self.target_offer_ids)
+        ):
+            raise InvalidModelProposal(
+                "package selection requires exactly two unique public offer IDs"
+            )
+        has_single_target = self.target_offer_id is not None
+        has_package_targets = bool(self.target_offer_ids)
+        if self.intent == "select" and has_single_target == has_package_targets:
+            raise InvalidModelProposal(
+                "select intent requires exactly one target selection form"
+            )
+        if self.intent != "select" and (has_single_target or has_package_targets):
+            raise InvalidModelProposal("targets are allowed only for select")
+        fact_names = {item.name for item in self.facts}
+        service = next(
+            (item.value for item in self.facts if item.name == "service"), None
+        )
+        if has_package_targets and (
+            service != "package" or "activity_date" not in fact_names
+        ):
+            raise InvalidModelProposal(
+                "package selection requires service package and activity_date"
+            )
+        if has_single_target and service == "package":
+            raise InvalidModelProposal("package selection requires target_offer_ids")
         if self.confirmed_summary_version is not None and (
             type(self.confirmed_summary_version) is not int
             or self.confirmed_summary_version < 1

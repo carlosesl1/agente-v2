@@ -62,9 +62,10 @@ _FACT_ORDER = {
     "service": 1,
     "start_date": 2,
     "end_date": 3,
-    "adults": 4,
-    "children": 5,
-    "payment_method": 6,
+    "activity_date": 4,
+    "adults": 5,
+    "children": 6,
+    "payment_method": 7,
 }
 
 
@@ -141,7 +142,7 @@ def _event_id(source_event_id: str, event_kind: str) -> str:
 def _model_fact_slot(fact: ModelFact):
     if fact.name in ("language", "service", "payment_method"):
         return StringSlot(fact.value)
-    if fact.name in ("start_date", "end_date"):
+    if fact.name in ("start_date", "end_date", "activity_date"):
         return DateSlot(fact.value)
     if fact.name in ("adults", "children"):
         return IntegerSlot(fact.value)
@@ -251,6 +252,28 @@ def _proposal_binds_offer(proposal: ModelProposal, offer: OfferSnapshot) -> bool
     if offer.service is ServiceKind.LODGING:
         return values.get("end_date") == offer.end_date
     return True
+
+
+def _proposal_binds_package(
+    proposal: ModelProposal,
+    *,
+    lodging: OfferSnapshot,
+    activity: OfferSnapshot,
+) -> bool:
+    values = _proposal_values(proposal)
+    if (
+        lodging.service is not ServiceKind.LODGING
+        or activity.service is not ServiceKind.ACTIVITY
+        or values.get("service") != "package"
+        or values.get("start_date") != lodging.start_date
+        or values.get("end_date") != lodging.end_date
+        or values.get("activity_date") != activity.start_date
+        or values.get("adults") != lodging.party.adults
+        or values.get("children") != lodging.party.children
+    ):
+        return False
+    party_size = lodging.party.adults + lodging.party.children
+    return activity.party.adults == party_size and activity.party.children == 0
 
 
 def _canonical_public_hash(payload: dict[str, object]) -> str:
@@ -404,6 +427,59 @@ def _offer_and_query(
         status=LookupStatus.POSITIVE,
     )
     return offer, query, evidence
+
+
+def _ready_component(
+    *,
+    workflow_id: str,
+    event_seed: str,
+    draft_id: str,
+    offer: OfferSnapshot,
+    query: SearchQuery,
+    evidence: LookupEvidence,
+    customer: CustomerFacts,
+    terms: EconomicTerms,
+    now: datetime,
+) -> ReadyToSummarizeState:
+    domain_state = new_workflow(workflow_id=workflow_id, started_at=now)
+    domain_state = reduce_domain(
+        domain_state,
+        StartSearch(
+            event_id=_event_id(event_seed, "search"),
+            occurred_at=now,
+            query=query,
+        ),
+    ).state
+    domain_state = reduce_domain(
+        domain_state,
+        LookupRecorded(
+            event_id=_event_id(event_seed, "lookup"),
+            occurred_at=now,
+            evidence=evidence,
+            offers=(offer,),
+        ),
+    ).state
+    domain_state = reduce_domain(
+        domain_state,
+        OfferChosen(
+            event_id=_event_id(event_seed, "selection"),
+            occurred_at=now,
+            offer_id=offer.offer_id,
+        ),
+    ).state
+    domain_state = reduce_domain(
+        domain_state,
+        DraftRequested(
+            event_id=_event_id(event_seed, "draft"),
+            occurred_at=now,
+            draft_id=draft_id,
+            customer=customer,
+            terms=terms,
+        ),
+    ).state
+    if type(domain_state) is not ReadyToSummarizeState:
+        raise ConversationReductionError("domain did not create a commercial draft")
+    return domain_state
 
 
 def _replace_boundary(
@@ -711,6 +787,136 @@ class V2ConversationReducer:
                     ),
                 ),
                 receipt_requirements=("reservation_command",),
+            )
+
+        if proposal.intent == "select" and proposal.target_offer_ids:
+            selected: list[tuple[OfferSnapshot, SearchQuery, LookupEvidence]] = []
+            for target_offer_id in proposal.target_offer_ids:
+                matching_observations = []
+                for observation in reads:
+                    try:
+                        _selected_payload(observation, target_offer_id)
+                    except ConversationReductionError:
+                        continue
+                    matching_observations.append(observation)
+                if len(matching_observations) != 1:
+                    raise ConversationReductionError(
+                        "package selection requires each offer in one uniquely bound read"
+                    )
+                selected.append(
+                    _offer_and_query(
+                        matching_observations[0],
+                        target_offer_id,
+                        now=instant,
+                    )
+                )
+            by_service = {item[0].service: item for item in selected}
+            if set(by_service) != {ServiceKind.LODGING, ServiceKind.ACTIVITY}:
+                raise ConversationReductionError(
+                    "package selection requires one lodging and one activity offer"
+                )
+            lodging_offer, lodging_query, lodging_evidence = by_service[
+                ServiceKind.LODGING
+            ]
+            activity_offer, activity_query, activity_evidence = by_service[
+                ServiceKind.ACTIVITY
+            ]
+            if not _proposal_binds_package(
+                proposal,
+                lodging=lodging_offer,
+                activity=activity_offer,
+            ):
+                raise ConversationReductionError(
+                    "proposal facts diverge from the selected package offers"
+                )
+            values = _proposal_values(proposal)
+            payment_method = values.get("payment_method")
+            if payment_method not in ("stripe", "wise", "pix"):
+                raise ConversationReductionError(
+                    "payment method is incomplete or invalid"
+                )
+            workflow_id = _identity(
+                state.lead_key, proposal.source_event_id, prefix="workflow"
+            )
+            customer = _customer(profile)
+            terms = EconomicTerms(payment_method=payment_method, add_ons=())
+            lodging_state = _ready_component(
+                workflow_id=_identity(workflow_id, "lodging", prefix="workflow"),
+                event_seed=proposal.source_event_id + ":lodging",
+                draft_id=_identity(
+                    workflow_id, lodging_offer.offer_id, prefix="draft"
+                ),
+                offer=lodging_offer,
+                query=lodging_query,
+                evidence=lodging_evidence,
+                customer=customer,
+                terms=terms,
+                now=instant,
+            )
+            activity_state = _ready_component(
+                workflow_id=_identity(workflow_id, "activity", prefix="workflow"),
+                event_seed=proposal.source_event_id + ":activity",
+                draft_id=_identity(
+                    workflow_id, activity_offer.offer_id, prefix="draft"
+                ),
+                offer=activity_offer,
+                query=activity_query,
+                evidence=activity_evidence,
+                customer=customer,
+                terms=terms,
+                now=instant,
+            )
+            domain_state = PackageCommandCoordinator().combine(
+                workflow_id=workflow_id,
+                draft_id=_identity(
+                    workflow_id,
+                    *sorted(proposal.target_offer_ids),
+                    prefix="draft",
+                ),
+                lodging=lodging_state,
+                activity=activity_state,
+                now=instant,
+            )
+            summary_id = _identity(
+                domain_state.draft.draft_id,
+                str(domain_state.draft.version),
+                prefix="summary",
+            )
+            domain_state = reduce_domain(
+                domain_state,
+                SummaryRecorded(
+                    event_id=_event_id(proposal.source_event_id, "summary"),
+                    occurred_at=instant,
+                    summary_event_id=summary_id,
+                    draft_version=domain_state.draft.version,
+                    subject_signature=domain_state.draft.subject_signature,
+                    outbox_message_id=_identity(summary_id, prefix="outbox"),
+                ),
+            ).state
+            if type(domain_state) is not AwaitingConfirmationState:
+                raise ConversationReductionError(
+                    "domain did not bind the package confirmation summary"
+                )
+            next_state = _replace_boundary(
+                state,
+                workflow=domain_state,
+                source_event_id=proposal.source_event_id,
+            )
+            total_amount = lodging_offer.total.amount + activity_offer.total.amount
+            summary_text = (
+                f"Confirme {lodging_offer.public_label}, {lodging_offer.total.currency} "
+                f"{format(lodging_offer.total.amount, '.2f')}; "
+                f"{activity_offer.public_label}, {activity_offer.total.currency} "
+                f"{format(activity_offer.total.amount, '.2f')}; total "
+                f"{lodging_offer.total.currency} {format(total_amount, '.2f')}, "
+                f"pagamento por {payment_method}."
+            )
+            return V2ConversationDecision(
+                next_state=next_state,
+                projection=replace(merged, stage=ConversationStage.CLOSING),
+                commands=(),
+                public_reply=ConversationReply("summary", (summary_text,)),
+                receipt_requirements=("summary_presented",),
             )
 
         if proposal.intent == "select" and proposal.target_offer_id is not None:
