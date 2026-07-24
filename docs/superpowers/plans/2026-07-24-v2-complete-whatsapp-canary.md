@@ -291,7 +291,7 @@ Settlement/payment-confirmation workers remain closed. Assert readiness reports 
 - Add: `compose.v2.controlled-write.yaml`
 - Add: `scripts/v2_canary_gate.py`
 - Add: `scripts/v2_canary_rollback.sh`
-- Modify: `tests/test_phase8_ops_artifacts.py`
+- Add: `tests/test_phase8_ops_artifacts.py`
 - Add: `tests/test_v2_canary_ops.py`
 
 **Step 1 — RED:** Validate immutable image digest, non-root/read-only containers, private state volumes, localhost-only upstream, healthchecks, all gates false by default, exclusive route token, and rollback that closes gates before stopping services.

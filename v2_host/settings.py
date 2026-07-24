@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 import json
 import os
 from pathlib import Path
+import re
 
 
 _REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
+_CONTROLLED_MODEL = "openai-codex/gpt-5.6-luna"
+_MAX_WRITE_WINDOW = timedelta(hours=24)
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class RuntimeMode(str, Enum):
@@ -19,6 +24,11 @@ class RuntimeMode(str, Enum):
     DARK_READ_ONLY = "dark_read_only"
     SHADOW = "shadow"
     CONTROLLED_WRITE = "controlled_write"
+
+
+class StripeEnvironment(str, Enum):
+    TEST = "test"
+    LIVE = "live"
 
 
 def _env_bool(source: Mapping[str, str], name: str, *, default: bool = False) -> bool:
@@ -43,6 +53,39 @@ def _json_string_map(raw: str, name: str) -> dict[str, str]:
     ):
         raise ValueError(f"{name} must map non-empty strings to non-empty strings")
     return dict(value)
+
+
+def _subscriber_ids(raw: str) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    values = tuple(item.strip() for item in raw.split(","))
+    if any(not item or not item.isdecimal() for item in values):
+        raise ValueError("V2_ALLOWED_SUBSCRIBER_IDS must contain decimal subscriber ids")
+    return values
+
+
+def _optional_positive_int(raw: str, name: str) -> int | None:
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("numeric V2 settings must be integers") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _optional_utc_datetime(raw: str, name: str) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an ISO datetime") from exc
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must be an explicit UTC datetime")
+    return value.astimezone(timezone.utc)
 
 
 def _json_command(raw: str) -> tuple[str, ...]:
@@ -87,10 +130,18 @@ class V2Settings:
     bokun_writes_enabled: bool = False
     stripe_links_enabled: bool = False
     manychat_delivery_enabled: bool = False
+    manychat_handoff_enabled: bool = False
     real_effects_ack: str = ""
+    global_kill_switch_engaged: bool = True
+    write_window_end: datetime | None = None
     runtime_mode: RuntimeMode = RuntimeMode.API_ONLY
+    allowed_subscriber_ids: tuple[str, ...] = ()
+    hermes_model: str = ""
+    candidate_git_sha: str = ""
+    candidate_image_digest: str = ""
     cloudbeds_api_key: str = ""
     cloudbeds_property_id: str = ""
+    cloudbeds_source_id: str = ""
     cloudbeds_base_url: str = "https://api.cloudbeds.com"
     bokun_access_key: str = ""
     bokun_secret_key: str = ""
@@ -98,6 +149,15 @@ class V2Settings:
     bokun_base_url: str = "https://api.bokun.io"
     manychat_api_key: str = ""
     manychat_base_url: str = "https://api.manychat.com"
+    manychat_reply_field_id: int | None = None
+    manychat_reply_flow_ns: str = ""
+    manychat_payment_link_field_id: int | None = None
+    manychat_payment_description_field_id: int | None = None
+    manychat_payment_flow_ns: str = ""
+    manychat_handoff_tag_id: int | None = None
+    stripe_environment: StripeEnvironment = StripeEnvironment.TEST
+    stripe_secret_key: str = ""
+    stripe_base_url: str = "https://api.stripe.com"
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
     hermes_transcript_key: bytes = b""
@@ -144,6 +204,7 @@ class V2Settings:
             self.bokun_writes_enabled,
             self.stripe_links_enabled,
             self.manychat_delivery_enabled,
+            self.manychat_handoff_enabled,
         )
         if any(type(value) is not bool for value in gates):
             raise TypeError("real effect gates must be exact booleans")
@@ -151,16 +212,76 @@ class V2Settings:
             raise ValueError("real effects require exact operational acknowledgment")
         if self.runtime_mode is not RuntimeMode.CONTROLLED_WRITE and any(gates):
             raise ValueError("real effect gates require controlled_write runtime mode")
+        if type(self.global_kill_switch_engaged) is not bool:
+            raise TypeError("global kill switch must be exact bool")
+        if self.write_window_end is not None and (
+            type(self.write_window_end) is not datetime
+            or self.write_window_end.tzinfo is None
+            or self.write_window_end.utcoffset() != timedelta(0)
+        ):
+            raise ValueError("write window end must be an explicit UTC datetime")
+        if type(self.allowed_subscriber_ids) is not tuple or any(
+            type(value) is not str or not value.isdecimal()
+            for value in self.allowed_subscriber_ids
+        ):
+            raise ValueError("allowed subscriber ids must be an exact decimal string tuple")
+        if type(self.stripe_environment) is not StripeEnvironment:
+            raise TypeError("stripe_environment must be exact StripeEnvironment")
+        if self.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+            if len(self.allowed_subscriber_ids) != 1:
+                raise ValueError("controlled_write requires exactly one subscriber")
+            if self.hermes_model != _CONTROLLED_MODEL:
+                raise ValueError("controlled_write requires openai-codex/gpt-5.6-luna")
+            if not _GIT_SHA_RE.fullmatch(self.candidate_git_sha):
+                raise ValueError("candidate git sha must be an immutable 40-character lowercase hex sha")
+            if not _IMAGE_DIGEST_RE.fullmatch(self.candidate_image_digest):
+                raise ValueError("candidate image digest must be an immutable sha256 digest")
+            if self.stripe_environment is not StripeEnvironment.TEST:
+                raise ValueError("controlled_write requires the Stripe test environment")
+        if any(gates):
+            if self.global_kill_switch_engaged:
+                raise ValueError("real effects require the global kill switch to be released")
+            if self.write_window_end is None:
+                raise ValueError("real effects require an open write window")
+            now = datetime.now(timezone.utc)
+            if self.write_window_end <= now:
+                raise ValueError("write window must end in the future")
+            if self.write_window_end - now > _MAX_WRITE_WINDOW:
+                raise ValueError("write window may not exceed 24 hours")
+        if self.stripe_links_enabled:
+            if not self.stripe_secret_key.startswith(("sk_test_", "rk_test_")):
+                raise ValueError("Stripe link creation requires a test Stripe key")
         if type(self.bokun_product_map) is not dict or any(
             type(key) is not str or not key or type(value) is not str or not value
             for key, value in self.bokun_product_map.items()
         ):
             raise ValueError("bokun_product_map must map exact non-empty strings")
         object.__setattr__(self, "bokun_product_map", dict(self.bokun_product_map))
-        for name in ("cloudbeds_base_url", "bokun_base_url", "manychat_base_url"):
+        for name in (
+            "cloudbeds_base_url",
+            "bokun_base_url",
+            "manychat_base_url",
+            "stripe_base_url",
+        ):
             value = getattr(self, name)
             if type(value) is not str or not value.startswith("https://") or "\x00" in value:
                 raise ValueError(f"{name} must be an HTTPS URL")
+        for name in (
+            "manychat_reply_field_id",
+            "manychat_payment_link_field_id",
+            "manychat_payment_description_field_id",
+            "manychat_handoff_tag_id",
+        ):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{name} must be a positive exact integer")
+        for name in (
+            "manychat_reply_flow_ns",
+            "manychat_payment_flow_ns",
+        ):
+            value = getattr(self, name)
+            if type(value) is not str or "\x00" in value:
+                raise ValueError(f"{name} must be NUL-free exact text")
         if type(self.hermes_command) is not tuple or any(
             type(item) is not str or not item or "\x00" in item for item in self.hermes_command
         ):
@@ -242,6 +363,7 @@ class V2Settings:
         return {
             "bokun_writes": self.bokun_writes_enabled,
             "cloudbeds_writes": self.cloudbeds_writes_enabled,
+            "manychat_handoff": self.manychat_handoff_enabled,
             "manychat_delivery": self.manychat_delivery_enabled,
             "stripe_links": self.stripe_links_enabled,
         }
@@ -249,6 +371,15 @@ class V2Settings:
     @property
     def all_real_effect_gates_closed(self) -> bool:
         return not any(self.real_effect_gates.values())
+
+    def write_window_is_open(self, now: datetime) -> bool:
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be a timezone-aware datetime")
+        return bool(
+            not self.global_kill_switch_engaged
+            and self.write_window_end is not None
+            and now.astimezone(timezone.utc) < self.write_window_end
+        )
 
     @property
     def financial_webhooks_configured(self) -> bool:
@@ -307,6 +438,12 @@ class V2Settings:
             mode = RuntimeMode(source.get("V2_RUNTIME_MODE", RuntimeMode.API_ONLY.value))
         except ValueError as exc:
             raise ValueError("V2_RUNTIME_MODE is outside the closed catalog") from exc
+        try:
+            stripe_environment = StripeEnvironment(
+                source.get("V2_STRIPE_ENVIRONMENT", StripeEnvironment.TEST.value)
+            )
+        except ValueError as exc:
+            raise ValueError("V2_STRIPE_ENVIRONMENT is outside the closed catalog") from exc
         authority_path = source.get("V2_PUBLIC_AUTHORITY_MANIFEST_PATH", "")
         knowledge_path = source.get("V2_KNOWLEDGE_BASE_PATH", "")
         return cls(
@@ -324,10 +461,24 @@ class V2Settings:
             bokun_writes_enabled=_env_bool(source, "V2_ENABLE_BOKUN_WRITES"),
             stripe_links_enabled=_env_bool(source, "V2_ENABLE_STRIPE_LINKS"),
             manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
+            manychat_handoff_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_HANDOFF"),
             real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),
+            global_kill_switch_engaged=_env_bool(
+                source, "V2_GLOBAL_KILL_SWITCH", default=True
+            ),
+            write_window_end=_optional_utc_datetime(
+                source.get("V2_WRITE_WINDOW_END", ""), "V2_WRITE_WINDOW_END"
+            ),
             runtime_mode=mode,
+            allowed_subscriber_ids=_subscriber_ids(
+                source.get("V2_ALLOWED_SUBSCRIBER_IDS", "")
+            ),
+            hermes_model=source.get("V2_HERMES_MODEL", ""),
+            candidate_git_sha=source.get("V2_CANDIDATE_GIT_SHA", ""),
+            candidate_image_digest=source.get("V2_CANDIDATE_IMAGE_DIGEST", ""),
             cloudbeds_api_key=source.get("V2_CLOUDBEDS_API_KEY", ""),
             cloudbeds_property_id=source.get("V2_CLOUDBEDS_PROPERTY_ID", ""),
+            cloudbeds_source_id=source.get("V2_CLOUDBEDS_SOURCE_ID", ""),
             cloudbeds_base_url=source.get("V2_CLOUDBEDS_BASE_URL", "https://api.cloudbeds.com"),
             bokun_access_key=source.get("V2_BOKUN_ACCESS_KEY", ""),
             bokun_secret_key=source.get("V2_BOKUN_SECRET_KEY", ""),
@@ -338,6 +489,27 @@ class V2Settings:
             bokun_base_url=source.get("V2_BOKUN_BASE_URL", "https://api.bokun.io"),
             manychat_api_key=source.get("V2_MANYCHAT_API_KEY", ""),
             manychat_base_url=source.get("V2_MANYCHAT_BASE_URL", "https://api.manychat.com"),
+            manychat_reply_field_id=_optional_positive_int(
+                source.get("V2_MANYCHAT_REPLY_FIELD_ID", ""),
+                "V2_MANYCHAT_REPLY_FIELD_ID",
+            ),
+            manychat_reply_flow_ns=source.get("V2_MANYCHAT_REPLY_FLOW_NS", ""),
+            manychat_payment_link_field_id=_optional_positive_int(
+                source.get("V2_MANYCHAT_PAYMENT_LINK_FIELD_ID", ""),
+                "V2_MANYCHAT_PAYMENT_LINK_FIELD_ID",
+            ),
+            manychat_payment_description_field_id=_optional_positive_int(
+                source.get("V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID", ""),
+                "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID",
+            ),
+            manychat_payment_flow_ns=source.get("V2_MANYCHAT_PAYMENT_FLOW_NS", ""),
+            manychat_handoff_tag_id=_optional_positive_int(
+                source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
+                "V2_MANYCHAT_HANDOFF_TAG_ID",
+            ),
+            stripe_environment=stripe_environment,
+            stripe_secret_key=source.get("V2_STRIPE_SECRET_KEY", ""),
+            stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
             hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=source.get("V2_HERMES_SYSTEM_PROMPT", ""),
             hermes_transcript_key=_hex_key(source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
@@ -361,4 +533,4 @@ class V2Settings:
         )
 
 
-__all__ = ["RuntimeMode", "V2Settings"]
+__all__ = ["RuntimeMode", "StripeEnvironment", "V2Settings"]
