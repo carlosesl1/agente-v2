@@ -54,6 +54,10 @@ class PublicDeliveryNotCalled(RuntimeError):
     """Delivery failed with proof that no channel request was attempted."""
 
 
+class PublicDeliveryRejected(RuntimeError):
+    """Delivery is forbidden and must not be retried automatically."""
+
+
 class PublicDeliveryUnknown(RuntimeError):
     """A channel request may have happened and must not be retried automatically."""
 

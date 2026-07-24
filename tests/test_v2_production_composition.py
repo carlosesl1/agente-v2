@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from reservation_domain import ReservationOperation
+from reservation_followup.workers import HandoffOutboxWorker
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import (
     ClosedCapabilityWorker,
@@ -22,6 +23,7 @@ from v2_host.worker_main import WorkerQueue, _load_worker_factory
 from v2_application.payments import PaymentInitiationWorker
 from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.completion_projector import CompletionProjector
+from v2_application.public_delivery import CombinedPublicDeliveryWorker
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.workers import V2ReservationWorker
 
@@ -275,6 +277,63 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         )
     finally:
         stripe_container.close()
+
+    manychat_enabled = replace(
+        settings,
+        manychat_delivery_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+        manychat_reply_field_id=101,
+        manychat_reply_flow_ns="flow:reply:v2",
+        manychat_payment_link_field_id=201,
+        manychat_payment_description_field_id=202,
+        manychat_payment_flow_ns="flow:payment:v2",
+    )
+    manychat_container = V2Container.open(
+        settings=manychat_enabled,
+        role=V2Role.WORKER,
+    )
+    try:
+        manychat_workers = build_worker_set(
+            container=manychat_container,
+            settings=manychat_enabled,
+        )
+        assert type(
+            manychat_workers[WorkerQueue.PUBLIC_DELIVERY]
+        ) is CombinedPublicDeliveryWorker
+        assert (
+            manychat_container.readiness().capabilities["manychat_delivery"]
+            == "ready"
+        )
+    finally:
+        manychat_container.close()
+
+    handoff_enabled = replace(
+        settings,
+        manychat_handoff_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+        manychat_handoff_tag_id=301,
+        manychat_handoff_flow_ns="flow:handoff:v2",
+    )
+    handoff_container = V2Container.open(
+        settings=handoff_enabled,
+        role=V2Role.WORKER,
+    )
+    try:
+        handoff_workers = build_worker_set(
+            container=handoff_container,
+            settings=handoff_enabled,
+        )
+        assert type(handoff_workers[WorkerQueue.HANDOFF]) is HandoffOutboxWorker
+        assert (
+            handoff_container.readiness().capabilities["manychat_handoff"]
+            == "ready"
+        )
+    finally:
+        handoff_container.close()
 
 
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:

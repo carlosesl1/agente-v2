@@ -18,6 +18,7 @@ class WorkerQueue(str, Enum):
     INBOX = "inbox"
     BOUNDARY_RELAY = "boundary_relay"
     RESERVATION = "reservation"
+    HANDOFF = "handoff"
     OUTCOME_PROJECTOR = "outcome_projector"
     PAYMENT_INITIATION = "payment_initiation"
     SETTLEMENT = "settlement"

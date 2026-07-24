@@ -8,10 +8,12 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from typing import Final, Protocol
+from urllib.parse import urlparse
 
 from v2_contracts.channel import (
     InboundEvent,
     PublicDeliveryNotCalled,
+    PublicDeliveryRejected,
     PublicDeliveryUnknown,
 )
 
@@ -147,6 +149,142 @@ class ManyChatDeliveryAdapter:
         if type(response) is not ManyChatTransportResponse:
             raise PublicDeliveryUnknown("ManyChat returned an invalid delivery response")
         return response.provider_message_id
+
+
+class ManyChatFlowDeliveryAdapter:
+    """Deliver typed public rows through ManyChat custom fields and flows."""
+
+    def __init__(
+        self,
+        *,
+        transport: object,
+        allowed_subscriber_id: str,
+        reply_field_id: int,
+        reply_flow_ns: str,
+        payment_link_field_id: int,
+        payment_description_field_id: int,
+        payment_flow_ns: str,
+    ) -> None:
+        for method in ("set_custom_field", "set_custom_fields", "trigger_flow"):
+            if not callable(getattr(transport, method, None)):
+                raise TypeError(f"transport must expose {method}")
+        if (
+            type(allowed_subscriber_id) is not str
+            or not allowed_subscriber_id.isdecimal()
+        ):
+            raise ValueError("allowed_subscriber_id must be exact decimal text")
+        for name, value in (
+            ("reply_field_id", reply_field_id),
+            ("payment_link_field_id", payment_link_field_id),
+            ("payment_description_field_id", payment_description_field_id),
+        ):
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be a positive exact integer")
+        for name, value in (
+            ("reply_flow_ns", reply_flow_ns),
+            ("payment_flow_ns", payment_flow_ns),
+        ):
+            if type(value) is not str or not value or "\x00" in value:
+                raise ValueError(f"{name} must be non-empty NUL-free text")
+        self._transport = transport
+        self._allowed_subscriber_id = allowed_subscriber_id
+        self._reply_field_id = reply_field_id
+        self._reply_flow_ns = reply_flow_ns
+        self._payment_link_field_id = payment_link_field_id
+        self._payment_description_field_id = payment_description_field_id
+        self._payment_flow_ns = payment_flow_ns
+
+    def send(self, claim: object) -> str:
+        outbox_id = getattr(claim, "message_id", None)
+        subscriber_id = getattr(claim, "subscriber_id", None)
+        chunk = getattr(claim, "chunk", None)
+        text = getattr(chunk, "text", None)
+        source_message_id = getattr(claim, "source_message_id", None)
+        if subscriber_id is None or text is None:
+            outbox_id = getattr(claim, "outbox_id", outbox_id)
+            lead_id = getattr(claim, "lead_id", None)
+            text = getattr(claim, "text", text)
+            source_message_id = getattr(
+                claim,
+                "source_message_id",
+                source_message_id,
+            )
+            if type(lead_id) is str and lead_id.startswith("manychat:"):
+                subscriber_id = lead_id.removeprefix("manychat:")
+        if type(outbox_id) is not str or not outbox_id:
+            raise PublicDeliveryNotCalled("claim lacks a stable outbox identity")
+        if type(subscriber_id) is not str or not subscriber_id.isdecimal():
+            raise PublicDeliveryNotCalled("claim lacks a decimal ManyChat subscriber")
+        if subscriber_id != self._allowed_subscriber_id:
+            raise PublicDeliveryRejected("subscriber is outside the delivery allowlist")
+        if type(text) is not str or not text.strip():
+            raise PublicDeliveryNotCalled("claim lacks public text")
+        payment = (
+            type(source_message_id) is str
+            and source_message_id.startswith("message:payment-link:")
+        )
+        mutated = False
+        try:
+            if payment:
+                description, url = self._payment_values(text)
+                response = self._transport.set_custom_fields(
+                    subscriber_id=subscriber_id,
+                    fields=[
+                        {
+                            "field_id": self._payment_link_field_id,
+                            "field_value": url,
+                        },
+                        {
+                            "field_id": self._payment_description_field_id,
+                            "field_value": description,
+                        },
+                    ],
+                    idempotency_key=outbox_id + ":fields",
+                )
+                flow_ns = self._payment_flow_ns
+            else:
+                response = self._transport.set_custom_field(
+                    subscriber_id=subscriber_id,
+                    field_id=self._reply_field_id,
+                    field_value=text,
+                    idempotency_key=outbox_id + ":field",
+                )
+                flow_ns = self._reply_flow_ns
+            if type(response) is not ManyChatTransportResponse:
+                raise RuntimeError("ManyChat custom-field receipt is invalid")
+            mutated = True
+            flow = self._transport.trigger_flow(
+                subscriber_id=subscriber_id,
+                flow_ns=flow_ns,
+                idempotency_key=outbox_id + ":flow",
+            )
+            if type(flow) is not ManyChatTransportResponse:
+                raise RuntimeError("ManyChat flow receipt is invalid")
+            return flow.provider_message_id
+        except ManyChatTransportNotCalled as exc:
+            if not mutated:
+                raise PublicDeliveryNotCalled(str(exc)) from exc
+            raise PublicDeliveryUnknown(
+                "ManyChat flow outcome is unknown after custom-field mutation"
+            ) from exc
+        except PublicDeliveryNotCalled:
+            raise
+        except Exception as exc:
+            raise PublicDeliveryUnknown(
+                "ManyChat field/flow delivery outcome is unknown"
+            ) from exc
+
+    @staticmethod
+    def _payment_values(text: str) -> tuple[str, str]:
+        marker = ": https://"
+        if marker not in text:
+            raise ValueError("payment public row lacks its typed HTTPS separator")
+        description, suffix = text.rsplit(marker, 1)
+        url = "https://" + suffix
+        parsed = urlparse(url)
+        if not description or parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("payment public row is malformed")
+        return description, url
 
 
 _MISSING: Final = object()

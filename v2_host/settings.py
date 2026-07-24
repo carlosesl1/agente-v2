@@ -155,6 +155,7 @@ class V2Settings:
     manychat_payment_description_field_id: int | None = None
     manychat_payment_flow_ns: str = ""
     manychat_handoff_tag_id: int | None = None
+    manychat_handoff_flow_ns: str = ""
     stripe_environment: StripeEnvironment = StripeEnvironment.TEST
     stripe_secret_key: str = ""
     stripe_hostel_account_profile_id: str = ""
@@ -282,6 +283,23 @@ class V2Settings:
                 )
         if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
+        if self.manychat_delivery_enabled and (
+            not self.manychat_api_key
+            or self.manychat_reply_field_id is None
+            or not self.manychat_reply_flow_ns
+            or self.manychat_payment_link_field_id is None
+            or self.manychat_payment_description_field_id is None
+            or not self.manychat_payment_flow_ns
+        ):
+            raise ValueError(
+                "ManyChat delivery requires reply/payment fields and flows"
+            )
+        if self.manychat_handoff_enabled and (
+            not self.manychat_api_key
+            or self.manychat_handoff_tag_id is None
+            or not self.manychat_handoff_flow_ns
+        ):
+            raise ValueError("ManyChat handoff requires tag and flow")
         if type(self.bokun_product_map) is not dict or any(
             type(key) is not str or not key or type(value) is not str or not value
             for key, value in self.bokun_product_map.items()
@@ -309,6 +327,7 @@ class V2Settings:
         for name in (
             "manychat_reply_flow_ns",
             "manychat_payment_flow_ns",
+            "manychat_handoff_flow_ns",
         ):
             value = getattr(self, name)
             if type(value) is not str or "\x00" in value:
@@ -551,6 +570,9 @@ class V2Settings:
             manychat_handoff_tag_id=_optional_positive_int(
                 source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
                 "V2_MANYCHAT_HANDOFF_TAG_ID",
+            ),
+            manychat_handoff_flow_ns=source.get(
+                "V2_MANYCHAT_HANDOFF_FLOW_NS", ""
             ),
             stripe_environment=stripe_environment,
             stripe_secret_key=source.get("V2_STRIPE_SECRET_KEY", ""),

@@ -315,6 +315,7 @@ class SignedQualificationRuntime:
                 lease_ttl=timedelta(seconds=30),
             ),
             WorkerQueue.RESERVATION: self.reservation_worker,
+            WorkerQueue.HANDOFF: QualificationIdleStage(),
             WorkerQueue.OUTCOME_PROJECTOR: QualificationIdleStage(),
             WorkerQueue.PAYMENT_INITIATION: self.payment_worker,
             WorkerQueue.SETTLEMENT: self.settlement_worker,

@@ -1236,6 +1236,106 @@ class ManyChatHTTPTransport:
             provider_id = "manychat:" + hashlib.sha256(canonical + idempotency_key.encode()).hexdigest()[:32]
         return ManyChatTransportResponse(provider_id)
 
+    def set_custom_field(
+        self,
+        *,
+        subscriber_id: str,
+        field_id: int,
+        field_value: str,
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse:
+        return self._effect_post(
+            path="/fb/subscriber/setCustomField",
+            body={
+                "subscriber_id": subscriber_id,
+                "field_id": field_id,
+                "field_value": field_value,
+            },
+            idempotency_key=idempotency_key,
+        )
+
+    def set_custom_fields(
+        self,
+        *,
+        subscriber_id: str,
+        fields: list[dict[str, object]],
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse:
+        return self._effect_post(
+            path="/fb/subscriber/setCustomFields",
+            body={"subscriber_id": subscriber_id, "fields": fields},
+            idempotency_key=idempotency_key,
+        )
+
+    def trigger_flow(
+        self,
+        *,
+        subscriber_id: str,
+        flow_ns: str,
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse:
+        return self._effect_post(
+            path="/fb/sending/sendFlow",
+            body={"subscriber_id": subscriber_id, "flow_ns": flow_ns},
+            idempotency_key=idempotency_key,
+        )
+
+    def add_tag(
+        self,
+        *,
+        subscriber_id: str,
+        tag_id: int,
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse:
+        return self._effect_post(
+            path="/fb/subscriber/addTag",
+            body={"subscriber_id": subscriber_id, "tag_id": tag_id},
+            idempotency_key=idempotency_key,
+        )
+
+    def _effect_post(
+        self,
+        *,
+        path: str,
+        body: dict[str, object],
+        idempotency_key: str,
+    ) -> ManyChatTransportResponse:
+        try:
+            response = self._client.post(
+                self._base_url + path,
+                headers={**self._headers, "Idempotency-Key": idempotency_key},
+                json=body,
+                timeout=self._timeout,
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            raise ManyChatTransportNotCalled(
+                "ManyChat connection was not established"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError("ManyChat effect outcome is unknown") from exc
+        try:
+            payload = response.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise RuntimeError("ManyChat effect response is ambiguous") from exc
+        if (
+            not 200 <= response.status_code < 300
+            or not isinstance(payload, Mapping)
+            or payload.get("status") not in {"success", "ok"}
+        ):
+            raise RuntimeError("ManyChat did not confirm the requested effect")
+        provider_id = _first(payload, "request_id", "message_id", "id")
+        if provider_id is None:
+            canonical = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode()
+            provider_id = "manychat:" + hashlib.sha256(
+                canonical + idempotency_key.encode()
+            ).hexdigest()[:32]
+        return ManyChatTransportResponse(provider_id)
+
 
 class FileKnowledgeTransport:
     """Fresh, deterministic lookup over the standalone V2 Cérebro data file."""

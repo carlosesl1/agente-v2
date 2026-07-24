@@ -10,7 +10,11 @@ from pathlib import Path
 import re
 import sqlite3
 
-from v2_contracts.channel import PublicDeliveryNotCalled, PublicDeliveryUnknown
+from v2_contracts.channel import (
+    PublicDeliveryNotCalled,
+    PublicDeliveryRejected,
+    PublicDeliveryUnknown,
+)
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
@@ -343,6 +347,9 @@ class PublicDeliveryWorker:
             return PublicDeliveryDisposition.IDLE
         try:
             receipt = self._delivery.send(claim)
+        except PublicDeliveryRejected:
+            self._store.mark_manual_review(claim, now=now)
+            return PublicDeliveryDisposition.MANUAL_REVIEW
         except PublicDeliveryNotCalled:
             self._store.release(claim, now=now)
             return PublicDeliveryDisposition.RETRYABLE_FAILURE
@@ -364,6 +371,7 @@ __all__ = [
     "CompletionPolicy",
     "CompletionStatus",
     "PublicDeliveryNotCalled",
+    "PublicDeliveryRejected",
     "PublicDeliveryUnknown",
     "PublicDeliveryWorker",
     "PublicOutboxStore",

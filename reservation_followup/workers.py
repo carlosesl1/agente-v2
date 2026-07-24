@@ -29,10 +29,15 @@ class HandoffDeliveryPort(Protocol):
     def deliver(self, message: HandoffEffectJob) -> HandoffReceipt: ...
 
 
+class HandoffDeliveryUnknown(RuntimeError):
+    """A handoff provider may have accepted the effect."""
+
+
 class HandoffWorkerDisposition(str, Enum):
     IDLE = "idle"
     DELIVERED = "delivered"
     RETRYABLE_FAILURE = "retryable_failure"
+    MANUAL_REVIEW = "manual_review"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +71,10 @@ class HandoffWorkerResult:
     def retryable_failure(cls, message_id: str) -> HandoffWorkerResult:
         return cls(HandoffWorkerDisposition.RETRYABLE_FAILURE, message_id)
 
+    @classmethod
+    def manual_review(cls, message_id: str) -> HandoffWorkerResult:
+        return cls(HandoffWorkerDisposition.MANUAL_REVIEW, message_id)
+
 
 class HandoffOutboxWorker:
     """Claim and deliver at most one durable handoff effect per invocation."""
@@ -77,6 +86,7 @@ class HandoffOutboxWorker:
         delivery: HandoffDeliveryPort,
         worker_id: str,
         lease_ttl: timedelta,
+        effect_guard: object | None = None,
     ) -> None:
         if type(store) is not SQLiteFollowupUnitOfWork:
             raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
@@ -93,8 +103,17 @@ class HandoffOutboxWorker:
         self._delivery_version = delivery.delivery_version
         self._worker_id = _require_id(worker_id, "worker_id")
         self._lease_ttl = lease_ttl
+        if effect_guard is not None and not callable(
+            getattr(effect_guard, "allows_workflow", None)
+        ):
+            raise TypeError("effect_guard must expose allows_workflow or be None")
+        self._effect_guard = effect_guard
 
     def run_once(self, *, now: datetime) -> HandoffWorkerResult:
+        if self._effect_guard is not None and not self._effect_guard.allows_workflow(
+            "manychat-handoff"
+        ):
+            return HandoffWorkerResult.idle()
         claim = self._store.claim_handoff_outbox(
             worker_id=self._worker_id,
             delivery_id=self._delivery_id,
@@ -106,6 +125,9 @@ class HandoffOutboxWorker:
             return HandoffWorkerResult.idle()
         try:
             receipt = self._delivery.deliver(claim.message)
+        except HandoffDeliveryUnknown:
+            self._store.mark_handoff_outbox_unknown(claim, now=now)
+            return HandoffWorkerResult.manual_review(claim.message.effect_id)
         except Exception:
             pass
         else:
@@ -413,6 +435,7 @@ class PaymentSettlementWorker:
 
 __all__ = [
     "HandoffDeliveryPort",
+    "HandoffDeliveryUnknown",
     "HandoffWorkerDisposition",
     "HandoffWorkerResult",
     "HandoffOutboxWorker",

@@ -10,7 +10,16 @@ from reservation_boundary.public_dispatch import (
     PublicDeliveryReceipt,
     PublicDispatchClaim,
 )
-from v2_contracts.channel import PublicDeliveryNotCalled, PublicDeliveryUnknown
+from v2_contracts.channel import (
+    PublicDeliveryNotCalled,
+    PublicDeliveryRejected,
+    PublicDeliveryUnknown,
+)
+from v2_application.completion import (
+    PublicDeliveryDisposition,
+    PublicDeliveryWorker,
+    PublicOutboxStore,
+)
 
 
 class BoundaryPublicDisposition(str, Enum):
@@ -102,6 +111,9 @@ class BoundaryPublicDeliveryWorker:
             raise
         try:
             provider_receipt_id = self._delivery.send(claim)
+        except PublicDeliveryRejected:
+            self._boundary.mark_public_delivery_manual_review(claim, now=now)
+            return BoundaryPublicDisposition.MANUAL_REVIEW
         except PublicDeliveryNotCalled:
             self._boundary.release_public_delivery_not_called(claim, now=now)
             return BoundaryPublicDisposition.RETRYABLE_FAILURE
@@ -125,7 +137,49 @@ class BoundaryPublicDeliveryWorker:
         return BoundaryPublicDisposition.DELIVERED
 
 
+class CombinedPublicDeliveryWorker:
+    """Drain boundary replies first, then completion rows, behind one live gate."""
+
+    def __init__(
+        self,
+        *,
+        boundary: BoundaryPublicStore,
+        completion: PublicOutboxStore,
+        delivery: PublicDeliveryPort,
+        effect_guard: object,
+        worker_id: str,
+        lease_ttl: timedelta,
+    ) -> None:
+        if not callable(getattr(effect_guard, "allows_workflow", None)):
+            raise TypeError("effect_guard must expose allows_workflow")
+        self._boundary = BoundaryPublicDeliveryWorker(
+            boundary=boundary,
+            delivery=delivery,
+            worker_id=worker_id + ":boundary",
+            lease_ttl=lease_ttl,
+        )
+        self._completion = PublicDeliveryWorker(
+            store=completion,
+            delivery=delivery,
+            worker_id=worker_id + ":completion",
+            lease_ttl=lease_ttl,
+        )
+        self._effect_guard = effect_guard
+
+    def run_once(self, *, now: datetime):
+        if not self._effect_guard.allows_workflow("manychat-public-delivery"):
+            return BoundaryPublicDisposition.IDLE
+        boundary = self._boundary.run_once(now=now)
+        if boundary is not BoundaryPublicDisposition.IDLE:
+            return boundary
+        completion = self._completion.run_once(now=now)
+        if completion is PublicDeliveryDisposition.IDLE:
+            return BoundaryPublicDisposition.IDLE
+        return completion
+
+
 __all__ = [
     "BoundaryPublicDeliveryWorker",
     "BoundaryPublicDisposition",
+    "CombinedPublicDeliveryWorker",
 ]

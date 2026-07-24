@@ -15,11 +15,13 @@ from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import ServiceKind
 from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
+from reservation_followup.workers import HandoffOutboxWorker
 from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
 from v2_adapters.manychat_profile import ManyChatProfileAdapter
+from v2_adapters.manychat import ManyChatFlowDeliveryAdapter
 from v2_adapters.provider_http import (
     BokunHTTPTransport,
     CloudbedsHTTPTransport,
@@ -33,6 +35,7 @@ from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
+from v2_application.public_delivery import CombinedPublicDeliveryWorker
 from v2_application.recovery import (
     HandoffCoordinator,
     ManualReviewHandoffProjector,
@@ -48,6 +51,7 @@ from v2_contracts.providers import (
 from v2_contracts.payments import BusinessUnit
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
+from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
 from v2_host.public_authority import ManifestPublicAuthorityResolver
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue
@@ -405,16 +409,6 @@ def build_worker_set(
     if settings.runtime_mode is RuntimeMode.API_ONLY:
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
-    unsupported_controlled_gates = (
-        settings.manychat_delivery_enabled,
-        settings.manychat_handoff_enabled,
-    )
-    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE and any(
-        unsupported_controlled_gates
-    ):
-        raise RuntimeError(
-            "controlled-write graph is closed until every enabled effect transport is installed"
-        )
     inbox_worker: object
     if settings.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}:
         inbox_worker = _build_inbox_worker(
@@ -476,15 +470,63 @@ def build_worker_set(
         if settings.stripe_links_enabled
         else ClosedCapabilityWorker("completion_projector")
     )
+    public_delivery: object
+    if settings.manychat_delivery_enabled:
+        manychat_transport = ManyChatHTTPTransport(
+            api_key=settings.manychat_api_key,
+            base_url=settings.manychat_base_url,
+        )
+        public_delivery = CombinedPublicDeliveryWorker(
+            boundary=SQLiteBoundaryWorkerStore(container.boundary),
+            completion=container.public_outbox,
+            delivery=ManyChatFlowDeliveryAdapter(
+                transport=manychat_transport,
+                allowed_subscriber_id=settings.allowed_subscriber_ids[0],
+                reply_field_id=settings.manychat_reply_field_id,
+                reply_flow_ns=settings.manychat_reply_flow_ns,
+                payment_link_field_id=settings.manychat_payment_link_field_id,
+                payment_description_field_id=(
+                    settings.manychat_payment_description_field_id
+                ),
+                payment_flow_ns=settings.manychat_payment_flow_ns,
+            ),
+            effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
+            worker_id="worker:manychat-public",
+            lease_ttl=timedelta(seconds=30),
+        )
+    else:
+        public_delivery = ClosedCapabilityWorker("manychat_delivery")
+    handoff_worker: object
+    if settings.manychat_handoff_enabled:
+        handoff_transport = ManyChatHTTPTransport(
+            api_key=settings.manychat_api_key,
+            base_url=settings.manychat_base_url,
+        )
+        handoff_worker = HandoffOutboxWorker(
+            store=container.followup,
+            delivery=ManyChatHandoffDeliveryAdapter(
+                transport=handoff_transport,
+                subscriber_id=settings.allowed_subscriber_ids[0],
+                tag_id=settings.manychat_handoff_tag_id,
+                flow_ns=settings.manychat_handoff_flow_ns,
+                clock=UTCClock(),
+            ),
+            worker_id="worker:manychat-handoff",
+            lease_ttl=timedelta(seconds=30),
+            effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
+        )
+    else:
+        handoff_worker = ClosedCapabilityWorker("manychat_handoff")
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
         WorkerQueue.RESERVATION: reservation_worker,
+        WorkerQueue.HANDOFF: handoff_worker,
         WorkerQueue.OUTCOME_PROJECTOR: outcome_projector,
         WorkerQueue.PAYMENT_INITIATION: payment_worker,
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
         WorkerQueue.POST_PAYMENT: completion_projector,
-        WorkerQueue.PUBLIC_DELIVERY: ClosedCapabilityWorker("manychat_delivery"),
+        WorkerQueue.PUBLIC_DELIVERY: public_delivery,
         WorkerQueue.RECONCILIATION: ReconciliationStage(
             container=container,
             reads=reads,
@@ -517,7 +559,12 @@ def build_worker_set(
                 else "closed"
             ),
             "boundary_relay": "ready",
-            "manychat_delivery": "closed",
+            "manychat_delivery": (
+                "ready" if settings.manychat_delivery_enabled else "closed"
+            ),
+            "manychat_handoff": (
+                "ready" if settings.manychat_handoff_enabled else "closed"
+            ),
             "payment_initiation": (
                 "ready" if settings.stripe_links_enabled else "closed"
             ),

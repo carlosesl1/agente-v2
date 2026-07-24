@@ -235,23 +235,36 @@ def _outbox_constraints(prefix: str, *, v2: bool = False) -> tuple[str, ...]:
     workflow_table = f"{prefix}_workflows"
     workflow_id = "handoff_id" if prefix == "handoff" else "payment_id"
     if prefix == "handoff":
+        manual_lease = (
+            " OR (status = 'manual_review' AND claim_owner IS NULL "
+            "AND lease_acquired_at IS NULL AND lease_expires_at IS NULL)"
+            if v2
+            else ""
+        )
         lease_tuple = (
             "((status = 'pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
             "AND lease_expires_at IS NULL) OR (status = 'leased' AND claim_owner IS NOT NULL "
             "AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL) OR "
             "(status = 'delivered' AND claim_owner IS NOT NULL AND lease_acquired_at IS NULL "
-            "AND lease_expires_at IS NULL))"
+            f"AND lease_expires_at IS NULL){manual_lease})"
         )
         active_lease = (
             "(status != 'leased' OR (claim_owner IS NOT NULL AND fencing_token >= 1 "
             "AND lease_expires_at > lease_acquired_at))"
+        )
+        manual_status = (
+            " OR (status = 'manual_review' AND claim_owner IS NULL "
+            "AND delivered_at IS NULL AND receipt_hash IS NULL)"
+            if v2
+            else ""
         )
         status_matrix = (
             "((status = 'pending' AND claim_owner IS NULL AND delivered_at IS NULL) OR "
             "(status = 'leased' AND claim_owner IS NOT NULL AND delivered_at IS NULL) OR "
             "(status = 'delivered' AND claim_owner IS NOT NULL AND "
             "lease_acquired_at IS NULL AND lease_expires_at IS NULL AND "
-            "fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL))"
+            f"fencing_token >= 1 AND delivery_attempts >= 1 AND delivered_at IS NOT NULL)"
+            f"{manual_status})"
         )
         fencing_history = "(fencing_token = delivery_attempts)"
     else:

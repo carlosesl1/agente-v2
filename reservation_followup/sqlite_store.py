@@ -2403,9 +2403,15 @@ class SQLiteFollowupUnitOfWork:
         claim: HandoffOutboxClaim,
         *,
         now: datetime,
+        _terminal_unknown: bool = False,
     ) -> HandoffTransition:
         self._claim_job(claim)
         now = _require_utc_input(now, "now")
+        if type(_terminal_unknown) is not bool:
+            raise TypeError("_terminal_unknown must be an exact bool")
+        if _terminal_unknown and self._schema_version != SCHEMA_VERSION_V2:
+            raise UnsupportedEffect("terminal handoff uncertainty requires schema v2")
+        target_status = "manual_review" if _terminal_unknown else "pending"
         with self._transaction("release_handoff_outbox"):
             current, revision = self._load_handoff(claim.message.handoff_id)
             message, row = self._assert_live_handoff_claim(claim, now=now)
@@ -2417,13 +2423,14 @@ class SQLiteFollowupUnitOfWork:
                 if v2_meta is None:
                     raise DataCorruption("handoff outbox v2 metadata is missing")
                 cursor = self._connection.execute(
-                    "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
+                    "UPDATE main.handoff_outbox SET status=?, claim_owner=NULL, "
                     "lease_acquired_at=NULL, lease_expires_at=NULL, "
                     "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
                     "AND status='leased' AND claim_owner=? AND fencing_token=? "
                     "AND lease_acquired_at=? AND lease_expires_at=? "
                     "AND delivery_attempts=? AND cas_revision=?",
                     (
+                        target_status,
                         now.isoformat(),
                         message.effect_id,
                         row[9],
@@ -2436,12 +2443,13 @@ class SQLiteFollowupUnitOfWork:
                 )
             else:
                 cursor = self._connection.execute(
-                    "UPDATE main.handoff_outbox SET status='pending', claim_owner=NULL, "
+                    "UPDATE main.handoff_outbox SET status=?, claim_owner=NULL, "
                     "lease_acquired_at=NULL, lease_expires_at=NULL, updated_at=? "
                     "WHERE message_id=? AND status='leased' AND claim_owner=? "
                     "AND fencing_token=? AND lease_acquired_at=? AND lease_expires_at=? "
                     "AND delivery_attempts=?",
                     (
+                        target_status,
                         now.isoformat(),
                         message.effect_id,
                         row[9],
@@ -2468,7 +2476,11 @@ class SQLiteFollowupUnitOfWork:
                 incident_key=message.incident_key,
                 effect_id=message.effect_id,
                 kind=message.kind,
-                failure_code=HandoffEffectFailureCode.EFFECT_UNAVAILABLE,
+                failure_code=(
+                    HandoffEffectFailureCode.EFFECT_UNKNOWN
+                    if _terminal_unknown
+                    else HandoffEffectFailureCode.EFFECT_UNAVAILABLE
+                ),
                 failed_at=now,
             )
             transition = reduce_handoff(current, event)
@@ -2479,6 +2491,18 @@ class SQLiteFollowupUnitOfWork:
                 transition,
             )
             return transition
+
+    def mark_handoff_outbox_unknown(
+        self,
+        claim: HandoffOutboxClaim,
+        *,
+        now: datetime,
+    ) -> HandoffTransition:
+        return self.release_handoff_outbox(
+            claim,
+            now=now,
+            _terminal_unknown=True,
+        )
 
     def complete_handoff_outbox(
         self,
