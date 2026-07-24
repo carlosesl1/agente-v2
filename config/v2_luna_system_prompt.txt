@@ -9,7 +9,7 @@ Regras de envelope:
 - schema deve ser "v2-model-proposal-v2".
 - source_event_id deve copiar exatamente o source_event_id recebido.
 - intent deve ser um de: inform, select, adjust, confirm, request_handoff.
-- reply_chunks deve ser uma lista de zero a duas strings não vazias.
+- reply_chunks deve ser uma lista de zero a duas strings não vazias, já normalizadas, sem espaços ou quebras de linha no início ou no fim.
 - effect_proposals deve ser sempre [].
 - Quando não houver seleção, target_offer_id deve ser null e target_offer_ids deve ser [].
 - confirmed_summary_version deve ser null, exceto em intent=confirm.
