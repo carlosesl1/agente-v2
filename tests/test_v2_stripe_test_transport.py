@@ -69,32 +69,63 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                 ],
                 "metadata[economic_version]": ["2"],
             }
-            return httpx.Response(200, request=request, json={"id": "prod_test_001"})
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "prod_test_001", "livemode": False},
+            )
         if request.url.path == "/v1/prices":
             assert form == {
                 "product": ["prod_test_001"],
                 "currency": ["brl"],
                 "unit_amount": ["15300"],
             }
-            return httpx.Response(200, request=request, json={"id": "price_test_001"})
-        assert request.url.path == "/v1/payment_links"
-        assert form == {
-            "line_items[0][price]": ["price_test_001"],
-            "line_items[0][quantity]": ["1"],
-            "metadata[reservation_anchor_sha256]": [
-                "761bedf72cf75935ffe67cf434d904ace0cb355ce6af5f00748c87ce07462531"
-            ],
-            "metadata[subscriber_sha256]": [SUBSCRIBER_FINGERPRINT],
-            "metadata[business_unit]": ["hostel"],
-            "metadata[economic_version]": ["2"],
-            "metadata[payment_percentage]": ["100"],
-        }
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "price_test_001", "livemode": False},
+            )
+        if request.url.path == "/v1/payment_links":
+            assert form == {
+                "line_items[0][price]": ["price_test_001"],
+                "line_items[0][quantity]": ["1"],
+                "metadata[reservation_anchor_sha256]": [
+                    "761bedf72cf75935ffe67cf434d904ace0cb355ce6af5f00748c87ce07462531"
+                ],
+                "metadata[subscriber_sha256]": [SUBSCRIBER_FINGERPRINT],
+                "metadata[business_unit]": ["hostel"],
+                "metadata[economic_version]": ["2"],
+                "metadata[payment_percentage]": ["100"],
+            }
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "plink_test_001",
+                    "url": "https://buy.stripe.com/test_link_001",
+                    "active": True,
+                    "livemode": False,
+                },
+            )
+        assert request.method == "GET"
+        assert request.url.path == "/v1/payment_links/plink_test_001"
         return httpx.Response(
             200,
             request=request,
             json={
                 "id": "plink_test_001",
                 "url": "https://buy.stripe.com/test_link_001",
+                "active": True,
+                "livemode": False,
+                "metadata": {
+                    "reservation_anchor_sha256": (
+                        "761bedf72cf75935ffe67cf434d904ace0cb355ce6af5f00748c87ce07462531"
+                    ),
+                    "subscriber_sha256": SUBSCRIBER_FINGERPRINT,
+                    "business_unit": "hostel",
+                    "economic_version": "2",
+                    "payment_percentage": "100",
+                },
             },
         )
 
@@ -104,15 +135,77 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
         "link_id": "plink_test_001",
         "url": "https://buy.stripe.com/test_link_001",
     }
-    assert [request.headers["Idempotency-Key"] for request in seen] == [
+    assert [request.headers["Idempotency-Key"] for request in seen[:3]] == [
         _request().idempotency_key + ":product",
         _request().idempotency_key + ":price",
         _request().idempotency_key + ":payment_link",
     ]
+    assert "Idempotency-Key" not in seen[3].headers
     assert all(request.headers["Authorization"] == f"Bearer {TEST_KEY}" for request in seen)
     wire = b"&".join(request.content for request in seen).decode()
     assert _request().payment_id not in wire
     assert _request().reservation_anchor_id not in wire
+
+
+def test_livemode_response_is_never_accepted_as_a_test_effect() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"id": "prod_live_forbidden", "livemode": True},
+        )
+
+    with pytest.raises(RuntimeError, match="test mode"):
+        _transport(handler)(_request())
+    assert [request.url.path for request in seen] == ["/v1/products"]
+
+
+def test_payment_link_readback_mismatch_is_unknown() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/products":
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "prod_test_001", "livemode": False},
+            )
+        if request.url.path == "/v1/prices":
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "price_test_001", "livemode": False},
+            )
+        if request.method == "POST":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "plink_test_001",
+                    "url": "https://buy.stripe.com/test_link_001",
+                    "active": True,
+                    "livemode": False,
+                },
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "different",
+                "url": "https://buy.stripe.com/different",
+                "active": True,
+                "livemode": False,
+                "metadata": {},
+            },
+        )
+
+    with pytest.raises(RuntimeError, match="read-back"):
+        _transport(handler)(_request())
+    assert [request.method for request in seen] == ["POST", "POST", "POST", "GET"]
 
 
 def test_live_key_and_noncanonical_api_base_fail_before_http() -> None:
@@ -144,7 +237,11 @@ def test_partial_creation_is_manual_review_and_never_recreates_product(
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
         if request.url.path == "/v1/products":
-            return httpx.Response(200, request=request, json={"id": "prod_test_partial"})
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "prod_test_partial", "livemode": False},
+            )
         raise httpx.ReadTimeout("after Product creation", request=request)
 
     stripe = StripeLinkAdapter(

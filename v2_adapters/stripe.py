@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Mapping
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -92,12 +92,49 @@ class StripeTestHTTPTransport:
             raise RuntimeError("Stripe creation response fields mismatch")
         return payload
 
+    def _get(self, *, profile: str, path: str) -> dict[str, object]:
+        key = self._keys.get(profile)
+        if key is None:
+            raise ValueError("Stripe account profile is outside the closed map")
+        try:
+            response = self._client.get(
+                self._base_url + path,
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError("Stripe read-back outcome is ambiguous") from exc
+        try:
+            payload = response.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Stripe read-back outcome is ambiguous") from exc
+        if not 200 <= response.status_code < 300 or not isinstance(payload, dict):
+            raise RuntimeError("Stripe read-back outcome is ambiguous")
+        return payload
+
     @staticmethod
     def _provider_id(payload: dict[str, object], kind: str) -> str:
         value = payload.get("id")
         if type(value) is not str or not value:
             raise RuntimeError(f"Stripe {kind} response lacks an id")
         return value
+
+    @staticmethod
+    def _require_test_mode(payload: dict[str, object], kind: str) -> None:
+        if payload.get("livemode") is not False:
+            raise RuntimeError(f"Stripe {kind} was not confirmed in test mode")
+
+    @staticmethod
+    def _canonical_link_url(payload: dict[str, object]) -> str:
+        url = payload.get("url")
+        parsed = urlparse(url) if type(url) is str else None
+        if (
+            parsed is None
+            or parsed.scheme != "https"
+            or parsed.hostname != "buy.stripe.com"
+        ):
+            raise RuntimeError("Stripe payment link URL is not canonical")
+        return url
 
     def __call__(self, request: StripeLinkRequest) -> dict[str, str]:
         if type(request) is not StripeLinkRequest:
@@ -116,6 +153,7 @@ class StripeTestHTTPTransport:
             },
             idempotency_key=request.idempotency_key + ":product",
         )
+        self._require_test_mode(product, "product")
         product_id = self._provider_id(product, "product")
         price = self._post(
             profile=request.account_profile_id,
@@ -127,32 +165,51 @@ class StripeTestHTTPTransport:
             },
             idempotency_key=request.idempotency_key + ":price",
         )
+        self._require_test_mode(price, "price")
         price_id = self._provider_id(price, "price")
+        expected_metadata = {
+            "reservation_anchor_sha256": hashlib.sha256(
+                request.reservation_anchor_id.encode()
+            ).hexdigest(),
+            "subscriber_sha256": request.subscriber_fingerprint,
+            "business_unit": request.business_unit.value,
+            "economic_version": str(request.economic_version),
+            "payment_percentage": str(request.payment_percentage),
+        }
         link = self._post(
             profile=request.account_profile_id,
             path="/v1/payment_links",
             form={
                 "line_items[0][price]": price_id,
                 "line_items[0][quantity]": "1",
-                "metadata[reservation_anchor_sha256]": hashlib.sha256(
-                    request.reservation_anchor_id.encode()
-                ).hexdigest(),
-                "metadata[subscriber_sha256]": request.subscriber_fingerprint,
-                "metadata[business_unit]": request.business_unit.value,
-                "metadata[economic_version]": str(request.economic_version),
-                "metadata[payment_percentage]": str(request.payment_percentage),
+                **{
+                    f"metadata[{name}]": value
+                    for name, value in expected_metadata.items()
+                },
             },
             idempotency_key=request.idempotency_key + ":payment_link",
         )
+        self._require_test_mode(link, "payment link")
         link_id = self._provider_id(link, "payment link")
-        url = link.get("url")
-        parsed = urlparse(url) if type(url) is str else None
+        url = self._canonical_link_url(link)
         if (
-            parsed is None
-            or parsed.scheme != "https"
-            or parsed.hostname != "buy.stripe.com"
+            link.get("active") is not True
         ):
-            raise RuntimeError("Stripe payment link URL is not canonical")
+            raise RuntimeError("Stripe payment link is not active")
+        readback = self._get(
+            profile=request.account_profile_id,
+            path="/v1/payment_links/" + quote(link_id, safe=""),
+        )
+        self._require_test_mode(readback, "payment link read-back")
+        metadata = readback.get("metadata")
+        if (
+            self._provider_id(readback, "payment link read-back") != link_id
+            or self._canonical_link_url(readback) != url
+            or readback.get("active") is not True
+            or not isinstance(metadata, dict)
+            or any(metadata.get(name) != value for name, value in expected_metadata.items())
+        ):
+            raise RuntimeError("Stripe payment link read-back did not match")
         return {"link_id": link_id, "url": url}
 
 
