@@ -335,12 +335,14 @@ class CloudbedsHTTPTransport:
         }.get(terms["payment_method"])
         if payment_method is None:
             raise ProviderHTTPError("Cloudbeds payment method is invalid")
-        compact = lambda value: json.dumps(
-            value,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        def compact(value: object) -> str:
+            return json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+
         form = {
             "propertyID": self._property_id,
             "sourceID": self._source_id,
