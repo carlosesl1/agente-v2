@@ -167,6 +167,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert type(workers[WorkerQueue.INBOX]).__name__ == "InboxTurnWorker"
         assert type(workers[WorkerQueue.BOUNDARY_RELAY]) is BoundaryRelayWorker
         assert type(workers[WorkerQueue.RESERVATION]) is ClosedCapabilityWorker
+        assert workers[WorkerQueue.RECONCILIATION]._manual_handoff is not None
         assert settings.all_real_effect_gates_closed is True
         assert container.readiness().status == "ready"
     finally:

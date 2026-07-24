@@ -33,6 +33,10 @@ from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
+from v2_application.recovery import (
+    HandoffCoordinator,
+    ManualReviewHandoffProjector,
+)
 from v2_application.reservations import V2ReservationExecutionAdapter
 from v2_application.workers import V2ReservationWorker
 from v2_application.turn_executor import V2TurnExecutor
@@ -111,6 +115,17 @@ class ReconciliationStage:
             raise ValueError("read probe requires both service and settings")
         self._reads = reads
         self._settings = settings
+        self._manual_handoff = None
+        if settings is not None and settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+            if len(settings.allowed_subscriber_ids) != 1:
+                raise ValueError(
+                    "manual-review handoff requires one allowlisted subscriber"
+                )
+            self._manual_handoff = ManualReviewHandoffProjector(
+                execution=container.execution,
+                coordinator=HandoffCoordinator(store=container.followup),
+                lead_id=f"manychat:{settings.allowed_subscriber_ids[0]}",
+            )
         self._next_probe_at: datetime | None = None
         self._probe_healthy = False
 
@@ -159,10 +174,17 @@ class ReconciliationStage:
         return {"status": "fresh_healthy"}
 
     def run_once(self, *, now: datetime) -> dict[str, object]:
+        reservation = self._reservation.run_once(now=now)
+        manual_handoff = (
+            None
+            if self._manual_handoff is None
+            else self._manual_handoff.run_once(now=now)
+        )
         return {
             "status": "ok",
             "provider_reads": self._probe_reads(now=now),
-            "reservation": self._reservation.run_once(now=now),
+            "reservation": reservation,
+            "manual_handoff": manual_handoff,
             "payment": self._payment.run_once(now=now),
         }
 

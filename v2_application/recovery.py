@@ -9,6 +9,8 @@ import hashlib
 import re
 
 from reservation_domain import ExecutionCertainty, ServiceKind
+from reservation_execution import LedgerStatus
+from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.handoff import (
     HandoffReasonCode,
     HandoffRequested,
@@ -322,11 +324,72 @@ class HandoffCoordinator:
         return HandoffOpenResult(transition.state, True)
 
 
+@dataclass(frozen=True, slots=True)
+class ManualReviewHandoffProjection:
+    created: int
+    replayed: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.created) is not int
+            or self.created < 0
+            or type(self.replayed) is not int
+            or self.replayed < 0
+        ):
+            raise ValueError("handoff projection counters must be non-negative")
+
+
+class ManualReviewHandoffProjector:
+    """Open one internal handoff for durable reservation uncertainty."""
+
+    def __init__(
+        self,
+        *,
+        execution: SQLiteUnitOfWork,
+        coordinator: HandoffCoordinator,
+        lead_id: str,
+    ) -> None:
+        if type(execution) is not SQLiteUnitOfWork:
+            raise TypeError("execution must be exact SQLiteUnitOfWork")
+        if type(coordinator) is not HandoffCoordinator:
+            raise TypeError("coordinator must be exact HandoffCoordinator")
+        self._execution = execution
+        self._coordinator = coordinator
+        self._lead_id = _id(lead_id, "lead_id")
+
+    def run_once(self, *, now: datetime) -> ManualReviewHandoffProjection:
+        created = 0
+        replayed = 0
+        for command, ledger in self._execution.list_outcome_projection_inputs():
+            if ledger.status is not LedgerStatus.MANUAL_REVIEW:
+                continue
+            digest = hashlib.sha256(
+                b"v2-manual-review-handoff-event-v1\0"
+                + command.command_id.encode("utf-8")
+                + b"\0"
+                + ledger.outcome_hash.encode("ascii")
+            ).hexdigest()
+            result = self._coordinator.open_exception_once(
+                lead_id=self._lead_id,
+                workflow_id=command.workflow_id,
+                source_event_id=f"event:manual-review:{digest[:40]}",
+                reason_code=HandoffReasonCode.PROVIDER_UNCERTAIN,
+                now=now,
+            )
+            if result.created:
+                created += 1
+            else:
+                replayed += 1
+        return ManualReviewHandoffProjection(created, replayed)
+
+
 __all__ = [
     "CommercialEffectBlocked",
     "HandoffCoordinator",
     "HandoffEffectGuard",
     "HandoffOpenResult",
+    "ManualReviewHandoffProjection",
+    "ManualReviewHandoffProjector",
     "PackageComponent",
     "PackageProgress",
     "PackageProgressStatus",
