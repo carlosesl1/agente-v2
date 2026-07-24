@@ -13,8 +13,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from reservation_boundary.sandbox import (
-    CloudbedsDockerRead,
+from reservation_boundary.sandbox import (  # noqa: E402
     DEFAULT_SANDBOX_MODEL,
     HermesDockerModel,
     ModelCallFailed,
@@ -22,7 +21,10 @@ from reservation_boundary.sandbox import (
     SandboxConversation,
     SandboxProtocolError,
     SQLiteSandboxStore,
+    V2ProviderDockerRead,
 )
+
+DEFAULT_V2_READ_WORKER = "agente-v2-digest-canary-169a67c-worker"
 
 
 def _default_db() -> Path:
@@ -41,9 +43,15 @@ def _knowledge(path: Path | None) -> dict[str, object]:
             "environment": "sandbox",
             "external_effects": False,
             "known_services": ["hostel", "agency"],
+            "tour_catalog": [
+                {
+                    "canonical_id": "product:buracao",
+                    "public_name": "Cachoeira do Buracão",
+                }
+            ],
             "notice": (
-                "Preço e disponibilidade de hospedagem só podem vir de READ_OBSERVATION; "
-                "links e efeitos externos permanecem indisponíveis."
+                "Preço e disponibilidade de hospedagem e passeio só podem vir de "
+                "READ_OBSERVATIONS; links e efeitos externos permanecem indisponíveis."
             ),
         }
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -62,11 +70,10 @@ def _submit(runner: SandboxConversation, session: str, message: str) -> bool:
     if result.blocked_effects:
         kinds = ", ".join(item.kind for item in result.blocked_effects)
         print(f"[sandbox: {len(result.blocked_effects)} efeito(s) bloqueado(s): {kinds}]", file=sys.stderr)
-    if result.read_observation is not None:
-        observation = result.read_observation
+    for observation in result.read_observations:
         print(
-            "[sandbox: leitura Cloudbeds "
-            f"status={observation.status} opções={len(observation.options)} "
+            f"[sandbox: leitura {observation.kind} "
+            f"status={observation.status} "
             f"hash={observation.canonical_hash()[:12]}]",
             file=sys.stderr,
         )
@@ -82,7 +89,7 @@ def main() -> int:
     parser.add_argument("--message")
     parser.add_argument("--knowledge", type=Path)
     parser.add_argument("--container", default="hermes-webui")
-    parser.add_argument("--cloudbeds-container", default="chapada-leads-hermes")
+    parser.add_argument("--read-worker-container", default=DEFAULT_V2_READ_WORKER)
     parser.add_argument("--provider", default="openai-codex")
     parser.add_argument("--model", default=DEFAULT_SANDBOX_MODEL)
     args = parser.parse_args()
@@ -95,9 +102,9 @@ def main() -> int:
             provider=args.provider,
             model=args.model,
         ),
-        reads=CloudbedsDockerRead(
+        reads=V2ProviderDockerRead(
             project_root=_PROJECT_ROOT,
-            container=args.cloudbeds_container,
+            container=args.read_worker_container,
         ),
         knowledge=_knowledge(args.knowledge),
     )

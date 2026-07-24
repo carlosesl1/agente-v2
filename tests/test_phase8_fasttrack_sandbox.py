@@ -10,6 +10,7 @@ import unittest
 
 import reservation_boundary.sandbox as sandbox
 from scripts import phase8_cloudbeds_read_child as cloudbeds_child
+from scripts import run_phase8_sandbox as source_runner
 from reservation_boundary.sandbox import (
     HermesDockerModel,
     ModelCallFailed,
@@ -178,6 +179,38 @@ class _RunResult:
 
 
 class FastTrackSandboxTests(unittest.TestCase):
+    def test_source_runner_defaults_to_v2_worker_and_private_tour_catalog(self) -> None:
+        knowledge = source_runner._knowledge(None)
+
+        self.assertEqual(
+            source_runner.DEFAULT_V2_READ_WORKER,
+            "agente-v2-digest-canary-169a67c-worker",
+        )
+        self.assertEqual(
+            knowledge["tour_catalog"],
+            [{"canonical_id": "product:buracao", "public_name": "Cachoeira do Buracão"}],
+        )
+        self.assertIn("hospedagem e passeio", knowledge["notice"])
+        source = Path(source_runner.__file__).read_text(encoding="utf-8")
+        self.assertIn("reads=V2ProviderDockerRead(", source)
+        self.assertIn('parser.add_argument("--read-worker-container"', source)
+        self.assertNotIn("CloudbedsDockerRead", source)
+
+    def test_source_runner_prompt_allows_two_distinct_grounded_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = SandboxConversation(
+                store=SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3"),
+                model=_QueueModel(_response()),
+                knowledge=source_runner._knowledge(None),
+            )
+
+            prompt = runner._system_prompt()
+
+        self.assertIn("activity_availability", prompt)
+        self.assertIn("product:buracao", prompt)
+        self.assertIn("READ_OBSERVATIONS", prompt)
+        self.assertIn("no máximo dois", prompt)
+
     def test_v2_provider_child_sanitizes_activity_and_closes_effect_gates(self) -> None:
         child = importlib.import_module("scripts.phase8_v2_provider_read_child")
         environment = {
