@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.v2.yaml"
+PROMPT = ROOT / "config/v2_luna_system_prompt.txt"
 
 
 def _environment() -> dict[str, object]:
@@ -45,6 +46,9 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
     assert env["HERMES_HOME"] == "/hermes"
     assert env["HOME"] == "/hermes/home"
     assert env["V2_HERMES_MODEL"] == "openai-codex/gpt-5.6-luna"
+    assert env["V2_HERMES_SYSTEM_PROMPT_PATH"] == (
+        "/app/config/v2_luna_system_prompt.txt"
+    )
     command = env["V2_HERMES_COMMAND_JSON"]
     for literal in (
         '"python"',
@@ -65,6 +69,25 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
     )
     assert env["V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX"].startswith("${")
     assert env["V2_HERMES_TRANSCRIPT_KEY_HEX"].startswith("${")
+
+
+def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> None:
+    prompt = PROMPT.read_text(encoding="utf-8")
+    for literal in (
+        "v2-model-proposal-v2",
+        "source_event_id",
+        "target_offer_id",
+        "target_offer_ids",
+        "confirmed_summary_version",
+        "effect_proposals deve ser sempre []",
+        "product:buracao",
+        "Nunca exponha offer_id",
+        "Nunca invente preço",
+        "Não execute reserva",
+    ):
+        assert literal in prompt
+    dockerfile = (ROOT / "Dockerfile.v2").read_text(encoding="utf-8")
+    assert "COPY config/v2_luna_system_prompt.txt" in dockerfile
 
 
 def test_compose_has_all_independent_effect_gates_closed_by_default() -> None:

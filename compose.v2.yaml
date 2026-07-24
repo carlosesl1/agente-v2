@@ -56,7 +56,7 @@ services:
 
       V2_HERMES_MODEL: openai-codex/gpt-5.6-luna
       V2_HERMES_COMMAND_JSON: '["python","-m","v2_host.hermes_child","hermes","chat","-m","openai-codex/gpt-5.6-luna","--provider","openai-codex","-Q","--safe-mode","--source","tool"]'
-      V2_HERMES_SYSTEM_PROMPT: "${V2_HERMES_SYSTEM_PROMPT:?set closed Luna system prompt}"
+      V2_HERMES_SYSTEM_PROMPT_PATH: /app/config/v2_luna_system_prompt.txt
       V2_HERMES_TRANSCRIPT_KEY_HEX: "${V2_HERMES_TRANSCRIPT_KEY_HEX:?set transcript HMAC key}"
       V2_HERMES_TIMEOUT_SECONDS: "${V2_HERMES_TIMEOUT_SECONDS:-150}"
       V2_KNOWLEDGE_BASE_PATH: /app/config/cerebro_faq.yaml

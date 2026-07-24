@@ -171,3 +171,33 @@ def test_manychat_action_configuration_is_closed_and_strict(tmp_path: Path) -> N
     env["V2_MANYCHAT_REPLY_FIELD_ID"] = "not-an-id"
     with pytest.raises(ValueError, match="numeric V2 settings"):
         V2Settings.from_env(env)
+
+
+def test_versioned_hermes_system_prompt_can_be_loaded_by_absolute_path(
+    tmp_path: Path,
+) -> None:
+    env = _controlled_env(tmp_path)
+    prompt = tmp_path / "v2-prompt.txt"
+    prompt.write_text("Closed V2 prompt.\n", encoding="utf-8")
+    env.pop("V2_HERMES_SYSTEM_PROMPT")
+    env["V2_HERMES_SYSTEM_PROMPT_PATH"] = str(prompt)
+
+    settings = V2Settings.from_env(env)
+
+    assert settings.hermes_system_prompt == "Closed V2 prompt.\n"
+
+    env["V2_HERMES_SYSTEM_PROMPT"] = "ambiguous inline prompt"
+    with pytest.raises(ValueError, match="either inline or path"):
+        V2Settings.from_env(env)
+
+
+def test_hermes_system_prompt_path_fails_closed(tmp_path: Path) -> None:
+    env = _controlled_env(tmp_path)
+    env.pop("V2_HERMES_SYSTEM_PROMPT")
+    env["V2_HERMES_SYSTEM_PROMPT_PATH"] = "relative-prompt.txt"
+    with pytest.raises(ValueError, match="absolute"):
+        V2Settings.from_env(env)
+
+    env["V2_HERMES_SYSTEM_PROMPT_PATH"] = str(tmp_path / "missing.txt")
+    with pytest.raises(ValueError, match="unreadable"):
+        V2Settings.from_env(env)

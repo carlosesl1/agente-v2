@@ -38,6 +38,7 @@ COPY v2_application /app/v2_application
 COPY v2_contracts /app/v2_contracts
 COPY v2_host /app/v2_host
 COPY config/cerebro_faq.yaml /app/config/cerebro_faq.yaml
+COPY config/v2_luna_system_prompt.txt /app/config/v2_luna_system_prompt.txt
 
 RUN python -m compileall -q \
       reservation_boundary \

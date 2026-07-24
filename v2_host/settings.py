@@ -102,6 +102,30 @@ def _json_command(raw: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _system_prompt(source: Mapping[str, str]) -> str:
+    inline = source.get("V2_HERMES_SYSTEM_PROMPT", "")
+    raw_path = source.get("V2_HERMES_SYSTEM_PROMPT_PATH", "")
+    if inline and raw_path:
+        raise ValueError("Hermes system prompt must use either inline or path")
+    if inline:
+        if not inline.strip() or "\x00" in inline or len(inline.encode("utf-8")) > 65_536:
+            raise ValueError("Hermes inline system prompt is invalid")
+        return inline
+    if not raw_path:
+        return ""
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise ValueError("V2_HERMES_SYSTEM_PROMPT_PATH must be absolute")
+    try:
+        payload = path.read_bytes()
+        prompt = payload.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("Hermes system prompt path is unreadable") from exc
+    if not prompt.strip() or "\x00" in prompt or len(payload) > 65_536:
+        raise ValueError("Hermes system prompt file is invalid")
+    return prompt
+
+
 def _hex_key(raw: str) -> bytes:
     if not raw:
         return b""
@@ -590,7 +614,7 @@ class V2Settings:
             ),
             stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
             hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
-            hermes_system_prompt=source.get("V2_HERMES_SYSTEM_PROMPT", ""),
+            hermes_system_prompt=_system_prompt(source),
             hermes_transcript_key=_hex_key(source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
             hermes_timeout_seconds=timeout,
             knowledge_base_path=Path(knowledge_path) if knowledge_path else None,
