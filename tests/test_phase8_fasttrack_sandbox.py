@@ -145,6 +145,19 @@ class _QueueRead:
         return self.observation
 
 
+class _RoutingRead:
+    def __init__(self, observations: dict[str, object], *, before_call=None) -> None:
+        self.observations = observations
+        self.calls: list[object] = []
+        self.before_call = before_call
+
+    def read(self, request: object) -> object:
+        if self.before_call is not None:
+            self.before_call()
+        self.calls.append(request)
+        return self.observations[request.kind]
+
+
 class _RunResult:
     def __init__(self, returncode: int, stdout: bytes, stderr: bytes = b"") -> None:
         self.returncode = returncode
@@ -362,13 +375,150 @@ class FastTrackSandboxTests(unittest.TestCase):
             follow_up = model.calls[1][1]
             self.assertEqual(follow_up[-2], ("assistant", first.decode("utf-8")))
             self.assertEqual(follow_up[-1][0], "user")
-            self.assertTrue(follow_up[-1][1].startswith("READ_OBSERVATION="))
+            self.assertTrue(follow_up[-1][1].startswith("READ_OBSERVATIONS="))
             self.assertIn(observation.canonical_hash(), follow_up[-1][1])
             self.assertEqual(store.load_messages("lead-read"), (
                 ("user", "10 a 12 de agosto, para 2 adultos."),
                 ("assistant", "Encontrei uma opção real para essas datas."),
             ))
             self.assertEqual(store.read_observation_count("lead-read"), 1)
+
+    def test_hybrid_read_loop_journals_two_observations_atomically(self) -> None:
+        lodging_request = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-05",
+                "check_out": "2026-08-06",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        activity_request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+        first = _response_with_reads([lodging_request, activity_request])
+        final = _response("Há hospedagem e Buracão disponíveis para vocês.")
+        lodging = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation(
+                options=[
+                    {
+                        "adults": 2,
+                        "available_units": 2,
+                        "check_in": "2026-08-05",
+                        "check_out": "2026-08-06",
+                        "children": 0,
+                        "currency": "BRL",
+                        "nights": 1,
+                        "price_reliable": True,
+                        "room_public_name": "Suíte Serra",
+                        "total_amount": "150.00",
+                    }
+                ]
+            )
+        )
+        activity = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _activity_observation()
+        )
+        model = _QueueModel(first, final)
+        reads = _RoutingRead(
+            {
+                "lodging_availability": lodging,
+                "activity_availability": activity,
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=model,
+                reads=reads,
+                knowledge={"catalog": {"Buracão": "product:buracao"}},
+            )
+
+            result = runner.submit(
+                session_id="lead-hybrid",
+                message="Hospedagem 5 a 6 e Buracão dia 5, para 2 adultos.",
+            )
+
+            self.assertEqual(tuple(item.kind for item in reads.calls), (
+                "lodging_availability",
+                "activity_availability",
+            ))
+            self.assertEqual(result.read_observations, (lodging, activity))
+            self.assertIsNone(result.read_observation)
+            self.assertEqual(store.read_observation_count("lead-hybrid"), 2)
+            private = model.calls[1][1][-1]
+            self.assertEqual(private[0], "user")
+            self.assertTrue(private[1].startswith("READ_OBSERVATIONS="))
+            self.assertIn(lodging.canonical_hash(), private[1])
+            self.assertIn(activity.canonical_hash(), private[1])
+            self.assertEqual(
+                store.load_messages("lead-hybrid"),
+                (
+                    ("user", "Hospedagem 5 a 6 e Buracão dia 5, para 2 adultos."),
+                    ("assistant", "Há hospedagem e Buracão disponíveis para vocês."),
+                ),
+            )
+
+    def test_observation_migration_preserves_old_row_and_adds_kind_to_key(self) -> None:
+        old_observation = _observation()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sandbox.sqlite3"
+            with sqlite3.connect(path) as connection:
+                connection.executescript(
+                    """
+                    PRAGMA foreign_keys=ON;
+                    CREATE TABLE sandbox_sessions (
+                        session_id TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ) STRICT;
+                    CREATE TABLE sandbox_read_observations (
+                        session_id TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL,
+                        kind TEXT NOT NULL CHECK (kind = 'lodging_availability'),
+                        observation_json BLOB NOT NULL,
+                        observation_hash TEXT NOT NULL,
+                        PRIMARY KEY (session_id, ordinal),
+                        FOREIGN KEY (session_id) REFERENCES sandbox_sessions(session_id)
+                    ) STRICT;
+                    INSERT INTO sandbox_sessions(session_id) VALUES ('legacy');
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO sandbox_read_observations(
+                        session_id,ordinal,kind,observation_json,observation_hash
+                    ) VALUES (?,?,?,?,?)
+                    """,
+                    (
+                        "legacy",
+                        1,
+                        "lodging_availability",
+                        old_observation,
+                        hashlib.sha256(old_observation).hexdigest(),
+                    ),
+                )
+
+            SQLiteSandboxStore(path)
+
+            with sqlite3.connect(path) as connection:
+                pk = {
+                    row[1]: row[5]
+                    for row in connection.execute(
+                        "PRAGMA table_info(sandbox_read_observations)"
+                    )
+                    if row[5]
+                }
+                rows = connection.execute(
+                    "SELECT session_id,ordinal,kind FROM sandbox_read_observations"
+                ).fetchall()
+            self.assertEqual(pk, {"session_id": 1, "ordinal": 2, "kind": 3})
+            self.assertEqual(rows, [("legacy", 1, "lodging_availability")])
 
     def test_model_and_read_calls_happen_without_sqlite_write_transaction(self) -> None:
         read_item: dict[str, object] = {

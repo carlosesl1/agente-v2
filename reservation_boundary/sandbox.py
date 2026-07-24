@@ -54,8 +54,8 @@ class SandboxModelPort(Protocol):
 class SandboxReadPort(Protocol):
     def read(
         self,
-        request: "LodgingAvailabilityReadRequest",
-    ) -> "LodgingAvailabilityObservation": ...
+        request: "SandboxReadRequest",
+    ) -> "SandboxReadObservation": ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -635,7 +635,11 @@ class SandboxTurnResult:
     route: str
     reply_type: str
     blocked_effects: tuple[BlockedEffect, ...]
-    read_observation: LodgingAvailabilityObservation | None = None
+    read_observations: tuple[SandboxReadObservation, ...] = ()
+
+    @property
+    def read_observation(self) -> SandboxReadObservation | None:
+        return self.read_observations[0] if len(self.read_observations) == 1 else None
 
 
 class SQLiteSandboxStore:
@@ -676,14 +680,65 @@ class SQLiteSandboxStore:
                 CREATE TABLE IF NOT EXISTS sandbox_read_observations (
                     session_id TEXT NOT NULL,
                     ordinal INTEGER NOT NULL,
-                    kind TEXT NOT NULL CHECK (kind = 'lodging_availability'),
+                    kind TEXT NOT NULL CHECK (
+                        kind IN ('lodging_availability','activity_availability')
+                    ),
                     observation_json BLOB NOT NULL,
                     observation_hash TEXT NOT NULL,
-                    PRIMARY KEY (session_id, ordinal),
+                    PRIMARY KEY (session_id, ordinal, kind),
                     FOREIGN KEY (session_id) REFERENCES sandbox_sessions(session_id)
                 ) STRICT;
                 """
             )
+            self._migrate_read_observations(connection)
+
+    @staticmethod
+    def _migrate_read_observations(connection: sqlite3.Connection) -> None:
+        primary_key = {
+            str(row[1]): int(row[5])
+            for row in connection.execute(
+                "PRAGMA table_info(sandbox_read_observations)"
+            )
+            if row[5]
+        }
+        if primary_key == {"session_id": 1, "ordinal": 2, "kind": 3}:
+            return
+        if primary_key != {"session_id": 1, "ordinal": 2}:
+            raise RuntimeError("sandbox read observation schema is not migratable")
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "ALTER TABLE sandbox_read_observations RENAME TO sandbox_read_observations_legacy"
+            )
+            connection.execute(
+                """
+                CREATE TABLE sandbox_read_observations (
+                    session_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    kind TEXT NOT NULL CHECK (
+                        kind IN ('lodging_availability','activity_availability')
+                    ),
+                    observation_json BLOB NOT NULL,
+                    observation_hash TEXT NOT NULL,
+                    PRIMARY KEY (session_id, ordinal, kind),
+                    FOREIGN KEY (session_id) REFERENCES sandbox_sessions(session_id)
+                ) STRICT
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO sandbox_read_observations(
+                    session_id,ordinal,kind,observation_json,observation_hash
+                )
+                SELECT session_id,ordinal,kind,observation_json,observation_hash
+                FROM sandbox_read_observations_legacy
+                """
+            )
+            connection.execute("DROP TABLE sandbox_read_observations_legacy")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5.0)
@@ -718,7 +773,7 @@ class SQLiteSandboxStore:
         response_bytes: bytes,
         response: SandboxModelResponse,
         blocked: tuple[BlockedEffect, ...],
-        observation: LodgingAvailabilityObservation | None = None,
+        observations: tuple[SandboxReadObservation, ...] = (),
     ) -> int:
         session = self._session_id(session_id)
         user_message = _text(message, "message")
@@ -760,7 +815,7 @@ class SQLiteSandboxStore:
                         item.reason,
                     ),
                 )
-            if observation is not None:
+            for observation in observations:
                 connection.execute(
                     """
                     INSERT INTO sandbox_read_observations(
@@ -770,7 +825,7 @@ class SQLiteSandboxStore:
                     (
                         session,
                         ordinal,
-                        "lodging_availability",
+                        observation.kind,
                         observation.to_canonical_bytes(),
                         observation.canonical_hash(),
                     ),
@@ -858,7 +913,7 @@ class SandboxConversation:
             messages=messages,
         )
         response = SandboxModelResponse.from_canonical_bytes(response_bytes)
-        observation: LodgingAvailabilityObservation | None = None
+        observations: list[SandboxReadObservation] = []
         if response.read_requests:
             if response.effect_proposals:
                 raise SandboxProtocolError(
@@ -866,19 +921,35 @@ class SandboxConversation:
                 )
             if self._reads is None:
                 raise ReadCallFailed("sandbox read port is unavailable")
-            observation = self._reads.read(response.read_requests[0])
-            if type(observation) is not LodgingAvailabilityObservation:
-                raise ReadCallFailed("sandbox read port returned an invalid observation")
+            for request in response.read_requests:
+                observation = self._reads.read(request)
+                if (
+                    type(request) is LodgingAvailabilityReadRequest
+                    and type(observation) is not LodgingAvailabilityObservation
+                ) or (
+                    type(request) is ActivityAvailabilityReadRequest
+                    and type(observation) is not ActivityAvailabilityObservation
+                ):
+                    raise ReadCallFailed("sandbox read port returned an invalid observation")
+                observations.append(observation)
             private_observation = _canonical_json(
                 {
-                    "hash": observation.canonical_hash(),
-                    "observation": _parse_json(observation.to_canonical_bytes()),
+                    "items": [
+                        {
+                            "hash": observation.canonical_hash(),
+                            "kind": observation.kind,
+                            "observation": _parse_json(
+                                observation.to_canonical_bytes()
+                            ),
+                        }
+                        for observation in observations
+                    ],
                 }
             ).decode("utf-8")
             final_messages = (
                 *messages,
                 ("assistant", response_bytes.decode("utf-8")),
-                ("user", "READ_OBSERVATION=" + private_observation),
+                ("user", "READ_OBSERVATIONS=" + private_observation),
             )
             response_bytes = self._model.complete(
                 system_prompt=self._system_prompt(),
@@ -900,7 +971,7 @@ class SandboxConversation:
             response_bytes=response_bytes,
             response=response,
             blocked=blocked,
-            observation=observation,
+            observations=tuple(observations),
         )
         return SandboxTurnResult(
             ordinal,
@@ -909,7 +980,7 @@ class SandboxConversation:
             response.route,
             response.reply_type,
             blocked,
-            observation,
+            tuple(observations),
         )
 
 
