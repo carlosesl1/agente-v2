@@ -59,7 +59,14 @@ def test_each_real_effect_gate_is_independent(tmp_path: Path) -> None:
         for name in names:
             env[name] = "true" if name == selected else "false"
         if selected == "V2_ENABLE_STRIPE_LINKS":
-            env["V2_STRIPE_SECRET_KEY"] = "sk_test_scoped"
+            env.update(
+                {
+                    "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID": "stripe-account:hostel:test",
+                    "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
+                    "V2_STRIPE_HOSTEL_SECRET_KEY": "rk_" + "test_scoped_hostel",
+                    "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
+                }
+            )
         settings = V2Settings.from_env(env)
         assert sum(settings.real_effect_gates.values()) == 1
         assert settings.real_effect_gates[

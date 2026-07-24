@@ -7,8 +7,11 @@ from datetime import datetime, timedelta
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from reservation_followup import PaymentEvidenceRecorded
 from reservation_followup.payment import PixVisualEvidence
@@ -307,12 +310,18 @@ def _offer_bytes(offer: PaymentMethodOffer) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
+_RESULT_CIPHERTEXT_PREFIX = b"v2-payment-result-aesgcm-v1\0"
+
+
 class SQLitePaymentInitiationStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, result_encryption_key: bytes) -> None:
         if not isinstance(path, Path) or not path.is_absolute():
             raise ValueError("path must be an absolute pathlib.Path")
+        if type(result_encryption_key) is not bytes or len(result_encryption_key) != 32:
+            raise ValueError("result_encryption_key must be exact 32-byte key material")
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self._result_cipher = AESGCM(result_encryption_key)
         self._connection = sqlite3.connect(path, isolation_level=None, timeout=5.0)
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
@@ -418,7 +427,20 @@ class SQLitePaymentInitiationStore:
         now: datetime,
     ) -> None:
         now_text = _utc_text(now, "now")
-        raw = None if result is None else _offer_bytes(result)
+        plaintext = None if result is None else _offer_bytes(result)
+        if plaintext is None:
+            raw = None
+        else:
+            nonce = os.urandom(12)
+            raw = (
+                _RESULT_CIPHERTEXT_PREFIX
+                + nonce
+                + self._result_cipher.encrypt(
+                    nonce,
+                    plaintext,
+                    claim.initiation_id.encode(),
+                )
+            )
         digest = None if raw is None else hashlib.sha256(raw).hexdigest()
         self._connection.execute("BEGIN IMMEDIATE")
         try:
@@ -468,6 +490,7 @@ class PaymentInitiationWorker:
         payments: PaymentService,
         worker_id: str,
         lease_ttl: timedelta,
+        effect_guard: object | None = None,
     ) -> None:
         if type(store) is not SQLitePaymentInitiationStore:
             raise TypeError("store must be exact SQLitePaymentInitiationStore")
@@ -477,8 +500,17 @@ class PaymentInitiationWorker:
         self._payments = payments
         self._worker_id = worker_id
         self._lease_ttl = lease_ttl
+        if effect_guard is not None and not callable(
+            getattr(effect_guard, "allows_workflow", None)
+        ):
+            raise TypeError("effect_guard must expose allows_workflow")
+        self._effect_guard = effect_guard
 
     def run_once(self, *, now: datetime) -> PaymentInitiationResult:
+        if self._effect_guard is not None and not self._effect_guard.allows_workflow(
+            "stripe-payment-initiation"
+        ):
+            return PaymentInitiationResult(PaymentInitiationDisposition.IDLE)
         claim = self._store.claim(
             worker_id=self._worker_id,
             now=now,

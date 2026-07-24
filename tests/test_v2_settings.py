@@ -120,14 +120,17 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
             "V2_REAL_EFFECTS_ACK": "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST",
             "V2_GLOBAL_KILL_SWITCH": "false",
             "V2_WRITE_WINDOW_END": _future_window(),
-            "V2_STRIPE_SECRET_KEY": "sk_live_forbidden",
+            "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID": "stripe-account:hostel:test",
+            "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
+            "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_" + "live_forbidden_hostel",
+            "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
             "V2_STRIPE_ENVIRONMENT": "test",
         }
     )
-    with pytest.raises(ValueError, match="test Stripe key"):
+    with pytest.raises(ValueError, match="test Stripe keys"):
         V2Settings.from_env(env)
 
-    env["V2_STRIPE_SECRET_KEY"] = "rk_test_scoped"
+    env["V2_STRIPE_HOSTEL_SECRET_KEY"] = "rk_" + "test_scoped_hostel"
     env["V2_STRIPE_ENVIRONMENT"] = "live"
     with pytest.raises(ValueError, match="test"):
         V2Settings.from_env(env)
@@ -136,6 +139,14 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
     settings = V2Settings.from_env(env)
     assert settings.stripe_links_enabled is True
     assert settings.stripe_environment is StripeEnvironment.TEST
+    assert settings.stripe_account_profiles == {
+        "hostel": "stripe-account:hostel:test",
+        "agency": "stripe-account:agency:test",
+    }
+    assert set(settings.stripe_test_secret_keys) == {
+        "stripe-account:hostel:test",
+        "stripe-account:agency:test",
+    }
     assert settings.write_window_is_open(datetime.now(timezone.utc)) is True
 
 

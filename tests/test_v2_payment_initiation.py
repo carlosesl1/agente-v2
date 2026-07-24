@@ -173,11 +173,13 @@ def test_economic_change_increments_only_financial_version() -> None:
 
 
 NOW = datetime(2026, 7, 23, 16, 0, tzinfo=timezone.utc)
+RESULT_KEY = b"payment-result-test-key-00000001"
 
 
 def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path) -> None:
     payments, transport, _ = service()
-    store = SQLitePaymentInitiationStore(tmp_path / "payment-init.sqlite3")
+    path = tmp_path / "payment-init.sqlite3"
+    store = SQLitePaymentInitiationStore(path, result_encryption_key=RESULT_KEY)
     selection = PaymentSelection(HOSTEL, PaymentMethod.STRIPE)
     assert store.enqueue(selection, now=NOW) is True
     worker = PaymentInitiationWorker(
@@ -194,6 +196,11 @@ def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path)
     assert second.disposition is PaymentInitiationDisposition.IDLE
     assert len(transport.requests) == 1
     assert store.dispatch_slots(selection) == 1
+    persisted = b"".join(
+        candidate.read_bytes()
+        for candidate in path.parent.glob(path.name + "*")
+    )
+    assert b"https://pay.invalid" not in persisted
 
 
 def test_stripe_timeout_after_fence_is_manual_review_without_retry(tmp_path: Path) -> None:
@@ -218,7 +225,10 @@ def test_stripe_timeout_after_fence_is_manual_review_without_retry(tmp_path: Pat
         wise=WiseInstructionAdapter(instructions={"receiver:hostel": "Transferência Wise pendente de verificação."}),
         pix=PixInstructionAdapter(knowledge=Knowledge()),
     )
-    store = SQLitePaymentInitiationStore(tmp_path / "payment-timeout.sqlite3")
+    store = SQLitePaymentInitiationStore(
+        tmp_path / "payment-timeout.sqlite3",
+        result_encryption_key=RESULT_KEY,
+    )
     selection = PaymentSelection(HOSTEL, PaymentMethod.STRIPE)
     store.enqueue(selection, now=NOW)
     worker = PaymentInitiationWorker(
@@ -234,3 +244,32 @@ def test_stripe_timeout_after_fence_is_manual_review_without_retry(tmp_path: Pat
     assert first.disposition is PaymentInitiationDisposition.MANUAL_REVIEW
     assert second.disposition is PaymentInitiationDisposition.IDLE
     assert transport.calls == 1
+
+
+def test_closed_effect_guard_leaves_selection_unfenced_and_calls_no_provider(
+    tmp_path: Path,
+) -> None:
+    class ClosedGuard:
+        def allows_workflow(self, workflow_id: str) -> bool:
+            return False
+
+    payments, transport, _ = service()
+    store = SQLitePaymentInitiationStore(
+        tmp_path / "payment-closed-window.sqlite3",
+        result_encryption_key=RESULT_KEY,
+    )
+    selection = PaymentSelection(HOSTEL, PaymentMethod.STRIPE)
+    store.enqueue(selection, now=NOW)
+    worker = PaymentInitiationWorker(
+        store=store,
+        payments=payments,
+        worker_id="worker:payment-closed-window",
+        lease_ttl=timedelta(seconds=30),
+        effect_guard=ClosedGuard(),
+    )
+
+    result = worker.run_once(now=NOW + timedelta(seconds=1))
+
+    assert result.disposition is PaymentInitiationDisposition.IDLE
+    assert transport.requests == []
+    assert store.dispatch_slots(selection) == 0

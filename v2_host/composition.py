@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import hashlib
 import json
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
@@ -102,7 +103,11 @@ class V2Container:
             followup = SQLiteFollowupUnitOfWork.open(paths["followup"])
             opened.append(followup)
             payment_initiation = SQLitePaymentInitiationStore(
-                paths["payment_initiation"]
+                paths["payment_initiation"],
+                result_encryption_key=hashlib.sha256(
+                    b"v2-payment-result-store-v1\0"
+                    + settings.webhook_secret.encode()
+                ).digest(),
             )
             opened.append(payment_initiation)
             public_outbox = PublicOutboxStore(paths["public_outbox"])

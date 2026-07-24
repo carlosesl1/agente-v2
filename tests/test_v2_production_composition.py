@@ -19,6 +19,7 @@ from v2_host.production import (
 )
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue, _load_worker_factory
+from v2_application.payments import PaymentInitiationWorker
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.workers import V2ReservationWorker
 
@@ -237,6 +238,37 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         }
     finally:
         both_container.close()
+
+    stripe_enabled = replace(
+        settings,
+        stripe_links_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+        stripe_hostel_account_profile_id="stripe-account:hostel:test",
+        stripe_agency_account_profile_id="stripe-account:agency:test",
+        stripe_hostel_secret_key="rk_" + "test_scoped_hostel",
+        stripe_agency_secret_key="rk_" + "test_scoped_agency",
+    )
+    stripe_container = V2Container.open(
+        settings=stripe_enabled,
+        role=V2Role.WORKER,
+    )
+    try:
+        stripe_workers = build_worker_set(
+            container=stripe_container,
+            settings=stripe_enabled,
+        )
+        assert (
+            type(stripe_workers[WorkerQueue.PAYMENT_INITIATION])
+            is PaymentInitiationWorker
+        )
+        assert (
+            stripe_container.readiness().capabilities["stripe_test_links"]
+            == "ready"
+        )
+    finally:
+        stripe_container.close()
 
 
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:

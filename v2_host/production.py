@@ -26,7 +26,9 @@ from v2_adapters.provider_http import (
     FileKnowledgeTransport,
     ManyChatHTTPTransport,
 )
+from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
 from v2_application.reservations import V2ReservationExecutionAdapter
@@ -37,6 +39,7 @@ from v2_contracts.providers import (
     ReadKind,
     ReadRequest,
 )
+from v2_contracts.payments import BusinessUnit
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.public_authority import ManifestPublicAuthorityResolver
@@ -65,6 +68,11 @@ class ControlledEffectGuard:
             self._settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
             and self._settings.write_window_is_open(now=self._clock.now())
         )
+
+
+class _ClosedInstructionAdapter:
+    def instruction(self, obligation: object) -> object:
+        raise RuntimeError("non-Stripe payment initiation is closed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +333,44 @@ def _build_reservation_worker(
     )
 
 
+def _build_stripe_worker(
+    *,
+    container: V2Container,
+    settings: V2Settings,
+) -> PaymentInitiationWorker:
+    if container.payment_initiation is None:
+        raise ValueError("payment initiation owner is unavailable")
+    if not settings.stripe_links_enabled:
+        raise ValueError("Stripe worker requires the explicit test-link gate")
+    if len(settings.allowed_subscriber_ids) != 1:
+        raise ValueError("Stripe worker requires one allowlisted subscriber")
+    transport = StripeTestHTTPTransport(
+        secret_keys=settings.stripe_test_secret_keys,
+        base_url=settings.stripe_base_url,
+    )
+    stripe = StripeLinkAdapter(
+        transport=transport,
+        account_profiles={
+            BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
+            BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
+        },
+        enabled=True,
+        subscriber_id=settings.allowed_subscriber_ids[0],
+        payment_percentages={
+            BusinessUnit.HOSTEL: 100,
+            BusinessUnit.AGENCY: 100,
+        },
+    )
+    closed = _ClosedInstructionAdapter()
+    return PaymentInitiationWorker(
+        store=container.payment_initiation,
+        payments=PaymentService(stripe=stripe, wise=closed, pix=closed),
+        worker_id="worker:stripe-test-link",
+        lease_ttl=timedelta(seconds=30),
+        effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
+    )
+
+
 def build_worker_set(
     *, container: V2Container, settings: V2Settings
 ) -> dict[WorkerQueue, object]:
@@ -336,7 +382,6 @@ def build_worker_set(
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
     unsupported_controlled_gates = (
-        settings.stripe_links_enabled,
         settings.manychat_delivery_enabled,
         settings.manychat_handoff_enabled,
     )
@@ -376,11 +421,16 @@ def build_worker_set(
         if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
         else ClosedCapabilityWorker("reservation_writes")
     )
+    payment_worker: object = (
+        _build_stripe_worker(container=container, settings=settings)
+        if settings.stripe_links_enabled
+        else ClosedCapabilityWorker("payment_initiation")
+    )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
         WorkerQueue.RESERVATION: reservation_worker,
-        WorkerQueue.PAYMENT_INITIATION: ClosedCapabilityWorker("payment_initiation"),
+        WorkerQueue.PAYMENT_INITIATION: payment_worker,
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
         WorkerQueue.POST_PAYMENT: ClosedCapabilityWorker("post_payment_delivery"),
         WorkerQueue.PUBLIC_DELIVERY: ClosedCapabilityWorker("manychat_delivery"),
@@ -417,7 +467,12 @@ def build_worker_set(
             ),
             "boundary_relay": "ready",
             "manychat_delivery": "closed",
-            "payment_initiation": "closed",
+            "payment_initiation": (
+                "ready" if settings.stripe_links_enabled else "closed"
+            ),
+            "stripe_test_links": (
+                "ready" if settings.stripe_links_enabled else "closed"
+            ),
             "reservation_writes": (
                 "ready"
                 if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled

@@ -115,6 +115,9 @@ class StripeLinkRequest:
     currency: str
     economic_version: int
     idempotency_key: str
+    subscriber_fingerprint: str = ""
+    payment_percentage: int = 100
+    business_unit: BusinessUnit = BusinessUnit.HOSTEL
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -124,6 +127,18 @@ class StripeLinkRequest:
         if type(self.economic_version) is not int or self.economic_version < 1:
             raise ValueError("economic_version must be an exact positive integer")
         _id(self.idempotency_key, "idempotency_key")
+        if self.subscriber_fingerprint and (
+            type(self.subscriber_fingerprint) is not str
+            or _HASH_RE.fullmatch(self.subscriber_fingerprint) is None
+        ):
+            raise ValueError("subscriber_fingerprint must be empty or SHA-256")
+        if (
+            type(self.payment_percentage) is not int
+            or not 1 <= self.payment_percentage <= 100
+        ):
+            raise ValueError("payment_percentage must be an exact integer from 1 to 100")
+        if type(self.business_unit) is not BusinessUnit:
+            raise TypeError("business_unit must be exact BusinessUnit")
 
 
 @dataclass(frozen=True, slots=True)

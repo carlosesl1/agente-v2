@@ -157,6 +157,10 @@ class V2Settings:
     manychat_handoff_tag_id: int | None = None
     stripe_environment: StripeEnvironment = StripeEnvironment.TEST
     stripe_secret_key: str = ""
+    stripe_hostel_account_profile_id: str = ""
+    stripe_agency_account_profile_id: str = ""
+    stripe_hostel_secret_key: str = ""
+    stripe_agency_secret_key: str = ""
     stripe_base_url: str = "https://api.stripe.com"
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
@@ -249,8 +253,33 @@ class V2Settings:
             if self.write_window_end - now > _MAX_WRITE_WINDOW:
                 raise ValueError("write window may not exceed 24 hours")
         if self.stripe_links_enabled:
-            if not self.stripe_secret_key.startswith(("sk_test_", "rk_test_")):
-                raise ValueError("Stripe link creation requires a test Stripe key")
+            profiles = (
+                self.stripe_hostel_account_profile_id,
+                self.stripe_agency_account_profile_id,
+            )
+            keys = (
+                self.stripe_hostel_secret_key,
+                self.stripe_agency_secret_key,
+            )
+            if (
+                any(
+                    type(value) is not str or not value or "\x00" in value
+                    for value in profiles
+                )
+                or len(set(profiles)) != 2
+            ):
+                raise ValueError(
+                    "Stripe links require distinct hostel/agency account profiles"
+                )
+            if any(
+                type(value) is not str
+                or not value.startswith(("sk_test_", "rk_test_"))
+                or "\x00" in value
+                for value in keys
+            ):
+                raise ValueError(
+                    "Stripe link creation requires two test Stripe keys"
+                )
         if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
         if type(self.bokun_product_map) is not dict or any(
@@ -408,6 +437,20 @@ class V2Settings:
         )
 
     @property
+    def stripe_account_profiles(self) -> dict[str, str]:
+        return {
+            "hostel": self.stripe_hostel_account_profile_id,
+            "agency": self.stripe_agency_account_profile_id,
+        }
+
+    @property
+    def stripe_test_secret_keys(self) -> dict[str, str]:
+        return {
+            self.stripe_hostel_account_profile_id: self.stripe_hostel_secret_key,
+            self.stripe_agency_account_profile_id: self.stripe_agency_secret_key,
+        }
+
+    @property
     def sqlite_paths(self) -> dict[str, Path]:
         parent = self.sqlite_path.parent
         return {
@@ -511,6 +554,18 @@ class V2Settings:
             ),
             stripe_environment=stripe_environment,
             stripe_secret_key=source.get("V2_STRIPE_SECRET_KEY", ""),
+            stripe_hostel_account_profile_id=source.get(
+                "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID", ""
+            ),
+            stripe_agency_account_profile_id=source.get(
+                "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID", ""
+            ),
+            stripe_hostel_secret_key=source.get(
+                "V2_STRIPE_HOSTEL_SECRET_KEY", ""
+            ),
+            stripe_agency_secret_key=source.get(
+                "V2_STRIPE_AGENCY_SECRET_KEY", ""
+            ),
             stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
             hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=source.get("V2_HERMES_SYSTEM_PROMPT", ""),
