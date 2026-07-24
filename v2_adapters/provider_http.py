@@ -346,7 +346,16 @@ class BokunHTTPTransport:
         query = urlencode({"start": activity_date, "end": activity_date, "currency": "BRL"})
         availability = self._get(f"/activity.json/{provider_id}/availabilities?{query}")
         participants = int(payload.get("participants") or 0)
-        selected = next((item for item in _items(availability) if self._available(item)), None)
+        if participants < 1:
+            raise ProviderHTTPError("Bókun participants must be positive")
+        selected = next(
+            (
+                item
+                for item in _items(availability)
+                if self._available(item, participants)
+            ),
+            None,
+        )
         amount = self._participant_total(selected or {}, participants)
         if amount is None:
             amount = _first_amount(meta, "price", "amount", "totalAmount", "total")
@@ -374,11 +383,11 @@ class BokunHTTPTransport:
         return _first(meta, "title", "name", "displayName")
 
     @staticmethod
-    def _available(item: Mapping[str, object]) -> bool:
+    def _available(item: Mapping[str, object], participants: int) -> bool:
         if item.get("soldOut") is True or item.get("unavailable") is True or item.get("available") is False:
             return False
         units = _integer(item, "availabilityCount", "availability", "seatsAvailable")
-        return units is None or units > 0
+        return units is None or units >= participants
 
     @staticmethod
     def _participant_total(item: Mapping[str, object], participants: int) -> Decimal | None:

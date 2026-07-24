@@ -202,7 +202,15 @@ def _sanitize_result(
         return _provider_error(request)
     arguments = request["arguments"]
     if request["kind"] == "activity_availability":
+        if raw.get("product_id") != arguments["product_id"]:
+            raise ValueError("Bókun observation product binding mismatch")
         name = _text(raw.get("product_public_name"), maximum=200) or "Passeio"
+        private_tokens = (
+            str(arguments["product_id"]),
+            str(raw.get("bokun_product_id") or ""),
+        )
+        if any(token and token.casefold() in name.casefold() for token in private_tokens):
+            raise ValueError("Bókun public name contains an internal identifier")
         available = raw.get("available") is True
         amount = _money(raw.get("total_amount")) if available else None
         currency = _currency(raw.get("currency")) if amount is not None else None

@@ -27,6 +27,10 @@ _REPLY_TYPES: Final = frozenset(("ask_more", "qualify", "answer", "handoff", "no
 _FACT_NAMES: Final = frozenset(("language", "service", "start_date", "end_date", "adults", "children"))
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
 _PRODUCT_ID_RE: Final = re.compile(r"^product:[a-z0-9][a-z0-9._-]{0,127}$")
+_PRIVATE_PUBLIC_SHAPE_RE: Final = re.compile(
+    r"(?i)(?:\b(?:product|room|rate|offer|reservation|booking):[a-z0-9._-]+\b|"
+    r"\b[0-9a-f]{64}\b|\b[0-9]{5,}\b)"
+)
 DEFAULT_SANDBOX_MODEL: Final = "gpt-5.6-luna"
 
 
@@ -216,7 +220,7 @@ class LodgingAvailabilityObservation:
         has_price = any("total_amount" in item for item in options)
         if price is not has_price:
             raise SandboxProtocolError("price_confirmed diverges from public options")
-        summary = _text(parsed["public_summary"], "public_summary")
+        summary = _public_text(parsed["public_summary"], "public_summary")
         observation = cls(status, availability, price, options, summary, False)
         if observation.to_canonical_bytes() != payload:
             raise SandboxProtocolError("lodging observation must be canonical JSON")
@@ -289,7 +293,7 @@ class ActivityAvailabilityObservation:
         participants = _bounded_int(
             parsed["participants"], "observation.participants", minimum=1, maximum=20
         )
-        public_name = _text(parsed["product_public_name"], "product_public_name")
+        public_name = _public_text(parsed["product_public_name"], "product_public_name")
         availability = parsed["availability_confirmed"]
         price = parsed["price_confirmed"]
         if type(availability) is not bool or type(price) is not bool:
@@ -311,7 +315,7 @@ class ActivityAvailabilityObservation:
             raise SandboxProtocolError("ok activity observation requires availability")
         if status != "ok" and (availability or price):
             raise SandboxProtocolError("non-ok activity observation cannot claim availability")
-        summary = _text(parsed["public_summary"], "public_summary")
+        summary = _public_text(parsed["public_summary"], "public_summary")
         observation = cls(
             status,
             activity_date,
@@ -408,6 +412,13 @@ def _text(value: object, name: str, *, allow_empty: bool = False) -> str:
     return value
 
 
+def _public_text(value: object, name: str) -> str:
+    text = _text(value, name)
+    if _PRIVATE_PUBLIC_SHAPE_RE.search(text) is not None:
+        raise SandboxProtocolError(f"{name} contains an internal identifier shape")
+    return text
+
+
 def _closed_json(value: object, name: str) -> object:
     if value is None or type(value) in (str, bool, int):
         return value
@@ -420,6 +431,34 @@ def _closed_json(value: object, name: str) -> object:
             result[key] = _closed_json(item, name)
         return result
     raise SandboxProtocolError(f"{name} contains an unsupported JSON value")
+
+
+def _activity_catalog(knowledge: dict[str, object]) -> dict[str, str]:
+    raw_catalog = knowledge.get("tour_catalog")
+    if raw_catalog is None:
+        return {}
+    if type(raw_catalog) is not list:
+        raise SandboxProtocolError("knowledge.tour_catalog must be a list")
+    result: dict[str, str] = {}
+    for item in raw_catalog:
+        if type(item) is not dict or set(item) != {"canonical_id", "public_name"}:
+            raise SandboxProtocolError("knowledge tour catalog item fields mismatch")
+        canonical_id = _text(item["canonical_id"], "knowledge canonical_id")
+        if _PRODUCT_ID_RE.fullmatch(canonical_id) is None:
+            raise SandboxProtocolError("knowledge canonical_id is invalid")
+        public_name = _public_text(item["public_name"], "knowledge public_name")
+        if canonical_id in result:
+            raise SandboxProtocolError("knowledge tour catalog contains a duplicate ID")
+        result[canonical_id] = public_name
+    return result
+
+
+def _assert_public_reply_safe(reply: str, private_tokens: frozenset[str]) -> None:
+    if _PRIVATE_PUBLIC_SHAPE_RE.search(reply) is not None:
+        raise SandboxProtocolError("public reply contains an internal identifier shape")
+    folded = reply.casefold()
+    if any(token.casefold() in folded for token in private_tokens):
+        raise SandboxProtocolError("public reply contains a private sandbox token")
 
 
 def _bounded_int(
@@ -462,7 +501,9 @@ def _public_lodging_option(value: object) -> dict[str, object]:
         ),
         "nights": _bounded_int(value["nights"], "option.nights", minimum=1, maximum=365),
         "price_reliable": value["price_reliable"],
-        "room_public_name": _text(value["room_public_name"], "option.room_public_name"),
+        "room_public_name": _public_text(
+            value["room_public_name"], "option.room_public_name"
+        ),
     }
     if type(result["price_reliable"]) is not bool:
         raise SandboxProtocolError("option.price_reliable must be an exact boolean")
@@ -874,7 +915,12 @@ class SandboxConversation:
         self.store = store
         self._model = model
         self._reads = reads
-        self._knowledge = _closed_json(knowledge, "knowledge")
+        closed_knowledge = _closed_json(knowledge, "knowledge")
+        if type(closed_knowledge) is not dict:
+            raise TypeError("closed knowledge must remain an exact dict")
+        self._knowledge = closed_knowledge
+        self._activity_products = _activity_catalog(closed_knowledge)
+        self._activity_product_ids = frozenset(self._activity_products)
 
     def _system_prompt(self) -> str:
         knowledge = _canonical_json(self._knowledge).decode("utf-8")
@@ -927,6 +973,13 @@ class SandboxConversation:
             if self._reads is None:
                 raise ReadCallFailed("sandbox read port is unavailable")
             for request in response.read_requests:
+                if (
+                    type(request) is ActivityAvailabilityReadRequest
+                    and request.product_id not in self._activity_product_ids
+                ):
+                    raise SandboxProtocolError(
+                        "activity product is outside the private knowledge catalog"
+                    )
                 observation = self._reads.read(request)
                 if (
                     type(request) is LodgingAvailabilityReadRequest
@@ -936,6 +989,15 @@ class SandboxConversation:
                     and type(observation) is not ActivityAvailabilityObservation
                 ):
                     raise ReadCallFailed("sandbox read port returned an invalid observation")
+                if (
+                    type(request) is ActivityAvailabilityReadRequest
+                    and type(observation) is ActivityAvailabilityObservation
+                    and observation.product_public_name
+                    != self._activity_products[request.product_id]
+                ):
+                    raise ReadCallFailed(
+                        "activity observation public name failed catalog binding"
+                    )
                 observations.append(observation)
             private_observation = _canonical_json(
                 {
@@ -963,6 +1025,10 @@ class SandboxConversation:
             response = SandboxModelResponse.from_canonical_bytes(response_bytes)
             if response.read_requests:
                 raise SandboxProtocolError("second sandbox read request is forbidden")
+        private_tokens = frozenset(
+            (*self._activity_product_ids, *(item.canonical_hash() for item in observations))
+        )
+        _assert_public_reply_safe(response.reply, private_tokens)
         blocked = tuple(
             BlockedEffect(
                 item.kind,

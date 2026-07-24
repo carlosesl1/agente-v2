@@ -612,7 +612,12 @@ class FastTrackSandboxTests(unittest.TestCase):
             )
         )
         activity = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
-            _activity_observation()
+            _activity_observation(
+                product_public_name="Cachoeira do Buracão",
+                public_summary=(
+                    "Encontrei disponibilidade para Cachoeira do Buracão na data solicitada."
+                ),
+            )
         )
         model = _QueueModel(first, final)
         reads = _RoutingRead(
@@ -627,7 +632,7 @@ class FastTrackSandboxTests(unittest.TestCase):
                 store=store,
                 model=model,
                 reads=reads,
-                knowledge={"catalog": {"Buracão": "product:buracao"}},
+                knowledge=source_runner._knowledge(None),
             )
 
             result = runner.submit(
@@ -1044,6 +1049,152 @@ class FastTrackSandboxTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(sandbox.ReadCallFailed, "request binding"):
                 mismatched.read(request)
+
+    def test_activity_request_outside_private_catalog_is_rejected_before_read(self) -> None:
+        request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:other",
+            },
+            "kind": "activity_availability",
+        }
+        activity = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _activity_observation()
+        )
+        reads = _RoutingRead({"activity_availability": activity})
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "sandbox.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([request]),
+                    _response("Outro passeio disponível."),
+                ),
+                reads=reads,
+                knowledge=source_runner._knowledge(None),
+            )
+
+            with self.assertRaises(SandboxProtocolError):
+                runner.submit(session_id="catalog-denied", message="Outro passeio")
+
+            self.assertEqual(reads.calls, [])
+            self.assertEqual(store.load_messages("catalog-denied"), ())
+            self.assertEqual(store.read_observation_count("catalog-denied"), 0)
+
+    def test_public_observations_reject_internal_id_shaped_labels(self) -> None:
+        with self.assertRaises(SandboxProtocolError):
+            sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+                _activity_observation(product_public_name="product:buracao")
+            )
+        with self.assertRaises(SandboxProtocolError):
+            sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+                _activity_observation(product_public_name="913372")
+            )
+
+        lodging = json.loads(_observation())
+        lodging["options"][0]["room_public_name"] = "room:internal-123"
+        with self.assertRaises(SandboxProtocolError):
+            sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+                _canonical(lodging)
+            )
+
+    def test_public_reply_rejects_private_catalog_id_and_observation_hash(self) -> None:
+        knowledge = source_runner._knowledge(None)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "catalog.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(_response("Use product:buracao")),
+                knowledge=knowledge,
+            )
+            with self.assertRaises(SandboxProtocolError):
+                runner.submit(session_id="private-id", message="Qual passeio?")
+            self.assertEqual(store.load_messages("private-id"), ())
+
+        observation = sandbox.LodgingAvailabilityObservation.from_canonical_bytes(
+            _observation()
+        )
+        read_item = {
+            "arguments": {
+                "adults": 2,
+                "check_in": "2026-08-05",
+                "check_out": "2026-08-06",
+                "children": 0,
+            },
+            "kind": "lodging_availability",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "hash.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([read_item]),
+                    _response(f"hash={observation.canonical_hash()}"),
+                ),
+                reads=_QueueRead(observation),
+                knowledge=knowledge,
+            )
+            with self.assertRaises(SandboxProtocolError):
+                runner.submit(session_id="private-hash", message="Hospedagem")
+            self.assertEqual(store.load_messages("private-hash"), ())
+            self.assertEqual(store.read_observation_count("private-hash"), 0)
+
+    def test_activity_observation_public_name_is_bound_to_private_catalog(self) -> None:
+        request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+        swapped = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _activity_observation(
+                product_public_name="Outro passeio",
+                public_summary="Encontrei Outro passeio para a data solicitada.",
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteSandboxStore(Path(tmp) / "swapped.sqlite3")
+            runner = SandboxConversation(
+                store=store,
+                model=_QueueModel(
+                    _response_with_reads([request]),
+                    _response("Outro passeio disponível."),
+                ),
+                reads=_RoutingRead({"activity_availability": swapped}),
+                knowledge=source_runner._knowledge(None),
+            )
+
+            with self.assertRaises(sandbox.ReadCallFailed):
+                runner.submit(session_id="swapped-product", message="Buracão")
+
+            self.assertEqual(store.load_messages("swapped-product"), ())
+            self.assertEqual(store.read_observation_count("swapped-product"), 0)
+
+    def test_v2_provider_child_rejects_swapped_activity_product(self) -> None:
+        child = importlib.import_module("scripts.phase8_v2_provider_read_child")
+        request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+        with self.assertRaises(ValueError):
+            child._sanitize_result(
+                {
+                    "available": True,
+                    "bokun_product_id": "999",
+                    "currency": "BRL",
+                    "product_id": "product:other",
+                    "product_public_name": "Outro passeio",
+                    "total_amount": "100.00",
+                },
+                request=request,
+            )
 
     def test_hermes_adapter_uses_stdin_no_shell_and_fails_closed(self) -> None:
         calls: list[tuple[tuple[str, ...], bytes, int]] = []

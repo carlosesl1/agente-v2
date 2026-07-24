@@ -150,6 +150,55 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
     assert seen[1].url.path == "/activity.json/913372/availabilities"
 
 
+def test_bokun_transport_requires_capacity_for_all_participants() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/availabilities"):
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "availabilityCount": 1,
+                        "available": True,
+                        "date": "2026-08-10",
+                        "pricesByRate": [
+                            {
+                                "pricePerCategoryUnit": [
+                                    {"amount": {"amount": 300, "currency": "BRL"}}
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"id": 913372, "title": "Roteiro do Buracão"},
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:buracao": "913372"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-23 12:00:00",
+    )
+
+    result = transport(
+        "activity",
+        {
+            "activity_date": "2026-08-10",
+            "participants": 2,
+            "product_id": "product:buracao",
+        },
+    )
+
+    assert result["available"] is False
+    assert result["product_id"] == "product:buracao"
+
+
 def test_manychat_transport_normalizes_profile_and_confirms_native_send() -> None:
     seen: list[httpx.Request] = []
 
