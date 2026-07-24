@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from pathlib import Path
 import sqlite3
@@ -106,6 +107,17 @@ def _activity_observation(**overrides: object) -> bytes:
     return _canonical(value)
 
 
+def _v2_read_result(observation: bytes, request_payload: bytes) -> bytes:
+    return _canonical(
+        {
+            "observation": json.loads(observation),
+            "request_hash": hashlib.sha256(
+                b"phase8-v2-read-request-v1\x00" + request_payload
+            ).hexdigest(),
+        }
+    )
+
+
 class _QueueModel:
     def __init__(self, *responses: bytes, before_call=None) -> None:
         self.responses = list(responses)
@@ -166,6 +178,150 @@ class _RunResult:
 
 
 class FastTrackSandboxTests(unittest.TestCase):
+    def test_v2_provider_child_sanitizes_activity_and_closes_effect_gates(self) -> None:
+        child = importlib.import_module("scripts.phase8_v2_provider_read_child")
+        environment = {
+            "V2_RUNTIME_MODE": "dark_read_only",
+            "V2_ENABLE_CLOUDBEDS_WRITES": "false",
+            "V2_ENABLE_BOKUN_WRITES": "false",
+            "V2_ENABLE_STRIPE_LINKS": "false",
+            "V2_ENABLE_MANYCHAT_DELIVERY": "false",
+        }
+        child._validate_environment(environment)
+        for gate in (
+            "V2_ENABLE_CLOUDBEDS_WRITES",
+            "V2_ENABLE_BOKUN_WRITES",
+            "V2_ENABLE_STRIPE_LINKS",
+            "V2_ENABLE_MANYCHAT_DELIVERY",
+        ):
+            with self.subTest(gate=gate):
+                with self.assertRaises(ValueError):
+                    child._validate_environment({**environment, gate: "true"})
+        with self.assertRaises(ValueError):
+            child._validate_environment({**environment, "V2_RUNTIME_MODE": "shadow"})
+
+        request = {
+            "arguments": {
+                "activity_date": "2026-08-05",
+                "participants": 2,
+                "product_id": "product:buracao",
+            },
+            "kind": "activity_availability",
+        }
+        sanitized = child._sanitize_result(
+            {
+                "available": True,
+                "bokun_product_id": "913372",
+                "currency": "BRL",
+                "product_id": "product:buracao",
+                "product_public_name": "Buracão",
+                "total_amount": "700.00",
+            },
+            request=request,
+        )
+        serialized = _canonical(sanitized).decode("utf-8")
+        self.assertNotIn("product:buracao", serialized)
+        self.assertNotIn("913372", serialized)
+        observation = sandbox.ActivityAvailabilityObservation.from_canonical_bytes(
+            _canonical(sanitized)
+        )
+        self.assertEqual(observation.activity_date, "2026-08-05")
+        self.assertEqual(observation.participants, 2)
+        self.assertEqual(observation.product_public_name, "Buracão")
+
+    def test_v2_provider_adapter_is_no_shell_and_request_bound(self) -> None:
+        calls: list[tuple[tuple[str, ...], bytes, int]] = []
+
+        def fake_run(command: tuple[str, ...], *, input: bytes, timeout: int) -> _RunResult:
+            calls.append((command, input, timeout))
+            return _RunResult(
+                0,
+                b"PHASE8_V2_READ_RESULT\x00"
+                + _v2_read_result(_activity_observation(), input),
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "scripts" / "phase8_v2_provider_read_child.py"
+            child.parent.mkdir()
+            child.write_text("# fixed V2 read child\n", encoding="utf-8")
+            adapter = sandbox.V2ProviderDockerRead(
+                project_root=root,
+                container="v2-read-worker",
+                run=fake_run,
+            )
+            request = sandbox.ActivityAvailabilityReadRequest.from_mapping(
+                {
+                    "arguments": {
+                        "activity_date": "2026-08-05",
+                        "participants": 2,
+                        "product_id": "product:buracao",
+                    },
+                    "kind": "activity_availability",
+                }
+            )
+
+            observation = adapter.read(request)
+
+        self.assertIsInstance(observation, sandbox.ActivityAvailabilityObservation)
+        command, payload, timeout = calls[0]
+        self.assertEqual(
+            command,
+            (
+                "docker",
+                "exec",
+                "-i",
+                "v2-read-worker",
+                "/usr/local/bin/python",
+                "-c",
+                "# fixed V2 read child\n",
+            ),
+        )
+        self.assertNotIn("sh", command)
+        self.assertNotIn("bash", command)
+        self.assertEqual(payload, request.to_canonical_bytes())
+        self.assertEqual(timeout, 30)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "scripts" / "phase8_v2_provider_read_child.py"
+            child.parent.mkdir()
+            child.write_text("# fixed V2 read child\n", encoding="utf-8")
+            bad_marker = sandbox.V2ProviderDockerRead(
+                project_root=root,
+                run=lambda *_args, **_kwargs: _RunResult(0, _activity_observation()),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "result marker"):
+                bad_marker.read(request)
+            mismatch = sandbox.V2ProviderDockerRead(
+                project_root=root,
+                run=lambda _command, *, input, timeout: _RunResult(
+                    0,
+                    b"PHASE8_V2_READ_RESULT\x00"
+                    + _v2_read_result(
+                        _activity_observation(activity_date="2026-08-06"),
+                        input,
+                    ),
+                ),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "request binding"):
+                mismatch.read(request)
+            wrong_hash = sandbox.V2ProviderDockerRead(
+                project_root=root,
+                run=lambda _command, *, input, timeout: _RunResult(
+                    0,
+                    b"PHASE8_V2_READ_RESULT\x00"
+                    + _canonical(
+                        {
+                            "observation": json.loads(_activity_observation()),
+                            "request_hash": "0" * 64,
+                        }
+                    ),
+                ),
+            )
+            with self.assertRaisesRegex(sandbox.ReadCallFailed, "request binding"):
+                wrong_hash.read(request)
+
     def test_activity_contract_request_is_id_only_closed_and_canonical(self) -> None:
         request_mapping = {
             "arguments": {

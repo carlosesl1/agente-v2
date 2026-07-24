@@ -1122,6 +1122,119 @@ class CloudbedsDockerRead:
         return observation
 
 
+_V2_READ_RESULT_MARKER: Final = b"PHASE8_V2_READ_RESULT\x00"
+
+
+class V2ProviderDockerRead:
+    """Execute one allowlisted read inside the effect-denied V2 worker."""
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        container: str = "agente-v2-digest-canary-169a67c-worker",
+        timeout: int = 30,
+        run: Callable[..., _CompletedProcess] = _run_command,
+    ) -> None:
+        if not isinstance(project_root, Path) or not project_root.is_absolute():
+            raise TypeError("project_root must be an absolute pathlib.Path")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", container) is None:
+            raise ValueError("container name is invalid")
+        if type(timeout) is not int or timeout <= 0:
+            raise ValueError("timeout must be a positive exact integer")
+        child_path = project_root / "scripts" / "phase8_v2_provider_read_child.py"
+        try:
+            child_source = child_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ReadCallFailed("V2 read child source is unavailable") from exc
+        if not child_source or len(child_source.encode("utf-8")) > 64 * 1024:
+            raise ReadCallFailed("V2 read child source is outside the size limit")
+        self._container = container
+        self._timeout = timeout
+        self._run = run
+        self._child_source = child_source
+
+    @staticmethod
+    def _request_hash(request: SandboxReadRequest) -> str:
+        return hashlib.sha256(
+            b"phase8-v2-read-request-v1\x00" + request.to_canonical_bytes()
+        ).hexdigest()
+
+    def read(self, request: SandboxReadRequest) -> SandboxReadObservation:
+        if type(request) not in {
+            LodgingAvailabilityReadRequest,
+            ActivityAvailabilityReadRequest,
+        }:
+            raise TypeError("request must be an exact sandbox read request")
+        command = (
+            "docker",
+            "exec",
+            "-i",
+            self._container,
+            "/usr/local/bin/python",
+            "-c",
+            self._child_source,
+        )
+        try:
+            result = self._run(
+                command,
+                input=request.to_canonical_bytes(),
+                timeout=self._timeout,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ReadCallFailed("V2 read child could not be executed") from exc
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()[-500:]
+            raise ReadCallFailed(detail or f"V2 read child exited with {result.returncode}")
+        marker_at = result.stdout.rfind(_V2_READ_RESULT_MARKER)
+        if marker_at < 0:
+            raise ReadCallFailed("V2 read child result marker is missing")
+        payload = result.stdout[marker_at + len(_V2_READ_RESULT_MARKER) :]
+        try:
+            envelope = _parse_json(payload)
+        except SandboxProtocolError as exc:
+            raise ReadCallFailed("V2 read child returned an invalid envelope") from exc
+        if type(envelope) is not dict or set(envelope) != {
+            "observation",
+            "request_hash",
+        }:
+            raise ReadCallFailed("V2 read child envelope fields mismatch")
+        if envelope["request_hash"] != self._request_hash(request):
+            raise ReadCallFailed("V2 read observation failed request binding")
+        observation_payload = _canonical_json(envelope["observation"])
+        try:
+            if type(request) is LodgingAvailabilityReadRequest:
+                observation: SandboxReadObservation = (
+                    LodgingAvailabilityObservation.from_canonical_bytes(
+                        observation_payload
+                    )
+                )
+                if any(
+                    option["check_in"] != request.check_in
+                    or option["check_out"] != request.check_out
+                    or option["adults"] != request.adults
+                    or option["children"] != request.children
+                    for option in observation.options
+                ):
+                    raise ReadCallFailed(
+                        "V2 lodging observation failed request binding"
+                    )
+            else:
+                observation = ActivityAvailabilityObservation.from_canonical_bytes(
+                    observation_payload
+                )
+                if (
+                    observation.activity_date != request.activity_date
+                    or observation.participants != request.participants
+                ):
+                    raise ReadCallFailed(
+                        "V2 activity observation failed request binding"
+                    )
+        except SandboxProtocolError as exc:
+            raise ReadCallFailed("V2 read child returned an invalid observation") from exc
+        return observation
+
+
 class HermesDockerModel:
     """No-shell adapter to an isolated, tool-free AIAgent inside WebUI's venv."""
 
@@ -1207,4 +1320,5 @@ __all__ = (
     "SandboxReadRequest",
     "SandboxTurnResult",
     "SQLiteSandboxStore",
+    "V2ProviderDockerRead",
 )
