@@ -1,11 +1,9 @@
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.v2
-    image: agente-v2:local
+    image: ${V2_IMAGE_REF:?set V2_IMAGE_REF to an immutable repository@sha256 digest}
     command: []
-    environment:
+    environment: &v2-environment
+      V2_RUNTIME_MODE: dark_read_only
       V2_MANYCHAT_WEBHOOK_SECRET: ${V2_MANYCHAT_WEBHOOK_SECRET:?set V2_MANYCHAT_WEBHOOK_SECRET}
       V2_STRIPE_WEBHOOK_SECRET: ${V2_STRIPE_WEBHOOK_SECRET:?set V2_STRIPE_WEBHOOK_SECRET}
       V2_WISE_WEBHOOK_SECRET: ${V2_WISE_WEBHOOK_SECRET:?set V2_WISE_WEBHOOK_SECRET}
@@ -14,6 +12,18 @@ services:
       V2_WISE_SIGNER_PROFILE_ID: ${V2_WISE_SIGNER_PROFILE_ID:?set V2_WISE_SIGNER_PROFILE_ID}
       V2_WISE_ACCOUNT_PROFILE_ID: ${V2_WISE_ACCOUNT_PROFILE_ID:?set V2_WISE_ACCOUNT_PROFILE_ID}
       V2_STRIPE_ACCOUNT_PROFILE_ID: ${V2_STRIPE_ACCOUNT_PROFILE_ID:?set V2_STRIPE_ACCOUNT_PROFILE_ID}
+      V2_CLOUDBEDS_API_KEY: ${V2_CLOUDBEDS_API_KEY:?set V2_CLOUDBEDS_API_KEY}
+      V2_CLOUDBEDS_PROPERTY_ID: ${V2_CLOUDBEDS_PROPERTY_ID:?set V2_CLOUDBEDS_PROPERTY_ID}
+      V2_BOKUN_ACCESS_KEY: ${V2_BOKUN_ACCESS_KEY:?set V2_BOKUN_ACCESS_KEY}
+      V2_BOKUN_SECRET_KEY: ${V2_BOKUN_SECRET_KEY:?set V2_BOKUN_SECRET_KEY}
+      V2_BOKUN_PRODUCT_MAP_JSON: ${V2_BOKUN_PRODUCT_MAP_JSON:?set V2_BOKUN_PRODUCT_MAP_JSON}
+      V2_READ_PROBE_CHECK_IN: ${V2_READ_PROBE_CHECK_IN:?set V2_READ_PROBE_CHECK_IN}
+      V2_READ_PROBE_CHECK_OUT: ${V2_READ_PROBE_CHECK_OUT:?set V2_READ_PROBE_CHECK_OUT}
+      V2_READ_PROBE_ACTIVITY_DATE: ${V2_READ_PROBE_ACTIVITY_DATE:?set V2_READ_PROBE_ACTIVITY_DATE}
+      V2_READ_PROBE_PRODUCT_ID: ${V2_READ_PROBE_PRODUCT_ID:?set V2_READ_PROBE_PRODUCT_ID}
+      V2_READ_PROBE_INTERVAL_SECONDS: ${V2_READ_PROBE_INTERVAL_SECONDS:-60}
+      V2_KNOWLEDGE_BASE_PATH: /app/config/cerebro_faq.yaml
+      V2_REQUIRE_WORKER_HEARTBEAT: "true"
       V2_SQLITE_PATH: /data/inbox.sqlite3
       V2_API_HOST: 0.0.0.0
       V2_API_PORT: "8080"
@@ -22,12 +32,12 @@ services:
       V2_ENABLE_STRIPE_LINKS: "false"
       V2_ENABLE_MANYCHAT_DELIVERY: "false"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - v2-state:/data
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -43,46 +53,20 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 10s
 
   worker:
-    image: agente-v2:local
+    image: ${V2_IMAGE_REF:?set V2_IMAGE_REF to an immutable repository@sha256 digest}
     entrypoint: ["python", "-m", "v2_host.worker_main"]
     environment:
-      V2_MANYCHAT_WEBHOOK_SECRET: ${V2_MANYCHAT_WEBHOOK_SECRET:?set V2_MANYCHAT_WEBHOOK_SECRET}
-      V2_STRIPE_WEBHOOK_SECRET: ${V2_STRIPE_WEBHOOK_SECRET:?set V2_STRIPE_WEBHOOK_SECRET}
-      V2_WISE_WEBHOOK_SECRET: ${V2_WISE_WEBHOOK_SECRET:?set V2_WISE_WEBHOOK_SECRET}
-      V2_PIX_WEBHOOK_SECRET: ${V2_PIX_WEBHOOK_SECRET:?set V2_PIX_WEBHOOK_SECRET}
-      V2_PIX_RECEIVER_PROFILE_ID: ${V2_PIX_RECEIVER_PROFILE_ID:?set V2_PIX_RECEIVER_PROFILE_ID}
-      V2_WISE_SIGNER_PROFILE_ID: ${V2_WISE_SIGNER_PROFILE_ID:?set V2_WISE_SIGNER_PROFILE_ID}
-      V2_WISE_ACCOUNT_PROFILE_ID: ${V2_WISE_ACCOUNT_PROFILE_ID:?set V2_WISE_ACCOUNT_PROFILE_ID}
-      V2_STRIPE_ACCOUNT_PROFILE_ID: ${V2_STRIPE_ACCOUNT_PROFILE_ID:?set V2_STRIPE_ACCOUNT_PROFILE_ID}
-      V2_SQLITE_PATH: /data/inbox.sqlite3
-      V2_WORKER_FACTORY: ${V2_WORKER_FACTORY:?set V2_WORKER_FACTORY}
+      <<: *v2-environment
+      V2_WORKER_FACTORY: v2_host.production:build_worker_set
       V2_WORKER_INTERVAL_SECONDS: ${V2_WORKER_INTERVAL_SECONDS:-0.25}
-      V2_ENABLE_CLOUDBEDS_WRITES: "false"
-      V2_ENABLE_BOKUN_WRITES: "false"
-      V2_ENABLE_STRIPE_LINKS: "false"
-      V2_ENABLE_MANYCHAT_DELIVERY: "false"
     volumes:
       - v2-state:/data
     read_only: true
     tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
-  qualification:
-    image: agente-v2:local
-    profiles: ["qualification"]
-    entrypoint: ["python", "scripts/run_v2_e2e.py"]
-    environment:
-      V2_MANYCHAT_WEBHOOK_SECRET: qualification-only
-    read_only: true
-    tmpfs:
-      - /tmp
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     security_opt:
       - no-new-privileges:true
     cap_drop:

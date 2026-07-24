@@ -139,6 +139,22 @@ class V2ReadService:
             normalized[kind] = port
         self._ports = normalized
 
+    def __repr__(self) -> str:
+        port_types = ",".join(
+            sorted({type(port).__name__ for port in self._ports.values()})
+        )
+        transport_types = ",".join(
+            sorted(
+                {
+                    type(getattr(port, "_transport", None)).__name__
+                    for port in self._ports.values()
+                    if getattr(port, "_transport", None) is not None
+                }
+            )
+        )
+        suffix = f";transports={transport_types}" if transport_types else ""
+        return f"V2ReadService(ports={port_types}{suffix})"
+
     def read(self, request: ReadRequest) -> ReadObservation:
         if type(request) is not ReadRequest:
             raise TypeError("request must be an exact ReadRequest")

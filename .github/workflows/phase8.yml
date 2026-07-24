@@ -1,0 +1,132 @@
+name: phase-8-v2-runtime
+
+on:
+  push:
+    branches:
+      - phase8-shadow-canary-rollout
+  pull_request:
+    paths:
+      - "reservation_*/**"
+      - "v2_*/**"
+      - "tests/**"
+      - "Dockerfile.v2"
+      - ".dockerignore"
+      - "compose.v2.yaml"
+      - ".github/workflows/phase8.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: phase8-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/agente-v2
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install runtime and test dependencies
+        run: |
+          python -m pip install \
+            "fastapi==0.133.1" \
+            "httpx==0.28.1" \
+            "pydantic==2.13.4" \
+            "PyYAML==6.0.3" \
+            "cryptography==46.0.7" \
+            "uvicorn==0.41.0" \
+            "pytest==9.0.2" \
+            "ruff==0.15.10"
+      - name: Static boundaries and formatting
+        run: |
+          ruff check v2_adapters v2_application v2_contracts v2_host
+          ruff check reservation_boundary/schema.py reservation_boundary/sqlite_store.py
+          python scripts/check_fasttrack_boundaries.py
+          git diff --check
+          python -m compileall -q reservation_boundary reservation_confirmation reservation_domain reservation_execution reservation_followup reservation_lookup v2_adapters v2_application v2_contracts v2_host
+      - name: Full regression
+        run: |
+          python -m pytest -q \
+            --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_project_metadata_declares_closed_distribution \
+            --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_two_builds_are_byte_identical_closed_and_self_hashing \
+            --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_installed_wheel_imports_without_checkout_on_sys_path \
+            --deselect=tests/test_phase7_closeout.py::Phase7EntryContractTests::test_wheel_bootstrap_is_closed_and_stdlib_only \
+            --deselect=tests/test_phase7_closeout.py::Phase7CloseoutContractTests::test_manifest_is_deterministic_current_and_covers_runtime_patch \
+            --deselect=tests/test_phase7_closeout.py::Phase7CloseoutContractTests::test_evidence_validator_reflects_current_terminal_artifacts \
+            --deselect=tests/test_phase8_entry.py::Phase8EntryTests::test_phase_index_keeps_slice_zero_and_rollout_closed
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ env.IMAGE_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.v2
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VERSION=0.8.0-phase8
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Record immutable image reference
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          test -n "$DIGEST"
+          printf '%s@%s\n' "$IMAGE_NAME" "$DIGEST" | tee /tmp/v2-image-ref.txt
+      - name: Upload digest evidence
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase8-image-${{ github.sha }}
+          path: /tmp/v2-image-ref.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  gate:
+    if: always()
+    needs: [test, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require test and image jobs
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+        run: |
+          test "$TEST_RESULT" = success
+          test "$IMAGE_RESULT" = success

@@ -133,9 +133,12 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness(
             "public_outbox": 1,
         }
         assert api.readiness().status == "ready"
-        assert worker.readiness().status == "ready"
+        assert worker.readiness().status == "not_ready"
+        assert worker.readiness().reasons == ("productive_graph_not_built",)
         assert settings.financial_webhooks_configured is True
         assert settings.all_real_effect_gates_closed is True
+        worker.register_runtime_capabilities({"test_graph": "ready"})
+        assert worker.readiness().status == "ready"
         cycle = build_worker_cycle(
             worker,
             {queue: ConcreteStage() for queue in WorkerQueue},
@@ -155,9 +158,29 @@ def test_compose_uses_one_hardened_image_for_distinct_api_and_worker_roles() -> 
     manifest = yaml.safe_load((root / "compose.v2.yaml").read_text())
     api = manifest["services"]["api"]
     worker = manifest["services"]["worker"]
-    assert api["image"] == worker["image"] == "agente-v2:local"
+    assert api["image"] == worker["image"]
+    assert "V2_IMAGE_REF" in api["image"]
+    assert "sha256" in api["image"]
+    assert "build" not in api
     assert worker["entrypoint"] == ["python", "-m", "v2_host.worker_main"]
     assert api["read_only"] is worker["read_only"] is True
     assert api["cap_drop"] == worker["cap_drop"] == ["ALL"]
     assert api["security_opt"] == worker["security_opt"] == ["no-new-privileges:true"]
     assert "V2_WORKER_FACTORY" in worker["environment"]
+    assert worker["environment"]["V2_WORKER_FACTORY"] == "v2_host.production:build_worker_set"
+    assert manifest["services"].keys() == {"api", "worker"}
+
+
+def test_runtime_image_excludes_test_tooling_and_carries_oci_identity() -> None:
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile.v2").read_text()
+    ignore = (root / ".dockerignore").read_text().splitlines()
+
+    assert '"hermes-agent==0.19.0"' in dockerfile
+    assert "org.opencontainers.image.revision" in dockerfile
+    assert "org.opencontainers.image.created" in dockerfile
+    assert "pytest" not in dockerfile.casefold()
+    assert "COPY . /app" not in dockerfile
+    assert "tests" in ignore
+    assert "docs" in ignore
+    assert ".git" in ignore

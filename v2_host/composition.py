@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+import json
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
@@ -25,12 +27,25 @@ class V2Readiness:
     role: V2Role
     owner_counts: dict[str, int]
     real_effect_gates: dict[str, bool]
+    capabilities: dict[str, str]
+    reasons: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if self.status not in {"ready", "not_ready"}:
             raise ValueError("readiness status is outside the closed grammar")
         if type(self.role) is not V2Role:
             raise TypeError("readiness role must be exact V2Role")
+        if type(self.capabilities) is not dict or any(
+            type(key) is not str
+            or not key
+            or value not in {"ready", "closed", "missing", "degraded"}
+            for key, value in self.capabilities.items()
+        ):
+            raise ValueError("readiness capabilities use a closed status grammar")
+        if type(self.reasons) is not tuple or any(
+            type(item) is not str or not item for item in self.reasons
+        ):
+            raise TypeError("readiness reasons must be exact non-empty strings")
 
 
 class V2Container:
@@ -56,6 +71,7 @@ class V2Container:
         self.followup = followup
         self.payment_initiation = payment_initiation
         self.public_outbox = public_outbox
+        self._runtime_capabilities: dict[str, str] | None = None
         self._closed = False
 
     @classmethod
@@ -140,13 +156,80 @@ class V2Container:
                 "public_outbox": 1,
             },
         }[self.role]
-        ready = counts == expected and self.settings.financial_webhooks_configured
+        capabilities: dict[str, str]
+        reasons: list[str] = []
+        if self.role is V2Role.API:
+            capabilities = {
+                "financial_webhooks": (
+                    "ready" if self.settings.financial_webhooks_configured else "missing"
+                ),
+                "manychat_ingress": "ready",
+            }
+            if self.settings.require_worker_heartbeat:
+                heartbeat_reason = self._worker_heartbeat_reason()
+                capabilities["worker_heartbeat"] = (
+                    "ready" if heartbeat_reason is None else "missing"
+                )
+                if heartbeat_reason is not None:
+                    reasons.append(heartbeat_reason)
+        elif self._runtime_capabilities is None:
+            capabilities = {"productive_graph": "missing"}
+            reasons.append("productive_graph_not_built")
+        else:
+            capabilities = dict(self._runtime_capabilities)
+            reasons.extend(
+                f"capability_{name}_{status}"
+                for name, status in capabilities.items()
+                if status in {"missing", "degraded"}
+            )
+        if counts != expected:
+            reasons.append("durable_owner_count_mismatch")
+        if not self.settings.financial_webhooks_configured:
+            reasons.append("financial_webhooks_not_configured")
+        ready = (
+            counts == expected
+            and self.settings.financial_webhooks_configured
+            and not reasons
+        )
         return V2Readiness(
             status="ready" if ready else "not_ready",
             role=self.role,
             owner_counts=counts,
             real_effect_gates=self.settings.real_effect_gates,
+            capabilities=capabilities,
+            reasons=tuple(dict.fromkeys(reasons)),
         )
+
+    def register_runtime_capabilities(self, capabilities: dict[str, str]) -> None:
+        if self.role is not V2Role.WORKER:
+            raise ValueError("runtime capabilities belong to the worker role")
+        if self._runtime_capabilities is not None:
+            raise RuntimeError("runtime capabilities are immutable after registration")
+        if type(capabilities) is not dict or not capabilities or any(
+            type(key) is not str
+            or not key
+            or value not in {"ready", "closed", "missing", "degraded"}
+            for key, value in capabilities.items()
+        ):
+            raise ValueError("runtime capabilities use a closed status grammar")
+        self._runtime_capabilities = dict(capabilities)
+
+    def _worker_heartbeat_reason(self) -> str | None:
+        path = self.settings.worker_heartbeat_path
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            observed = datetime.fromisoformat(value["observed_at"])
+            status = value["status"]
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return "worker_heartbeat_missing"
+        if observed.tzinfo is None or observed.utcoffset() is None:
+            return "worker_heartbeat_invalid"
+        age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
+        if age < 0 or age > self.settings.worker_heartbeat_max_age_seconds:
+            return "worker_heartbeat_stale"
+        if status != "healthy":
+            return "worker_heartbeat_degraded"
+        return None
 
     def close(self) -> None:
         if self._closed:

@@ -1,0 +1,435 @@
+{
+  "version": "2026-07-18-payment-instructions-owned-by-hermes",
+  "source": "old_n8n_cerebro",
+  "entries": [
+    {
+      "id": "cancelamento_48h_reembolso",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "cancelamento",
+        "reembolso",
+        "48 horas",
+        "sinal"
+      ],
+      "question": "Se eu cancelar com 48 horas de antecedência, recebo o dinheiro de volta?",
+      "answer": "Sim. Cancelamentos realizados até 48 horas antes do início da primeira excursão: o valor adiantado de 20% do valor total do pacote será reembolsado integralmente."
+    },
+    {
+      "id": "cancelamento_entre_48h_12h",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "cancelamento",
+        "48 horas",
+        "12 horas",
+        "sinal"
+      ],
+      "question": "E se eu cancelar entre 48 horas e 12 horas antes do passeio?",
+      "answer": "Neste caso, somente o valor adiantado de 20% será cobrado integralmente pela empresa, ou seja, você perderá apenas esse sinal. Não é cobrança de 100% do valor total; a cobrança de 100% só se aplica no prazo de até 12 horas antes/início da véspera, conforme a política específica."
+    },
+    {
+      "id": "cancelamento_ate_12h",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "cancelamento",
+        "12 horas",
+        "perda total"
+      ],
+      "question": "Posso cancelar até 12 horas antes sem perder dinheiro?",
+      "answer": "Não. Cancelamentos realizados até 12 horas antes do início da excursão, ou seja, até as 8 horas da noite anterior, terão cobrança de 100% do valor total da excursão."
+    },
+    {
+      "id": "cancelamento_pos_pagamento_integral",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "cancelamento",
+        "pagamento integral",
+        "força maior"
+      ],
+      "question": "Já paguei tudo, ainda posso ter reembolso se cancelar?",
+      "answer": "Depois que o valor integral foi pago no dia anterior da excursão, não haverá reembolso possível, fora de casos de força maior, como acidente grave ou óbito na família próxima."
+    },
+    {
+      "id": "prazo_reembolso",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "reembolso",
+        "prazo",
+        "dias úteis"
+      ],
+      "question": "Em quanto tempo recebo meu reembolso?",
+      "answer": "Os reembolsos, quando aplicáveis, serão processados dentro de 7 dias úteis após a solicitação de cancelamento."
+    },
+    {
+      "id": "mudar_datas_passeio",
+      "topic": "alteracao_reserva",
+      "tags": [
+        "mudar datas",
+        "modificar reserva",
+        "disponibilidade"
+      ],
+      "question": "Posso mudar as datas do meu passeio depois de reservar?",
+      "answer": "Sim. Caso deseje modificar a reserva, como mudança de datas ou de roteiro, informe pelo WhatsApp com pelo menos 24 horas de antecedência. A equipe confirma por ali; as modificações estão sujeitas à disponibilidade e podem incorrer em custos adicionais."
+    },
+    {
+      "id": "passeio_mais_barato_sem_reembolso",
+      "topic": "alteracao_reserva",
+      "tags": [
+        "modificação",
+        "passeio mais barato",
+        "diferença"
+      ],
+      "question": "Se eu mudar para um passeio mais barato, recebo a diferença?",
+      "answer": "Não haverá reembolsos para modificações que resultem em um valor menor do que o originalmente pago. Quaisquer diferenças a maior deverão ser pagas pelo cliente."
+    },
+    {
+      "id": "agencia_pode_cancelar",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "agência cancela",
+        "clima",
+        "segurança",
+        "participantes"
+      ],
+      "question": "A agência pode cancelar meu passeio?",
+      "answer": "Sim, a agência se reserva o direito de cancelar a excursão por motivos de segurança, condições climáticas adversas, número insuficiente de participantes ou outros fatores imprevistos. Nesses casos excepcionais, outras opções de passeios similares serão oferecidas."
+    },
+    {
+      "id": "agencia_cancelou_reembolso_total",
+      "topic": "cancelamento_reembolso",
+      "tags": [
+        "agência cancelou",
+        "reembolso total",
+        "remarcar"
+      ],
+      "question": "Se vocês cancelarem meu passeio, recebo meu dinheiro de volta?",
+      "answer": "Em caso de cancelamento pela Agência, você terá direito ao reembolso total do valor pago ou poderá optar por remarcar a excursão para outra data disponível sem custos adicionais."
+    },
+    {
+      "id": "responsabilidade_cliente_passeio",
+      "topic": "seguranca_passeios",
+      "tags": [
+        "responsabilidades",
+        "guia",
+        "pontualidade",
+        "segurança"
+      ],
+      "question": "Quais são minhas responsabilidades durante o passeio?",
+      "answer": "Você deve ser pontual e seguir todas as orientações do guia profissional durante a excursão. Acidentes podem ocorrer se as instruções do guia não forem seguidas, e a agência não se responsabiliza por incidentes decorrentes da não observância das orientações."
+    },
+    {
+      "id": "onibus_salvador_lencois",
+      "topic": "transporte",
+      "tags": [
+        "ônibus",
+        "salvador",
+        "lençóis",
+        "real expresso",
+        "horários"
+      ],
+      "question": "Quais são os horários de ônibus de Salvador para Lençóis?",
+      "answer": "Três horários diários: 7h, 13h e 23h. Companhia Real Expresso. Site: www.realexpresso.com.br"
+    },
+    {
+      "id": "onibus_lencois_salvador",
+      "topic": "transporte",
+      "tags": [
+        "ônibus",
+        "lençóis",
+        "salvador",
+        "real expresso",
+        "horários"
+      ],
+      "question": "E os horários de Lençóis para Salvador?",
+      "answer": "Três horários diários: 9h00, 13h e 22h45. Companhia Real Expresso."
+    },
+    {
+      "id": "comprar_passagem_onibus",
+      "topic": "transporte",
+      "tags": [
+        "passagem",
+        "ônibus",
+        "real expresso",
+        "clickbus",
+        "busbud"
+      ],
+      "question": "Como posso comprar minha passagem de ônibus?",
+      "answer": "No site da Real Expresso, www.realexpresso.com.br, em sites como clickbus.com, busbud.com, buscaonibus.com.br, ou diretamente no guichê da companhia nas rodoviárias de Lençóis, Salvador, Feira de Santana, Seabra e Palmeiras."
+    },
+    {
+      "id": "tipos_assento_onibus",
+      "topic": "transporte",
+      "tags": [
+        "ônibus",
+        "assento",
+        "normal",
+        "leito"
+      ],
+      "question": "Que tipos de assento posso escolher no ônibus?",
+      "answer": "Há 2 tipos de assentos: Normal e Leito, que é mais caro. Ônibus executivos às vezes são adicionados na alta temporada ou feriados."
+    },
+    {
+      "id": "dicas_passagens_onibus",
+      "topic": "transporte",
+      "tags": [
+        "ônibus noturno",
+        "reservar",
+        "seguro opcional"
+      ],
+      "question": "Alguma dica importante sobre as passagens de ônibus?",
+      "answer": "Os ônibus noturnos são sempre mais disputados. É essencial reservar com pelo menos 24 horas de antecedência. Você pode pedir tarifa Sem Seguro, que é opcional."
+    },
+    {
+      "id": "voo_direto_lencois",
+      "topic": "transporte",
+      "tags": [
+        "voo",
+        "salvador",
+        "lençóis",
+        "aeroporto",
+        "taxi"
+      ],
+      "question": "Tem voo direto para Lençóis?",
+      "answer": "Sim. Há voo Salvador-Lençóis, 2 vezes por semana, quinta-feira e domingo. Os voos retornam no mesmo dia. Podemos organizar táxi do aeroporto."
+    },
+    {
+      "id": "chapada_sul_bahia_sem_salvador",
+      "topic": "transporte",
+      "tags": [
+        "itacaré",
+        "valença",
+        "boipeba",
+        "morro de são paulo",
+        "feira de santana"
+      ],
+      "question": "Posso ir direto da Chapada para o sul da Bahia sem voltar a Salvador?",
+      "answer": "Sim. Feira de Santana oferece conexões para Itacaré e Valença, que serve Boipeba e Morro de São Paulo, sem voltar a Salvador. Horários: 5h30, 7h e 9h. A viagem dura 4h."
+    },
+    {
+      "id": "conexao_feira_vindo_sul",
+      "topic": "transporte",
+      "tags": [
+        "feira de santana",
+        "sul da bahia",
+        "conexão",
+        "lençóis"
+      ],
+      "question": "Como faço conexão via Feira de Santana vindo do sul?",
+      "answer": "Para chegar à Chapada, deve chegar antes das 14h30 em Feira de Santana para pegar o ônibus que passa às 15h e chega em Lençóis às 21h. O próximo ônibus só sai à meia-noite."
+    },
+    {
+      "id": "onibus_chapada_recife",
+      "topic": "transporte",
+      "tags": [
+        "recife",
+        "feira de santana",
+        "ônibus direto",
+        "real expresso"
+      ],
+      "question": "Tem ônibus direto da Chapada para Recife?",
+      "answer": "Sim, de Feira de Santana para Recife há ônibus direto às terças, quintas e domingos pela Real Expresso, em ônibus executivo. A partida é às 13h40. É necessário sair de Lençóis na noite anterior."
+    },
+    {
+      "id": "informacoes_gerais_chapada_backpackers",
+      "topic": "localizacao",
+      "tags": [
+        "informações gerais",
+        "horário",
+        "horários",
+        "recepção",
+        "portaria",
+        "vídeos",
+        "videos",
+        "youtube",
+        "chapada backpackers"
+      ],
+      "question": "Quais são os horários, portaria e vídeos da Chapada Backpackers?",
+      "answer": "Vídeos: https://www.youtube.com/@ChapadaBackpackers/videos. Portaria 24h. Recepção 7h-22h. Fuso: Brasília/Bahia."
+    },
+    {
+      "id": "endereco_chapada_backpackers",
+      "topic": "localizacao",
+      "tags": [
+        "endereço",
+        "rua",
+        "chapada backpackers",
+        "lençóis"
+      ],
+      "question": "Qual o endereço de vocês?",
+      "answer": "Chapada Backpackers Hostel e Agência - Rua General Viveiros 275, Bairro Tomba, 46960-000 Lençóis, Bahia, Brasil."
+    },
+    {
+      "id": "hostel_informacoes_basicas",
+      "topic": "hostel",
+      "tags": [
+        "hostel",
+        "hospedagem",
+        "endereço",
+        "localização",
+        "check-in",
+        "check-out",
+        "cozinha",
+        "café da manhã",
+        "cafe da manha",
+        "amenidades"
+      ],
+      "question": "Quais são as informações básicas do hostel?",
+      "answer": "O hostel fica na Av. Gen. Viveiros, 275, em Lençóis, perto do centro e da rodoviária. Tem cozinha compartilhada, área comum, WiFi, roupa de cama, guarda-volumes e informações turísticas. Check-in a partir de 12:00 e check-out 11:00. Café da manhã é opcional e custa R$ 30,00 por pessoa, por dia."
+    },
+    {
+      "id": "hostel_cafe_da_manha_preco",
+      "topic": "hostel",
+      "tags": [
+        "café da manhã",
+        "cafe da manha",
+        "breakfast",
+        "preço do café",
+        "valor do café",
+        "café incluído",
+        "café opcional",
+        "por pessoa",
+        "por dia"
+      ],
+      "question": "A diária inclui café da manhã e quanto custa adicionar?",
+      "answer": "O café da manhã é opcional, não está incluído automaticamente na diária e custa R$ 30,00 por pessoa, por dia."
+    },
+    {
+      "id": "passeio_pos_confirmacao_whatsapp_dia_anterior",
+      "topic": "passeios",
+      "tags": [
+        "pós confirmação",
+        "pretrip",
+        "dia anterior",
+        "whatsapp",
+        "programa",
+        "seguro",
+        "detalhes finais",
+        "ponto de encontro"
+      ],
+      "question": "Quando o cliente recebe detalhes finais do passeio confirmado?",
+      "answer": "Após confirmação real do passeio/booking e pagamento, informe que a equipe entra em contato pelo WhatsApp no dia anterior ao passeio com horários, ponto de encontro, programa final e informações de seguro. Não prometa esses detalhes antes da confirmação."
+    },
+    {
+      "id": "troca_moeda_estrangeira",
+      "topic": "pagamentos",
+      "tags": [
+        "moeda estrangeira",
+        "euro",
+        "dólar",
+        "câmbio"
+      ],
+      "question": "Vocês trocam moeda estrangeira?",
+      "answer": "A troca de moeda é possível em euros e dólares americanos apenas se você não tiver outro meio de pagamento. Preferimos evitar, pois a taxa de câmbio não será vantajosa para o cliente."
+    },
+    {
+      "id": "saque_banco_brasil_estrangeiro",
+      "topic": "pagamentos",
+      "tags": [
+        "saque",
+        "banco do brasil",
+        "estrangeiro",
+        "cartão internacional"
+      ],
+      "question": "Posso sacar no Banco do Brasil sendo estrangeiro?",
+      "answer": "É impossível sacar dinheiro com um cartão internacional no Banco do Brasil. Não há caixa eletrônico 24 horas em Lençóis."
+    },
+    {
+      "id": "melhores_bancos_estrangeiro",
+      "topic": "pagamentos",
+      "tags": [
+        "saque",
+        "estrangeiro",
+        "santander",
+        "bradesco"
+      ],
+      "question": "Quais os melhores bancos para estrangeiros sacarem no Brasil?",
+      "answer": "Os dois melhores bancos para sacar dinheiro no Brasil são Santander e Bradesco, que praticam taxas razoáveis."
+    },
+    {
+      "id": "saque_bradesco_taxa",
+      "topic": "pagamentos",
+      "tags": [
+        "bradesco",
+        "saque",
+        "taxa de câmbio",
+        "comissão"
+      ],
+      "question": "Como devo proceder ao sacar no Bradesco?",
+      "answer": "No Bradesco, quando perguntarem sobre taxa de câmbio do banco, responda NÃO, porque a taxa é ruim. Quando perguntarem sobre comissão, responda NÃO também. A conversão será feita na taxa internacional, mais vantajosa."
+    },
+    {
+      "id": "cartao_lencois_restaurantes",
+      "topic": "pagamentos",
+      "tags": [
+        "cartão",
+        "restaurantes",
+        "lojas",
+        "lençóis"
+      ],
+      "question": "Posso pagar com cartão nos restaurantes e lojas de Lençóis?",
+      "answer": "Sim. Pagamentos com cartão são aceitos na maioria dos estabelecimentos comerciais e restaurantes da cidade de Lençóis."
+    },
+    {
+      "id": "sacar_dinheiro_salvador_seguro",
+      "topic": "pagamentos",
+      "tags": [
+        "salvador",
+        "rodoviária",
+        "sacar dinheiro",
+        "segurança"
+      ],
+      "question": "É seguro sacar dinheiro em Salvador?",
+      "answer": "Sim. Na rodoviária de Salvador há caixas eletrônicos. A rodoviária é segura. A viagem de ônibus com a Real Expresso até Lençóis é segura também, não há risco de assalto."
+    },
+    {
+      "id": "tamanho_grupos_passeios",
+      "topic": "passeios_grupos",
+      "tags": [
+        "grupo",
+        "trekking",
+        "roteiro de 1 dia",
+        "quantidade pessoas"
+      ],
+      "question": "São quantas pessoas mais ou menos nos passeios?",
+      "answer": "Nossos grupos de trekking têm no máximo 11 clientes. A partir de 12, formamos 2 grupos. Nos meses de baixa temporada, grupos grandes são raros. Nossos grupos de roteiros de 1 dia costumam ter no máximo 6 clientes, excepcionalmente 7."
+    },
+    {
+      "id": "passeios_notas_mandassaia_refeicoes_videos",
+      "topic": "passeios",
+      "tags": [
+        "passeios",
+        "Mandassaia",
+        "Lapão",
+        "chuva forte",
+        "trekking",
+        "refeições",
+        "pre trekking",
+        "pós trekking",
+        "vídeos",
+        "videos"
+      ],
+      "question": "Quais notas importantes sobre Mandassaia, refeições de trekking e vídeos dos passeios?",
+      "answer": "Mandassaia-Lapão depende de condição climática: chuva forte pode mudar a segurança ou viabilidade, então em caso de dúvida a equipe deve conferir. Em trekkings, as refeições durante o roteiro entram conforme o produto contratado; refeições pré/pós trekking não entram. Vídeos de apoio da Chapada Backpackers: https://www.youtube.com/@ChapadaBackpackers/videos."
+    },
+    {
+      "id": "questionario_trekking_2_mais_dias",
+      "topic": "passeios",
+      "tags": [
+        "questionário",
+        "trekking",
+        "2 dias",
+        "Pati",
+        "Mixila",
+        "Fumaça por Baixo",
+        "nomes",
+        "idades",
+        "alergias",
+        "medicamentos",
+        "restrição alimentar",
+        "vertigem",
+        "equipamento"
+      ],
+      "question": "Que informações pedir para trekkings de 2 ou mais dias?",
+      "answer": "Para trekkings de 2 ou mais dias, colete nomes e idades dos participantes, alergias, medicamentos, restrição alimentar, vertigem ou medo de altura e equipamento/experiência de trilha. Peça uma coisa por vez em conversa natural e não peça documento quando não for exigido."
+    }
+  ]
+}

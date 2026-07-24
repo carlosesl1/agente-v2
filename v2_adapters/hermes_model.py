@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from datetime import date
@@ -20,6 +21,27 @@ from v2_contracts.model import (
 from v2_contracts.providers import ReadKind, ReadRequest
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
+_CHILD_ENV_ALLOWLIST: Final = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "HOME",
+        "HERMES_HOME",
+        "HERMES_MODEL",
+        "HERMES_PROFILE",
+        "HERMES_PROVIDER",
+        "LANG",
+        "LC_ALL",
+        "NOUS_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "PATH",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "XAI_API_KEY",
+        "XDG_CONFIG_HOME",
+    }
+)
 _RESPONSE_FIELDS: Final = frozenset(
     (
         "schema",
@@ -186,6 +208,7 @@ class HermesModelAdapter:
         timeout: int,
         transcript_key: bytes,
         run: Callable[..., object] = subprocess.run,
+        environ: dict[str, str] | None = None,
     ) -> None:
         if (
             type(command) is not tuple
@@ -208,6 +231,14 @@ class HermesModelAdapter:
         self._timeout = timeout
         self._transcript_key = transcript_key
         self._run = run
+        source = os.environ if environ is None else environ
+        if type(source) is not dict and environ is not None:
+            raise TypeError("environ must be an exact dict")
+        self._child_env = {
+            key: value
+            for key, value in source.items()
+            if key in _CHILD_ENV_ALLOWLIST and type(value) is str and "\x00" not in value
+        }
 
     def complete(self, request: ModelRequest) -> ModelProposal:
         return self.complete_audited(request).proposal
@@ -223,6 +254,7 @@ class HermesModelAdapter:
                 capture_output=True,
                 timeout=self._timeout,
                 check=False,
+                env=self._child_env,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise InvalidModelProposal("Hermes child process failed") from exc

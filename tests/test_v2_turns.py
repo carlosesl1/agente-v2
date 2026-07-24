@@ -223,8 +223,8 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         separators=(",", ":"),
     ).encode()
 
-    def run(command, *, input, capture_output, timeout, check):
-        captured.update(command=command, input=input, check=check)
+    def run(command, *, input, capture_output, timeout, check, env):
+        captured.update(command=command, input=input, check=check, env=env)
         return Completed(b"PHASE8_RESULT\x00" + response)
 
     observation = ReadObservation(
@@ -241,6 +241,12 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         timeout=30,
         transcript_key=b"t" * 32,
         run=run,
+        environ={
+            "PATH": "/usr/bin",
+            "OPENAI_API_KEY": "model-only",
+            "V2_CLOUDBEDS_API_KEY": "must-not-leak",
+            "V2_MANYCHAT_API_KEY": "must-not-leak",
+        },
     )
 
     audited = adapter.complete_audited(
@@ -260,6 +266,10 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
     assert proposal.reply_chunks == ("A suíte está disponível.",)
     assert captured["command"] == ("hermes-model-child",)
     assert captured["check"] is False
+    assert captured["env"] == {
+        "PATH": "/usr/bin",
+        "OPENAI_API_KEY": "model-only",
+    }
     assert "total_amount" in sent
     assert observation.private_binding_hash not in sent
     assert "token" not in sent.lower()

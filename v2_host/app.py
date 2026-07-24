@@ -130,6 +130,8 @@ def create_app(
                 "role": snapshot.role.value,
                 "owner_counts": snapshot.owner_counts,
                 "real_effect_gates": snapshot.real_effect_gates,
+                "capabilities": snapshot.capabilities,
+                "reasons": list(snapshot.reasons),
             }
         return JSONResponse(
             status_code=200 if content["status"] == "ready" else 503,

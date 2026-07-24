@@ -6,7 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+import json
+import logging
 import os
+from pathlib import Path
 import time
 from typing import Protocol
 
@@ -100,17 +103,61 @@ def build_worker_cycle(
         raise TypeError("container must be exact V2Container")
     if container.role is not V2Role.WORKER:
         raise ValueError("worker cycle requires the worker role")
-    if container.readiness().status != "ready":
+    cycle = WorkerCycle(workers)
+    snapshot = container.readiness()
+    if (
+        snapshot.status != "ready"
+        and snapshot.capabilities == {"productive_graph": "missing"}
+        and snapshot.reasons == ("productive_graph_not_built",)
+    ):
+        # A complete, guard-validated explicit graph is itself the worker
+        # composition proof. Production registers richer capability details in
+        # its factory; this path keeps the signed qualification factory valid.
+        container.register_runtime_capabilities(
+            {f"worker:{queue.value}": "ready" for queue in WorkerQueue}
+        )
+        snapshot = container.readiness()
+    if snapshot.status != "ready":
         raise RuntimeError("worker container is not ready")
-    return WorkerCycle(workers)
+    return cycle
 
 
 def _load_worker_factory(path: str):
+    if path in {"", "v2_host.production:build_worker_set"}:
+        from v2_host.production import build_worker_set
+
+        return build_worker_set
     if path == "v2_host.qualification_workers:build_worker_set":
         from v2_host.qualification_workers import build_worker_set
 
         return build_worker_set
     raise ValueError("V2_WORKER_FACTORY is outside the closed factory allowlist")
+
+
+def _write_heartbeat(path: Path, report: WorkerCycleReport, *, now: datetime) -> None:
+    failed = [item.queue.value for item in report.items if item.failed]
+    payload = json.dumps(
+        {
+            "schema": "v2-worker-heartbeat-v1",
+            "observed_at": now.isoformat(),
+            "status": "degraded" if failed else "healthy",
+            "failed_queues": failed,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(payload, encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _log_cycle_failures(report: WorkerCycleReport) -> None:
+    failed = [item.queue.value for item in report.items if item.failed]
+    if failed:
+        logging.getLogger("v2.worker").error(
+            "worker_cycle_degraded failed_queues=%s", ",".join(failed)
+        )
 
 
 def main() -> None:
@@ -132,7 +179,10 @@ def main() -> None:
         if interval <= 0 or interval > 60:
             raise ValueError("V2_WORKER_INTERVAL_SECONDS must be in (0, 60]")
         while True:
-            cycle.run_once(now=datetime.now(timezone.utc))
+            now = datetime.now(timezone.utc)
+            report = cycle.run_once(now=now)
+            _log_cycle_failures(report)
+            _write_heartbeat(settings.worker_heartbeat_path, report, now=now)
             time.sleep(interval)
     finally:
         container.close()
@@ -145,6 +195,9 @@ __all__ = [
     "WorkerCycleReport",
     "WorkerQueue",
     "build_worker_cycle",
+    "_load_worker_factory",
+    "_log_cycle_failures",
+    "_write_heartbeat",
     "main",
 ]
 

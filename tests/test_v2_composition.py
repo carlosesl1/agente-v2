@@ -49,14 +49,13 @@ def test_enabling_real_effect_requires_exact_operational_ack(tmp_path: Path) -> 
             cloudbeds_writes_enabled=True,
         )
 
-    settings = V2Settings(
-        webhook_secret="test-webhook-secret",
-        sqlite_path=tmp_path / "inbox.sqlite3",
-        cloudbeds_writes_enabled=True,
-        real_effects_ack=ACK,
-    )
-    assert settings.real_effect_gates["cloudbeds_writes"] is True
-    assert settings.all_real_effect_gates_closed is False
+    with pytest.raises(ValueError, match="controlled_write"):
+        V2Settings(
+            webhook_secret="test-webhook-secret",
+            sqlite_path=tmp_path / "inbox.sqlite3",
+            cloudbeds_writes_enabled=True,
+            real_effects_ack=ACK,
+        )
 
 
 def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
@@ -99,5 +98,10 @@ def test_api_role_exposes_health_and_readiness_without_opening_gates(
             "role": "api",
             "owner_counts": client.app.state.v2_container.owner_counts(),
             "real_effect_gates": settings.real_effect_gates,
+            "capabilities": {
+                "financial_webhooks": "ready",
+                "manychat_ingress": "ready",
+            },
+            "reasons": [],
         }
         assert client.app.state.v2_container.role is V2Role.API

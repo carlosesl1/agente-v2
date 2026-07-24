@@ -48,9 +48,9 @@ class ManyChatTransport(Protocol):
 
 
 class PublicMessageClaim(Protocol):
-    outbox_id: str
-    lead_id: str
-    text: str
+    message_id: str
+    subscriber_id: str
+    chunk: object
 
 
 class ManyChatDeliveryAdapter:
@@ -62,15 +62,30 @@ class ManyChatDeliveryAdapter:
         self._transport = transport
 
     def send(self, claim: PublicMessageClaim) -> str:
-        outbox_id = getattr(claim, "outbox_id", None)
-        lead_id = getattr(claim, "lead_id", None)
-        text = getattr(claim, "text", None)
+        # The boundary-owned worker claims PublicDispatchClaim rows.  Keep the
+        # former generic-outbox shape readable only for migration tests; the
+        # productive path uses message_id/subscriber_id/chunk.
+        outbox_id = getattr(claim, "message_id", None)
+        subscriber_id = getattr(claim, "subscriber_id", None)
+        chunk = getattr(claim, "chunk", None)
+        text = getattr(chunk, "text", None)
+        if subscriber_id is None or text is None:
+            # Legacy PublicClaim also exposes source_message_id as message_id,
+            # so shape detection must not rely on message_id alone.
+            legacy_outbox_id = getattr(claim, "outbox_id", None)
+            lead_id = getattr(claim, "lead_id", None)
+            legacy_text = getattr(claim, "text", None)
+            if legacy_outbox_id is not None:
+                outbox_id = legacy_outbox_id
+            if legacy_text is not None:
+                text = legacy_text
+            if type(lead_id) is str and lead_id.startswith("manychat:"):
+                subscriber_id = lead_id.removeprefix("manychat:")
         if type(outbox_id) is not str or not outbox_id:
             raise PublicDeliveryNotCalled("claim lacks a stable outbox identity")
-        if type(lead_id) is not str or not lead_id.startswith("manychat:"):
-            raise PublicDeliveryNotCalled("claim is not bound to a ManyChat lead")
-        subscriber_id = lead_id.removeprefix("manychat:")
-        if not subscriber_id or type(text) is not str or not text.strip():
+        if type(subscriber_id) is not str or not subscriber_id.strip():
+            raise PublicDeliveryNotCalled("claim is not bound to a ManyChat subscriber")
+        if type(text) is not str or not text.strip():
             raise PublicDeliveryNotCalled("claim lacks a sendable subscriber or text")
         try:
             response = self._transport.send_text(
