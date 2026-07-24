@@ -211,6 +211,7 @@ class FastTrackSandboxTests(unittest.TestCase):
         self.assertIn("READ_OBSERVATIONS", prompt)
         self.assertIn("no máximo dois", prompt)
         self.assertIn("value deve ser string ou integer", prompt)
+        self.assertIn("route=handoff se e somente se reply_type=handoff", prompt)
 
     def test_v2_provider_child_sanitizes_activity_and_closes_effect_gates(self) -> None:
         child = importlib.import_module("scripts.phase8_v2_provider_read_child")
