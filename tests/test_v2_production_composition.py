@@ -17,6 +17,7 @@ from v2_host.production import (
 )
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue, _load_worker_factory
+from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 
 
 def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
@@ -76,6 +77,13 @@ def test_dark_read_only_factory_builds_closed_effect_graph_and_truthful_readines
             WorkerQueue.PUBLIC_DELIVERY,
         ):
             assert type(workers[queue]) is ClosedCapabilityWorker
+        assert type(workers[WorkerQueue.BOUNDARY_RELAY]) is BoundaryRelayWorker
+        assert (
+            workers[WorkerQueue.BOUNDARY_RELAY]
+            .run_once(now=datetime.now(timezone.utc))
+            .disposition
+            is RelayWorkerDisposition.IDLE
+        )
         assert type(workers[WorkerQueue.RECONCILIATION]).__name__ == "ReconciliationStage"
         assert settings.all_real_effect_gates_closed is True
     finally:
@@ -88,6 +96,72 @@ def test_read_service_is_constructed_from_direct_provider_transports(tmp_path: P
     assert type(reads).__name__ == "V2ReadService"
     assert "CloudbedsHTTPTransport" in repr(reads)
     assert "BokunHTTPTransport" in repr(reads)
+
+
+def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_closed(
+    tmp_path: Path,
+) -> None:
+    key = b"authenticated-authority-key-0000001"
+    manifest = tmp_path / "authority-controlled.json"
+    authority = {
+        "authorization_id": "authority:controlled-idle",
+        "subscriber_id": "1873018537",
+        "target_binding_hash": "1" * 64,
+        "channel_id": "manychat:channel-controlled",
+        "channel_scope": "manychat:subscriber-1873018537",
+        "generation": 1,
+        "capability_policy_digest": "2" * 64,
+        "effect_authorization_binding_digest": "3" * 64,
+        "contract_digest": "4" * 64,
+        "deadline_at": "2099-01-01T00:00:00+00:00",
+        "allocations": [
+            {"allocation_id": "allocation:controlled-0", "ordinal": 0}
+        ],
+    }
+    signed = {
+        "schema": "v2-public-authority-manifest-v1",
+        "authorities": [authority],
+    }
+    canonical = json.dumps(
+        signed,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    signed["hmac_sha256"] = hmac.new(key, canonical, hashlib.sha256).hexdigest()
+    manifest.write_text(json.dumps(signed), encoding="utf-8")
+    knowledge = tmp_path / "cerebro-controlled.yaml"
+    knowledge.write_text(
+        "entries:\n  - id: faq-1\n    topic: geral\n    question: Oi?\n    answer: Olá.\n",
+        encoding="utf-8",
+    )
+    settings = _settings(
+        tmp_path,
+        runtime_mode=RuntimeMode.CONTROLLED_WRITE,
+        allowed_subscriber_ids=("1873018537",),
+        hermes_model="openai-codex/gpt-5.6-luna",
+        candidate_git_sha="a" * 40,
+        candidate_image_digest="sha256:" + "b" * 64,
+        manychat_api_key="manychat-secret",
+        hermes_command=("python", "-m", "v2_host.hermes_child", "hermes"),
+        hermes_system_prompt="Return the exact V2 proposal contract.",
+        hermes_transcript_key=b"transcript-key-for-controlled-test-01",
+        public_authority_manifest_path=manifest,
+        public_authority_hmac_key=key,
+        knowledge_base_path=knowledge,
+    )
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        workers = build_worker_set(container=container, settings=settings)
+
+        assert type(workers[WorkerQueue.INBOX]).__name__ == "InboxTurnWorker"
+        assert type(workers[WorkerQueue.BOUNDARY_RELAY]) is BoundaryRelayWorker
+        assert type(workers[WorkerQueue.RESERVATION]) is ClosedCapabilityWorker
+        assert settings.all_real_effect_gates_closed is True
+        assert container.readiness().status == "ready"
+    finally:
+        container.close()
 
 
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:

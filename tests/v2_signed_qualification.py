@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from reservation_domain import ServiceKind
+from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_followup import (
     BusinessUnit as FollowupBusinessUnit,
     PaymentMethod as FollowupPaymentMethod,
@@ -46,6 +47,7 @@ from v2_application.payments import (
     PaymentInitiationWorker,
     PaymentService,
 )
+from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reservations import V2ReservationExecutionAdapter
 from v2_application.workers import V2ReservationWorker
 from v2_contracts.payments import (
@@ -298,6 +300,13 @@ class SignedQualificationRuntime:
         workers = {
             WorkerQueue.INBOX: QualificationInboxStage(
                 self.container.inbox, self._setup_from_inbox
+            ),
+            WorkerQueue.BOUNDARY_RELAY: BoundaryRelayWorker(
+                boundary=SQLiteBoundaryWorkerStore(self.container.boundary),
+                reservation_target=self.container.execution,
+                handoff_target=self.container.followup,
+                worker_id="worker:signed-e2e:boundary-relay",
+                lease_ttl=timedelta(seconds=30),
             ),
             WorkerQueue.RESERVATION: self.reservation_worker,
             WorkerQueue.PAYMENT_INITIATION: self.payment_worker,

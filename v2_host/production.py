@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from reservation_execution.reconciliation import Reconciler
+from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_followup.reconciliation import PaymentReconciler
 from v2_adapters.bokun import BokunReadAdapter
 from v2_adapters.cloudbeds import CloudbedsReadAdapter
@@ -25,6 +26,7 @@ from v2_adapters.provider_http import (
     ManyChatHTTPTransport,
 )
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reads import V2ReadService
 from v2_application.turn_executor import V2TurnExecutor
 from v2_contracts.providers import ReadKind, ReadRequest
@@ -230,12 +232,15 @@ def build_worker_set(
     if settings.runtime_mode is RuntimeMode.API_ONLY:
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
-    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+    if (
+        settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+        and not settings.all_real_effect_gates_closed
+    ):
         raise RuntimeError(
             "controlled-write graph is closed until every enabled effect transport is installed"
         )
     inbox_worker: object
-    if settings.runtime_mode is RuntimeMode.SHADOW:
+    if settings.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}:
         inbox_worker = _build_inbox_worker(
             container=container,
             settings=settings,
@@ -243,8 +248,22 @@ def build_worker_set(
         )
     else:
         inbox_worker = ClosedCapabilityWorker("inbox_turns")
+    if (
+        container.boundary is None
+        or container.execution is None
+        or container.followup is None
+    ):
+        raise ValueError("boundary relay durable owners are unavailable")
+    boundary_relay = BoundaryRelayWorker(
+        boundary=SQLiteBoundaryWorkerStore(container.boundary),
+        reservation_target=container.execution,
+        handoff_target=container.followup,
+        worker_id="worker:boundary-relay",
+        lease_ttl=timedelta(seconds=30),
+    )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
+        WorkerQueue.BOUNDARY_RELAY: boundary_relay,
         WorkerQueue.RESERVATION: ClosedCapabilityWorker("reservation_writes"),
         WorkerQueue.PAYMENT_INITIATION: ClosedCapabilityWorker("payment_initiation"),
         WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
@@ -264,14 +283,24 @@ def build_worker_set(
                 "ready" if settings.knowledge_base_path is not None else "closed"
             ),
             "hermes_model": (
-                "ready" if settings.runtime_mode is RuntimeMode.SHADOW else "closed"
+                "ready"
+                if settings.runtime_mode
+                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                else "closed"
             ),
             "inbox_turns": (
-                "ready" if settings.runtime_mode is RuntimeMode.SHADOW else "closed"
+                "ready"
+                if settings.runtime_mode
+                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                else "closed"
             ),
             "manychat_profile": (
-                "ready" if settings.runtime_mode is RuntimeMode.SHADOW else "closed"
+                "ready"
+                if settings.runtime_mode
+                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                else "closed"
             ),
+            "boundary_relay": "ready",
             "manychat_delivery": "closed",
             "payment_initiation": "closed",
             "reservation_writes": "closed",
