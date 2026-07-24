@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -49,23 +50,23 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
     assert env["V2_HERMES_SYSTEM_PROMPT_PATH"] == (
         "/app/config/v2_luna_system_prompt.txt"
     )
-    command = env["V2_HERMES_COMMAND_JSON"]
-    for literal in (
-        '"python"',
-        '"-m"',
-        '"v2_host.hermes_child"',
-        '"hermes"',
-        '"--profile"',
-        '"leads"',
-        '"chat"',
-        '"gpt-5.6-luna"',
-        '"--provider"',
-        '"openai-codex"',
-        '"--safe-mode"',
-        '"--source"',
-        '"tool"',
-    ):
-        assert literal in command
+    command = json.loads(env["V2_HERMES_COMMAND_JSON"])
+    assert command == [
+        "python",
+        "-m",
+        "v2_host.hermes_child",
+        "hermes",
+        "--profile",
+        "leads",
+        "-m",
+        "gpt-5.6-luna",
+        "--provider",
+        "openai-codex",
+        "--safe-mode",
+    ]
+    assert "chat" not in command
+    assert "-Q" not in command
+    assert "--source" not in command
     assert env["V2_PUBLIC_AUTHORITY_MANIFEST_PATH"] == (
         "/run/v2/public-authority.json"
     )
