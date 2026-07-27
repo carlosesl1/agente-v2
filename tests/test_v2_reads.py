@@ -320,3 +320,4 @@ def test_bokun_read_exposes_only_fee_inclusive_total_and_binds_quote_scope() -> 
     assert observation.public_payload["base_amount"] == "330.00"
     assert observation.public_payload["booking_fee_amount"] == "4.95"
     assert observation.public_payload["price_includes_booking_fee"] is True
+    assert "quote_scope" not in observation.public_payload

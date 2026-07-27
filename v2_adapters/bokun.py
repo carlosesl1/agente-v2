@@ -173,7 +173,9 @@ class BokunReadAdapter:
             }
         )
         public = {
-            **query,
+            "product_id": request.product_id,
+            "activity_date": request.activity_date.isoformat(),
+            "participants": request.participants,
             "offer_id": "offer:" + private_hash,
             "product_public_name": text(
                 response.get("product_public_name"), "product_public_name"
