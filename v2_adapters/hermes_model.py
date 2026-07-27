@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import unicodedata
 from collections.abc import Callable
 from datetime import date
 from typing import Final
@@ -207,7 +208,9 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
             source_event_id=decoded["source_event_id"],
             intent=decoded["intent"],
             reply_chunks=tuple(
-                item.strip() if type(item) is str else item
+                unicodedata.normalize("NFKC", item).strip()
+                if type(item) is str
+                else item
                 for item in _tuple_items(decoded["reply_chunks"], "reply_chunks")
             ),
             facts=tuple(
