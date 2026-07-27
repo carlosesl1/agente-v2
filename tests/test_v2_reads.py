@@ -48,6 +48,14 @@ class FixedClock:
         return NOW
 
 
+class SequenceClock:
+    def __init__(self, values: tuple[datetime, ...]) -> None:
+        self._values = iter(values)
+
+    def now(self) -> datetime:
+        return next(self._values)
+
+
 def test_lodging_read_binds_dates_occupancy_price_and_private_offer_id() -> None:
     calls = []
 
@@ -102,6 +110,53 @@ def test_query_hash_is_stable_across_new_request_id_but_request_hash_is_not() ->
 
     assert reread.canonical_hash() != LODGING_REQUEST.canonical_hash()
     assert reread.query_hash() == LODGING_REQUEST.query_hash()
+
+
+def test_private_reread_accepts_observation_created_after_read_started() -> None:
+    def transport(operation, payload):
+        assert operation == "lodging"
+        return {
+            "options": [
+                {
+                    "room_public_name": "Compartilhado n°2",
+                    **payload,
+                    "total_amount": "90.00",
+                    "currency": "BRL",
+                    "available_units": 1,
+                    "room_type_id": "room-private-002",
+                    "room_rate_id": "rate-private-002",
+                }
+            ]
+        }
+
+    clock = SequenceClock((NOW, NOW + timedelta(seconds=2)))
+    adapter = CloudbedsReadAdapter(
+        transport=transport,
+        clock=clock,
+        ttl=timedelta(minutes=5),
+    )
+    observation = adapter.read(LODGING_REQUEST)
+    option = observation.public_payload["options"][0]
+    component = OfferSnapshot(
+        offer_id=option["offer_id"],
+        lookup_id=f"lookup:{LODGING_REQUEST.query_hash()}",
+        service=ServiceKind.LODGING,
+        provider_ref=observation.private_binding_hash,
+        public_label=option["room_public_name"],
+        start_date=LODGING_REQUEST.check_in,
+        end_date=LODGING_REQUEST.check_out,
+        start_time=None,
+        party=Party(adults=LODGING_REQUEST.adults, children=LODGING_REQUEST.children),
+        total=Money(amount=Decimal("90.00"), currency="BRL"),
+        available=True,
+    )
+    resolver = PrivateOfferBindingResolver({ServiceKind.LODGING: adapter})
+
+    binding = resolver.resolve(component, now=NOW + timedelta(seconds=1))
+
+    assert binding.query.offer_id == component.offer_id
+    assert binding.observed_at == NOW + timedelta(seconds=2)
+    assert binding.expires_at > NOW + timedelta(seconds=1)
 
 
 def test_activity_read_requires_canonical_product_id() -> None:

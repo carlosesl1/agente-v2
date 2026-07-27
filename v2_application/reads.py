@@ -120,7 +120,7 @@ class PrivateOfferBindingResolver:
         if not (
             binding.provider == expected_provider
             and binding.query == query
-            and binding.observed_at <= instant < binding.expires_at
+            and instant < binding.expires_at
         ):
             raise PrivateBindingMismatch(
                 "private re-read changed the commercial binding"
