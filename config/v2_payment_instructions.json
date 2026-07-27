@@ -1,0 +1,12 @@
+{
+  "schema": "v2-payment-instructions-v1",
+  "version": "2026-07-27-v1-commercial-migration",
+  "hostel": {
+    "pix": "Pix da hospedagem: Rosileide Novaes Bastos, chave rosileidebastos557@gmail.com. Depois da transferência, envie o comprovante por aqui; a reserva só será marcada como paga após validação.",
+    "wise": "Wise da hospedagem — BRL: HOSTEL CHAPADA BACKPACKERS LTDA, CNPJ 54.065.587/0001-46, conta 40867635, agência 40571694. EUR: IBAN BE04 9052 7977 9531, SWIFT TRWIBEB1XXX. USD: account 505885367411584, routing 084009519, SWIFT TRWIUS35XXX. Depois da transferência, envie o comprovante; a confirmação depende de validação."
+  },
+  "agency": {
+    "pix": "Pix dos passeios: Guilherme Hoff Figueiredo, chave 75999979532. A reserva exige sinal de 20%. Depois da transferência, envie o comprovante por aqui; o booking só será marcado como pago após validação.",
+    "wise": "Wise dos passeios — BRL: ALBERGUE DE LENCOIS BACKPACKERS LTDA, CNPJ 25.218.189/0001-14, conta 12919632, agência 40571694. EUR: IBAN BE86 9055 4628 8950, SWIFT TRWIBEB1XXX. USD: account 579454603838281, routing 084009519, SWIFT TRWIUS35XXX. A reserva exige sinal de 20%. Depois da transferência, envie o comprovante; a confirmação depende de validação."
+  }
+}

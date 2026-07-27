@@ -110,6 +110,27 @@ def test_agency_stripe_uses_only_agency_account_and_anchor() -> None:
     assert [request.account_profile_id for request in transport.requests] == ["agency"]
 
 
+def test_agency_stripe_link_charges_only_configured_twenty_percent_signal() -> None:
+    transport = StripeTransport()
+    adapter = StripeLinkAdapter(
+        transport=transport,
+        account_profiles={
+            BusinessUnit.HOSTEL: "hostel",
+            BusinessUnit.AGENCY: "agency",
+        },
+        enabled=True,
+        payment_percentages={
+            BusinessUnit.HOSTEL: 100,
+            BusinessUnit.AGENCY: 20,
+        },
+    )
+
+    adapter.create_link(AGENCY)
+
+    assert transport.requests[0].amount_minor == 9000
+    assert transport.requests[0].payment_percentage == 20
+
+
 def test_wise_instruction_contains_no_unverified_payment_claim() -> None:
     payments, transport, _ = service()
 
@@ -127,8 +148,35 @@ def test_pix_instruction_comes_from_authorized_knowledge_profile() -> None:
     instruction = payments.initiate(AGENCY, PaymentMethod.PIX)
 
     assert instruction.receiver_profile_id == AGENCY.receiver_profile_id
-    assert instruction.public_text == knowledge.pix_instruction("receiver:agency")
+    assert instruction.public_text.endswith(
+        knowledge.pix_instruction("receiver:agency")
+    )
+    assert instruction.public_text.startswith("Valor desta etapa: R$ 450,00.")
     assert instruction.settled is False
+
+
+def test_agency_pix_and_wise_instructions_render_twenty_percent_signal() -> None:
+    knowledge = Knowledge()
+    percentages = {"receiver:hostel": 100, "receiver:agency": 20}
+    wise = WiseInstructionAdapter(
+        instructions={
+            "receiver:hostel": "Transferência Wise do hostel; aguarde validação.",
+            "receiver:agency": "Transferência Wise da agência; aguarde validação.",
+        },
+        payment_percentages=percentages,
+    )
+    pix = PixInstructionAdapter(
+        knowledge=knowledge,
+        receiver_profiles=("receiver:hostel", "receiver:agency"),
+        payment_percentages=percentages,
+    )
+
+    assert wise.instruction(AGENCY).public_text.startswith(
+        "Valor desta etapa: R$ 90,00."
+    )
+    assert pix.instruction(AGENCY).public_text.startswith(
+        "Valor desta etapa: R$ 90,00."
+    )
 
 
 def test_foreign_guest_due_at_checkin_has_no_payment_effect() -> None:

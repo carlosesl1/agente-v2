@@ -137,7 +137,20 @@ def _load_worker_factory(path: str):
     raise ValueError("V2_WORKER_FACTORY is outside the closed factory allowlist")
 
 
-def _write_heartbeat(path: Path, report: WorkerCycleReport, *, now: datetime) -> None:
+def _write_heartbeat(
+    path: Path,
+    report: WorkerCycleReport,
+    *,
+    now: datetime,
+    public_ingress_reason: str | None = None,
+    public_turn_capacity: int = 0,
+) -> None:
+    if type(public_turn_capacity) is not int or public_turn_capacity < 0:
+        raise ValueError("public_turn_capacity must be an exact non-negative integer")
+    if public_ingress_reason is not None and (
+        type(public_ingress_reason) is not str or not public_ingress_reason
+    ):
+        raise ValueError("public_ingress_reason must be non-empty exact text")
     failed = [item.queue.value for item in report.items if item.failed]
     payload = json.dumps(
         {
@@ -145,6 +158,9 @@ def _write_heartbeat(path: Path, report: WorkerCycleReport, *, now: datetime) ->
             "observed_at": now.isoformat(),
             "status": "degraded" if failed else "healthy",
             "failed_queues": failed,
+            "public_ingress_ready": public_ingress_reason is None,
+            "public_ingress_reason": public_ingress_reason,
+            "public_turn_capacity": public_turn_capacity,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -185,7 +201,15 @@ def main() -> None:
             now = datetime.now(timezone.utc)
             report = cycle.run_once(now=now)
             _log_cycle_failures(report)
-            _write_heartbeat(settings.worker_heartbeat_path, report, now=now)
+            _write_heartbeat(
+                settings.worker_heartbeat_path,
+                report,
+                now=now,
+                public_ingress_reason=container.controlled_public_ingress_reason(
+                    now=now,
+                ),
+                public_turn_capacity=container.public_turn_capacity(now=now),
+            )
             time.sleep(interval)
     finally:
         container.close()

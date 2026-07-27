@@ -153,6 +153,8 @@ class V2Settings:
     cloudbeds_writes_enabled: bool = False
     bokun_writes_enabled: bool = False
     stripe_links_enabled: bool = False
+    wise_instructions_enabled: bool = False
+    pix_instructions_enabled: bool = False
     manychat_delivery_enabled: bool = False
     manychat_handoff_enabled: bool = False
     real_effects_ack: str = ""
@@ -186,12 +188,15 @@ class V2Settings:
     stripe_agency_account_profile_id: str = ""
     stripe_hostel_secret_key: str = ""
     stripe_agency_secret_key: str = ""
+    hostel_payment_percentage: int = 100
+    agency_payment_percentage: int = 20
     stripe_base_url: str = "https://api.stripe.com"
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
     hermes_transcript_key: bytes = b""
     hermes_timeout_seconds: int = 45
     knowledge_base_path: Path | None = None
+    payment_instruction_path: Path | None = None
     public_authority_manifest_path: Path | None = None
     public_authority_hmac_key: bytes = b""
     require_worker_heartbeat: bool = False
@@ -232,6 +237,8 @@ class V2Settings:
             self.cloudbeds_writes_enabled,
             self.bokun_writes_enabled,
             self.stripe_links_enabled,
+            self.wise_instructions_enabled,
+            self.pix_instructions_enabled,
             self.manychat_delivery_enabled,
             self.manychat_handoff_enabled,
         )
@@ -277,14 +284,14 @@ class V2Settings:
                 raise ValueError("write window must end in the future")
             if self.write_window_end - now > _MAX_WRITE_WINDOW:
                 raise ValueError("write window may not exceed 24 hours")
-        if self.stripe_links_enabled:
+        if (
+            self.stripe_links_enabled
+            or self.wise_instructions_enabled
+            or self.pix_instructions_enabled
+        ):
             profiles = (
                 self.stripe_hostel_account_profile_id,
                 self.stripe_agency_account_profile_id,
-            )
-            keys = (
-                self.stripe_hostel_secret_key,
-                self.stripe_agency_secret_key,
             )
             if (
                 any(
@@ -294,8 +301,13 @@ class V2Settings:
                 or len(set(profiles)) != 2
             ):
                 raise ValueError(
-                    "Stripe links require distinct hostel/agency account profiles"
+                    "payment initiation requires distinct hostel/agency receiver profiles"
                 )
+        if self.stripe_links_enabled:
+            keys = (
+                self.stripe_hostel_secret_key,
+                self.stripe_agency_secret_key,
+            )
             if any(
                 type(value) is not str
                 or not value.startswith(("sk_test_", "rk_test_"))
@@ -305,6 +317,22 @@ class V2Settings:
                 raise ValueError(
                     "Stripe link creation requires two test Stripe keys"
                 )
+        if (
+            self.wise_instructions_enabled or self.pix_instructions_enabled
+        ) and self.payment_instruction_path is None:
+            raise ValueError(
+                "Wise/Pix instructions require a versioned instruction catalog"
+            )
+        if any(
+            type(value) is not int or not 1 <= value <= 100
+            for value in (
+                self.hostel_payment_percentage,
+                self.agency_payment_percentage,
+            )
+        ):
+            raise ValueError(
+                "payment percentages must be exact integers from 1 to 100"
+            )
         if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
         if self.manychat_delivery_enabled and (
@@ -364,7 +392,11 @@ class V2Settings:
             raise TypeError("hermes_transcript_key must be exact bytes")
         if type(self.hermes_timeout_seconds) is not int or self.hermes_timeout_seconds < 1:
             raise ValueError("hermes_timeout_seconds must be positive")
-        for name in ("knowledge_base_path", "public_authority_manifest_path"):
+        for name in (
+            "knowledge_base_path",
+            "payment_instruction_path",
+            "public_authority_manifest_path",
+        ):
             path = getattr(self, name)
             if path is not None and (
                 not isinstance(path, Path) or not path.is_absolute()
@@ -439,7 +471,9 @@ class V2Settings:
             "cloudbeds_writes": self.cloudbeds_writes_enabled,
             "manychat_handoff": self.manychat_handoff_enabled,
             "manychat_delivery": self.manychat_delivery_enabled,
+            "pix_instructions": self.pix_instructions_enabled,
             "stripe_links": self.stripe_links_enabled,
+            "wise_instructions": self.wise_instructions_enabled,
         }
 
     @property
@@ -494,6 +528,24 @@ class V2Settings:
         }
 
     @property
+    def payment_percentages(self) -> dict[str, int]:
+        return {
+            "hostel": self.hostel_payment_percentage,
+            "agency": self.agency_payment_percentage,
+        }
+
+    @property
+    def enabled_payment_methods(self) -> tuple[str, ...]:
+        methods = []
+        if self.stripe_links_enabled:
+            methods.append("stripe")
+        if self.wise_instructions_enabled:
+            methods.append("wise")
+        if self.pix_instructions_enabled:
+            methods.append("pix")
+        return tuple(methods)
+
+    @property
     def sqlite_paths(self) -> dict[str, Path]:
         parent = self.sqlite_path.parent
         return {
@@ -520,6 +572,12 @@ class V2Settings:
             timeout = int(source.get("V2_HERMES_TIMEOUT_SECONDS", "45"))
             heartbeat_age = int(source.get("V2_WORKER_HEARTBEAT_MAX_AGE_SECONDS", "10"))
             read_probe_interval = int(source.get("V2_READ_PROBE_INTERVAL_SECONDS", "60"))
+            hostel_payment_percentage = int(
+                source.get("V2_HOSTEL_PAYMENT_PERCENTAGE", "100")
+            )
+            agency_payment_percentage = int(
+                source.get("V2_AGENCY_PAYMENT_PERCENTAGE", "20")
+            )
         except ValueError as exc:
             raise ValueError("numeric V2 settings must be integers") from exc
         try:
@@ -534,6 +592,7 @@ class V2Settings:
             raise ValueError("V2_STRIPE_ENVIRONMENT is outside the closed catalog") from exc
         authority_path = source.get("V2_PUBLIC_AUTHORITY_MANIFEST_PATH", "")
         knowledge_path = source.get("V2_KNOWLEDGE_BASE_PATH", "")
+        payment_instruction_path = source.get("V2_PAYMENT_INSTRUCTION_PATH", "")
         return cls(
             webhook_secret=source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
             sqlite_path=Path(raw_path),
@@ -548,6 +607,12 @@ class V2Settings:
             cloudbeds_writes_enabled=_env_bool(source, "V2_ENABLE_CLOUDBEDS_WRITES"),
             bokun_writes_enabled=_env_bool(source, "V2_ENABLE_BOKUN_WRITES"),
             stripe_links_enabled=_env_bool(source, "V2_ENABLE_STRIPE_LINKS"),
+            wise_instructions_enabled=_env_bool(
+                source, "V2_ENABLE_WISE_INSTRUCTIONS"
+            ),
+            pix_instructions_enabled=_env_bool(
+                source, "V2_ENABLE_PIX_INSTRUCTIONS"
+            ),
             manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
             manychat_handoff_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_HANDOFF"),
             real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),
@@ -612,12 +677,17 @@ class V2Settings:
             stripe_agency_secret_key=source.get(
                 "V2_STRIPE_AGENCY_SECRET_KEY", ""
             ),
+            hostel_payment_percentage=hostel_payment_percentage,
+            agency_payment_percentage=agency_payment_percentage,
             stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
             hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=_system_prompt(source),
             hermes_transcript_key=_hex_key(source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
             hermes_timeout_seconds=timeout,
             knowledge_base_path=Path(knowledge_path) if knowledge_path else None,
+            payment_instruction_path=(
+                Path(payment_instruction_path) if payment_instruction_path else None
+            ),
             public_authority_manifest_path=Path(authority_path) if authority_path else None,
             public_authority_hmac_key=_hex_key(
                 source.get("V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX", "")

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 
-from v2_host.worker_main import WorkerCycle, WorkerQueue
+from v2_host.worker_main import WorkerCycle, WorkerQueue, _write_heartbeat
 
 
 NOW = datetime(2026, 7, 23, 18, 0, tzinfo=timezone.utc)
@@ -57,3 +59,30 @@ def test_worker_cycle_isolates_one_queue_failure_without_retrying_it() -> None:
     assert workers[WorkerQueue.SETTLEMENT].calls == 1
     assert workers[WorkerQueue.PUBLIC_DELIVERY].calls == 1
     assert workers[WorkerQueue.RECONCILIATION].calls == 1
+
+
+def test_worker_heartbeat_publishes_effective_public_ingress_capacity(
+    tmp_path: Path,
+) -> None:
+    _, workers = configured_workers()
+    report = WorkerCycle(workers).run_once(now=NOW)
+    path = tmp_path / "worker-heartbeat.json"
+
+    _write_heartbeat(
+        path,
+        report,
+        now=NOW,
+        public_ingress_reason=None,
+        public_turn_capacity=3,
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload == {
+        "schema": "v2-worker-heartbeat-v1",
+        "observed_at": NOW.isoformat(),
+        "status": "healthy",
+        "failed_queues": [],
+        "public_ingress_ready": True,
+        "public_ingress_reason": None,
+        "public_turn_capacity": 3,
+    }

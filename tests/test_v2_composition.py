@@ -35,7 +35,9 @@ def test_settings_default_every_real_effect_gate_closed(tmp_path: Path) -> None:
         "cloudbeds_writes": False,
         "manychat_delivery": False,
         "manychat_handoff": False,
+        "pix_instructions": False,
         "stripe_links": False,
+        "wise_instructions": False,
     }
     assert settings.all_real_effect_gates_closed is True
     assert len(set(settings.sqlite_paths.values())) == len(settings.sqlite_paths)

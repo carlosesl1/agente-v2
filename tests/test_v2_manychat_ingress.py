@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -93,6 +94,36 @@ def test_webhook_rejects_bad_secret_and_oversized_body(
 
     assert unauthorized.status_code == 401
     assert oversized.status_code == 413
+    assert inbox.pending_count() == 0
+
+
+def test_webhook_rejects_before_persistence_when_runtime_is_not_ready(
+    inbox: SQLiteInbox,
+) -> None:
+    settings = V2Settings(
+        webhook_secret="test-secret",
+        sqlite_path=inbox.path,
+        max_body_bytes=4096,
+    )
+    snapshot = SimpleNamespace(
+        status="not_ready",
+        role=SimpleNamespace(value="api"),
+        owner_counts={},
+        real_effect_gates=settings.real_effect_gates,
+        capabilities={"controlled_public_ingress": "missing"},
+        reasons=("public_authority_expired",),
+    )
+    with TestClient(
+        create_app(settings, inbox, readiness=lambda: snapshot)
+    ) as guarded:
+        response = guarded.post(
+            "/webhook/manychat",
+            headers=AUTH,
+            json=TEXT_PAYLOAD,
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable"}
     assert inbox.pending_count() == 0
 
 

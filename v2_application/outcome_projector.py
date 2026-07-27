@@ -63,6 +63,7 @@ class ReservationOutcomeProjector:
         execution: SQLiteUnitOfWork,
         payment_store: SQLitePaymentInitiationStore,
         receiver_profiles: dict[BusinessUnit, str],
+        enabled_methods: tuple[PaymentMethod, ...] = (PaymentMethod.STRIPE,),
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
@@ -76,9 +77,17 @@ class ReservationOutcomeProjector:
             raise ValueError("receiver profile ids must be non-empty exact text")
         if len(set(receiver_profiles.values())) != len(receiver_profiles):
             raise ValueError("business units must use distinct receiver profiles")
+        if (
+            type(enabled_methods) is not tuple
+            or not enabled_methods
+            or any(type(item) is not PaymentMethod for item in enabled_methods)
+            or len(set(enabled_methods)) != len(enabled_methods)
+        ):
+            raise ValueError("enabled_methods must be unique exact payment methods")
         self._execution = execution
         self._payment_store = payment_store
         self._receiver_profiles = dict(receiver_profiles)
+        self._enabled_methods = frozenset(enabled_methods)
 
     def run_once(self, *, now: datetime) -> OutcomeProjectionResult:
         instant = _utc(now)
@@ -120,12 +129,24 @@ class ReservationOutcomeProjector:
             if not _closed_group_shape(tuple(command for command, _ in members)):
                 suppressed += 1
                 continue
-            if any(command.payload.terms.payment_method != "stripe" for command, _ in members):
+            try:
+                methods = {
+                    PaymentMethod(command.payload.terms.payment_method)
+                    for command, _ in members
+                }
+            except ValueError:
+                suppressed += 1
+                continue
+            if len(methods) != 1:
+                suppressed += 1
+                continue
+            method = next(iter(methods))
+            if method not in self._enabled_methods:
                 suppressed += 1
                 continue
 
             selections = tuple(
-                self._selection(command, ledger, outcome)
+                self._selection(command, ledger, outcome, method=method)
                 for (command, ledger), outcome in zip(members, outcomes, strict=True)
             )
             actionable = tuple(
@@ -143,6 +164,8 @@ class ReservationOutcomeProjector:
         command: ReservationCommand,
         ledger: LedgerSnapshot,
         outcome,
+        *,
+        method: PaymentMethod,
     ) -> PaymentSelection | None:
         component = command.payload.components[0]
         unit = {
@@ -203,7 +226,7 @@ class ReservationOutcomeProjector:
             economic_version=context.economic_version,
             receiver_profile_id=context.receiver_profile_id,
         )
-        return PaymentSelection(obligation, PaymentMethod.STRIPE)
+        return PaymentSelection(obligation, method)
 
 
 def _closed_group_shape(commands: tuple[ReservationCommand, ...]) -> bool:

@@ -148,6 +148,8 @@ def create_app(
         provided = request.headers.get("X-V2-Webhook-Secret", "")
         if not _secret_matches(provided, settings.webhook_secret):
             return JSONResponse(status_code=401, content={"status": "unauthorized"})
+        if readiness is not None and readiness().status != "ready":
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
         bounded = await _bounded_body(request, settings.max_body_bytes)
         if type(bounded) is JSONResponse:
             return bounded

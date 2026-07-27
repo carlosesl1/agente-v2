@@ -1,0 +1,103 @@
+{
+  "schema": "v2-public-commercial-catalog-v1",
+  "version": "2026-07-27-v1-catalog-migration",
+  "products": [
+    {
+      "canonical_id": "product:tour-2ms",
+      "public_name": "Roteiro 2Ms",
+      "aliases": ["2M's Tour", "2Ms Tour", "2M Tour", "Roteiro 2Ms", "Roteiro 2M", "2Ms", "2M"],
+      "difficulty": "easy"
+    },
+    {
+      "canonical_id": "product:tour-4ps",
+      "public_name": "Roteiro 4Ps",
+      "aliases": ["4P's Tour", "4Ps", "4P", "Roteiro 4Ps", "Roteiro dos 4Ps", "4Ps Tour"],
+      "difficulty": "easy"
+    },
+    {
+      "canonical_id": "product:aguas-claras",
+      "public_name": "Águas Claras",
+      "aliases": ["Águas Claras", "Aguas Claras", "Águas Claras Day Hike"],
+      "difficulty": "easy"
+    },
+    {
+      "canonical_id": "product:buracao",
+      "public_name": "Cachoeira do Buracão",
+      "aliases": ["Buracão", "Buracao", "Roteiro do Buracão", "Buracão Waterfall"],
+      "difficulty": "intermediate",
+      "allowed_weekdays": ["wednesday"]
+    },
+    {
+      "canonical_id": "product:mixila-1d",
+      "public_name": "Mixila 1 dia",
+      "aliases": ["Mixila 1 dia", "Mixila 1D", "Mixila de um dia", "Cachoeira do Mixila 1D", "Day hike to Mixila Waterfall"],
+      "difficulty": "hard"
+    },
+    {
+      "canonical_id": "product:fumaca-por-baixo-3d",
+      "public_name": "Fumaça por Baixo 3 dias",
+      "aliases": ["Fumaça por Baixo", "Fumaca por Baixo", "Fumaça por Baixo 3D", "Fumaca por Baixo 3D", "Fumaça from Below - 3 Days Trek"],
+      "difficulty": "hard"
+    },
+    {
+      "canonical_id": "product:fumaca-por-cima",
+      "public_name": "Fumaça por Cima",
+      "aliases": ["Fumaça por Cima", "Fumaca por Cima", "Fumaça Waterfall from Above"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:mandassaia-lapao",
+      "public_name": "Mandassaia e Gruta do Lapão",
+      "aliases": ["Mandassaia", "Mandassaia-Lapão", "Mandassaia Lapão", "Mandassaia e Gruta do Lapão", "Mandassaia Waterfall and Lapão Cave"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:marimbus",
+      "public_name": "Roteiro do Marimbus",
+      "aliases": ["Marimbus", "Roteiro do Marimbus", "Marimbus Tour"],
+      "difficulty": "easy"
+    },
+    {
+      "canonical_id": "product:mixila-2d",
+      "public_name": "Mixila 2 dias",
+      "aliases": ["Mixila 2 dias", "Mixila 2D", "Cachoeira do Mixila 2D", "Mixila Waterfall - 2 Days trekking"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:pati-3d-english",
+      "public_name": "Vale do Pati 3 dias com guia em inglês",
+      "aliases": ["Pati Valley 3 days with English Speaking Guide", "Pati Valley 3 days", "English Pati 3D", "Pati ENG"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:sossego",
+      "public_name": "Cachoeira do Sossego",
+      "aliases": ["Sossego", "Cachoeira do Sossego", "Sossego Waterfall Day Hike"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:pati-2d",
+      "public_name": "Vale do Pati 2 dias",
+      "aliases": ["Pati 2D", "Pati 2 dias", "Pati 2 days", "Vale do Pati 2D", "Vale do Pati 2 dias", "Vale do Pati 2 days"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:pati-3d",
+      "public_name": "Vale do Pati 3 dias",
+      "aliases": ["Pati 3D", "Pati 3 dias", "Pati 3 days", "Vale do Pati 3D", "Vale do Pati 3 dias", "Vale do Pati 3 days"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:pati-4d",
+      "public_name": "Vale do Pati 4 dias",
+      "aliases": ["Pati 4D", "Pati 4 dias", "Pati 4 days", "Vale do Pati 4D", "Vale do Pati 4 dias", "Vale do Pati 4 days"],
+      "difficulty": "intermediate"
+    },
+    {
+      "canonical_id": "product:pati-5d",
+      "public_name": "Vale do Pati 5 dias",
+      "aliases": ["Pati 5D", "Pati 5 dias", "Pati 5 days", "Vale do Pati 5D", "Vale do Pati 5 dias", "Vale do Pati 5 days"],
+      "difficulty": "intermediate"
+    }
+  ]
+}

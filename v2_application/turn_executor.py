@@ -56,6 +56,7 @@ from v2_contracts.channel import InboundBatch
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
+from v2_contracts.providers import ReadObservation
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -504,8 +505,6 @@ class V2TurnExecutor:
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
-        if len(first_audited.frames) != 1:
-            raise TurnExecutionError("each model call must return one audited exchange")
         first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
@@ -515,10 +514,21 @@ class V2TurnExecutor:
             raise TurnExecutionError("model proposed duplicate reads")
         v2_observations = ()
         if read_requests:
-            v2_observations = tuple(
-                self._reads.accept(self._reads.read(item), now=now)
-                for item in read_requests
-            )
+            accepted_observations: list[ReadObservation] = []
+            for item in read_requests:
+                observation = self._reads.read(item)
+                observed_now = self._clock.now()
+                if (
+                    type(observed_now) is not datetime
+                    or observed_now.tzinfo is None
+                    or observed_now.utcoffset() != timedelta(0)
+                    or observed_now < now
+                ):
+                    raise TurnExecutionError("read clock is not monotonic UTC")
+                accepted_observations.append(
+                    self._reads.accept(observation, now=observed_now)
+                )
+            v2_observations = tuple(accepted_observations)
             followup = ModelRequest(
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
@@ -532,10 +542,6 @@ class V2TurnExecutor:
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
-            if len(second_audited.frames) != 1:
-                raise TurnExecutionError(
-                    "each model call must return one audited exchange"
-                )
             proposal = validate_productive_proposal(second_audited.proposal)
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
@@ -545,6 +551,17 @@ class V2TurnExecutor:
         else:
             audited = first_audited
             proposal = first_proposal
+
+        decision_now = self._clock.now()
+        if (
+            type(decision_now) is not datetime
+            or decision_now.tzinfo is None
+            or decision_now.utcoffset() != timedelta(0)
+            or decision_now < now
+        ):
+            raise TurnExecutionError("decision clock is not monotonic UTC")
+        if decision_now > now + self._turn_timeout:
+            raise TurnExecutionError("turn deadline expired before decision")
 
         frames = _frame_commitments(audited)
         final_frame_hash = frames[-1].canonical_hash()
@@ -569,7 +586,7 @@ class V2TurnExecutor:
             profile=profile,
             reads=v2_observations,
             fact_commitment_hash=final_frame_hash,
-            now=now,
+            now=decision_now,
         )
         if not any(item.name == "language" for item in decision.projection.facts):
             language_fact = TypedFact(
@@ -650,7 +667,7 @@ class V2TurnExecutor:
         authority = self._public_authority.resolve(
             batch,
             chunk_count=len(chunks),
-            now=now,
+            now=decision_now,
         )
         if type(authority) is not PublicTurnAuthority:
             raise TypeError("authority port must return exact PublicTurnAuthority")
@@ -658,7 +675,7 @@ class V2TurnExecutor:
             raise TurnExecutionError(
                 "public allocation count does not match reply chunks"
             )
-        if authority.deadline_at <= now:
+        if authority.deadline_at <= decision_now:
             raise TurnExecutionError("public authority deadline is expired")
         effective_binding = _domain_hash(
             "v2-effective-turn-binding-v1",
@@ -767,7 +784,7 @@ class V2TurnExecutor:
             type(commit_now) is not datetime
             or commit_now.tzinfo is None
             or commit_now.utcoffset() != timedelta(0)
-            or commit_now < now
+            or commit_now < decision_now
         ):
             raise TurnExecutionError("commit clock is not monotonic UTC")
         if commit_now > now + self._turn_timeout:

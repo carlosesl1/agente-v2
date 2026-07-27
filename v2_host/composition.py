@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
@@ -14,7 +14,8 @@ from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.completion import PublicOutboxStore
 from v2_application.inbox import SQLiteInbox
 from v2_application.payments import SQLitePaymentInitiationStore
-from v2_host.settings import V2Settings
+from v2_host.public_authority import active_authority_reason
+from v2_host.settings import RuntimeMode, V2Settings
 
 
 class V2Role(str, Enum):
@@ -73,6 +74,7 @@ class V2Container:
         self.payment_initiation = payment_initiation
         self.public_outbox = public_outbox
         self._runtime_capabilities: dict[str, str] | None = None
+        self._public_authority_resolver: object | None = None
         self._closed = False
 
     @classmethod
@@ -177,6 +179,15 @@ class V2Container:
                 )
                 if heartbeat_reason is not None:
                     reasons.append(heartbeat_reason)
+            if self.settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+                ingress_reason = self.controlled_public_ingress_reason(
+                    now=datetime.now(timezone.utc),
+                )
+                capabilities["controlled_public_ingress"] = (
+                    "ready" if ingress_reason is None else "missing"
+                )
+                if ingress_reason is not None:
+                    reasons.append(ingress_reason)
         elif self._runtime_capabilities is None:
             capabilities = {"productive_graph": "missing"}
             reasons.append("productive_graph_not_built")
@@ -219,6 +230,52 @@ class V2Container:
             raise ValueError("runtime capabilities use a closed status grammar")
         self._runtime_capabilities = dict(capabilities)
 
+    def register_public_authority_resolver(self, resolver: object) -> None:
+        if self.role is not V2Role.WORKER:
+            raise ValueError("public authority resolver belongs to the worker role")
+        if self._public_authority_resolver is not None:
+            raise RuntimeError("public authority resolver is immutable after registration")
+        if not callable(getattr(resolver, "available_turn_capacity", None)):
+            raise TypeError("public authority resolver must expose capacity")
+        self._public_authority_resolver = resolver
+
+    def public_turn_capacity(self, *, now: datetime) -> int:
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+            raise ValueError("public capacity now must be exact UTC")
+        if self._public_authority_resolver is None:
+            return 0
+        capacities = tuple(
+            self._public_authority_resolver.available_turn_capacity(
+                subscriber,
+                now=now,
+            )
+            for subscriber in self.settings.allowed_subscriber_ids
+        )
+        return min(capacities) if capacities else 0
+
+    def controlled_public_ingress_reason(self, *, now: datetime) -> str | None:
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+            raise ValueError("controlled ingress now must be exact UTC")
+        if self.settings.runtime_mode is not RuntimeMode.CONTROLLED_WRITE:
+            return None
+        if not self.settings.manychat_delivery_enabled:
+            return "manychat_delivery_gate_closed"
+        if not self.settings.write_window_is_open(now):
+            return "write_window_closed"
+        if self.settings.public_authority_manifest_path is None:
+            return "public_authority_missing"
+        reason = active_authority_reason(
+            manifest_path=self.settings.public_authority_manifest_path,
+            hmac_key=self.settings.public_authority_hmac_key,
+            subscriber_ids=self.settings.allowed_subscriber_ids,
+            now=now,
+        )
+        if reason is not None:
+            return reason
+        if self.role is V2Role.WORKER and self.public_turn_capacity(now=now) < 1:
+            return "public_authority_allocations_exhausted"
+        return None
+
     def _worker_heartbeat_reason(self) -> str | None:
         path = self.settings.worker_heartbeat_path
         try:
@@ -234,6 +291,17 @@ class V2Container:
             return "worker_heartbeat_stale"
         if status != "healthy":
             return "worker_heartbeat_degraded"
+        if self.settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+            if value.get("public_ingress_ready") is not True:
+                reason = value.get("public_ingress_reason")
+                return (
+                    reason
+                    if type(reason) is str and reason
+                    else "worker_public_ingress_not_ready"
+                )
+            capacity = value.get("public_turn_capacity")
+            if type(capacity) is not int or capacity < 1:
+                return "public_authority_allocations_exhausted"
         return None
 
     def close(self) -> None:

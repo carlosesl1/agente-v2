@@ -197,6 +197,8 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             "cloudbeds_writes": True,
             "bokun_writes": False,
             "stripe_links": False,
+            "wise_instructions": False,
+            "pix_instructions": False,
             "manychat_delivery": False,
             "manychat_handoff": False,
         }
@@ -277,6 +279,62 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         )
     finally:
         stripe_container.close()
+
+    payment_instructions = tmp_path / "payment-instructions.json"
+    payment_instructions.write_text(
+        json.dumps(
+            {
+                "schema": "v2-payment-instructions-v1",
+                "version": "test-v1",
+                "hostel": {
+                    "pix": "Pix hostel; aguarde validação.",
+                    "wise": "Wise hostel; aguarde validação.",
+                },
+                "agency": {
+                    "pix": "Pix agência; aguarde validação.",
+                    "wise": "Wise agência; aguarde validação.",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    instructions_enabled = replace(
+        settings,
+        wise_instructions_enabled=True,
+        pix_instructions_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+        stripe_hostel_account_profile_id="receiver:hostel",
+        stripe_agency_account_profile_id="receiver:agency",
+        payment_instruction_path=payment_instructions,
+    )
+    instructions_container = V2Container.open(
+        settings=instructions_enabled,
+        role=V2Role.WORKER,
+    )
+    try:
+        instructions_workers = build_worker_set(
+            container=instructions_container,
+            settings=instructions_enabled,
+        )
+        assert type(
+            instructions_workers[WorkerQueue.PAYMENT_INITIATION]
+        ) is PaymentInitiationWorker
+        assert type(
+            instructions_workers[WorkerQueue.OUTCOME_PROJECTOR]
+        ) is ReservationOutcomeProjector
+        assert type(
+            instructions_workers[WorkerQueue.POST_PAYMENT]
+        ) is CompletionProjector
+        assert instructions_container.readiness().capabilities[
+            "wise_instructions"
+        ] == "ready"
+        assert instructions_container.readiness().capabilities[
+            "pix_instructions"
+        ] == "ready"
+    finally:
+        instructions_container.close()
 
     manychat_enabled = replace(
         settings,

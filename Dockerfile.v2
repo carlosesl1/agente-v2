@@ -38,7 +38,10 @@ COPY v2_application /app/v2_application
 COPY v2_contracts /app/v2_contracts
 COPY v2_host /app/v2_host
 COPY config/cerebro_faq.yaml /app/config/cerebro_faq.yaml
+COPY config/v2_bokun_product_map.json /app/config/v2_bokun_product_map.json
 COPY config/v2_luna_system_prompt.txt /app/config/v2_luna_system_prompt.txt
+COPY config/v2_payment_instructions.json /app/config/v2_payment_instructions.json
+COPY config/v2_public_commercial_catalog.json /app/config/v2_public_commercial_catalog.json
 
 RUN python -m compileall -q \
       reservation_boundary \

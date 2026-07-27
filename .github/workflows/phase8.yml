@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - phase8-shadow-canary-rollout
+      - maya-v2-operational-readiness
   pull_request:
     paths:
       - "reservation_*/**"
       - "v2_*/**"
+      - "config/**"
+      - "deploy/**"
       - "tests/**"
+      - "docs/refactor/ACTIVE.md"
       - "Dockerfile.v2"
       - ".dockerignore"
       - "compose.v2.yaml"

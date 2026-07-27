@@ -99,7 +99,10 @@ def test_reducer_accumulates_user_supplied_customer_facts_when_profile_is_empty(
         now=NOW,
     )
 
-    assert first.public_reply.kind == "profile_completion"
+    assert first.public_reply.kind == "inform"
+    assert first.public_reply.chunks == (
+        "Vou guardar esses dados para a reserva.",
+    )
     assert tuple(item.name for item in first.projection.facts) == (
         "full_name",
         "email",

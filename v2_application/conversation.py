@@ -711,41 +711,8 @@ class V2ConversationReducer:
                 handoff_request=handoff_request,
                 receipt_requirements=("handoff_relay",),
             )
-        if not _profile_ready(profile, merged, instant):
-            return V2ConversationDecision(
-                next_state=_consume_without_workflow_transition(
-                    state, proposal.source_event_id
-                ),
-                projection=merged,
-                commands=(),
-                public_reply=ConversationReply(
-                    "profile_completion",
-                    ("Complete seus dados no perfil para eu continuar com segurança.",),
-                ),
-                receipt_requirements=("profile_completion",),
-            )
-
-        customer = _customer(profile, merged)
-        if (
-            proposal.intent == "select"
-            and DesiredService.AGENCY in merged.desired_services
-            and (customer.birth_date is None or customer.gender is None)
-        ):
-            return V2ConversationDecision(
-                next_state=_consume_without_workflow_transition(
-                    state, proposal.source_event_id
-                ),
-                projection=merged,
-                commands=(),
-                public_reply=ConversationReply(
-                    "profile_completion",
-                    (
-                        "Para reservar o passeio, preciso da data de nascimento e gênero cadastral.",
-                    ),
-                ),
-                receipt_requirements=("profile_completion",),
-            )
-
+        # An active human handoff suppresses identity-dependent effects even when the
+        # private profile is incomplete.  Informational turns remain conversational.
         if state.handoff is not None and proposal.intent in {"select", "confirm"}:
             return V2ConversationDecision(
                 next_state=_consume_without_workflow_transition(
@@ -762,6 +729,46 @@ class V2ConversationReducer:
                 ),
                 receipt_requirements=("handoff_effect_guard",),
             )
+
+        # A complete customer binding is a write-boundary requirement, not a
+        # prerequisite for greetings, discovery, FAQ, or read-only provider work.
+        if proposal.intent in {"select", "confirm"} and not _profile_ready(
+            profile, merged, instant
+        ):
+            return V2ConversationDecision(
+                next_state=_consume_without_workflow_transition(
+                    state, proposal.source_event_id
+                ),
+                projection=merged,
+                commands=(),
+                public_reply=ConversationReply(
+                    "profile_completion",
+                    (
+                        "Para avançar com a reserva, preciso dos seus dados de contato.",
+                    ),
+                ),
+                receipt_requirements=("profile_completion",),
+            )
+
+        if proposal.intent == "select":
+            customer = _customer(profile, merged)
+            if DesiredService.AGENCY in merged.desired_services and (
+                customer.birth_date is None or customer.gender is None
+            ):
+                return V2ConversationDecision(
+                    next_state=_consume_without_workflow_transition(
+                        state, proposal.source_event_id
+                    ),
+                    projection=merged,
+                    commands=(),
+                    public_reply=ConversationReply(
+                        "profile_completion",
+                        (
+                            "Para reservar o passeio, preciso da data de nascimento e gênero cadastral.",
+                        ),
+                    ),
+                    receipt_requirements=("profile_completion",),
+                )
 
         workflow = state.workflow
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "confirm":

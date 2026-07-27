@@ -288,7 +288,9 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         replace(audited.frames[0], stdout_bytes=audited.frames[0].stdout_bytes + b"x")
 
 
-def test_hermes_adapter_normalizes_reply_boundaries_but_rejects_empty() -> None:
+def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair() -> (
+    None
+):
     def proposal(reply: str) -> bytes:
         return json.dumps(
             {
@@ -306,7 +308,11 @@ def test_hermes_adapter_normalizes_reply_boundaries_but_rejects_empty() -> None:
             separators=(",", ":"),
         ).encode()
 
-    responses = [proposal("  Olá!  \n"), proposal(" \n ")]
+    responses = [
+        proposal("  Olá!  \n"),
+        proposal(" \n "),
+        proposal(" \n "),
+    ]
 
     def run(command, *, input, capture_output, timeout, check, env):
         return Completed(b"PHASE8_RESULT\x00" + responses.pop(0))
@@ -329,5 +335,53 @@ def test_hermes_adapter_normalizes_reply_boundaries_but_rejects_empty() -> None:
     )
 
     assert adapter.complete(request).reply_chunks == ("Olá!",)
-    with pytest.raises(InvalidModelProposal, match="reply_chunks"):
-        adapter.complete(request)
+
+    fallback = adapter.complete_audited(request)
+
+    assert fallback.proposal.reply_chunks == (
+        "Não consegui concluir essa resposta agora. Pode repetir sua última mensagem?",
+    )
+    assert fallback.proposal.intent == "inform"
+    assert fallback.proposal.read_requests == ()
+    assert fallback.proposal.effect_proposals == ()
+    assert len(fallback.frames) == 3
+    assert fallback.closure.ephemeral_session_id.startswith("deterministic:")
+
+
+def test_hermes_adapter_falls_back_after_two_child_process_failures() -> None:
+    class Failed:
+        returncode = 1
+        stdout = b""
+        stderr = b"child failed"
+
+    responses = [Failed(), Failed()]
+
+    def run(command, *, input, capture_output, timeout, check, env):
+        return responses.pop(0)
+
+    adapter = HermesModelAdapter(
+        command=("hermes-model-child",),
+        system_prompt="Return closed V2 JSON.",
+        timeout=30,
+        transcript_key=b"n" * 32,
+        run=run,
+        environ={"PATH": "/usr/bin"},
+    )
+    request = ModelRequest(
+        request_id="model-request:process-failure",
+        lead_id="manychat:process-failure",
+        source_event_id="event:process-failure",
+        message="Oi",
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    fallback = adapter.complete_audited(request)
+
+    assert fallback.proposal.source_event_id == request.source_event_id
+    assert fallback.proposal.intent == "inform"
+    assert len(fallback.proposal.reply_chunks) == 1
+    assert fallback.proposal.read_requests == ()
+    assert fallback.proposal.effect_proposals == ()
+    assert len(fallback.frames) == 3
+    assert fallback.closure.ephemeral_session_id.startswith("deterministic:")

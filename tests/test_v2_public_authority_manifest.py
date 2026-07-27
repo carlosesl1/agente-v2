@@ -10,7 +10,10 @@ import pytest
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from v2_contracts.channel import InboundBatch, InboundEvent
-from v2_host.public_authority import ManifestPublicAuthorityResolver
+from v2_host.public_authority import (
+    ManifestPublicAuthorityResolver,
+    active_authority_reason,
+)
 
 
 NOW = datetime(2026, 7, 23, 18, 0, tzinfo=timezone.utc)
@@ -110,8 +113,56 @@ def test_authenticated_manifest_installs_and_resolves_finite_shadow_authority(
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
+        assert resolver.available_turn_capacity("1873018537", now=NOW) == 1
     finally:
         store.close()
+
+
+def test_signed_manifest_status_rejects_expiry_and_missing_reply_ordinal(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority-status.json"
+    _manifest(path)
+
+    assert active_authority_reason(
+        manifest_path=path,
+        hmac_key=KEY,
+        subscriber_ids=("1873018537",),
+        now=NOW,
+    ) is None
+    assert active_authority_reason(
+        manifest_path=path,
+        hmac_key=KEY,
+        subscriber_ids=("1873018537",),
+        now=NOW + timedelta(hours=1),
+    ) == "public_authority_expired"
+
+    payload = json.loads(path.read_text())
+    payload["authorities"][0]["allocations"] = [
+        {"allocation_id": "allocation:only-one-chunk", "ordinal": 0}
+    ]
+    signed = {
+        "schema": payload["schema"],
+        "authorities": payload["authorities"],
+    }
+    payload["hmac_sha256"] = hmac.new(
+        KEY,
+        json.dumps(
+            signed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert active_authority_reason(
+        manifest_path=path,
+        hmac_key=KEY,
+        subscriber_ids=("1873018537",),
+        now=NOW,
+    ) == "public_authority_reply_capacity_missing"
 
 
 def test_manifest_tampering_fails_before_install(tmp_path: Path) -> None:

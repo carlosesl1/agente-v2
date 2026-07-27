@@ -19,7 +19,7 @@ from reservation_execution.projection import LedgerSnapshot
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from v2_application.completion import PublicOutboxStore, PublicReply
 from v2_application.payments import SQLitePaymentInitiationStore
-from v2_contracts.payments import BusinessUnit, StripePaymentLink
+from v2_contracts.payments import BusinessUnit, PaymentInstruction, StripePaymentLink
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,19 +107,33 @@ class CompletionProjector:
                 now=instant,
             )
         for offer in self._payment_store.completed_offers():
-            if type(offer) is not StripePaymentLink:
+            if type(offer) not in (StripePaymentLink, PaymentInstruction):
                 continue
-            unit = self._unit_by_profile.get(offer.account_profile_id)
+            profile_id = (
+                offer.account_profile_id
+                if type(offer) is StripePaymentLink
+                else offer.receiver_profile_id
+            )
+            unit = self._unit_by_profile.get(profile_id)
             if unit is None:
-                raise RuntimeError("completed Stripe link has an unknown account profile")
+                raise RuntimeError("completed payment offer has an unknown receiver profile")
+            if type(offer) is StripePaymentLink:
+                message_id = _opaque("message:payment-link", offer.payment_id)
+                text = _payment_text(unit, offer.public_url)
+            else:
+                message_id = _opaque(
+                    f"message:payment-{offer.method.value}",
+                    offer.payment_id,
+                )
+                text = offer.public_text
             attempted += 1
             inserted += self._public_store.enqueue(
                 PublicReply(
                     release_id=_opaque("release:10-payment", offer.payment_id),
                     lead_id=self._lead_id,
-                    message_id=_opaque("message:payment-link", offer.payment_id),
+                    message_id=message_id,
                     channel="manychat",
-                    chunks=(_payment_text(unit, offer.public_url),),
+                    chunks=(text,),
                 ),
                 now=instant,
             )

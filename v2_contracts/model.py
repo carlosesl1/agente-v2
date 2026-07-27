@@ -430,20 +430,42 @@ class AuditedModelTurn:
         return cls(proposal, frames, closure)
 
     @classmethod
+    def from_frames(
+        cls,
+        *,
+        proposal: ModelProposal,
+        frames: tuple[AuditedTranscriptFrame, ...],
+        ephemeral_session_id: str,
+    ) -> AuditedModelTurn:
+        """Close one logical model turn over exact attempts plus safe fallback."""
+
+        if type(proposal) is not ModelProposal:
+            raise TypeError("proposal must be an exact ModelProposal")
+        if type(frames) is not tuple or not frames or any(
+            type(item) is not AuditedTranscriptFrame for item in frames
+        ):
+            raise TypeError("frames must contain exact AuditedTranscriptFrame values")
+        closure = AuditedTranscriptClosure(
+            final_seq=len(frames),
+            final_frame_hash=frames[-1].commitment_hash(),
+            transcript_mac=cls._transcript_mac(frames),
+            ephemeral_session_id=ephemeral_session_id,
+            zero_requests_in_flight=True,
+        )
+        return cls(proposal, frames, closure)
+
+    @classmethod
     def combine(cls, turns: tuple[AuditedModelTurn, ...]) -> AuditedModelTurn:
         if type(turns) is not tuple or not turns:
             raise ValueError("turns must be a non-empty exact tuple")
         if any(type(item) is not cls for item in turns):
             raise TypeError("turns must contain exact AuditedModelTurn values")
         frames = tuple(frame for turn in turns for frame in turn.frames)
-        closure = AuditedTranscriptClosure(
-            final_seq=len(frames),
-            final_frame_hash=frames[-1].commitment_hash(),
-            transcript_mac=cls._transcript_mac(frames),
+        return cls.from_frames(
+            proposal=turns[-1].proposal,
+            frames=frames,
             ephemeral_session_id=turns[-1].closure.ephemeral_session_id,
-            zero_requests_in_flight=True,
         )
-        return cls(turns[-1].proposal, frames, closure)
 
 
 __all__ = [

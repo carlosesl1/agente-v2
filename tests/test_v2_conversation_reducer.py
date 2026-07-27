@@ -382,6 +382,36 @@ def test_incomplete_profile_and_stale_confirmation_never_emit_command() -> None:
     assert stale.public_reply.kind == "stale_confirmation"
 
 
+@pytest.mark.parametrize("intent", ("inform", "adjust"))
+def test_incomplete_profile_allows_non_identity_dependent_conversation(
+    intent: str,
+) -> None:
+    proposal = ModelProposal(
+        source_event_id=f"event:{intent}-incomplete-profile",
+        intent=intent,
+        reply_chunks=("Posso te ajudar com informações antes da reserva.",),
+        facts=(ModelFact("language", "pt-BR"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    decision = V2ConversationReducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(complete=False),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.handoff_request is None
+    assert decision.public_reply.kind == "inform"
+    assert decision.public_reply.chunks == proposal.reply_chunks
+    assert decision.receipt_requirements == ()
+
+
 def test_selection_builds_authoritative_summary_without_command() -> None:
     divergent = _proposal(
         source="event:select-divergent",

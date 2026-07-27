@@ -12,6 +12,7 @@ from typing import Final
 
 from v2_contracts.model import (
     AuditedModelTurn,
+    AuditedTranscriptFrame,
     EffectProposal,
     InvalidModelProposal,
     ModelFact,
@@ -56,6 +57,13 @@ _RESPONSE_FIELDS_V1: Final = frozenset(
     )
 )
 _RESPONSE_FIELDS_V2: Final = frozenset((*_RESPONSE_FIELDS_V1, "target_offer_ids"))
+_PROTOCOL_REPAIR_SUFFIX: Final = """
+
+PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
+Return exactly one v2-model-proposal-v2 JSON object and no commentary. reply_chunks
+must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
+effects, IDs, or facts that are not justified by the original request and observations.
+""".strip()
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -273,10 +281,32 @@ class HermesModelAdapter:
     def complete(self, request: ModelRequest) -> ModelProposal:
         return self.complete_audited(request).proposal
 
-    def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
-        if type(request) is not ModelRequest:
-            raise TypeError("request must be an exact ModelRequest")
-        stdin_bytes = _request_wire(request, self._system_prompt)
+    def _failure_frame(
+        self,
+        *,
+        stdin_bytes: bytes,
+        reason: str,
+    ) -> AuditedTranscriptFrame:
+        response = _canonical(
+            {
+                "schema": "v2-model-attempt-failure-v1",
+                "reason": reason,
+            }
+        )
+        stdout = b"V2_MODEL_ATTEMPT_FAILURE\x00" + response
+        return AuditedTranscriptFrame.create(
+            stdin_bytes=stdin_bytes,
+            stdout_bytes=stdout,
+            response_bytes=response,
+            transcript_key=self._transcript_key,
+        )
+
+    def _attempt(
+        self,
+        request: ModelRequest,
+        *,
+        stdin_bytes: bytes,
+    ) -> tuple[AuditedModelTurn | None, AuditedTranscriptFrame]:
         try:
             result = self._run(
                 self._command,
@@ -286,8 +316,11 @@ class HermesModelAdapter:
                 check=False,
                 env=self._child_env,
             )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise InvalidModelProposal("Hermes child process failed") from exc
+        except (OSError, subprocess.SubprocessError):
+            return None, self._failure_frame(
+                stdin_bytes=stdin_bytes,
+                reason="child_process_failed",
+            )
         returncode = getattr(result, "returncode", None)
         stdout = getattr(result, "stdout", None)
         stderr = getattr(result, "stderr", None)
@@ -296,26 +329,121 @@ class HermesModelAdapter:
             or type(stdout) is not bytes
             or type(stderr) is not bytes
         ):
-            raise InvalidModelProposal(
-                "Hermes child returned an invalid process result"
+            return None, self._failure_frame(
+                stdin_bytes=stdin_bytes,
+                reason="invalid_process_result",
             )
         if returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip()[-500:]
-            raise InvalidModelProposal(detail or f"Hermes child exited {returncode}")
+            return None, self._failure_frame(
+                stdin_bytes=stdin_bytes,
+                reason="child_nonzero_exit",
+            )
         marker_at = stdout.rfind(_RESULT_MARKER)
         if marker_at < 0:
-            raise InvalidModelProposal("Hermes child result marker is missing")
+            return None, self._failure_frame(
+                stdin_bytes=stdin_bytes,
+                reason="result_marker_missing",
+            )
         response = stdout[marker_at + len(_RESULT_MARKER) :]
         if not response or len(response) > 128 * 1024:
-            raise InvalidModelProposal("Hermes model response size is invalid")
-        proposal = _proposal(response, request.source_event_id)
-        return AuditedModelTurn.from_exchange(
+            return None, self._failure_frame(
+                stdin_bytes=stdin_bytes,
+                reason="response_size_invalid",
+            )
+        frame = AuditedTranscriptFrame.create(
+            stdin_bytes=stdin_bytes,
+            stdout_bytes=stdout,
+            response_bytes=response,
+            transcript_key=self._transcript_key,
+        )
+        try:
+            proposal = _proposal(response, request.source_event_id)
+        except InvalidModelProposal:
+            return None, frame
+        turn = AuditedModelTurn.from_exchange(
             proposal=proposal,
             stdin_bytes=stdin_bytes,
             stdout_bytes=stdout,
             response_bytes=response,
             transcript_key=self._transcript_key,
             ephemeral_session_id="uds:" + hashlib.sha256(stdin_bytes).hexdigest()[:32],
+        )
+        return turn, turn.frames[0]
+
+    @staticmethod
+    def _fallback_proposal(request: ModelRequest) -> ModelProposal:
+        if request.locale.lower().startswith("en"):
+            text = "I couldn't complete that reply just now. Could you repeat your last message?"
+        else:
+            text = (
+                "Não consegui concluir essa resposta agora. "
+                "Pode repetir sua última mensagem?"
+            )
+        return ModelProposal(
+            source_event_id=request.source_event_id,
+            intent="inform",
+            reply_chunks=(text,),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        )
+
+    def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
+        if type(request) is not ModelRequest:
+            raise TypeError("request must be an exact ModelRequest")
+        original_stdin = _request_wire(request, self._system_prompt)
+        attempted_frames: list[AuditedTranscriptFrame] = []
+        prompts = (
+            self._system_prompt,
+            self._system_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,
+        )
+        for prompt in prompts:
+            stdin_bytes = (
+                original_stdin
+                if prompt == self._system_prompt
+                else _request_wire(request, prompt)
+            )
+            turn, frame = self._attempt(request, stdin_bytes=stdin_bytes)
+            if turn is not None:
+                if not attempted_frames:
+                    return turn
+                return AuditedModelTurn.from_frames(
+                    proposal=turn.proposal,
+                    frames=(*attempted_frames, *turn.frames),
+                    ephemeral_session_id=turn.closure.ephemeral_session_id,
+                )
+            attempted_frames.append(frame)
+
+        proposal = self._fallback_proposal(request)
+        fallback_response = _canonical(
+            {
+                "schema": "v2-deterministic-protocol-fallback-v1",
+                "source_event_id": request.source_event_id,
+                "intent": proposal.intent,
+                "reply_chunks": list(proposal.reply_chunks),
+                "facts": [],
+                "read_requests": [],
+                "effect_proposals": [],
+            }
+        )
+        fallback_stdin = _canonical(
+            {
+                "schema": "v2-deterministic-protocol-fallback-request-v1",
+                "request_hash": hashlib.sha256(original_stdin).hexdigest(),
+                "failed_attempts": len(attempted_frames),
+            }
+        )
+        fallback_frame = AuditedTranscriptFrame.create(
+            stdin_bytes=fallback_stdin,
+            stdout_bytes=b"V2_DETERMINISTIC_FALLBACK\x00" + fallback_response,
+            response_bytes=fallback_response,
+            transcript_key=self._transcript_key,
+        )
+        session_hash = hashlib.sha256(fallback_stdin).hexdigest()[:32]
+        return AuditedModelTurn.from_frames(
+            proposal=proposal,
+            frames=(*attempted_frames, fallback_frame),
+            ephemeral_session_id=f"deterministic:protocol-fallback:{session_hash}",
         )
 
 

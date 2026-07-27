@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Mapping
 from urllib.parse import quote, urlparse
 
@@ -254,18 +255,28 @@ class StripeLinkAdapter:
             raise TypeError("obligation must be exact PaymentObligation")
         if not self._enabled:
             raise RuntimeError("stripe_link_gate_closed")
+        payment_percentage = self._percentages[obligation.business_unit]
+        amount_minor = int(
+            (
+                Decimal(obligation.amount_minor)
+                * Decimal(payment_percentage)
+                / Decimal(100)
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+        if amount_minor < 1:
+            raise ValueError("payment percentage produced no payable minor units")
         request = StripeLinkRequest(
             payment_id=obligation.payment_id,
             reservation_anchor_id=obligation.reservation_anchor_id,
             account_profile_id=self._profiles[obligation.business_unit],
-            amount_minor=obligation.amount_minor,
+            amount_minor=amount_minor,
             currency=obligation.currency,
             economic_version=obligation.economic_version,
             idempotency_key=(
                 f"stripe-link:{obligation.payment_id}:v{obligation.economic_version}"
             ),
             subscriber_fingerprint=self._subscriber_fingerprint,
-            payment_percentage=self._percentages[obligation.business_unit],
+            payment_percentage=payment_percentage,
             business_unit=obligation.business_unit,
         )
         response = self._transport(request)

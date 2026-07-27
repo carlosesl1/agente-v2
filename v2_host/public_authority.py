@@ -284,5 +284,63 @@ class ManifestPublicAuthorityResolver:
             deadline_at=entry.deadline_at,
         )
 
+    def available_turn_capacity(self, subscriber_id: str, *, now: datetime) -> int:
+        if type(subscriber_id) is not str or not subscriber_id:
+            raise ValueError("subscriber_id must be exact non-empty text")
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+            raise ValueError("authority capacity now must be exact UTC")
+        entry = self._by_subscriber.get(subscriber_id)
+        if entry is None or now >= entry.deadline_at:
+            return 0
+        counts = []
+        for ordinal in (0, 1):
+            row = self._store._connection.execute(
+                "SELECT count(*) FROM boundary_dispatch_authority WHERE "
+                "authorization_id=? AND scope_subject_id=? AND channel_scope=? "
+                "AND generation=? AND row_kind='allocation' "
+                "AND allowed_chunk_ordinal=? AND state='available'",
+                (
+                    entry.authorization_id,
+                    entry.subscriber_id,
+                    entry.channel_scope,
+                    entry.generation,
+                    ordinal,
+                ),
+            ).fetchone()
+            counts.append(int(row[0]))
+        return min(counts)
 
-__all__ = ["ManifestPublicAuthorityResolver"]
+
+def active_authority_reason(
+    *,
+    manifest_path: Path,
+    hmac_key: bytes,
+    subscriber_ids: tuple[str, ...],
+    now: datetime,
+) -> str | None:
+    if type(subscriber_ids) is not tuple or not subscriber_ids or any(
+        type(item) is not str or not item for item in subscriber_ids
+    ):
+        raise ValueError("subscriber_ids must contain exact non-empty text")
+    if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+        raise ValueError("authority status now must be exact UTC")
+    try:
+        entries = ManifestPublicAuthorityResolver._load(manifest_path, hmac_key)
+    except (TypeError, ValueError):
+        return "public_authority_invalid"
+    by_subscriber = {entry.subscriber_id: entry for entry in entries}
+    if len(by_subscriber) != len(entries) or any(
+        subscriber not in by_subscriber for subscriber in subscriber_ids
+    ):
+        return "public_authority_subscriber_missing"
+    for subscriber in subscriber_ids:
+        entry = by_subscriber[subscriber]
+        if now >= entry.deadline_at:
+            return "public_authority_expired"
+        ordinals = {ordinal for _, ordinal in entry.allocations}
+        if not {0, 1}.issubset(ordinals):
+            return "public_authority_reply_capacity_missing"
+    return None
+
+
+__all__ = ["ManifestPublicAuthorityResolver", "active_authority_reason"]

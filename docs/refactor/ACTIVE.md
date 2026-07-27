@@ -2,21 +2,21 @@
 
 ## Autoridade
 
-- Estado: `IMPLEMENTED_LOCAL_QUALIFIED`
-- Branch obrigatória: `phase8-shadow-canary-rollout`
+- Estado: `OPERATIONAL_REPAIRS_LOCAL_QUALIFIED`
+- Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-07-23-fasttrack-complete-agent-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-07-23-v2-fasttrack-runtime.md`
-- Base funcional anterior ao plano: `9fded4a7949cfade8b1d3dfc0e2e3dd023ca6543`
-- Rollout: `NO-GO`
-- Provider writes reais: `BLOQUEADOS`
-- ManyChat público real: `BLOQUEADO`
+- Especificação ativa: `docs/superpowers/specs/2026-07-27-maya-v2-operational-readiness-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-07-27-maya-v2-operational-readiness.md`
+- Base funcional anterior ao plano: `084f338a9a67dcc52c568a420a276174e8ecedca`
+- Rollout: `DARK_CANARY_PENDING`
+- Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
+- ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
-## IMPLEMENTAÇÃO CONCLUÍDA
+## REPAROS OPERACIONAIS AUTORIZADOS
 
-Tasks 1–9 estão `DONE`. Candidato funcional final: `45b2fe4c488653c9ea0d3dd7432bdd3c3bca39cd`.
+Carlos autorizou em 2026-07-27 a correção de conversa pré-reserva, relógio de consultas, fallback de protocolo, conhecimento comercial e controle operacional, além da preparação de todas as funções sob testes limitados.
 
-Não existe nova task de implementação autorizada. O próximo avanço possível é exclusivamente operacional e exige nova solicitação/aprovação explícita; rollout, deploy, restart, writes reais e ManyChat público continuam `NO-GO`/bloqueados.
+O candidato está qualificado localmente. O próximo avanço autorizado é: revisão final, commit/push do branch, CI no SHA exato, imagem imutável e dark canary com todos os efeitos externos fechados. Provider writes e entrega ManyChat só podem abrir um por vez, para o subscriber `1873018537`, com janela finita, autoridade assinada, read-back e rollback/fallback ao legado.
 
 ### Decisão de topologia da Task 7
 

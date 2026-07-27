@@ -24,7 +24,13 @@ from v2_application.turn_executor import (
     V2TurnExecutor,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
-from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
+from v2_contracts.model import (
+    AuditedModelTurn,
+    AuditedTranscriptFrame,
+    ModelFact,
+    ModelProposal,
+    ModelRequest,
+)
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
@@ -148,6 +154,39 @@ class FakeAuditedModel:
         )
 
 
+class DeterministicFallbackAuditedModel:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+
+    def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
+        assert self.store._connection.in_transaction is False
+        proposal = ModelProposal(
+            source_event_id=request.source_event_id,
+            intent="inform",
+            reply_chunks=("Pode repetir sua última mensagem?",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        )
+        frames = tuple(
+            AuditedTranscriptFrame.create(
+                stdin_bytes=f"attempt:{index}:{request.request_id}".encode(),
+                stdout_bytes=b"V2_AUDIT\x00" + response,
+                response_bytes=response,
+                transcript_key=TRANSCRIPT_KEY,
+            )
+            for index, response in enumerate(
+                (b"invalid-one", b"invalid-two", b"deterministic-fallback"),
+                start=1,
+            )
+        )
+        return AuditedModelTurn.from_frames(
+            proposal=proposal,
+            frames=frames,
+            ephemeral_session_id="deterministic:test-fallback",
+        )
+
+
 class FixedAuthority:
     def resolve(
         self,
@@ -192,6 +231,39 @@ class FakeLodgingReadPort:
             provider="cloudbeds",
             observed_at=NOW,
             expires_at=NOW + timedelta(minutes=5),
+            public_payload={
+                "offer_id": "offer:" + "7" * 64,
+                "room_public_name": "Suíte Casal",
+                "check_in": "2026-08-10",
+                "check_out": "2026-08-12",
+                "adults": 2,
+                "children": 0,
+                "total_amount": "480.00",
+                "currency": "BRL",
+                "available": True,
+                "available_units": 1,
+            },
+            private_binding_hash="8" * 64,
+        )
+
+
+class ProviderClockedLodgingReadPort:
+    """Stamp the observation during the provider call, after turn start."""
+
+    def __init__(self, store: SQLiteBoundaryStore, clock: SequenceClock) -> None:
+        self.store = store
+        self.clock = clock
+        self.calls: list[ReadRequest] = []
+
+    def read(self, request: ReadRequest) -> ReadObservation:
+        assert self.store._connection.in_transaction is False
+        self.calls.append(request)
+        observed_at = self.clock.now()
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="cloudbeds",
+            observed_at=observed_at,
+            expires_at=observed_at + timedelta(minutes=5),
             public_payload={
                 "offer_id": "offer:" + "7" * 64,
                 "room_public_name": "Suíte Casal",
@@ -349,6 +421,76 @@ def test_atomic_executor_commits_projection_receipt_public_row_and_replays() -> 
             == 1
         )
         assert hashlib.sha256(model.calls[0].request_id.encode()).hexdigest() != ""
+    finally:
+        store.close()
+
+
+def test_executor_accepts_observation_stamped_after_turn_start() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    clock = SequenceClock()
+    request = ReadRequest(
+        request_id="read:post-call-clock",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar.",),
+        facts=(),
+        read_requests=(request,),
+        effect_proposals=(),
+    )
+    model = FakeAuditedModel(store, [first, _proposal("Temos uma opção disponível.")])
+    port = ProviderClockedLodgingReadPort(store, clock)
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: port}),
+        profile=FakeProfile(store),
+        reducer=V2ConversationReducer(),
+        public_authority=MappingAuthority({BATCH.batch_id: AUTHORITY}),
+        clock=clock,
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == ("Temos uma opção disponível.",)
+        assert len(port.calls) == 1
+        assert len(model.calls) == 2
+    finally:
+        store.close()
+
+
+def test_executor_commits_multi_frame_deterministic_fallback_without_effects() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=DeterministicFallbackAuditedModel(store),
+        profile=FakeProfile(store),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == ("Pode repetir sua última mensagem?",)
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_turn_artifacts "
+            "WHERE artifact_kind='frame_commitment'"
+        ).fetchone() == (3,)
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone() == (0,)
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_outbox"
+        ).fetchone() == (0,)
     finally:
         store.close()
 

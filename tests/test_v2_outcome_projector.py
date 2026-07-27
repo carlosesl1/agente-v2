@@ -27,13 +27,15 @@ from v2_application.relay_worker import (
     reservation_target_operation_id,
 )
 from v2_application.reservations import ReservationAllocator
-from v2_contracts.payments import BusinessUnit
+from v2_contracts.payments import BusinessUnit, PaymentMethod
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
 RESULT_KEY = b"outcome-projector-key-0000000001"
 
 
-def _package_command(*, country_code: str = "BR") -> ReservationCommand:
+def _package_command(
+    *, country_code: str = "BR", payment_method: str = "stripe"
+) -> ReservationCommand:
     lodging = _lookup("cloudbeds").offers[0]
     activity = _lookup("bokun").offers[0]
     activity = activity.__class__(
@@ -59,7 +61,7 @@ def _package_command(*, country_code: str = "BR") -> ReservationCommand:
         birth_date=datetime(1990, 1, 2).date(),
         gender="m",
     )
-    terms = EconomicTerms(payment_method="stripe")
+    terms = EconomicTerms(payment_method=payment_method)
     signature = subject_signature(
         components=components,
         customer=customer,
@@ -134,7 +136,11 @@ def _finish_next(
     return claim.command
 
 
-def _stores(tmp_path: Path):
+def _stores(
+    tmp_path: Path,
+    *,
+    enabled_methods: tuple[PaymentMethod, ...] = (PaymentMethod.STRIPE,),
+):
     execution = SQLiteUnitOfWork.open_v6(tmp_path / "execution.sqlite3")
     payments = SQLitePaymentInitiationStore(
         (tmp_path / "payments.sqlite3").resolve(),
@@ -147,8 +153,41 @@ def _stores(tmp_path: Path):
             BusinessUnit.HOSTEL: "stripe-account:hostel:test",
             BusinessUnit.AGENCY: "stripe-account:agency:test",
         },
+        enabled_methods=enabled_methods,
     )
     return execution, payments, projector
+
+
+def test_selected_wise_method_projects_wise_obligation_instead_of_stripe(
+    tmp_path: Path,
+) -> None:
+    execution, payments, projector = _stores(
+        tmp_path,
+        enabled_methods=(PaymentMethod.WISE,),
+    )
+    try:
+        command = ReservationAllocator().allocate(
+            _package_command(payment_method="wise")
+        ).commands[0]
+        _persist(execution, (command,))
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+
+        result = projector.run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.inserted == 1
+        payload = json.loads(
+            payments._connection.execute(
+                "SELECT selection_json FROM payment_initiations"
+            ).fetchone()[0]
+        )
+        assert payload["method"] == "wise"
+    finally:
+        payments.close()
+        execution.close()
 
 
 def test_single_reservation_projects_one_obligation(tmp_path: Path) -> None:

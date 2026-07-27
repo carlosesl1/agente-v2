@@ -12,16 +12,22 @@ from tests.test_v2_outcome_projector import (
 )
 from reservation_domain import ExecutionCertainty
 from v2_adapters.stripe import StripeLinkAdapter
+from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.completion import PublicOutboxStore
 from v2_application.completion_projector import CompletionProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.reservations import ReservationAllocator
-from v2_contracts.payments import BusinessUnit
+from v2_contracts.payments import BusinessUnit, PaymentMethod
 
 
 class _ClosedInstruction:
     def instruction(self, obligation):
         raise AssertionError(f"unexpected non-Stripe obligation: {obligation.payment_id}")
+
+
+class _ClosedStripe:
+    def create_link(self, obligation):
+        raise AssertionError(f"unexpected Stripe obligation: {obligation.payment_id}")
 
 
 class _StripeTransport:
@@ -151,6 +157,63 @@ def test_unknown_stripe_link_never_enters_public_outbox(tmp_path: Path) -> None:
         assert len(texts) == 1
         assert "confirmad" in texts[0].casefold()
         assert "http" not in texts[0]
+    finally:
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_wise_instruction_enters_public_outbox_after_confirmed_reservation(
+    tmp_path: Path,
+) -> None:
+    execution, payments, outcome = _stores(
+        tmp_path,
+        enabled_methods=(PaymentMethod.WISE,),
+    )
+    public = PublicOutboxStore((tmp_path / "public-wise.sqlite3").resolve())
+    try:
+        command = ReservationAllocator().allocate(
+            _package_command(payment_method="wise")
+        ).commands[0]
+        _persist(execution, (command,))
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
+        worker = PaymentInitiationWorker(
+            store=payments,
+            payments=PaymentService(
+                stripe=_ClosedStripe(),
+                wise=WiseInstructionAdapter(
+                    instructions={
+                        "stripe-account:hostel:test": "Dados Wise da hospedagem; aguarde validação.",
+                        "stripe-account:agency:test": "Dados Wise da agência; aguarde validação.",
+                    }
+                ),
+                pix=_ClosedInstruction(),
+            ),
+            worker_id="worker:wise-completion-test",
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert worker.run_once(
+            now=NOW + timedelta(seconds=3)
+        ).disposition.value == "completed"
+
+        projected = _completion(execution, payments, public).run_once(
+            now=NOW + timedelta(seconds=4)
+        )
+
+        assert projected.inserted == 2
+        texts = tuple(
+            row[0]
+            for row in public._connection.execute(
+                "SELECT text FROM public_outbox ORDER BY release_id"
+            )
+        )
+        assert any("Dados Wise da hospedagem" in text for text in texts)
+        assert all("https://" not in text for text in texts)
     finally:
         public.close()
         payments.close()

@@ -22,6 +22,8 @@ from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
 from v2_adapters.manychat_profile import ManyChatProfileAdapter
 from v2_adapters.manychat import ManyChatFlowDeliveryAdapter
+from v2_adapters.payment_instructions import FilePaymentInstructionCatalog
+from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.provider_http import (
     BokunHTTPTransport,
     CloudbedsHTTPTransport,
@@ -29,6 +31,7 @@ from v2_adapters.provider_http import (
     ManyChatHTTPTransport,
 )
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
+from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
 from v2_application.completion_projector import CompletionProjector
 from v2_application.outcome_projector import ReservationOutcomeProjector
@@ -48,7 +51,7 @@ from v2_contracts.providers import (
     ReadKind,
     ReadRequest,
 )
-from v2_contracts.payments import BusinessUnit
+from v2_contracts.payments import BusinessUnit, PaymentMethod
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
@@ -83,6 +86,11 @@ class ControlledEffectGuard:
 class _ClosedInstructionAdapter:
     def instruction(self, obligation: object) -> object:
         raise RuntimeError("non-Stripe payment initiation is closed")
+
+
+class _ClosedStripeAdapter:
+    def create_link(self, obligation: object) -> object:
+        raise RuntimeError("Stripe payment initiation is closed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +258,7 @@ def _build_inbox_worker(
         hmac_key=settings.public_authority_hmac_key,
         now=clock.now(),
     )
+    container.register_public_authority_resolver(authority)
     profile = ManyChatProfileAdapter(
         transport=ManyChatHTTPTransport(
             api_key=settings.manychat_api_key,
@@ -361,39 +370,67 @@ def _build_reservation_worker(
     )
 
 
-def _build_stripe_worker(
+def _build_payment_worker(
     *,
     container: V2Container,
     settings: V2Settings,
 ) -> PaymentInitiationWorker:
     if container.payment_initiation is None:
         raise ValueError("payment initiation owner is unavailable")
-    if not settings.stripe_links_enabled:
-        raise ValueError("Stripe worker requires the explicit test-link gate")
+    if not settings.enabled_payment_methods:
+        raise ValueError("payment worker requires at least one explicit method gate")
     if len(settings.allowed_subscriber_ids) != 1:
-        raise ValueError("Stripe worker requires one allowlisted subscriber")
-    transport = StripeTestHTTPTransport(
-        secret_keys=settings.stripe_test_secret_keys,
-        base_url=settings.stripe_base_url,
-    )
-    stripe = StripeLinkAdapter(
-        transport=transport,
-        account_profiles={
-            BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
-            BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
-        },
-        enabled=True,
-        subscriber_id=settings.allowed_subscriber_ids[0],
-        payment_percentages={
-            BusinessUnit.HOSTEL: 100,
-            BusinessUnit.AGENCY: 100,
-        },
-    )
-    closed = _ClosedInstructionAdapter()
+        raise ValueError("payment worker requires one allowlisted subscriber")
+    profiles = {
+        BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
+        BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
+    }
+    percentages_by_unit = {
+        BusinessUnit.HOSTEL: settings.hostel_payment_percentage,
+        BusinessUnit.AGENCY: settings.agency_payment_percentage,
+    }
+    if settings.stripe_links_enabled:
+        stripe: object = StripeLinkAdapter(
+            transport=StripeTestHTTPTransport(
+                secret_keys=settings.stripe_test_secret_keys,
+                base_url=settings.stripe_base_url,
+            ),
+            account_profiles=profiles,
+            enabled=True,
+            subscriber_id=settings.allowed_subscriber_ids[0],
+            payment_percentages=percentages_by_unit,
+        )
+    else:
+        stripe = _ClosedStripeAdapter()
+
+    wise: object = _ClosedInstructionAdapter()
+    pix: object = _ClosedInstructionAdapter()
+    if settings.wise_instructions_enabled or settings.pix_instructions_enabled:
+        if settings.payment_instruction_path is None:
+            raise ValueError("payment instruction catalog is unavailable")
+        catalog = FilePaymentInstructionCatalog(
+            path=settings.payment_instruction_path,
+            receiver_profiles=profiles,
+        )
+        percentages_by_profile = {
+            profiles[unit]: percentage
+            for unit, percentage in percentages_by_unit.items()
+        }
+        if settings.wise_instructions_enabled:
+            wise = WiseInstructionAdapter(
+                instructions=catalog.wise_instructions(),
+                payment_percentages=percentages_by_profile,
+            )
+        if settings.pix_instructions_enabled:
+            pix = PixInstructionAdapter(
+                knowledge=catalog,
+                receiver_profiles=tuple(profiles.values()),
+                payment_percentages=percentages_by_profile,
+            )
     return PaymentInitiationWorker(
         store=container.payment_initiation,
-        payments=PaymentService(stripe=stripe, wise=closed, pix=closed),
-        worker_id="worker:stripe-test-link",
+        payments=PaymentService(stripe=stripe, wise=wise, pix=pix),
+        worker_id="worker:payment-initiation",
         lease_ttl=timedelta(seconds=30),
         effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
     )
@@ -439,9 +476,10 @@ def build_worker_set(
         if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
         else ClosedCapabilityWorker("reservation_writes")
     )
+    payment_enabled = bool(settings.enabled_payment_methods)
     payment_worker: object = (
-        _build_stripe_worker(container=container, settings=settings)
-        if settings.stripe_links_enabled
+        _build_payment_worker(container=container, settings=settings)
+        if payment_enabled
         else ClosedCapabilityWorker("payment_initiation")
     )
     outcome_projector: object = (
@@ -452,8 +490,11 @@ def build_worker_set(
                 BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
                 BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
             },
+            enabled_methods=tuple(
+                PaymentMethod(value) for value in settings.enabled_payment_methods
+            ),
         )
-        if settings.stripe_links_enabled
+        if payment_enabled
         else ClosedCapabilityWorker("outcome_projector")
     )
     completion_projector: object = (
@@ -467,7 +508,7 @@ def build_worker_set(
                 BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
             },
         )
-        if settings.stripe_links_enabled
+        if payment_enabled
         else ClosedCapabilityWorker("completion_projector")
     )
     public_delivery: object
@@ -533,6 +574,16 @@ def build_worker_set(
             settings=settings,
         ),
     }
+    controlled_ingress_status = "closed"
+    if (
+        settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+        and settings.manychat_delivery_enabled
+    ):
+        controlled_ingress_status = (
+            "ready"
+            if container.controlled_public_ingress_reason(now=UTCClock().now()) is None
+            else "degraded"
+        )
     container.register_runtime_capabilities(
         {
             "bokun_reads": "ready",
@@ -559,6 +610,7 @@ def build_worker_set(
                 else "closed"
             ),
             "boundary_relay": "ready",
+            "controlled_public_ingress": controlled_ingress_status,
             "manychat_delivery": (
                 "ready" if settings.manychat_delivery_enabled else "closed"
             ),
@@ -566,16 +618,22 @@ def build_worker_set(
                 "ready" if settings.manychat_handoff_enabled else "closed"
             ),
             "payment_initiation": (
-                "ready" if settings.stripe_links_enabled else "closed"
+                "ready" if payment_enabled else "closed"
             ),
             "outcome_projector": (
-                "ready" if settings.stripe_links_enabled else "closed"
+                "ready" if payment_enabled else "closed"
             ),
             "completion_projector": (
-                "ready" if settings.stripe_links_enabled else "closed"
+                "ready" if payment_enabled else "closed"
             ),
             "stripe_test_links": (
                 "ready" if settings.stripe_links_enabled else "closed"
+            ),
+            "wise_instructions": (
+                "ready" if settings.wise_instructions_enabled else "closed"
+            ),
+            "pix_instructions": (
+                "ready" if settings.pix_instructions_enabled else "closed"
             ),
             "reservation_writes": (
                 "ready"
