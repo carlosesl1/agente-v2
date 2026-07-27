@@ -340,15 +340,16 @@ def test_bokun_fee_quote_reuses_existing_deterministic_cart_without_post() -> No
                 200,
                 request=request,
                 json={
-                    "uuid": session_id,
+                    "sessionId": session_id,
                     "activityBookings": [
                         {
-                            "bookingId": "quote-activity-existing",
-                            "activityId": "912303",
+                            "id": "quote-activity-existing",
+                            "activity": {"id": 912303},
                             "pricingCategoryBookings": [
                                 {
-                                    "bookingId": "quote-passenger-existing",
-                                    "pricingCategoryId": "857489",
+                                    "id": "quote-passenger-existing",
+                                    "pricingCategoryId": 857489,
+                                    "pricingCategory": {"id": 857489},
                                 }
                             ],
                         }

@@ -807,7 +807,7 @@ class BokunHTTPTransport:
             item
             for item in activities
             if isinstance(item, Mapping)
-            and _first(item, "activityId", "activity_id") == product_id
+            and BokunHTTPTransport._cart_activity_product_id(item) == product_id
         ] if isinstance(activities, list) else []
         if len(matches) != 1:
             raise ProviderHTTPError("Bókun quote cart activity binding is invalid")
@@ -816,12 +816,33 @@ class BokunHTTPTransport:
             item
             for item in pricing
             if isinstance(item, Mapping)
-            and _first(item, "pricingCategoryId", "pricing_category_id")
-            == category_id
+            and BokunHTTPTransport._cart_pricing_category_id(item) == category_id
             and _first(item, "bookingId", "booking_id", "id") is not None
         ] if isinstance(pricing, list) else []
         if len(passengers) != participants:
             raise ProviderHTTPError("Bókun quote cart passenger binding is invalid")
+
+    @staticmethod
+    def _cart_activity_product_id(item: Mapping[str, object]) -> str | None:
+        direct = _first(
+            item,
+            "activityId",
+            "activity_id",
+            "productId",
+            "product_id",
+        )
+        activity = item.get("activity")
+        if direct is None and isinstance(activity, Mapping):
+            direct = _first(activity, "id", "activityId", "productId")
+        return direct
+
+    @staticmethod
+    def _cart_pricing_category_id(item: Mapping[str, object]) -> str | None:
+        direct = _first(item, "pricingCategoryId", "pricing_category_id")
+        category = item.get("pricingCategory")
+        if direct is None and isinstance(category, Mapping):
+            direct = _first(category, "id", "pricingCategoryId")
+        return direct
 
     def _book_activity(
         self,
@@ -1107,7 +1128,7 @@ class BokunHTTPTransport:
             item
             for item in activities
             if isinstance(item, Mapping)
-            and _first(item, "activityId", "activity_id") == product_id
+            and BokunHTTPTransport._cart_activity_product_id(item) == product_id
         ] if isinstance(activities, list) else []
         if len(matches) != 1:
             raise ProviderHTTPError("Bókun cart activity binding is invalid")
@@ -1118,8 +1139,7 @@ class BokunHTTPTransport:
             item
             for item in pricing
             if isinstance(item, Mapping)
-            and _first(item, "pricingCategoryId", "pricing_category_id")
-            == category_id
+            and BokunHTTPTransport._cart_pricing_category_id(item) == category_id
         ] if isinstance(pricing, list) else []
         passenger_booking = (
             _first(passenger_matches[0], "bookingId", "booking_id", "id")
