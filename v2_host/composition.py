@@ -100,7 +100,7 @@ class V2Container:
                 )
             boundary = SQLiteBoundaryStore.open_path_v8(paths["boundary"])
             opened.append(boundary)
-            execution = SQLiteUnitOfWork.open(paths["execution"])
+            execution = SQLiteUnitOfWork.open_v6(paths["execution"])
             opened.append(execution)
             followup = SQLiteFollowupUnitOfWork.open(paths["followup"])
             opened.append(followup)

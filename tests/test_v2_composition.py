@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
+from reservation_execution.sqlite_store import SCHEMA_VERSION_V6
 from v2_host.api_main import build_api_app
 from v2_host.composition import V2Container, V2Role
 from v2_host.settings import V2Settings
@@ -77,6 +78,8 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
         }
         assert container.settings is settings
         assert container.role is V2Role.WORKER
+        assert container.execution is not None
+        assert container.execution._schema_version == SCHEMA_VERSION_V6
         assert all(path.is_file() for path in settings.sqlite_paths.values())
     finally:
         container.close()
