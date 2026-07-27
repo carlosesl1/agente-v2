@@ -274,6 +274,28 @@ class FakeActivityReadPort:
         )
 
 
+class FakeActivityDescriptionReadPort:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+        self.calls: list[ReadRequest] = []
+
+    def read(self, request: ReadRequest) -> ReadObservation:
+        assert self.store._connection.in_transaction is False
+        self.calls.append(request)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="commercial_catalog",
+            observed_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            public_payload={
+                "product_id": "product:buracao",
+                "public_name": "Cachoeira do Buracão",
+                "description": "Passeio disponível às quartas-feiras.",
+            },
+            private_binding_hash="4" * 64,
+        )
+
+
 class ProviderClockedLodgingReadPort:
     """Stamp the observation during the provider call, after turn start."""
 
@@ -792,6 +814,55 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [activity]
         assert len(result.receipt.read_observations) == 2
+    finally:
+        store.close()
+
+
+def test_activity_description_read_does_not_enter_availability_bridge() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    description_request = ReadRequest(
+        request_id="read:description-buracao",
+        kind=ReadKind.ACTIVITY_DESCRIPTION,
+        product_id="product:buracao",
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou conferir os detalhes do passeio.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+        ),
+        read_requests=(description_request,),
+        effect_proposals=(),
+    )
+    second = _proposal("O Buracão acontece às quartas-feiras.")
+    model = FakeAuditedModel(store, [first, second])
+    port = FakeActivityDescriptionReadPort(store)
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService({ReadKind.ACTIVITY_DESCRIPTION: port}),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == ("O Buracão acontece às quartas-feiras.",)
+        assert len(port.calls) == 1
+        assert len(model.calls) == 2
+        assert model.calls[1].observations[0].public_payload["description"].startswith(
+            "Passeio disponível"
+        )
+        assert result.receipt.read_observations == ()
+        assert (
+            store._connection.execute(
+                "SELECT count(*) FROM boundary_turn_artifacts "
+                "WHERE artifact_kind='read_observation'"
+            ).fetchone()
+            == (0,)
+        )
     finally:
         store.close()
 

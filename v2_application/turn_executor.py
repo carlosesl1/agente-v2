@@ -56,7 +56,7 @@ from v2_contracts.channel import InboundBatch
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
-from v2_contracts.providers import ReadObservation
+from v2_contracts.providers import ReadKind, ReadObservation
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -578,6 +578,7 @@ class V2TurnExecutor:
                 frame_commitment_hash=frames[0].canonical_hash(),
             )
             for read_request, observation in zip(read_requests, v2_observations)
+            if read_request.kind in (ReadKind.LODGING, ReadKind.ACTIVITY)
         )
         decision = self._reducer.reduce(
             state=current.state,

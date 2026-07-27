@@ -288,6 +288,72 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         replace(audited.frames[0], stdout_bytes=audited.frames[0].stdout_bytes + b"x")
 
 
+def test_hermes_adapter_repairs_repeated_read_after_observation() -> None:
+    repeated = json.dumps(
+        {
+            "schema": "v2-model-proposal-v2",
+            "source_event_id": "event:repeat-read",
+            "intent": "inform",
+            "reply_chunks": ["Vou consultar novamente."],
+            "facts": [],
+            "read_requests": [
+                {
+                    "request_id": "read:repeat-lodging",
+                    "kind": "lodging",
+                    "check_in": "2026-08-10",
+                    "check_out": "2026-08-12",
+                    "adults": 2,
+                    "children": 0,
+                }
+            ],
+            "effect_proposals": [],
+            "target_offer_id": None,
+            "target_offer_ids": [],
+            "confirmed_summary_version": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    responses = [repeated, repeated]
+
+    def run(command, *, input, capture_output, timeout, check, env):
+        return Completed(b"PHASE8_RESULT\x00" + responses.pop(0))
+
+    observation = ReadObservation(
+        request_hash=LODGING_REQUEST.canonical_hash(),
+        provider="cloudbeds",
+        observed_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+        public_payload={"total_amount": "480.00", "currency": "BRL"},
+        private_binding_hash="f" * 64,
+    )
+    adapter = HermesModelAdapter(
+        command=("hermes-model-child",),
+        system_prompt="Return closed V2 JSON.",
+        timeout=30,
+        transcript_key=b"n" * 32,
+        run=run,
+        environ={"PATH": "/usr/bin"},
+    )
+
+    audited = adapter.complete_audited(
+        ModelRequest(
+            request_id="model-request:repeat-read",
+            lead_id="manychat:repeat-read",
+            source_event_id="event:repeat-read",
+            message="Use a consulta já feita.",
+            locale="pt-BR",
+            state_version=0,
+            observations=(observation,),
+        )
+    )
+
+    assert audited.proposal.read_requests == ()
+    assert audited.proposal.effect_proposals == ()
+    assert audited.closure.ephemeral_session_id.startswith("deterministic:")
+    assert len(audited.frames) == 3
+
+
 def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair() -> (
     None
 ):

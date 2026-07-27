@@ -63,6 +63,8 @@ PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
 Return exactly one v2-model-proposal-v2 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
+When observations are present in the request, use them and return read_requests as an
+empty list; the parent permits only one provider-read round per turn.
 """.strip()
 
 
@@ -359,6 +361,8 @@ class HermesModelAdapter:
         try:
             proposal = _proposal(response, request.source_event_id)
         except InvalidModelProposal:
+            return None, frame
+        if request.observations and proposal.read_requests:
             return None, frame
         turn = AuditedModelTurn.from_exchange(
             proposal=proposal,
