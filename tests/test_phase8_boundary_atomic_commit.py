@@ -21,6 +21,7 @@ from reservation_boundary.conversation import (
     TranscriptDirection,
     TranscriptKind,
 )
+from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.serialization import semantic_hash, to_wire_json
 from reservation_boundary.sqlite_store import IdentityConflict, SQLiteBoundaryStore, TurnReceipt
 from reservation_boundary.types import BoundaryCommit, ConversationIntentKind, KernelDecision
@@ -169,8 +170,15 @@ class Phase8BoundaryAtomicCommitTests(unittest.TestCase):
             ),
         )
 
-        relay_bytes = _canonical("phase8-reservation-relay-bundle", {"command": command.command_id})
-        relay_hash = _domain_hash("phase8-reservation-relay-bundle-v1", relay_bytes)
+        relay_bundle = ReservationRelayBundle.create(
+            genesis_state=b'{"state":"genesis"}',
+            phase5_events=(b'{"event":"prepared"}',),
+            summary_outboxes=(b'{"outbox":"summary"}',),
+            expected_final_state=b'{"state":"queued"}',
+            command_ledger_seed=b'{"ledger":"seed"}',
+        )
+        relay_bytes = relay_bundle.to_canonical_bytes()
+        relay_hash = relay_bundle.artifact_hash
         relay_type = self._type("CommandRelayWrite")
         relays = (
             relay_type("relay-1", command.command_id, relay_bytes, relay_hash),

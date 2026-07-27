@@ -24,6 +24,7 @@ from reservation_boundary.conversation import (
     SourceEventIdentity,
     TranscriptCommitment,
 )
+from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.reads import ReadObservation
 from reservation_boundary.schema import (
     BOUNDARY_V8_TABLES,
@@ -1220,10 +1221,25 @@ def _semantic_scan_v8_connection(connection: sqlite3.Connection) -> None:
                         bundle_json,
                         f"relay {relay_id}",
                     )
-                    domain = _SCHEMA_DOMAINS.get(envelope.get("schema"))
+                    schema = envelope.get("schema")
+                    try:
+                        if schema == ReservationRelayBundle.SCHEMA:
+                            expected_bundle_hash = (
+                                ReservationRelayBundle.from_canonical_bytes(
+                                    payload
+                                ).artifact_hash
+                            )
+                        else:
+                            domain = _SCHEMA_DOMAINS.get(schema)
+                            expected_bundle_hash = (
+                                _semantic_domain_hash(domain, payload)
+                                if domain is not None
+                                else None
+                            )
+                    except (TypeError, ValueError):
+                        expected_bundle_hash = None
                     if (
-                        domain is None
-                        or _semantic_domain_hash(domain, payload) != bundle_hash
+                        expected_bundle_hash != bundle_hash
                         or bundle_hash != relay_hash
                         or backlink != receipt_hash
                     ):
