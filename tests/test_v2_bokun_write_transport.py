@@ -342,3 +342,62 @@ def test_bokun_private_execution_binding_is_required_before_http() -> None:
             idempotency_key="idem:bokun-private",
         )
     assert seen == []
+
+
+def test_bokun_submit_uses_fee_inclusive_invoice_due_not_activity_subtotal() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        call = len(seen)
+        if call == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-booking-fee",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-booking-fee",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        if call == 2:
+            checkout = _checkout()
+            checkout["options"][0]["formattedAmount"] = "R$ 300,00"
+            checkout["options"][0]["invoice"]["remainingAmountAsText"] = (
+                "R$ 304,50"
+            )
+            return httpx.Response(200, request=request, json=checkout)
+        if call == 3:
+            return httpx.Response(
+                200,
+                request=request,
+                json={"booking": {"bookingId": "booking-fee-123"}},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"booking": {"bookingId": "booking-fee-123"}},
+        )
+
+    payload = _dispatch_payload()
+    payload["offer"] = {**payload["offer"], "amount": "304.50"}
+
+    result = _transport(handler)(
+        "book_activity",
+        payload,
+        idempotency_key="idem:bokun-fee-inclusive",
+    )
+
+    assert result == {"status": "confirmed", "booking_id": "booking-fee-123"}
+    assert len(seen) == 4

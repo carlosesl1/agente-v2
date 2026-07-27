@@ -131,6 +131,28 @@ def test_agency_stripe_link_charges_only_configured_twenty_percent_signal() -> N
     assert transport.requests[0].payment_percentage == 20
 
 
+def test_agency_stripe_signal_uses_twenty_percent_of_fee_inclusive_bokun_total() -> None:
+    transport = StripeTransport()
+    adapter = StripeLinkAdapter(
+        transport=transport,
+        account_profiles={
+            BusinessUnit.HOSTEL: "hostel",
+            BusinessUnit.AGENCY: "agency",
+        },
+        enabled=True,
+        payment_percentages={
+            BusinessUnit.HOSTEL: 100,
+            BusinessUnit.AGENCY: 20,
+        },
+    )
+    fee_inclusive = replace(AGENCY, amount_minor=33495)
+
+    adapter.create_link(fee_inclusive)
+
+    assert transport.requests[0].amount_minor == 6699
+    assert transport.requests[0].payment_percentage == 20
+
+
 def test_wise_instruction_contains_no_unverified_payment_claim() -> None:
     payments, transport, _ = service()
 

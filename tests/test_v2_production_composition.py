@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from reservation_domain import ReservationOperation
+from v2_contracts.providers import ReadKind
 from reservation_followup.workers import HandoffOutboxWorker
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import (
@@ -107,6 +108,7 @@ def test_read_service_is_constructed_from_direct_provider_transports(tmp_path: P
     assert type(reads).__name__ == "V2ReadService"
     assert "CloudbedsHTTPTransport" in repr(reads)
     assert "BokunHTTPTransport" in repr(reads)
+    assert reads._ports[ReadKind.ACTIVITY]._transport._quote_checkout_enabled is False
 
 
 def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_closed(

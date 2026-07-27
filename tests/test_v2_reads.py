@@ -233,7 +233,10 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
             "rate_id": "rate-private-001",
             "pricing_category_id": "category-private-001",
             "product_public_name": "Buracão",
+            "base_amount": provider_state["amount"],
+            "booking_fee_amount": "0.00",
             "total_amount": provider_state["amount"],
+            "price_includes_booking_fee": True,
             "currency": "BRL",
             "available": True,
         }
@@ -272,3 +275,48 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
     provider_state["amount"] = "401.00"
     with pytest.raises(PrivateBindingMismatch, match="commercial binding"):
         resolver.resolve(component, now=NOW)
+
+
+def test_bokun_read_exposes_only_fee_inclusive_total_and_binds_quote_scope() -> None:
+    calls = []
+
+    def transport(operation, payload):
+        calls.append((operation, payload))
+        return {
+            "product_id": payload["product_id"],
+            "bokun_product_id": "912303",
+            "start_time_id": "start-4ps",
+            "rate_id": "rate-4ps",
+            "pricing_category_id": "857489",
+            "product_public_name": "Roteiro dos 4Ps",
+            "base_amount": "330.00",
+            "booking_fee_amount": "4.95",
+            "total_amount": "334.95",
+            "price_includes_booking_fee": True,
+            "currency": "BRL",
+            "available": True,
+        }
+
+    adapter = BokunReadAdapter(
+        transport=transport,
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+
+    observation = adapter.read(ACTIVITY_REQUEST)
+
+    assert calls == [
+        (
+            "activity",
+            {
+                "product_id": ACTIVITY_REQUEST.product_id,
+                "activity_date": "2026-08-11",
+                "participants": 2,
+                "quote_scope": ACTIVITY_REQUEST.query_hash(),
+            },
+        )
+    ]
+    assert observation.public_payload["total_amount"] == "334.95"
+    assert observation.public_payload["base_amount"] == "330.00"
+    assert observation.public_payload["booking_fee_amount"] == "4.95"
+    assert observation.public_payload["price_includes_booking_fee"] is True

@@ -523,6 +523,7 @@ class BokunHTTPTransport:
         timeout_seconds: float = 10.0,
         client: httpx.Client | None = None,
         timestamp: Callable[[], str] | None = None,
+        quote_checkout_enabled: bool = False,
     ) -> None:
         if not access_key or not secret_key:
             raise ValueError("Bókun read credentials are required")
@@ -530,6 +531,8 @@ class BokunHTTPTransport:
             raise ValueError("Bókun canonical product map is required")
         if not base_url.startswith("https://"):
             raise ValueError("Bókun base URL must use HTTPS")
+        if type(quote_checkout_enabled) is not bool:
+            raise TypeError("Bókun quote checkout gate must be an exact bool")
         self._access_key = access_key
         self._secret_key = secret_key.encode()
         self._products = dict(product_map)
@@ -539,6 +542,7 @@ class BokunHTTPTransport:
         self._timestamp = timestamp or (
             lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         )
+        self._quote_checkout_enabled = quote_checkout_enabled
 
     def __repr__(self) -> str:
         return "BokunHTTPTransport(auth=hmac-sha1)"
@@ -651,15 +655,141 @@ class BokunHTTPTransport:
             amount = Decimal("0")
         currency = self._option_currency(selected or {}, meta)
         private = self._booking_private(selected) if selected is not None else {}
-        return {
+        result = {
             "product_id": canonical_id,
             "bokun_product_id": provider_id,
             "product_public_name": self._title(meta) or canonical_id,
             "total_amount": f"{amount:.2f}",
             "currency": currency,
-            "available": selected is not None,
+            "available": selected is not None and self._quote_checkout_enabled,
             **private,
         }
+        if selected is None or not self._quote_checkout_enabled:
+            return result
+        quote_scope = _text(payload.get("quote_scope"))
+        if quote_scope is None or re.fullmatch(r"[0-9a-f]{64}", quote_scope) is None:
+            raise ProviderHTTPError("Bókun quote scope is invalid")
+        total = self._quote_checkout_total(
+            quote_scope=quote_scope,
+            product_id=provider_id,
+            activity_date=activity_date,
+            participants=participants,
+            private=private,
+            base_amount=amount,
+        )
+        fee = (total - amount).quantize(Decimal("0.01"))
+        return {
+            **result,
+            "base_amount": f"{amount:.2f}",
+            "booking_fee_amount": f"{fee:.2f}",
+            "total_amount": f"{total:.2f}",
+            "price_includes_booking_fee": True,
+            "available": True,
+        }
+
+    def _quote_checkout_total(
+        self,
+        *,
+        quote_scope: str,
+        product_id: str,
+        activity_date: str,
+        participants: int,
+        private: Mapping[str, str],
+        base_amount: Decimal,
+    ) -> Decimal:
+        session_id = "v2-quote-" + hashlib.sha256(
+            quote_scope.encode()
+        ).hexdigest()[:32]
+        quote_key = "quote:" + quote_scope
+        cart_session_path = (
+            f"/shopping-cart.json/session/{session_id}"
+            "?lang=pt_BR&currency=BRL"
+        )
+        status, cart_payload = self._write_request(
+            method="GET",
+            path=cart_session_path,
+            idempotency_key=quote_key + ":probe",
+            allow_rejection=True,
+        )
+        if status == 404:
+            cart_path = (
+                f"/shopping-cart.json/session/{session_id}/activity"
+                "?lang=pt_BR&currency=BRL"
+            )
+            cart_body = {
+                "activityId": product_id,
+                "date": activity_date,
+                "startTimeId": private["start_time_id"],
+                "rateId": private["rate_id"],
+                "pricingCategoryBookings": [
+                    {"pricingCategoryId": private["pricing_category_id"]}
+                    for _ in range(participants)
+                ],
+            }
+            _, cart_payload = self._write_request(
+                method="POST",
+                path=cart_path,
+                idempotency_key=quote_key + ":cart",
+                json_body=cart_body,
+            )
+        elif not 200 <= status < 300:
+            raise ProviderHTTPError("Bókun quote cart probe was rejected")
+        self._validate_quote_cart(
+            cart_payload,
+            session_id=session_id,
+            product_id=product_id,
+            category_id=private["pricing_category_id"],
+            participants=participants,
+        )
+        checkout_path = (
+            f"/checkout.json/options/shopping-cart/{session_id}"
+            "?lang=pt_BR&currency=BRL"
+        )
+        _, checkout_payload = self._write_request(
+            method="GET",
+            path=checkout_path,
+            idempotency_key=quote_key + ":checkout",
+        )
+        total = self._checkout_amount(checkout_payload)
+        if total is None or total < base_amount:
+            raise ProviderHTTPError("Bókun quote checkout total is invalid")
+        return total.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _validate_quote_cart(
+        payload: object,
+        *,
+        session_id: str,
+        product_id: str,
+        category_id: str,
+        participants: int,
+    ) -> None:
+        cart = payload.get("data") if isinstance(payload, Mapping) else None
+        if not isinstance(cart, Mapping):
+            cart = payload if isinstance(payload, Mapping) else {}
+        returned_session = _first(cart, "uuid", "sessionId", "session_id")
+        if returned_session is not None and returned_session != session_id:
+            raise ProviderHTTPError("Bókun quote cart session identity mismatch")
+        activities = cart.get("activityBookings")
+        matches = [
+            item
+            for item in activities
+            if isinstance(item, Mapping)
+            and _first(item, "activityId", "activity_id") == product_id
+        ] if isinstance(activities, list) else []
+        if len(matches) != 1:
+            raise ProviderHTTPError("Bókun quote cart activity binding is invalid")
+        pricing = matches[0].get("pricingCategoryBookings")
+        passengers = [
+            item
+            for item in pricing
+            if isinstance(item, Mapping)
+            and _first(item, "pricingCategoryId", "pricing_category_id")
+            == category_id
+            and _first(item, "bookingId", "booking_id", "id") is not None
+        ] if isinstance(pricing, list) else []
+        if len(passengers) != participants:
+            raise ProviderHTTPError("Bókun quote cart passenger binding is invalid")
 
     def _book_activity(
         self,
@@ -969,6 +1099,37 @@ class BokunHTTPTransport:
         return activity_booking, passenger_booking
 
     @staticmethod
+    def _checkout_amount(payload: object) -> Decimal | None:
+        checkout = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(checkout, Mapping):
+            return None
+        options = checkout.get("options")
+        option = options[0] if isinstance(options, list) and options else None
+        if not isinstance(option, Mapping):
+            return None
+        invoice = option.get("invoice")
+        if isinstance(invoice, Mapping):
+            due = _first_amount(
+                invoice,
+                "remainingAmount",
+                "remainingAmountAsText",
+                "totalDue",
+                "totalDueAsText",
+            )
+            if due is not None:
+                return due
+        return _first_amount(
+            option,
+            "remainingAmount",
+            "remainingAmountAsText",
+            "totalDue",
+            "totalDueAsText",
+            "amount",
+            "totalPrice",
+            "formattedAmount",
+        )
+
+    @staticmethod
     def _submit_body(
         payload: object,
         *,
@@ -987,12 +1148,7 @@ class BokunHTTPTransport:
         option = options[0] if isinstance(options, list) and options else None
         if not isinstance(option, Mapping):
             raise ProviderHTTPError("Bókun checkout lacks an option")
-        checkout_amount = _first_amount(option, "amount", "totalPrice", "formattedAmount")
-        invoice = option.get("invoice")
-        if checkout_amount is None and isinstance(invoice, Mapping):
-            checkout_amount = _first_amount(
-                invoice, "remainingAmount", "remainingAmountAsText"
-            )
+        checkout_amount = BokunHTTPTransport._checkout_amount(checkout)
         if checkout_amount is None or checkout_amount.quantize(Decimal("0.01")) != expected_amount:
             raise ProviderHTTPError("Bókun checkout amount diverged after cart")
         questions = checkout.get("questions")

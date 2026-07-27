@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from decimal import Decimal
 from typing import Final
 
 from v2_adapters._provider_common import (
@@ -41,6 +42,30 @@ def _private_booking_fields(response: dict[str, object]) -> dict[str, str]:
     }
 
 
+def _fee_inclusive_public_fields(
+    response: dict[str, object], *, total_amount: str, available: bool
+) -> dict[str, object]:
+    if not available:
+        return {}
+    base_amount = text(response.get("base_amount"), "base_amount")
+    booking_fee = text(
+        response.get("booking_fee_amount"), "booking_fee_amount"
+    )
+    includes_fee = response.get("price_includes_booking_fee")
+    if (
+        _AMOUNT_RE.fullmatch(base_amount) is None
+        or _AMOUNT_RE.fullmatch(booking_fee) is None
+        or includes_fee is not True
+        or Decimal(base_amount) + Decimal(booking_fee) != Decimal(total_amount)
+    ):
+        raise ProviderReadError("Bókun fee-inclusive quote is not canonical")
+    return {
+        "base_amount": base_amount,
+        "booking_fee_amount": booking_fee,
+        "price_includes_booking_fee": True,
+    }
+
+
 class BokunReadAdapter:
     def __init__(self, *, transport, clock, ttl: timedelta) -> None:
         self._transport, self._clock, self._ttl = validated_adapter(
@@ -63,6 +88,7 @@ class BokunReadAdapter:
             "product_id": query.canonical_product_id,
             "activity_date": query.start_date.isoformat(),
             "participants": query.adults,
+            "quote_scope": query.request_hash,
         }
         response = exact_dict(self._transport("activity", payload), "Bókun response")
         if response.get("product_id") not in (None, query.canonical_product_id):
@@ -78,6 +104,11 @@ class BokunReadAdapter:
             raise ProviderReadError("Bókun amount or currency is not canonical")
         if type(available) is not bool:
             raise ProviderReadError("Bókun available must be an exact bool")
+        _fee_inclusive_public_fields(
+            response,
+            total_amount=amount,
+            available=available,
+        )
         private_hash = binding_hash(
             {
                 "request_hash": query.request_hash,
@@ -114,6 +145,7 @@ class BokunReadAdapter:
             "product_id": request.product_id,
             "activity_date": request.activity_date.isoformat(),
             "participants": request.participants,
+            "quote_scope": request.query_hash(),
         }
         response = exact_dict(self._transport("activity", query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
@@ -129,6 +161,11 @@ class BokunReadAdapter:
             raise ProviderReadError("Bókun amount or currency is not canonical")
         if type(available) is not bool:
             raise ProviderReadError("Bókun available must be an exact bool")
+        fee_fields = _fee_inclusive_public_fields(
+            response,
+            total_amount=amount,
+            available=available,
+        )
         private_hash = binding_hash(
             {
                 "request_hash": request.query_hash(),
@@ -144,6 +181,7 @@ class BokunReadAdapter:
             "total_amount": amount,
             "currency": currency,
             "available": available,
+            **fee_fields,
         }
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         return ReadObservation(

@@ -222,6 +222,7 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
             secret_key=settings.bokun_secret_key,
             product_map=settings.bokun_product_map,
             base_url=settings.bokun_base_url,
+            quote_checkout_enabled=settings.bokun_writes_enabled,
         ),
         clock=clock,
         ttl=timedelta(minutes=5),
@@ -338,6 +339,7 @@ def _build_reservation_worker(
             secret_key=settings.bokun_secret_key,
             product_map=settings.bokun_product_map,
             base_url=settings.bokun_base_url,
+            quote_checkout_enabled=True,
         )
         bokun_read_port = BokunReadAdapter(
             transport=bokun_transport,

@@ -144,7 +144,7 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
         "product_public_name": "Roteiro do Buracão",
         "total_amount": "600.00",
         "currency": "BRL",
-        "available": True,
+        "available": False,
     }
     assert len(seen) == 2
     assert all(request.headers["X-Bokun-AccessKey"] == "access" for request in seen)
@@ -152,6 +152,234 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
     assert all(request.headers["X-Bokun-Signature"] for request in seen)
     assert seen[0].url.path == "/activity.json/913372"
     assert seen[1].url.path == "/activity.json/913372/availabilities"
+
+
+def test_bokun_transport_quotes_fee_inclusive_checkout_before_offering() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        call = len(seen)
+        if call == 1:
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": 912303,
+                    "title": "Roteiro dos 4Ps",
+                    "pricingCategories": [
+                        {"id": 857489, "ticketCategory": "ADULT"}
+                    ],
+                },
+            )
+        if call == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": "2026-11-18",
+                        "startTimeId": "start-4ps",
+                        "available": True,
+                        "availabilityCount": 5,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": "rate-4ps",
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": "857489",
+                                        "amount": {
+                                            "amount": 330,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        if call == 3:
+            assert request.method == "GET"
+            assert request.url.path.startswith("/shopping-cart.json/session/v2-quote-")
+            return httpx.Response(404, request=request, json={"message": "not found"})
+        if call == 4:
+            assert request.method == "POST"
+            assert request.url.path.endswith("/activity")
+            session_id = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            assert json.loads(request.content) == {
+                "activityId": "912303",
+                "date": "2026-11-18",
+                "startTimeId": "start-4ps",
+                "rateId": "rate-4ps",
+                "pricingCategoryBookings": [
+                    {"pricingCategoryId": "857489"}
+                ],
+            }
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session_id,
+                    "activityBookings": [
+                        {
+                            "bookingId": "quote-activity-1",
+                            "activityId": "912303",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "quote-passenger-1",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        assert call == 5
+        assert request.method == "GET"
+        assert request.url.path.startswith(
+            "/checkout.json/options/shopping-cart/v2-quote-"
+        )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "options": [
+                    {
+                        "formattedAmount": "R$ 330,00",
+                        "invoice": {
+                            "remainingAmountAsText": "R$ 334,95"
+                        },
+                    }
+                ]
+            },
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"tour:4ps": "912303"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-27 18:00:00",
+        quote_checkout_enabled=True,
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "tour:4ps",
+            "activity_date": "2026-11-18",
+            "participants": 1,
+            "quote_scope": "a" * 64,
+        },
+    )
+
+    assert result["available"] is True
+    assert result["base_amount"] == "330.00"
+    assert result["booking_fee_amount"] == "4.95"
+    assert result["total_amount"] == "334.95"
+    assert result["price_includes_booking_fee"] is True
+    assert [request.method for request in seen] == ["GET", "GET", "GET", "POST", "GET"]
+    assert seen[3].headers["X-Idempotency-Key"].endswith(":cart")
+
+
+def test_bokun_fee_quote_reuses_existing_deterministic_cart_without_post() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        call = len(seen)
+        if call == 1:
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": 912303, "title": "Roteiro dos 4Ps"},
+            )
+        if call == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": "2026-11-18",
+                        "startTimeId": "start-4ps",
+                        "available": True,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": "rate-4ps",
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": "857489",
+                                        "amount": {
+                                            "amount": 330,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        if call == 3:
+            session_id = request.url.path.split("/session/", 1)[1]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session_id,
+                    "activityBookings": [
+                        {
+                            "bookingId": "quote-activity-existing",
+                            "activityId": "912303",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "quote-passenger-existing",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        assert call == 4
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "options": [
+                    {
+                        "invoice": {
+                            "remainingAmountAsText": "R$ 334,95"
+                        }
+                    }
+                ]
+            },
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"tour:4ps": "912303"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-27 18:00:00",
+        quote_checkout_enabled=True,
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "tour:4ps",
+            "activity_date": "2026-11-18",
+            "participants": 1,
+            "quote_scope": "b" * 64,
+        },
+    )
+
+    assert result["total_amount"] == "334.95"
+    assert [request.method for request in seen] == ["GET", "GET", "GET", "GET"]
 
 
 def test_bokun_transport_requires_capacity_for_all_participants() -> None:
