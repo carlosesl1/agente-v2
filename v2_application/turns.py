@@ -121,6 +121,7 @@ def _typed_fact(fact: ModelFact) -> TypedFact:
     if fact.name in (
         "language",
         "service",
+        "product_id",
         "full_name",
         "email",
         "phone_e164",

@@ -382,18 +382,19 @@ class ConversationProjection:
         fact_order = {
             "language": 0,
             "service": 1,
-            "start_date": 2,
-            "end_date": 3,
-            "activity_date": 4,
-            "adults": 5,
-            "children": 6,
-            "payment_method": 7,
-            "full_name": 8,
-            "email": 9,
-            "phone_e164": 10,
-            "country_code": 11,
-            "birth_date": 12,
-            "gender": 13,
+            "product_id": 2,
+            "start_date": 3,
+            "end_date": 4,
+            "activity_date": 5,
+            "adults": 6,
+            "children": 7,
+            "payment_method": 8,
+            "full_name": 9,
+            "email": 10,
+            "phone_e164": 11,
+            "country_code": 12,
+            "birth_date": 13,
+            "gender": 14,
         }
         fact_positions: list[int] = []
         for fact in self.facts:
@@ -1347,12 +1348,7 @@ class MayaTurnProposal:
         ):
             raise TypeError("MayaTurnProposal.read_observations must be exact")
         read_request_hashes = tuple(item.request_hash for item in self.read_observations)
-        read_frame_hashes = tuple(
-            item.frame_commitment_hash for item in self.read_observations
-        )
-        if len(set(read_request_hashes)) != len(read_request_hashes) or len(
-            set(read_frame_hashes)
-        ) != len(read_frame_hashes):
+        if len(set(read_request_hashes)) != len(read_request_hashes):
             raise ValueError("MayaTurnProposal read observations must be unique")
 
         if type(self.facts) is not tuple or any(
@@ -1362,18 +1358,19 @@ class MayaTurnProposal:
         fact_order = {
             "language": 0,
             "service": 1,
-            "start_date": 2,
-            "end_date": 3,
-            "activity_date": 4,
-            "adults": 5,
-            "children": 6,
-            "payment_method": 7,
-            "full_name": 8,
-            "email": 9,
-            "phone_e164": 10,
-            "country_code": 11,
-            "birth_date": 12,
-            "gender": 13,
+            "product_id": 2,
+            "start_date": 3,
+            "end_date": 4,
+            "activity_date": 5,
+            "adults": 6,
+            "children": 7,
+            "payment_method": 8,
+            "full_name": 9,
+            "email": 10,
+            "phone_e164": 11,
+            "country_code": 12,
+            "birth_date": 13,
+            "gender": 14,
         }
         fact_positions = tuple(fact_order[item.name] for item in self.facts)
         if (

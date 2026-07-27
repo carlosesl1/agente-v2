@@ -15,6 +15,7 @@ from v2_contracts.providers import ReadObservation, ReadRequest
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
+_PRODUCT_ID_RE: Final = re.compile(r"^product:[a-z0-9][a-z0-9._-]{0,127}$")
 _ALLOWED_INTENTS: Final = frozenset(
     ("inform", "select", "adjust", "confirm", "request_handoff")
 )
@@ -22,6 +23,7 @@ _ALLOWED_FACTS: Final = frozenset(
     (
         "language",
         "service",
+        "product_id",
         "start_date",
         "end_date",
         "activity_date",
@@ -78,6 +80,9 @@ class ModelFact:
             raise InvalidModelProposal("fact name is outside the V2 catalog")
         if self.name in ("language", "service", "full_name"):
             _text(self.value, f"fact {self.name}")
+        elif self.name == "product_id":
+            if type(self.value) is not str or _PRODUCT_ID_RE.fullmatch(self.value) is None:
+                raise InvalidModelProposal("fact product_id must be canonical")
         elif self.name == "payment_method":
             if (
                 type(self.value) is not str

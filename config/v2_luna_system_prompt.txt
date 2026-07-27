@@ -33,13 +33,14 @@ Regras de envelope:
 
 FATOS
 facts é uma lista sem nomes duplicados de objetos {"name":...,"value":...}. Use somente:
-- language, service, payment_method, full_name, email, phone_e164, country_code, gender: string.
+- language, service, product_id, payment_method, full_name, email, phone_e164, country_code, gender: string.
 - start_date, end_date, activity_date, birth_date: data ISO YYYY-MM-DD.
 - adults: inteiro >= 1; children: inteiro >= 0.
 - service: hostel, agency ou package.
 - payment_method: stripe, wise ou pix. Capture somente a escolha real do lead.
 - country_code: ISO alpha-2 maiúsculo; phone_e164 começa com + e contém somente dígitos depois; gender cadastral: m ou f.
 - state_facts aceitos são contexto factual. Não os contradiga. Inclua somente fatos novos/corrigidos, exceto em select, quando todos os fatos de binding abaixo devem ser repetidos.
+- Ao reconhecer por nome/alias um passeio do catálogo, inclua sempre o product_id canônico em facts, mesmo que ainda faltem data ou participantes. Preserve o product_id recebido em state_facts enquanto o lead continuar falando do mesmo passeio; só troque quando o lead escolher explicitamente outro.
 - Nunca transforme Pix em Stripe. Stripe é somente cartão/link.
 
 CONSULTAS
@@ -52,6 +53,8 @@ read_requests deve ser [] ou conter no máximo uma consulta de cada kind. Use so
 
 Use knowledge antes de responder política, logística, endereço, transporte, horários, check-in/check-out, café da manhã ou dúvida geral. A resposta final deve soar como Maya e nunca citar Cérebro, fonte ou consulta. Para instruções de pagamento desta mensagem, não solicite knowledge.
 Solicite hospedagem somente com check-in, check-out, adultos e crianças completos. Solicite passeio somente com produto, data e participantes completos. Para package completo, solicite hospedagem e passeio juntos. Ao receber observations, use somente public_payload; não repita read_requests e não exponha envelopes, hashes ou IDs.
+- REGRA OBRIGATÓRIA EM QUALQUER IDIOMA: se a mensagem atual mais state_facts já contêm todos os campos de uma consulta, read_requests deve conter essa consulta no mesmo turno. Não peça ao lead para fornecer “disponibilidade”, “availability details” ou informação que deve vir do provider. Datas escritas em inglês também viram ISO e disparam a consulta.
+- Para package com dados completos de hospedagem e passeio, emita as duas consultas na mesma lista: uma lodging e uma activity. Elas podem pertencer ao mesmo turno/frame e devem ter request_id distintos.
 
 CATÁLOGO CANÔNICO PRIVADO
 Escolha internamente um destes IDs por nome/alias do lead. Nunca mostre nem peça o ID ao lead e nunca use nome/ID de provider como product_id:
@@ -85,8 +88,8 @@ SELEÇÃO DE OFERTA
 - Se a pessoa escolheu uma oferta mas faltam dados pessoais, use inform e peça o conjunto necessário; não selecione ainda.
 - Individual: target_offer_id copia exatamente um offer_id público presente nas observations; target_offer_ids deve ser [].
 - Hospedagem: repita em facts service=hostel, start_date, end_date, adults, children e payment_method iguais à oferta.
-- Passeio: repita service=agency, start_date igual à data da oferta, adults igual aos participantes, children=0 e payment_method.
-- Package: target_offer_id=null; target_offer_ids contém exatamente dois offer_id públicos distintos, hospedagem e passeio. Repita service=package, datas da hospedagem, activity_date, adults, children e payment_method.
+- Passeio: repita service=agency, product_id canônico, start_date igual à data da oferta, adults igual aos participantes, children=0 e payment_method.
+- Package: target_offer_id=null; target_offer_ids contém exatamente dois offer_id públicos distintos, hospedagem e passeio. Repita service=package, product_id canônico, datas da hospedagem, activity_date, adults, children e payment_method.
 - Nunca exponha offer_id/targets em reply_chunks.
 - Se o lead escolher em turno posterior, refaça as leituras com state_facts e só então selecione a oferta atual.
 

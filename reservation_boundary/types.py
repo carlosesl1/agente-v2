@@ -19,6 +19,7 @@ from reservation_followup import HandoffWorkflow, PaymentSettlementCommand, Paym
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
+_PRODUCT_ID_RE: Final = re.compile(r"^product:[a-z0-9][a-z0-9._-]{0,127}$")
 _DECIMAL_RE: Final = re.compile(r"^(?:0|[1-9][0-9]*|-[1-9][0-9]*)\.[0-9]{2}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
@@ -317,6 +318,7 @@ class TypedFact:
         expected_types: dict[str, type[object]] = {
             "language": StringSlot,
             "service": StringSlot,
+            "product_id": StringSlot,
             "start_date": DateSlot,
             "end_date": DateSlot,
             "activity_date": DateSlot,
@@ -343,6 +345,8 @@ class TypedFact:
             "package",
         ):
             raise ValueError("service fact must be hostel, agency or package")
+        if self.name == "product_id" and _PRODUCT_ID_RE.fullmatch(self.value.value) is None:
+            raise ValueError("product_id fact must be canonical")
         if self.name == "adults" and self.value.value < 1:
             raise ValueError("adults fact must be >= 1")
         if self.name == "payment_method" and self.value.value not in (

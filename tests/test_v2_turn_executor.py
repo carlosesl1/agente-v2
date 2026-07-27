@@ -247,6 +247,33 @@ class FakeLodgingReadPort:
         )
 
 
+class FakeActivityReadPort:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+        self.calls: list[ReadRequest] = []
+
+    def read(self, request: ReadRequest) -> ReadObservation:
+        assert self.store._connection.in_transaction is False
+        self.calls.append(request)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="bokun",
+            observed_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            public_payload={
+                "offer_id": "offer:" + "6" * 64,
+                "product_id": "product:buracao",
+                "product_public_name": "Cachoeira do Buracão",
+                "activity_date": "2026-08-12",
+                "participants": 2,
+                "total_amount": "1300.00",
+                "currency": "BRL",
+                "available": True,
+            },
+            private_binding_hash="5" * 64,
+        )
+
+
 class ProviderClockedLodgingReadPort:
     """Stamp the observation during the provider call, after turn start."""
 
@@ -706,6 +733,65 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert row[0] == "read_observation"
         assert row[1] is None
         assert type(row[2]) is str and len(row[2]) == 64
+    finally:
+        store.close()
+
+
+def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
+    lodging = ReadRequest(
+        request_id="read:package-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    activity = ReadRequest(
+        request_id="read:package-activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(lodging, activity),
+        effect_proposals=(),
+    )
+    final = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Encontrei opções de hospedagem e Buracão.",),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [first, final])
+    lodging_port = FakeLodgingReadPort(store)
+    activity_port = FakeActivityReadPort(store)
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService(
+            {
+                ReadKind.LODGING: lodging_port,
+                ReadKind.ACTIVITY: activity_port,
+            }
+        ),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == ("Encontrei opções de hospedagem e Buracão.",)
+        assert lodging_port.calls == [lodging]
+        assert activity_port.calls == [activity]
+        assert len(result.receipt.read_observations) == 2
     finally:
         store.close()
 

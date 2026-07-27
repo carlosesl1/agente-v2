@@ -180,6 +180,35 @@ def _activity_read() -> ReadObservation:
     )
 
 
+def test_named_activity_product_is_persisted_as_canonical_private_fact() -> None:
+    proposal = ModelProposal(
+        source_event_id="event:remember-buracao",
+        intent="inform",
+        reply_chunks=("Em qual data você quer conhecer o Buracão?",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    decision = V2ConversationReducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(complete=False),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert {
+        fact.name: fact.value.value for fact in decision.projection.facts
+    }["product_id"] == "product:buracao"
+
+
 def _ready_state(*, service: ServiceKind, workflow_id: str) -> ReadyToSummarizeState:
     query = SearchQuery(
         service=service,

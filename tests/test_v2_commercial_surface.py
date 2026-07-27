@@ -51,6 +51,9 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
     assert '"kind":"activity_description"' in prompt
     assert "Saudação, descoberta, FAQ, recomendação, descrição, preço e disponibilidade não exigem perfil completo" in prompt
     assert "Nunca transforme Pix em Stripe" in prompt
+    assert "inclua sempre o product_id canônico em facts" in prompt
+    assert "REGRA OBRIGATÓRIA EM QUALQUER IDIOMA" in prompt
+    assert "uma lodging e uma activity" in prompt
     assert "rosileidebastos557@gmail.com" in prompt
     assert "75999979532" in prompt
 

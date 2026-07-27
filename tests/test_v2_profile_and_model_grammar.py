@@ -63,6 +63,14 @@ def test_productive_proposal_rejects_effects_and_closes_payment_method() -> None
         _proposal(payment_method="cash")
 
 
+@pytest.mark.parametrize("value", ("913372", "Buracão", "product:Buracao", "product:"))
+def test_product_fact_accepts_only_canonical_internal_product_ids(value: str) -> None:
+    with pytest.raises(InvalidModelProposal, match="product_id"):
+        ModelFact("product_id", value)
+
+    assert ModelFact("product_id", "product:buracao").value == "product:buracao"
+
+
 def test_profile_adapter_returns_private_binding_without_public_serialization() -> None:
     transport = ProfileTransport(_complete_payload())
     adapter = ManyChatProfileAdapter(transport=transport, ttl=timedelta(minutes=5))
