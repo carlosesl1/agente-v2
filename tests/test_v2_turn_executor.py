@@ -22,6 +22,7 @@ from v2_application.turn_executor import (
     PublicTurnAuthority,
     TurnExecutionError,
     V2TurnExecutor,
+    _confirmation_read_requests,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.model import (
@@ -867,6 +868,173 @@ def test_activity_description_read_does_not_enter_availability_bridge() -> None:
         store.close()
 
 
+def test_activity_confirmation_derives_current_provider_read() -> None:
+    first_read = ReadRequest(
+        request_id="read:derive-activity-selection",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    selection = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo do passeio.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+            ModelFact("start_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+            ModelFact("birth_date", date(1992, 4, 15)),
+            ModelFact("gender", "f"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "6" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(
+        store,
+        [
+            ModelProposal(
+                source_event_id=BATCH.batch_id,
+                intent="inform",
+                reply_chunks=(),
+                facts=(),
+                read_requests=(first_read,),
+                effect_proposals=(),
+            ),
+            selection,
+        ],
+    )
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
+    )
+    try:
+        executor.execute(BATCH)
+        state = store.load_state(BATCH.lead_id).state
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert projection is not None
+        confirmation = ModelProposal(
+            source_event_id="batch:derive-activity-confirmation",
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+        )
+
+        derived = _confirmation_read_requests(state, projection, confirmation)
+        assert len(derived) == 1
+        assert derived[0].kind is ReadKind.ACTIVITY
+        assert derived[0].product_id == "product:buracao"
+        assert derived[0].activity_date == date(2026, 8, 12)
+        assert derived[0].participants == 2
+    finally:
+        store.close()
+
+
+def test_confirmation_read_derivation_requires_typed_confirm_and_current_version() -> None:
+    first_read = ReadRequest(
+        request_id="read:derive-guard-selection",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    selection = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(
+        store,
+        [
+            ModelProposal(
+                source_event_id=BATCH.batch_id,
+                intent="inform",
+                reply_chunks=(),
+                facts=(),
+                read_requests=(first_read,),
+                effect_proposals=(),
+            ),
+            selection,
+        ],
+    )
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService({ReadKind.LODGING: FakeLodgingReadPort(store)}),
+    )
+    try:
+        executor.execute(BATCH)
+        state = store.load_state(BATCH.lead_id).state
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert projection is not None
+        inform = ModelProposal(
+            source_event_id="batch:derive-guard-inform",
+            intent="inform",
+            reply_chunks=("Posso ajudar com mais alguma coisa?",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        )
+        stale = ModelProposal(
+            source_event_id="batch:derive-guard-stale",
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=2,
+        )
+        current = ModelProposal(
+            source_event_id="batch:derive-guard-current",
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+        )
+
+        assert _confirmation_read_requests(state, projection, inform) == ()
+        assert _confirmation_read_requests(state, projection, stale) == ()
+        derived = _confirmation_read_requests(state, projection, current)
+        assert len(derived) == 1
+        assert derived[0].kind is ReadKind.LODGING
+        assert derived[0].check_in == date(2026, 8, 10)
+        assert derived[0].check_out == date(2026, 8, 12)
+        assert derived[0].adults == 2
+        assert derived[0].children == 0
+    finally:
+        store.close()
+
+
 def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
     tmp_path,
 ) -> None:
@@ -911,14 +1079,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         adults=2,
         children=0,
     )
-    confirmation_read = ReadRequest(
-        request_id="read:confirmation-lodging-002",
-        kind=ReadKind.LODGING,
-        check_in=date(2026, 8, 10),
-        check_out=date(2026, 8, 12),
-        adults=2,
-        children=0,
-    )
     selection = ModelProposal(
         source_event_id=BATCH.batch_id,
         intent="select",
@@ -955,14 +1115,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
             effect_proposals=(),
         ),
         selection,
-        ModelProposal(
-            source_event_id=second_batch.batch_id,
-            intent="inform",
-            reply_chunks=(),
-            facts=(),
-            read_requests=(confirmation_read,),
-            effect_proposals=(),
-        ),
+        confirmation,
         confirmation,
     ]
     store = SQLiteBoundaryStore.open_memory_v8()
@@ -997,6 +1150,14 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert confirmed.receipt.committed_state_version == 2
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
+        assert len(model.calls) == 4
+        assert len(read_port.calls) == 2
+        derived = read_port.calls[-1]
+        assert derived.kind is ReadKind.LODGING
+        assert derived.check_in == date(2026, 8, 10)
+        assert derived.check_out == date(2026, 8, 12)
+        assert derived.adults == 2
+        assert derived.children == 0
         assert (
             store._connection.execute(
                 "SELECT count(*) FROM boundary_commands"

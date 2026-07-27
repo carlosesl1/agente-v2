@@ -36,12 +36,18 @@ from reservation_boundary.sqlite_store import (
 )
 from reservation_boundary.types import (
     BoundaryCommit,
+    BoundaryState,
     ConversationIntentKind,
     KernelDecision,
     StringSlot,
     TypedFact,
 )
-from reservation_domain import ReservationCommand, dumps_command
+from reservation_domain import (
+    AwaitingConfirmationState,
+    ReservationCommand,
+    ServiceKind,
+    dumps_command,
+)
 from reservation_followup import HandoffRequested
 from v2_application.conversation import V2ConversationReducer
 from v2_application.read_bridge import bridge_availability_observation
@@ -56,7 +62,7 @@ from v2_contracts.channel import InboundBatch
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
-from v2_contracts.providers import ReadKind, ReadObservation
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -329,6 +335,64 @@ def _state_model_facts(
     )
 
 
+def _confirmation_read_requests(
+    state: BoundaryState,
+    projection: ConversationProjection,
+    proposal: ModelProposal,
+) -> tuple[ReadRequest, ...]:
+    workflow = state.workflow
+    if (
+        type(workflow) is not AwaitingConfirmationState
+        or proposal.intent != "confirm"
+        or proposal.read_requests
+        or proposal.confirmed_summary_version != workflow.draft.version
+    ):
+        return ()
+    values = {item.name: item.value.value for item in projection.facts}
+    requests: list[ReadRequest] = []
+    seen_kinds: set[ReadKind] = set()
+    for component in workflow.draft.components:
+        if component.service is ServiceKind.LODGING:
+            if component.end_date is None or ReadKind.LODGING in seen_kinds:
+                return ()
+            request = ReadRequest(
+                request_id=_opaque(
+                    "confirm-read-lodging",
+                    proposal.source_event_id,
+                    component.offer_id,
+                ),
+                kind=ReadKind.LODGING,
+                check_in=component.start_date,
+                check_out=component.end_date,
+                adults=component.party.adults,
+                children=component.party.children,
+            )
+        elif component.service is ServiceKind.ACTIVITY:
+            product_id = values.get("product_id")
+            if (
+                type(product_id) is not str
+                or not product_id
+                or ReadKind.ACTIVITY in seen_kinds
+            ):
+                return ()
+            request = ReadRequest(
+                request_id=_opaque(
+                    "confirm-read-activity",
+                    proposal.source_event_id,
+                    component.offer_id,
+                ),
+                kind=ReadKind.ACTIVITY,
+                product_id=product_id,
+                activity_date=component.start_date,
+                participants=component.party.adults,
+            )
+        else:
+            return ()
+        requests.append(request)
+        seen_kinds.add(request.kind)
+    return tuple(requests)
+
+
 def _command_relays(
     aggregate_turn_id: str,
     commands: tuple[object, ...],
@@ -508,7 +572,14 @@ class V2TurnExecutor:
         first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
-        read_requests = first_proposal.read_requests
+        read_requests = first_proposal.read_requests or _confirmation_read_requests(
+            current.state,
+            projection,
+            first_proposal,
+        )
+        derived_confirmation_reads = (
+            bool(read_requests) and not first_proposal.read_requests
+        )
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
             raise TurnExecutionError("model proposed duplicate reads")
@@ -547,6 +618,16 @@ class V2TurnExecutor:
                 raise TurnExecutionError("model proposal source event diverged")
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
+            if derived_confirmation_reads and (
+                proposal.intent != "confirm"
+                or proposal.confirmed_summary_version
+                != first_proposal.confirmed_summary_version
+            ):
+                proposal = replace(
+                    first_proposal,
+                    reply_chunks=proposal.reply_chunks,
+                    read_requests=(),
+                )
             audited = AuditedModelTurn.combine((first_audited, second_audited))
         else:
             audited = first_audited
