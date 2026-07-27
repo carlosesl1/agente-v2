@@ -33,6 +33,7 @@ from reservation_domain import (
     ServiceKind,
     StartSearch,
     SummaryRecorded,
+    dumps_command,
     new_workflow,
 )
 from reservation_domain import (
@@ -791,9 +792,10 @@ def test_private_offer_resolution_rechecks_all_bindings_during_prepare() -> None
     )
 
     request = adapter.prepare(command)
-    prepared = json.loads(request.canonical_payload)
-    assert prepared["schema"] == "v2-reservation-prepared-v2"
-    assert prepared["private_binding"]["room_type_id"] == "room-private-001"
+    assert request.canonical_payload == dumps_command(command)
+    assert adapter._prepared_private_bindings[command.command_id]["room_type_id"] == (
+        "room-private-001"
+    )
 
     provider_state["amount"] = "481.00"
     changed_adapter = V2ReservationExecutionAdapter(
