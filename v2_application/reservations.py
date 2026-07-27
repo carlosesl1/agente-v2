@@ -332,6 +332,7 @@ class V2ReservationExecutionAdapter:
         self._binding_resolver = binding_resolver
         self._clock = clock
         self._require_private_binding = require_private_binding
+        self._prepared_private_bindings: dict[str, dict[str, str]] = {}
 
     @property
     def operation(self) -> ReservationOperation:
@@ -372,7 +373,9 @@ class V2ReservationExecutionAdapter:
                 raise PreparationFailure("private_binding_mismatch", False, ()) from exc
             if binding.provider != self.provider:
                 raise DispatchRejected("private binding provider mismatch")
-            payload = _prepared_payload(command, binding.private_payload())
+            self._prepared_private_bindings[command.command_id] = (
+                binding.private_payload()
+            )
         return DispatchRequest.from_command(command, payload)
 
     def dispatch_fenced(
@@ -391,12 +394,22 @@ class V2ReservationExecutionAdapter:
             or request.idempotency_key != idempotency_key
         ):
             raise DispatchRejected("durable permit does not bind the prepared request")
-        command, private_binding = _load_prepared_payload(
+        command, prepared_binding = _load_prepared_payload(
             request.canonical_payload,
             self.provider,
         )
         if command.command_id != request.command_id:
             raise DispatchRejected("prepared command identity changed after fencing")
+        private_binding = prepared_binding
+        if self._binding_resolver is not None and private_binding is None:
+            private_binding = self._prepared_private_bindings.pop(
+                request.command_id,
+                None,
+            )
+            if private_binding is None:
+                raise DispatchRejected(
+                    "private binding was not retained through the durable fence"
+                )
         provider_payload = _provider_payload(command, self.provider, private_binding)
         provider_payload_hash = hashlib.sha256(
             provider_payload.encode("utf-8")

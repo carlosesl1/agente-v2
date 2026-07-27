@@ -17,6 +17,8 @@ from reservation_domain import (
     Money,
     ReservationCommand,
     ReservationOperation,
+    ServiceKind,
+    dumps_command,
 )
 from reservation_domain.signature import command_identity, subject_signature
 from reservation_execution import PreparationFailure
@@ -24,6 +26,7 @@ from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from tests.phase5_helpers import T0, _lookup, persist_script, workflow_events
 from v2_adapters.bokun import BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReservationPort
+from v2_application.reads import PrivateOfferBindingResolver
 from v2_application.reservations import (
     DispatchRejected,
     ReservationAllocator,
@@ -35,6 +38,7 @@ from v2_application.relay_worker import (
 )
 from v2_application.turn_executor import _execution_commands
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
+from v2_contracts.private_offers import PrivateOfferBinding
 from v2_contracts.providers import (
     ProviderCertainty,
     ProviderDispatchPermit,
@@ -68,6 +72,25 @@ class FakeCommercialEffectGuard:
     def allows_workflow(self, workflow_id: str) -> bool:
         self.calls.append(workflow_id)
         return workflow_id not in self.blocked_workflow_ids
+
+
+class FixedBindingPort:
+    def resolve(self, query):
+        return PrivateOfferBinding(
+            provider="cloudbeds",
+            query=query,
+            observed_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            provider_fields=(
+                ("room_rate_id", "rate-private-fenced-001"),
+                ("room_type_id", "room-private-fenced-001"),
+            ),
+        )
+
+
+class FixedReservationClock:
+    def now(self):
+        return NOW
 
 
 def _authorization(provider: str, *, enabled: bool = True) -> ProviderWriteAuthorization:
@@ -239,6 +262,87 @@ def _package_command(*, booking_profile: bool = False) -> ReservationCommand:
         payload=CommandPayload(components, customer, terms),
         created_at=NOW,
     )
+
+
+def test_private_binding_prepare_keeps_exact_command_payload_through_fence(
+    tmp_path: Path,
+) -> None:
+    command = ReservationAllocator().allocate(
+        _package_command(booking_profile=True)
+    ).commands[0]
+    assert command.operation is ReservationOperation.RESERVE_LODGING
+    component = replace(command.payload.components[0], provider_ref="a" * 64)
+    components = (component,)
+    payload = CommandPayload(components, command.payload.customer, command.payload.terms)
+    signature = subject_signature(
+        components=components,
+        customer=payload.customer,
+        terms=payload.terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id=command.workflow_id,
+        draft_id=command.draft_id,
+        draft_version=command.draft_version,
+        signature=signature,
+        operation=command.operation,
+    )
+    command = replace(
+        command,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        subject_signature=signature,
+        payload=payload,
+    )
+    port = FakeReservationPort(
+        "cloudbeds", _result(ProviderCertainty.EFFECT_CONFIRMED)
+    )
+    adapter = V2ReservationExecutionAdapter(
+        provider="cloudbeds",
+        port=port,
+        authorization=_authorization("cloudbeds"),
+        binding_resolver=PrivateOfferBindingResolver(
+            {ServiceKind.LODGING: FixedBindingPort()}
+        ),
+        clock=FixedReservationClock(),
+    )
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "private-fenced.sqlite3")
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    bundle = build_reservation_relay_bundle(command)
+    try:
+        store.accept_boundary_reservation(
+            operation_id=reservation_target_operation_id(
+                bundle_hash=bundle.artifact_hash,
+                source_turn_receipt_hash=source_hash,
+            ),
+            source_turn_receipt_hash=source_hash,
+            bundle=bundle,
+        )
+        claim = store.claim_command(
+            worker_id="worker:private-fenced",
+            now=NOW,
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert claim is not None
+
+        request = adapter.prepare(claim.command)
+        assert request.canonical_payload == dumps_command(claim.command)
+        permit = store.fence_dispatch(claim, request, now=NOW)
+        outcome = adapter.dispatch_fenced(
+            permit,
+            request,
+            idempotency_key=claim.command.idempotency_key,
+        )
+
+        assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+        assert adapter._prepared_private_bindings == {}
+        assert len(port.calls) == 1
+        provider_payload = json.loads(port.calls[0].canonical_payload)
+        assert provider_payload["offer"]["private_binding"] == {
+            "room_rate_id": "rate-private-fenced-001",
+            "room_type_id": "room-private-fenced-001",
+        }
+    finally:
+        store.close()
 
 
 def test_package_allocation_produces_two_provider_commands_as_one_batch() -> None:
