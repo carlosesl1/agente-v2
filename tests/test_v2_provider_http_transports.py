@@ -202,7 +202,19 @@ def test_bokun_transport_quotes_fee_inclusive_checkout_before_offering() -> None
         if call == 3:
             assert request.method == "GET"
             assert request.url.path.startswith("/shopping-cart.json/session/v2-quote-")
-            return httpx.Response(404, request=request, json={"message": "not found"})
+            session_id = request.url.path.split("/session/", 1)[1]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "sessionId": session_id,
+                    "size": 0,
+                    "activityBookings": [],
+                    "accommodationBookings": [],
+                    "routeBookings": [],
+                    "giftCardBookings": [],
+                },
+            )
         if call == 4:
             assert request.method == "POST"
             assert request.url.path.endswith("/activity")

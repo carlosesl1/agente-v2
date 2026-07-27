@@ -711,7 +711,13 @@ class BokunHTTPTransport:
             idempotency_key=quote_key + ":probe",
             allow_rejection=True,
         )
-        if status == 404:
+        if status == 404 or (
+            status == 200
+            and self._quote_cart_is_empty(
+                cart_payload,
+                session_id=session_id,
+            )
+        ):
             cart_path = (
                 f"/shopping-cart.json/session/{session_id}/activity"
                 "?lang=pt_BR&currency=BRL"
@@ -754,6 +760,32 @@ class BokunHTTPTransport:
         if total is None or total < base_amount:
             raise ProviderHTTPError("Bókun quote checkout total is invalid")
         return total.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _quote_cart_is_empty(
+        payload: object,
+        *,
+        session_id: str,
+    ) -> bool:
+        cart = payload.get("data") if isinstance(payload, Mapping) else None
+        if not isinstance(cart, Mapping):
+            cart = payload if isinstance(payload, Mapping) else {}
+        returned_session = _first(cart, "uuid", "sessionId", "session_id")
+        bookings = tuple(
+            cart.get(name)
+            for name in (
+                "activityBookings",
+                "accommodationBookings",
+                "routeBookings",
+                "giftCardBookings",
+            )
+        )
+        return (
+            returned_session == session_id
+            and type(cart.get("size")) is int
+            and cart.get("size") == 0
+            and all(type(items) is list and not items for items in bookings)
+        )
 
     @staticmethod
     def _validate_quote_cart(
