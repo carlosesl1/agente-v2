@@ -26,6 +26,17 @@ def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
     assert "confirmed_action_kinds" in PROMPT
     assert "approval_basis" in PROMPT
     assert "contextual_reference" in PROMPT
-    assert "“Sim” isolado" in PROMPT or '"Sim" isolado' in PROMPT
+    assert "Uma confirmação afirmativa curta é válida" in PROMPT
+    for example in (
+        "“Sim”",
+        "“Pode reservar”",
+        "“Pode sim”",
+        "“Confirmado”",
+        "“Isso mesmo”",
+    ):
+        assert example in PROMPT
+    assert "sem `pending_action` nunca autoriza" in PROMPT
+    assert "facts=[]" in PROMPT
+    assert "“Sim” isolado, emoji" not in PROMPT
     assert "sim, mas" in PROMPT.casefold()
     assert "signed_callback" not in PROMPT

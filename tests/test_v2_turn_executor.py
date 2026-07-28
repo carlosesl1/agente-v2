@@ -23,7 +23,6 @@ from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposit
 from v2_application.turn_executor import (
     _critical_confirmation_bound,
     _critical_model_reads_allowed,
-    _has_contextual_reference_shape,
     PublicTurnAuthority,
     TurnExecutionError,
     V2TurnExecutor,
@@ -1321,17 +1320,6 @@ def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
     )
     assert reads_allowed(information) is True
 
-    assert _has_contextual_reference_shape("Sim") is False
-    assert _has_contextual_reference_shape("👍") is False
-    assert _has_contextual_reference_shape("Pode fazer isso") is False
-    assert (
-        _has_contextual_reference_shape(
-            "Pode reservar esse passeio e gerar o link do sinal no cartão."
-        )
-        is True
-    )
-
-
 def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(seconds=2),
@@ -1392,15 +1380,28 @@ def test_approval_expiring_between_reducer_and_commit_persists_zero_effect_rows(
         store.close()
 
 
+@pytest.mark.parametrize(
+    "confirmation_text",
+    (
+        "Sim",
+        "Pode reservar",
+        "Pode sim",
+        "Confirmado",
+        "Isso mesmo",
+        "Sim, por favor",
+        "Pode reservar esse passeio e gerar o link do sinal no cartão.",
+    ),
+)
 def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
     tmp_path,
+    confirmation_text: str,
 ) -> None:
     second_event = InboundEvent(
         event_id="event:turn-executor-002",
         lead_id=BATCH.lead_id,
         subscriber_id=BATCH.subscriber_id,
         conversation_id=EVENT.conversation_id,
-        text="Pode reservar exatamente essa hospedagem e gerar o link no cartão.",
+        text=confirmation_text,
         media_url=None,
         media_type=None,
         occurred_at=NOW,

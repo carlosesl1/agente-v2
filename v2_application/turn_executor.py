@@ -68,18 +68,10 @@ from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _ZERO_HASH: Final = "0" * 64
-_REFERENCE_TOKEN_RE: Final = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 class TurnExecutionError(RuntimeError):
     """The turn could not be reduced into one authenticated v8 commit."""
-
-
-def _has_contextual_reference_shape(message: str) -> bool:
-    if type(message) is not str:
-        raise TypeError("message must be exact text")
-    tokens = tuple(_REFERENCE_TOKEN_RE.findall(message))
-    return len(tokens) >= 4 and sum(len(item) for item in tokens) >= 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -646,22 +638,6 @@ class V2TurnExecutor:
         first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
-        if (
-            pending_action is not None
-            and first_proposal.intent == "confirm"
-            and not _has_contextual_reference_shape(batch.combined_text)
-        ):
-            first_proposal = replace(
-                first_proposal,
-                intent="inform",
-                reply_chunks=(
-                    "Para autorizar, diga naturalmente qual reserva e qual pagamento devo fazer.",
-                ),
-                read_requests=(),
-                confirmed_summary_version=None,
-                confirmed_action_kinds=(),
-                approval_basis=None,
-            )
         material_scope_bound = (
             self._reducer.confirmation_projection_matches(
                 current.state.workflow,

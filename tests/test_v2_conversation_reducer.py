@@ -795,6 +795,60 @@ def test_material_projection_change_supersedes_old_confirmation_without_command(
     assert stale_confirmation.receipt_requirements == ("proposal_superseded",)
 
 
+def test_informational_detour_preserves_pending_proposal_for_later_short_confirmation() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(
+            service=ServiceKind.LODGING,
+            workflow_id="workflow:short-confirm-after-inform",
+        )
+    )
+    reducer = _reducer()
+    informed = reducer.reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=ModelProposal(
+            source_event_id="event:inform-before-short-confirm",
+            intent="inform",
+            reply_chunks=("O sinal é o valor informado no resumo.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        ),
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert informed.next_state.workflow == awaiting
+    assert informed.commands == ()
+
+    confirmed = reducer.reduce(
+        state=informed.next_state,
+        projection=informed.projection,
+        proposal=ModelProposal(
+            source_event_id="event:short-confirm-after-inform",
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=awaiting.draft.version,
+            confirmed_action_kinds=(
+                CriticalActionKind.INITIATE_PAYMENT,
+                CriticalActionKind.RESERVE_LODGING,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        ),
+        profile=_profile(),
+        reads=tuple(
+            _read_for_component(item) for item in awaiting.draft.components
+        ),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert len(confirmed.commands) == 1
+
+
 def test_runtime_package_selection_builds_one_bound_summary_then_two_child_commands() -> None:
     proposal = ModelProposal(
         source_event_id="event:select-package-runtime",
