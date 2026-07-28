@@ -1129,7 +1129,19 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
             ),
             approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
         )
-        model.proposals.extend([confirmation, confirmation])
+        confirmation_with_read = replace(
+            confirmation,
+            read_requests=(
+                ReadRequest(
+                    request_id="read:model-confirm-activity",
+                    kind=ReadKind.ACTIVITY,
+                    product_id="product:buracao",
+                    activity_date=date(2026, 8, 12),
+                    participants=2,
+                ),
+            ),
+        )
+        model.proposals.extend([confirmation_with_read, confirmation])
         _install_public_authority(store, confirmation_authority)
         confirmation_executor = V2TurnExecutor(
             store=store,

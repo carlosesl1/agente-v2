@@ -345,7 +345,6 @@ def _confirmation_read_requests(
     if (
         type(workflow) is not AwaitingConfirmationState
         or proposal.intent != "confirm"
-        or proposal.read_requests
         or proposal.confirmed_summary_version != workflow.draft.version
     ):
         return ()
