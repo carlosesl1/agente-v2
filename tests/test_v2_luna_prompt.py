@@ -19,6 +19,12 @@ def test_standard_twenty_percent_deposit_never_routes_to_handoff() -> None:
     assert "confirmar esse sinal deve ser respondido normalmente e nunca abre handoff" in PROMPT
 
 
+def test_pending_tour_schedule_question_never_uses_unrelated_hostel_hours() -> None:
+    assert "horário durante uma proposta pendente de passeio" in PROMPT
+    assert "nunca substitua pelo horário de check-in/check-out do hostel" in PROMPT
+    assert "não trouxer uma resposta direta e específica para o passeio" in PROMPT
+
+
 def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
     assert "v2-model-proposal-v3" in PROMPT
     assert "v2-model-proposal-v2" not in PROMPT
