@@ -14,7 +14,7 @@ from reservation_domain import ExecutionCertainty
 from v2_adapters.stripe import StripeLinkAdapter
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.completion import PublicOutboxStore
-from v2_application.completion_projector import CompletionProjector
+from v2_application.completion_projector import CompletionProjector, _payment_text
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.reservations import ReservationAllocator
 from v2_contracts.payments import BusinessUnit, PaymentMethod
@@ -78,6 +78,17 @@ def _completion(execution, payments, public: PublicOutboxStore) -> CompletionPro
             BusinessUnit.AGENCY: "stripe-account:agency:test",
         },
     )
+
+
+def test_payment_link_text_uses_the_natural_article_for_each_business_unit() -> None:
+    assert _payment_text(
+        BusinessUnit.HOSTEL,
+        "https://buy.stripe.com/test_hostel",
+    ) == "Link de pagamento da hospedagem: https://buy.stripe.com/test_hostel"
+    assert _payment_text(
+        BusinessUnit.AGENCY,
+        "https://buy.stripe.com/test_tour",
+    ) == "Link de pagamento do passeio: https://buy.stripe.com/test_tour"
 
 
 def test_package_confirmation_and_two_links_enter_public_outbox_once(

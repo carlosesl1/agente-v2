@@ -183,8 +183,9 @@ def _confirmation_text(commands: tuple[ReservationCommand, ...]) -> str:
 
 
 def _payment_text(unit: BusinessUnit, url: str) -> str:
-    label = "hospedagem" if unit is BusinessUnit.HOSTEL else "passeio"
-    return f"Link de pagamento da {label}: {url}"
+    if unit is BusinessUnit.HOSTEL:
+        return f"Link de pagamento da hospedagem: {url}"
+    return f"Link de pagamento do passeio: {url}"
 
 
 def _opaque(prefix: str, *parts: str) -> str:
