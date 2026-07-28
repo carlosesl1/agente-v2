@@ -37,6 +37,7 @@ def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
         assert example in PROMPT
     assert "sem `pending_action` nunca autoriza" in PROMPT
     assert "facts=[]" in PROMPT
+    assert "Incerteza real como “Talvez” usa intent=inform" in PROMPT
     assert "“Sim” isolado, emoji" not in PROMPT
     assert "sim, mas" in PROMPT.casefold()
     assert "signed_callback" not in PROMPT

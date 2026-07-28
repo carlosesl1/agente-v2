@@ -353,7 +353,7 @@ Build each `ModelRequest` with:
 pending_action=pending if has_pending_action else None
 ```
 
-For `confirm`, require exact version, exact actions, `contextual_reference`, `facts == ()`, zero model effect proposals and zero model read requests. For all non-confirm cases, require no confirmation fields and zero effect proposals.
+For `confirm`, require exact version, exact actions, `contextual_reference`, `facts == ()` and zero model effect proposals. Record model `read_requests`, but do not treat them as authority or a sandbox failure: the parent ignores child-authored reads during confirmation and derives the authenticated reread from the frozen draft. For all non-confirm cases, require no confirmation fields and zero effect proposals.
 
 - [ ] **Step 2: Run the real-model sandbox**
 
