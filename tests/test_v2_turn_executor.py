@@ -1041,6 +1041,63 @@ def test_activity_description_read_does_not_enter_availability_bridge() -> None:
         store.close()
 
 
+def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None:
+    request = ReadRequest(
+        request_id="read:preserve-customer-facts",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou conferir a disponibilidade.",),
+        facts=(
+            ModelFact("birth_date", date(1992, 4, 15)),
+            ModelFact("gender", "f"),
+        ),
+        read_requests=(request,),
+        effect_proposals=(),
+    )
+    selection = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+            ModelFact("start_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "6" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [first, selection])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
+    )
+    try:
+        result = executor.execute(BATCH)
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+
+        assert result.reply_chunks[0].startswith("Só para confirmar:")
+        assert projection is not None
+        values = {fact.name: fact.value.value for fact in projection.facts}
+        assert values["birth_date"] == date(1992, 4, 15)
+        assert values["gender"] == "f"
+    finally:
+        store.close()
+
+
 def test_activity_confirmation_derives_current_provider_read() -> None:
     first_read = ReadRequest(
         request_id="read:derive-activity-selection",

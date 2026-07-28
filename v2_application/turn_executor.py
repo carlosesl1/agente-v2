@@ -745,6 +745,18 @@ class V2TurnExecutor:
             proposal = validate_productive_proposal(second_audited.proposal)
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
+            second_fact_names = {item.name for item in proposal.facts}
+            proposal = replace(
+                proposal,
+                facts=(
+                    *proposal.facts,
+                    *(
+                        item
+                        for item in first_proposal.facts
+                        if item.name not in second_fact_names
+                    ),
+                ),
+            )
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
             if derived_confirmation_reads and (
