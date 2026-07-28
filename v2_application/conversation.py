@@ -334,7 +334,6 @@ def _projection_binds_draft(
             "service": (
                 "hostel" if component.service is ServiceKind.LODGING else "agency"
             ),
-            "product_id": component.lookup_id,
             "start_date": component.start_date,
             "adults": component.party.adults,
             "children": component.party.children,
@@ -343,6 +342,12 @@ def _projection_binds_draft(
         if component.service is ServiceKind.LODGING:
             expected["end_date"] = component.end_date
         else:
+            product_id = values.get("product_id")
+            if not isinstance(product_id, str) or not component.lookup_id.startswith(
+                f"lookup:{product_id}:"
+            ):
+                return False
+            expected["product_id"] = product_id
             expected["activity_date"] = component.start_date
     elif len(components) == 2:
         lodging = next(
@@ -360,6 +365,13 @@ def _projection_binds_draft(
             "children": lodging.party.children,
             "payment_method": draft.terms.payment_method,
         }
+        product_id = values.get("product_id")
+        if product_id is not None:
+            if not isinstance(product_id, str) or not activity.lookup_id.startswith(
+                f"lookup:{product_id}:"
+            ):
+                return False
+            expected["product_id"] = product_id
     else:
         return False
     material_names = {

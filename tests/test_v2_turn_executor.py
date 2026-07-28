@@ -1094,6 +1094,62 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         values = {fact.name: fact.value.value for fact in projection.facts}
         assert values["birth_date"] == date(1992, 4, 15)
         assert values["gender"] == "f"
+
+        confirmation_event = replace(
+            EVENT,
+            event_id="event:preserve-customer-facts-confirm",
+            text="Sim",
+            occurred_at=NOW,
+            payload_hash="8" * 64,
+        )
+        confirmation_batch = InboundBatch(
+            batch_id="batch:preserve-customer-facts-confirm",
+            lead_id=BATCH.lead_id,
+            subscriber_id=BATCH.subscriber_id,
+            events=(confirmation_event,),
+            combined_text=confirmation_event.text,
+        )
+        confirmation_authority = replace(
+            AUTHORITY,
+            authorization_id="auth:preserve-customer-facts-confirm",
+            allocation_ids=("allocation:preserve-customer-facts-confirm",),
+            allocation_manifest_hash="8" * 64,
+        )
+        confirmation = ModelProposal(
+            source_event_id=confirmation_batch.batch_id,
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+            confirmed_action_kinds=(
+                CriticalActionKind.BOOK_ACTIVITY,
+                CriticalActionKind.INITIATE_PAYMENT,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        )
+        model.proposals.extend([confirmation, confirmation])
+        _install_public_authority(store, confirmation_authority)
+        confirmation_executor = V2TurnExecutor(
+            store=store,
+            model=model,
+            reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
+            profile=FakeProfile(store),
+            reducer=_enabled_reducer(),
+            public_authority=MappingAuthority(
+                {confirmation_batch.batch_id: confirmation_authority}
+            ),
+            clock=ScriptedClock((NOW + timedelta(seconds=1),)),
+            locale="pt-BR",
+            turn_timeout=timedelta(seconds=30),
+            max_commit_attempts=2,
+        )
+
+        confirmed = confirmation_executor.execute(confirmation_batch)
+
+        assert len(confirmed.receipt.command_rows) == 1
+        assert confirmed.reply_chunks == ("Perfeito — vou processar sua reserva agora.",)
     finally:
         store.close()
 
