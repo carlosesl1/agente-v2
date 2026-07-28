@@ -1222,10 +1222,28 @@ class BokunHTTPTransport:
                         result.append(question_id)
             return tuple(result)
 
+        def question_ids(values: object) -> tuple[str, ...]:
+            if not isinstance(values, list):
+                return ()
+            result = []
+            for item in values:
+                if isinstance(item, Mapping):
+                    question_id = _first(item, "questionId", "id")
+                    if question_id:
+                        result.append(question_id)
+            if len(result) != len(set(result)):
+                raise ProviderHTTPError("Bókun checkout question IDs are ambiguous")
+            return tuple(result)
+
         main_required = required_ids(main_questions)
         unknown_main = set(main_required) - set(customer)
         if unknown_main:
             raise ProviderHTTPError("Bókun checkout requires unsupported customer fields")
+        main_answer_ids = tuple(
+            question_id
+            for question_id in question_ids(main_questions)
+            if question_id in customer
+        )
         passenger_question_groups = []
         for activity in activities:
             if isinstance(activity, Mapping) and isinstance(activity.get("passengers"), list):
@@ -1238,12 +1256,20 @@ class BokunHTTPTransport:
         passenger_required = required_ids(
             passenger_questions.get("passengerDetails")
         )
+        passenger_question_ids = question_ids(
+            passenger_questions.get("passengerDetails")
+        )
         passenger_values = {
             key: customer[key]
             for key in ("firstName", "lastName", "nationality", "dateOfBirth", "gender")
         }
         if set(passenger_required) - set(passenger_values):
             raise ProviderHTTPError("Bókun checkout requires unsupported passenger fields")
+        passenger_answer_ids = tuple(
+            question_id
+            for question_id in passenger_question_ids
+            if question_id in passenger_values
+        )
         if required_ids(passenger_questions.get("questions")):
             raise ProviderHTTPError("Bókun checkout requires unsupported special answers")
 
@@ -1260,7 +1286,7 @@ class BokunHTTPTransport:
             "shoppingCart": {
                 "uuid": session_id,
                 "bookingAnswers": {
-                    "mainContactDetails": answers(main_required, customer),
+                    "mainContactDetails": answers(main_answer_ids, customer),
                     "activityBookings": [
                         {
                             "bookingId": activity_booking,
@@ -1270,7 +1296,7 @@ class BokunHTTPTransport:
                                     "bookingId": passenger_booking,
                                     "pricingCategoryId": category_id,
                                     "passengerDetails": answers(
-                                        passenger_required, passenger_values
+                                        passenger_answer_ids, passenger_values
                                     ),
                                 }
                             ],

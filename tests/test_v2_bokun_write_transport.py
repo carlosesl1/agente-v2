@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from urllib.parse import parse_qs
 
 import httpx
@@ -98,6 +99,56 @@ def _transport(handler) -> BokunHTTPTransport:
         client=httpx.Client(transport=httpx.MockTransport(handler)),
         timestamp=lambda: "2026-07-24 12:00:00",
     )
+
+
+def test_submit_answers_supported_checkout_fields_even_when_provider_marks_them_optional() -> None:
+    checkout = _checkout()
+    questions = checkout["questions"]
+    assert isinstance(questions, dict)
+    main = questions["mainContactDetails"]
+    activities = questions["activityBookings"]
+    assert isinstance(main, list) and isinstance(activities, list)
+    for item in main:
+        assert isinstance(item, dict)
+        item["required"] = False
+    passenger = activities[0]["passengers"][0]["passengerDetails"]
+    for item in passenger:
+        item["required"] = False
+
+    body = BokunHTTPTransport._submit_body(
+        checkout,
+        session_id="session:optional-fields",
+        activity_booking="activity-booking-1",
+        passenger_booking="passenger-booking-1",
+        product_id="913372",
+        category_id="857489",
+        customer={
+            "firstName": "Carlos",
+            "lastName": "Eduardo",
+            "email": "carlos@example.invalid",
+            "phoneNumber": "+557****9999",
+            "nationality": "BR",
+            "language": "pt",
+            "dateOfBirth": "1990-01-02",
+            "gender": "m",
+        },
+        expected_amount=Decimal("300.00"),
+    )
+
+    main_answers = {
+        item["questionId"]: item["values"][0]
+        for item in body["shoppingCart"]["bookingAnswers"]["mainContactDetails"]
+    }
+    passenger_answers = {
+        item["questionId"]: item["values"][0]
+        for item in body["shoppingCart"]["bookingAnswers"]["activityBookings"][0]["passengers"][0]["passengerDetails"]
+    }
+    assert main_answers["email"] == "carlos@example.invalid"
+    assert main_answers["phoneNumber"] == "+557****9999"
+    assert main_answers["dateOfBirth"] == "1990-01-02"
+    assert main_answers["gender"] == "m"
+    assert passenger_answers["dateOfBirth"] == "1990-01-02"
+    assert passenger_answers["gender"] == "m"
 
 
 def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> None:
