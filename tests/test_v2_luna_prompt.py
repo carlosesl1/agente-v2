@@ -17,3 +17,15 @@ def test_agency_stripe_link_is_bound_to_twenty_percent_fee_inclusive_deposit() -
 def test_standard_twenty_percent_deposit_never_routes_to_handoff() -> None:
     assert "O sinal padrão de 20% não é desconto, concessão nem negociação" in PROMPT
     assert "confirmar esse sinal deve ser respondido normalmente e nunca abre handoff" in PROMPT
+
+
+def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
+    assert "v2-model-proposal-v3" in PROMPT
+    assert "v2-model-proposal-v2" not in PROMPT
+    assert "pending_action" in PROMPT
+    assert "confirmed_action_kinds" in PROMPT
+    assert "approval_basis" in PROMPT
+    assert "contextual_reference" in PROMPT
+    assert "“Sim” isolado" in PROMPT or '"Sim" isolado' in PROMPT
+    assert "sim, mas" in PROMPT.casefold()
+    assert "signed_callback" not in PROMPT

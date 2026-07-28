@@ -14,6 +14,7 @@ from reservation_boundary import (
     DesiredService,
 )
 from reservation_domain import (
+    AwaitingAdjustmentState,
     AwaitingConfirmationState,
     CustomerFacts,
     DraftRequested,
@@ -46,6 +47,12 @@ from v2_application.conversation import (
     PackageCommandCoordinator,
     V2ConversationReducer,
 )
+from v2_application.critical_actions import (
+    CriticalActionPolicy,
+    critical_action_context,
+    critical_proposal_digest,
+    critical_summary_outbox_id,
+)
 from v2_application.reads import (
     PrivateOfferBindingResolver,
 )
@@ -53,6 +60,7 @@ from v2_application.reservations import (
     ReservationAllocator,
     V2ReservationExecutionAdapter,
 )
+from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import (
@@ -69,6 +77,24 @@ LODGING_OFFER_ID = "offer:" + "a" * 32
 ACTIVITY_OFFER_ID = "offer:" + "c" * 32
 LODGING_BINDING_HASH = "b" * 64
 ACTIVITY_BINDING_HASH = "d" * 64
+
+
+def _enabled_policy() -> CriticalActionPolicy:
+    return CriticalActionPolicy(
+        frozenset(
+            {
+                CriticalActionKind.RESERVE_LODGING,
+                CriticalActionKind.BOOK_ACTIVITY,
+                CriticalActionKind.BOOK_PACKAGE,
+                CriticalActionKind.INITIATE_PAYMENT,
+            }
+        ),
+        enabled_payment_methods=frozenset({"stripe", "wise", "pix"}),
+    )
+
+
+def _reducer() -> V2ConversationReducer:
+    return V2ConversationReducer(critical_action_policy=_enabled_policy())
 
 
 def _profile(*, complete: bool = True) -> PrivateCustomerBinding:
@@ -120,21 +146,43 @@ def _proposal(
     service: str = "hostel",
     payment_method: str = "stripe",
 ) -> ModelProposal:
+    if intent == "confirm":
+        action = {
+            "hostel": CriticalActionKind.RESERVE_LODGING,
+            "agency": CriticalActionKind.BOOK_ACTIVITY,
+            "package": CriticalActionKind.BOOK_PACKAGE,
+        }[service]
+        confirmed_action_kinds = tuple(
+            sorted(
+                (action, CriticalActionKind.INITIATE_PAYMENT),
+                key=lambda item: item.value,
+            )
+        )
+        approval_basis = ApprovalBasis.CONTEXTUAL_REFERENCE
+    else:
+        confirmed_action_kinds = ()
+        approval_basis = None
     return ModelProposal(
         source_event_id=source,
         intent=intent,
         reply_chunks=("Mensagem pública do modelo.",),
         facts=(
-            ModelFact("language", "pt-BR"),
-            ModelFact("service", service),
-            ModelFact("start_date", date(2026, 8, 10)),
-            ModelFact("end_date", date(2026, 8, 12)),
-            ModelFact("adults", 2),
-            ModelFact("children", 0),
-            ModelFact("payment_method", payment_method),
+            ()
+            if intent == "confirm"
+            else (
+                ModelFact("language", "pt-BR"),
+                ModelFact("service", service),
+                ModelFact("start_date", date(2026, 8, 10)),
+                ModelFact("end_date", date(2026, 8, 12)),
+                ModelFact("adults", 2),
+                ModelFact("children", 0),
+                ModelFact("payment_method", payment_method),
+            )
         ),
         target_offer_id=target_offer_id,
         confirmed_summary_version=confirmed_summary_version,
+        confirmed_action_kinds=confirmed_action_kinds,
+        approval_basis=approval_basis,
         read_requests=(),
         effect_proposals=(),
     )
@@ -195,7 +243,7 @@ def test_named_activity_product_is_persisted_as_canonical_private_fact() -> None
         effect_proposals=(),
     )
 
-    decision = V2ConversationReducer().reduce(
+    decision = _reducer().reduce(
         state=_boundary(),
         projection=_projection(),
         proposal=proposal,
@@ -357,15 +405,27 @@ def _read_for_component(component: OfferSnapshot) -> ReadObservation:
 def _awaiting_from_ready(state: ReadyToSummarizeState, *, version: int | None = None):
     if version is not None:
         state = replace(state, draft=replace(state.draft, version=version))
+    context = critical_action_context(
+        state.draft,
+        summary_version=state.draft.version,
+        presented_at=NOW,
+        locale="pt-BR",
+        approval_ttl=timedelta(minutes=30),
+        agency_payment_percentage=20,
+        hostel_payment_percentage=100,
+        policy=_enabled_policy(),
+    )
+    digest = critical_proposal_digest(state.draft, context)
+    summary_id = "summary:001"
     transition = reduce_domain(
         state,
         SummaryRecorded(
             event_id="event:summary",
             occurred_at=NOW,
-            summary_event_id="summary:001",
+            summary_event_id=summary_id,
             draft_version=state.draft.version,
             subject_signature=state.draft.subject_signature,
-            outbox_message_id="outbox:summary:001",
+            outbox_message_id=critical_summary_outbox_id(summary_id, digest),
         ),
     )
     assert type(transition.state) is AwaitingConfirmationState
@@ -373,7 +433,7 @@ def _awaiting_from_ready(state: ReadyToSummarizeState, *, version: int | None = 
 
 
 def test_incomplete_profile_and_stale_confirmation_never_emit_command() -> None:
-    reducer = V2ConversationReducer()
+    reducer = _reducer()
     incomplete = reducer.reduce(
         state=_boundary(),
         projection=_projection(),
@@ -425,7 +485,7 @@ def test_incomplete_profile_allows_non_identity_dependent_conversation(
         effect_proposals=(),
     )
 
-    decision = V2ConversationReducer().reduce(
+    decision = _reducer().reduce(
         state=_boundary(),
         projection=_projection(),
         proposal=proposal,
@@ -456,7 +516,7 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
         ),
     )
     with pytest.raises(ConversationReductionError, match="diverge"):
-        V2ConversationReducer().reduce(
+        _reducer().reduce(
             state=_boundary(),
             projection=_projection(),
             proposal=divergent,
@@ -466,7 +526,7 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
             now=NOW,
         )
 
-    decision = V2ConversationReducer().reduce(
+    decision = _reducer().reduce(
         state=_boundary(),
         projection=_projection(),
         proposal=_proposal(
@@ -483,6 +543,13 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
     assert decision.commands == ()
     assert type(decision.next_state.workflow) is AwaitingConfirmationState
     assert decision.public_reply.kind == "summary"
+    assert decision.public_reply.chunks == (
+        "Só para confirmar: vou reservar Suíte Casal de 10/08/2026 a "
+        "12/08/2026 para 2 pessoas, pelo total final de R$ 480,00, e depois "
+        "gerar o link do pagamento de R$ 480,00 no cartão. Posso fazer essa reserva?",
+    )
+    assert "BRL" not in decision.public_reply.chunks[0]
+    assert "stripe" not in decision.public_reply.chunks[0]
     assert decision.projection.stage is ConversationStage.CLOSING
     assert (
         tuple(fact.name for fact in decision.projection.facts)[-1] == "payment_method"
@@ -495,11 +562,38 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
     )
 
 
+def test_disabled_critical_capability_fails_closed_with_public_denial() -> None:
+    reducer = V2ConversationReducer(
+        critical_action_policy=CriticalActionPolicy(
+            frozenset({CriticalActionKind.RESERVE_LODGING})
+        )
+    )
+
+    decision = reducer.reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=_proposal(
+            source="batch:capability-denied",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.next_state.workflow is None
+    assert decision.commands == ()
+    assert decision.public_reply.kind == "critical_action_unavailable"
+    assert decision.receipt_requirements == ("critical_action_denied",)
+
+
 def test_confirmed_summary_emits_domain_command_only() -> None:
     awaiting = _awaiting_from_ready(
         _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:single")
     )
-    missing = V2ConversationReducer().reduce(
+    missing = _reducer().reduce(
         state=_boundary(awaiting),
         projection=_projection(),
         proposal=_proposal(
@@ -521,7 +615,7 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
             _read_for_component(component) for component in awaiting.draft.components
         )
     )
-    stale = V2ConversationReducer().reduce(
+    stale = _reducer().reduce(
         state=_boundary(awaiting),
         projection=_projection(),
         proposal=_proposal(
@@ -537,7 +631,7 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert stale.commands == ()
     assert stale.public_reply.kind == "fresh_reads_required"
 
-    decision = V2ConversationReducer().reduce(
+    decision = _reducer().reduce(
         state=_boundary(awaiting),
         projection=_projection(),
         proposal=_proposal(
@@ -555,6 +649,150 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert type(decision.commands[0]) is ReservationCommand
     assert decision.commands[0].operation is ReservationOperation.RESERVE_LODGING
     assert type(decision.next_state.workflow) is ExecutionQueuedState
+
+
+def test_confirmation_scope_mismatch_and_expiry_fail_closed_without_command() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:approval-guard")
+    )
+    fresh_reads = tuple(
+        _read_for_component(item) for item in awaiting.draft.components
+    )
+    correct = _proposal(
+        source="event:approval-guard",
+        intent="confirm",
+        confirmed_summary_version=awaiting.draft.version,
+    )
+    wrong_scope = replace(
+        correct,
+        confirmed_action_kinds=(
+            CriticalActionKind.CANCEL_RESERVATION,
+            CriticalActionKind.INITIATE_PAYMENT,
+        ),
+    )
+
+    rejected = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=wrong_scope,
+        profile=_profile(),
+        reads=fresh_reads,
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert rejected.commands == ()
+    assert rejected.public_reply.kind == "stale_confirmation"
+
+    expired = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=correct,
+        profile=replace(_profile(), expires_at=NOW + timedelta(hours=1)),
+        reads=fresh_reads,
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(minutes=30),
+    )
+    assert expired.commands == ()
+    assert expired.public_reply.kind == "approval_expired"
+
+
+def test_adjustment_or_refusal_revokes_the_pending_proposal_version() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:adjust-revoke")
+    )
+    adjustment = ModelProposal(
+        source_event_id="event:adjust-revoke",
+        intent="adjust",
+        reply_chunks=("Tudo bem, não vou reservar essa opção.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    revoked = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=adjustment,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert revoked.commands == ()
+    assert type(revoked.next_state.workflow) is AwaitingAdjustmentState
+    assert revoked.public_reply.kind == "adjust"
+    assert _reducer().pending_action(
+        revoked.next_state.workflow,
+        locale="pt-BR",
+    ) is None
+
+    late_confirmation = _reducer().reduce(
+        state=revoked.next_state,
+        projection=revoked.projection,
+        proposal=_proposal(
+            source="event:late-old-confirmation",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert late_confirmation.commands == ()
+
+
+def test_material_projection_change_supersedes_old_confirmation_without_command() -> None:
+    reducer = _reducer()
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:material-change")
+    )
+    changed = reducer.reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=ModelProposal(
+            source_event_id="event:material-change-inform",
+            intent="inform",
+            reply_chunks=("Entendi, agora são três pessoas.",),
+            facts=(ModelFact("adults", 3),),
+            read_requests=(),
+            effect_proposals=(),
+        ),
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert type(changed.next_state.workflow) is AwaitingConfirmationState
+    assert (
+        reducer.confirmation_projection_matches(
+            changed.next_state.workflow,
+            changed.projection,
+        )
+        is False
+    )
+
+    stale_confirmation = reducer.reduce(
+        state=changed.next_state,
+        projection=changed.projection,
+        proposal=_proposal(
+            source="event:old-confirmation-after-change",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=tuple(
+            _read_for_component(component) for component in awaiting.draft.components
+        ),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert type(stale_confirmation.next_state.workflow) is AwaitingAdjustmentState
+    assert stale_confirmation.commands == ()
+    assert stale_confirmation.public_reply.kind == "proposal_changed"
+    assert stale_confirmation.receipt_requirements == ("proposal_superseded",)
 
 
 def test_runtime_package_selection_builds_one_bound_summary_then_two_child_commands() -> None:
@@ -578,7 +816,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
         read_requests=(),
         effect_proposals=(),
     )
-    selected = V2ConversationReducer().reduce(
+    selected = _reducer().reduce(
         state=_boundary(),
         projection=_projection(package=True),
         proposal=proposal,
@@ -600,24 +838,20 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
     assert ACTIVITY_OFFER_ID not in public_text
 
     awaiting = selected.next_state.workflow
-    confirmed = V2ConversationReducer().reduce(
+    confirmed = _reducer().reduce(
         state=selected.next_state,
         projection=selected.projection,
         proposal=ModelProposal(
             source_event_id="event:confirm-package-runtime",
             intent="confirm",
             reply_chunks=("Sim, pode reservar.",),
-            facts=(
-                ModelFact("language", "pt-BR"),
-                ModelFact("service", "package"),
-                ModelFact("start_date", date(2026, 8, 10)),
-                ModelFact("end_date", date(2026, 8, 12)),
-                ModelFact("activity_date", date(2026, 8, 11)),
-                ModelFact("adults", 2),
-                ModelFact("children", 0),
-                ModelFact("payment_method", "stripe"),
-            ),
+            facts=(),
             confirmed_summary_version=awaiting.draft.version,
+            confirmed_action_kinds=(
+                CriticalActionKind.BOOK_PACKAGE,
+                CriticalActionKind.INITIATE_PAYMENT,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
             read_requests=(),
             effect_proposals=(),
         ),
@@ -653,7 +887,7 @@ def test_package_has_one_summary_one_confirmation_and_two_allocated_components()
     )
     awaiting = _awaiting_from_ready(package_ready)
 
-    decision = V2ConversationReducer().reduce(
+    decision = _reducer().reduce(
         state=_boundary(awaiting),
         projection=_projection(package=True),
         proposal=_proposal(
@@ -734,7 +968,7 @@ def test_private_offer_resolution_rechecks_all_bindings_during_prepare() -> None
         )
     )
     offer_id = observation.public_payload["options"][0]["offer_id"]
-    selected = V2ConversationReducer().reduce(
+    selected = _reducer().reduce(
         state=_boundary(),
         projection=_projection(),
         proposal=_proposal(
@@ -748,7 +982,7 @@ def test_private_offer_resolution_rechecks_all_bindings_during_prepare() -> None
         now=NOW,
     )
     command = (
-        V2ConversationReducer()
+        _reducer()
         .reduce(
             state=selected.next_state,
             projection=_projection(),

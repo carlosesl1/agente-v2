@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Final
 
+from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import (
     AuditedModelTurn,
     AuditedTranscriptFrame,
@@ -58,14 +59,20 @@ _RESPONSE_FIELDS_V1: Final = frozenset(
     )
 )
 _RESPONSE_FIELDS_V2: Final = frozenset((*_RESPONSE_FIELDS_V1, "target_offer_ids"))
+_RESPONSE_FIELDS_V3: Final = frozenset(
+    (*_RESPONSE_FIELDS_V2, "confirmed_action_kinds", "approval_basis")
+)
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v2 JSON object and no commentary. reply_chunks
+Return exactly one v2-model-proposal-v3 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
 empty list; the parent permits only one provider-read round per turn.
+When pending_action is present, classify the latest message in relation to that exact
+public summary. A confirm must copy its summary_version and action_kinds exactly and
+set approval_basis to contextual_reference. A bare or unrelated yes is not approval.
 """.strip()
 
 
@@ -127,6 +134,15 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
             }
             for item in request.state_facts
         ]
+    if request.pending_action is not None:
+        user_payload["pending_action"] = {
+            "summary_version": request.pending_action.summary_version,
+            "action_kinds": [
+                item.value for item in request.pending_action.action_kinds
+            ],
+            "public_summary": request.pending_action.public_summary,
+            "expires_at": request.pending_action.expires_at.isoformat(),
+        }
     return _canonical(
         {
             "system_prompt": system_prompt,
@@ -185,6 +201,23 @@ def _tuple_items(value: object, name: str) -> tuple[object, ...]:
     return tuple(value)
 
 
+def _critical_actions(value: object) -> tuple[CriticalActionKind, ...]:
+    raw = _tuple_items(value, "confirmed_action_kinds")
+    try:
+        return tuple(CriticalActionKind(item) for item in raw)
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelProposal("critical action kind is invalid") from exc
+
+
+def _approval_basis(value: object) -> ApprovalBasis | None:
+    if value is None:
+        return None
+    try:
+        return ApprovalBasis(value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelProposal("approval basis is invalid") from exc
+
+
 def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
     try:
         decoded = json.loads(payload, object_pairs_hook=_unique_object)
@@ -197,6 +230,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         expected_fields = _RESPONSE_FIELDS_V1
     elif schema == "v2-model-proposal-v2":
         expected_fields = _RESPONSE_FIELDS_V2
+    elif schema == "v2-model-proposal-v3":
+        expected_fields = _RESPONSE_FIELDS_V3
     else:
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
@@ -232,8 +267,18 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                 tuple(
                     _tuple_items(decoded["target_offer_ids"], "target_offer_ids")
                 )
-                if schema == "v2-model-proposal-v2"
+                if schema in ("v2-model-proposal-v2", "v2-model-proposal-v3")
                 else ()
+            ),
+            confirmed_action_kinds=(
+                _critical_actions(decoded["confirmed_action_kinds"])
+                if schema == "v2-model-proposal-v3"
+                else ()
+            ),
+            approval_basis=(
+                _approval_basis(decoded["approval_basis"])
+                if schema == "v2-model-proposal-v3"
+                else None
             ),
         )
     except (TypeError, ValueError) as exc:

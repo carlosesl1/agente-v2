@@ -21,6 +21,7 @@ from reservation_boundary import (
 )
 from reservation_domain import (
     AwaitingConfirmationState,
+    CommercialDraft,
     ConfirmationDecisionKind,
     ConfirmationReceived,
     CustomerFacts,
@@ -51,7 +52,19 @@ from reservation_followup import (
     HandoffRequested,
     HandoffWorkflow,
 )
+from v2_application.critical_actions import (
+    ApprovalMatch,
+    CriticalActionDenied,
+    CriticalActionPolicy,
+    approval_assertion_matches,
+    critical_action_context,
+    critical_action_scope_available,
+    critical_proposal_digest,
+    critical_summary_outbox_id,
+    pending_action_context,
+)
 from v2_application.turns import validate_productive_proposal
+from v2_contracts.critical_actions import PendingCriticalActionContext
 from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -305,6 +318,64 @@ def _proposal_binds_package(
         return False
     party_size = lodging.party.adults + lodging.party.children
     return activity.party.adults == party_size and activity.party.children == 0
+
+
+def _projection_binds_draft(
+    projection: ConversationProjection,
+    draft: CommercialDraft,
+) -> bool:
+    if type(projection) is not ConversationProjection or type(draft) is not CommercialDraft:
+        raise TypeError("projection/draft must be exact values")
+    values = _projection_values(projection)
+    components = draft.components
+    if len(components) == 1:
+        component = components[0]
+        expected: dict[str, object] = {
+            "service": (
+                "hostel" if component.service is ServiceKind.LODGING else "agency"
+            ),
+            "product_id": component.lookup_id,
+            "start_date": component.start_date,
+            "adults": component.party.adults,
+            "children": component.party.children,
+            "payment_method": draft.terms.payment_method,
+        }
+        if component.service is ServiceKind.LODGING:
+            expected["end_date"] = component.end_date
+        else:
+            expected["activity_date"] = component.start_date
+    elif len(components) == 2:
+        lodging = next(
+            item for item in components if item.service is ServiceKind.LODGING
+        )
+        activity = next(
+            item for item in components if item.service is ServiceKind.ACTIVITY
+        )
+        expected = {
+            "service": "package",
+            "start_date": lodging.start_date,
+            "end_date": lodging.end_date,
+            "activity_date": activity.start_date,
+            "adults": lodging.party.adults,
+            "children": lodging.party.children,
+            "payment_method": draft.terms.payment_method,
+        }
+    else:
+        return False
+    material_names = {
+        "service",
+        "product_id",
+        "start_date",
+        "end_date",
+        "activity_date",
+        "adults",
+        "children",
+        "payment_method",
+    }
+    return all(
+        name not in values or (name in expected and values[name] == expected[name])
+        for name in material_names
+    )
 
 
 def _canonical_public_hash(payload: dict[str, object]) -> str:
@@ -630,6 +701,132 @@ class PackageCommandCoordinator:
 
 
 class V2ConversationReducer:
+    def __init__(
+        self,
+        *,
+        approval_ttl: timedelta = timedelta(minutes=30),
+        agency_payment_percentage: int = 20,
+        hostel_payment_percentage: int = 100,
+        critical_action_policy: CriticalActionPolicy | None = None,
+    ) -> None:
+        if type(approval_ttl) is not timedelta or approval_ttl <= timedelta(0):
+            raise ValueError("approval_ttl must be a positive exact timedelta")
+        for value, name in (
+            (agency_payment_percentage, "agency_payment_percentage"),
+            (hostel_payment_percentage, "hostel_payment_percentage"),
+        ):
+            if type(value) is not int or isinstance(value, bool) or not 1 <= value <= 100:
+                raise ValueError(f"{name} must be an exact integer from 1 to 100")
+        policy = critical_action_policy or CriticalActionPolicy.default()
+        if type(policy) is not CriticalActionPolicy:
+            raise TypeError("critical_action_policy must be exact CriticalActionPolicy")
+        self._approval_ttl = approval_ttl
+        self._agency_payment_percentage = agency_payment_percentage
+        self._hostel_payment_percentage = hostel_payment_percentage
+        self._critical_action_policy = policy
+
+    def _critical_context(
+        self,
+        draft,
+        *,
+        summary_version: int,
+        presented_at: datetime,
+        locale: str,
+    ) -> PendingCriticalActionContext:
+        try:
+            return critical_action_context(
+                draft,
+                summary_version=summary_version,
+                presented_at=presented_at,
+                locale=locale,
+                approval_ttl=self._approval_ttl,
+                agency_payment_percentage=self._agency_payment_percentage,
+                hostel_payment_percentage=self._hostel_payment_percentage,
+                policy=self._critical_action_policy,
+            )
+        except CriticalActionDenied:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise ConversationReductionError(
+                "critical action proposal is denied or invalid"
+            ) from exc
+
+    def pending_action(
+        self,
+        workflow,
+        *,
+        locale: str,
+    ) -> PendingCriticalActionContext | None:
+        if type(workflow) is not AwaitingConfirmationState:
+            return None
+        return pending_action_context(
+            workflow,
+            locale=locale,
+            approval_ttl=self._approval_ttl,
+            agency_payment_percentage=self._agency_payment_percentage,
+            hostel_payment_percentage=self._hostel_payment_percentage,
+            policy=self._critical_action_policy,
+        )
+
+    @staticmethod
+    def confirmation_projection_matches(
+        workflow: object,
+        projection: ConversationProjection,
+    ) -> bool:
+        if type(workflow) is not AwaitingConfirmationState:
+            return False
+        return _projection_binds_draft(projection, workflow.draft)
+
+    def confirmation_capability_available(
+        self,
+        workflow: object,
+        *,
+        now: datetime,
+    ) -> bool:
+        if type(workflow) is not AwaitingConfirmationState:
+            return False
+        return critical_action_scope_available(
+            workflow.draft,
+            policy=self._critical_action_policy,
+            now=now,
+        )
+
+    def approval_deadline(
+        self,
+        pending_action: PendingCriticalActionContext | None,
+    ) -> datetime | None:
+        if pending_action is None:
+            return None
+        if type(pending_action) is not PendingCriticalActionContext:
+            raise TypeError(
+                "pending_action must be exact PendingCriticalActionContext or None"
+            )
+        if self._critical_action_policy.valid_until is None:
+            return pending_action.expires_at
+        return min(
+            pending_action.expires_at,
+            self._critical_action_policy.valid_until,
+        )
+
+    @staticmethod
+    def _critical_action_denied(
+        state: BoundaryState,
+        projection: ConversationProjection,
+        source_event_id: str,
+    ) -> V2ConversationDecision:
+        return V2ConversationDecision(
+            next_state=_consume_without_workflow_transition(state, source_event_id),
+            projection=projection,
+            commands=(),
+            public_reply=ConversationReply(
+                "critical_action_unavailable",
+                (
+                    "Essa ação não está disponível com segurança agora. Posso continuar ajudando sem executá-la.",
+                ),
+            ),
+            receipt_requirements=("critical_action_denied",),
+        )
+
     def reduce(
         self,
         *,
@@ -773,19 +970,130 @@ class V2ConversationReducer:
                 )
 
         workflow = state.workflow
+        if type(workflow) is AwaitingConfirmationState and proposal.intent == "adjust":
+            transition = reduce_domain(
+                workflow,
+                ConfirmationReceived(
+                    event_id=_event_id(proposal.source_event_id, "adjustment"),
+                    occurred_at=instant,
+                    confirmation_event_id=_identity(
+                        proposal.source_event_id,
+                        workflow.draft.subject_signature,
+                        prefix="adjustment",
+                    ),
+                    decision=ConfirmationDecisionKind.ADJUST,
+                    target_draft_version=workflow.draft.version,
+                    subject_signature=workflow.draft.subject_signature,
+                ),
+            )
+            return V2ConversationDecision(
+                next_state=_replace_boundary(
+                    state,
+                    workflow=transition.state,
+                    source_event_id=proposal.source_event_id,
+                ),
+                projection=merged,
+                commands=(),
+                public_reply=ConversationReply(
+                    "adjust",
+                    proposal.reply_chunks
+                    or ("Tudo bem. Não vou executar esse resumo.",),
+                ),
+                receipt_requirements=("proposal_revoked",),
+            )
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "confirm":
-            if proposal.confirmed_summary_version != workflow.draft.version:
+            if not self.confirmation_capability_available(workflow, now=instant):
+                transition = reduce_domain(
+                    workflow,
+                    ConfirmationReceived(
+                        event_id=_event_id(proposal.source_event_id, "capability-denied"),
+                        occurred_at=instant,
+                        confirmation_event_id=_identity(
+                            proposal.source_event_id,
+                            workflow.draft.subject_signature,
+                            prefix="capability-denied",
+                        ),
+                        decision=ConfirmationDecisionKind.ADJUST,
+                        target_draft_version=workflow.draft.version,
+                        subject_signature=workflow.draft.subject_signature,
+                    ),
+                )
+                return V2ConversationDecision(
+                    next_state=_replace_boundary(
+                        state,
+                        workflow=transition.state,
+                        source_event_id=proposal.source_event_id,
+                    ),
+                    projection=merged,
+                    commands=(),
+                    public_reply=ConversationReply(
+                        "critical_action_unavailable",
+                        (
+                            "Essa ação não está disponível com segurança agora. Não vou executar o resumo anterior.",
+                        ),
+                    ),
+                    receipt_requirements=("critical_action_denied",),
+                )
+            if not self.confirmation_projection_matches(workflow, merged):
+                transition = reduce_domain(
+                    workflow,
+                    ConfirmationReceived(
+                        event_id=_event_id(proposal.source_event_id, "superseded"),
+                        occurred_at=instant,
+                        confirmation_event_id=_identity(
+                            proposal.source_event_id,
+                            workflow.draft.subject_signature,
+                            prefix="superseded",
+                        ),
+                        decision=ConfirmationDecisionKind.ADJUST,
+                        target_draft_version=workflow.draft.version,
+                        subject_signature=workflow.draft.subject_signature,
+                    ),
+                )
+                return V2ConversationDecision(
+                    next_state=_replace_boundary(
+                        state,
+                        workflow=transition.state,
+                        source_event_id=proposal.source_event_id,
+                    ),
+                    projection=merged,
+                    commands=(),
+                    public_reply=ConversationReply(
+                        "proposal_changed",
+                        (
+                            "Os detalhes mudaram. Não vou executar o resumo anterior; vou atualizar a proposta antes de pedir nova confirmação.",
+                        ),
+                    ),
+                    receipt_requirements=("proposal_superseded",),
+                )
+            pending = self.pending_action(workflow, locale=merged.locale)
+            approval_match = approval_assertion_matches(
+                workflow=workflow,
+                pending_action=pending,
+                proposal=proposal,
+                now=instant,
+            )
+            if approval_match is not ApprovalMatch.MATCH:
+                if approval_match is ApprovalMatch.EXPIRED:
+                    kind = "approval_expired"
+                    chunks = (
+                        "Esse resumo expirou. Vou atualizar disponibilidade e valores antes de pedir uma nova confirmação.",
+                    )
+                    requirement = "approval_expired"
+                else:
+                    kind = "stale_confirmation"
+                    chunks = (
+                        "Essa resposta não autoriza exatamente o resumo atual. Vou apresentar os termos novamente.",
+                    )
+                    requirement = "stale_confirmation"
                 return V2ConversationDecision(
                     next_state=_consume_without_workflow_transition(
                         state, proposal.source_event_id
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "stale_confirmation",
-                        ("O resumo mudou; confirme novamente a versão atual.",),
-                    ),
-                    receipt_requirements=("stale_confirmation",),
+                    public_reply=ConversationReply(kind, chunks),
+                    receipt_requirements=(requirement,),
                 )
             if workflow.draft.customer != _customer(profile, merged):
                 return V2ConversationDecision(
@@ -841,9 +1149,7 @@ class V2ConversationReducer:
                 commands=transition.commands,
                 public_reply=ConversationReply(
                     "reservation_authorized",
-                    (
-                        "Confirmação recebida. Vou processar a solicitação com segurança.",
-                    ),
+                    ("Perfeito — vou processar sua reserva agora.",),
                 ),
                 receipt_requirements=("reservation_command",),
             )
@@ -941,6 +1247,21 @@ class V2ConversationReducer:
                 str(domain_state.draft.version),
                 prefix="summary",
             )
+            try:
+                critical_context = self._critical_context(
+                    domain_state.draft,
+                    summary_version=domain_state.draft.version,
+                    presented_at=instant,
+                    locale=merged.locale,
+                )
+            except CriticalActionDenied:
+                return self._critical_action_denied(
+                    state, merged, proposal.source_event_id
+                )
+            proposal_digest = critical_proposal_digest(
+                domain_state.draft,
+                critical_context,
+            )
             domain_state = reduce_domain(
                 domain_state,
                 SummaryRecorded(
@@ -949,7 +1270,10 @@ class V2ConversationReducer:
                     summary_event_id=summary_id,
                     draft_version=domain_state.draft.version,
                     subject_signature=domain_state.draft.subject_signature,
-                    outbox_message_id=_identity(summary_id, prefix="outbox"),
+                    outbox_message_id=critical_summary_outbox_id(
+                        summary_id,
+                        proposal_digest,
+                    ),
                 ),
             ).state
             if type(domain_state) is not AwaitingConfirmationState:
@@ -961,20 +1285,14 @@ class V2ConversationReducer:
                 workflow=domain_state,
                 source_event_id=proposal.source_event_id,
             )
-            total_amount = lodging_offer.total.amount + activity_offer.total.amount
-            summary_text = (
-                f"Confirme {lodging_offer.public_label}, {lodging_offer.total.currency} "
-                f"{format(lodging_offer.total.amount, '.2f')}; "
-                f"{activity_offer.public_label}, {activity_offer.total.currency} "
-                f"{format(activity_offer.total.amount, '.2f')}; total "
-                f"{lodging_offer.total.currency} {format(total_amount, '.2f')}, "
-                f"pagamento por {payment_method}."
-            )
             return V2ConversationDecision(
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply("summary", (summary_text,)),
+                public_reply=ConversationReply(
+                    "summary",
+                    (critical_context.public_summary,),
+                ),
                 receipt_requirements=("summary_presented",),
             )
 
@@ -1054,6 +1372,21 @@ class V2ConversationReducer:
                 str(domain_state.draft.version),
                 prefix="summary",
             )
+            try:
+                critical_context = self._critical_context(
+                    domain_state.draft,
+                    summary_version=domain_state.draft.version,
+                    presented_at=instant,
+                    locale=merged.locale,
+                )
+            except CriticalActionDenied:
+                return self._critical_action_denied(
+                    state, merged, proposal.source_event_id
+                )
+            proposal_digest = critical_proposal_digest(
+                domain_state.draft,
+                critical_context,
+            )
             domain_state = reduce_domain(
                 domain_state,
                 SummaryRecorded(
@@ -1062,7 +1395,10 @@ class V2ConversationReducer:
                     summary_event_id=summary_id,
                     draft_version=domain_state.draft.version,
                     subject_signature=domain_state.draft.subject_signature,
-                    outbox_message_id=_identity(summary_id, prefix="outbox"),
+                    outbox_message_id=critical_summary_outbox_id(
+                        summary_id,
+                        proposal_digest,
+                    ),
                 ),
             ).state
             if type(domain_state) is not AwaitingConfirmationState:
@@ -1074,16 +1410,14 @@ class V2ConversationReducer:
                 workflow=domain_state,
                 source_event_id=proposal.source_event_id,
             )
-            total = domain_state.draft.components[0].total
-            summary_text = (
-                f"Confirme {offer.public_label}, total {total.currency} "
-                f"{format(total.amount, '.2f')}, pagamento por {payment_method}."
-            )
             return V2ConversationDecision(
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply("summary", (summary_text,)),
+                public_reply=ConversationReply(
+                    "summary",
+                    (critical_context.public_summary,),
+                ),
                 receipt_requirements=("summary_presented",),
             )
 

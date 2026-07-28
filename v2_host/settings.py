@@ -190,6 +190,7 @@ class V2Settings:
     stripe_agency_secret_key: str = ""
     hostel_payment_percentage: int = 100
     agency_payment_percentage: int = 20
+    critical_approval_ttl_seconds: int = 1_800
     stripe_base_url: str = "https://api.stripe.com"
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
@@ -332,6 +333,14 @@ class V2Settings:
         ):
             raise ValueError(
                 "payment percentages must be exact integers from 1 to 100"
+            )
+        if (
+            type(self.critical_approval_ttl_seconds) is not int
+            or isinstance(self.critical_approval_ttl_seconds, bool)
+            or not 1 <= self.critical_approval_ttl_seconds <= 86_400
+        ):
+            raise ValueError(
+                "critical_approval_ttl_seconds must be an exact integer from 1 to 86400"
             )
         if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
@@ -578,6 +587,9 @@ class V2Settings:
             agency_payment_percentage = int(
                 source.get("V2_AGENCY_PAYMENT_PERCENTAGE", "20")
             )
+            critical_approval_ttl_seconds = int(
+                source.get("V2_CRITICAL_APPROVAL_TTL_SECONDS", "1800")
+            )
         except ValueError as exc:
             raise ValueError("numeric V2 settings must be integers") from exc
         try:
@@ -679,6 +691,7 @@ class V2Settings:
             ),
             hostel_payment_percentage=hostel_payment_percentage,
             agency_payment_percentage=agency_payment_percentage,
+            critical_approval_ttl_seconds=critical_approval_ttl_seconds,
             stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
             hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=_system_prompt(source),

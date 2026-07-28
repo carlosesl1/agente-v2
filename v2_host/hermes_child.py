@@ -47,7 +47,7 @@ def _prompt(request: dict[str, object]) -> str:
     return (
         request["system_prompt"]
         + "\n\nYou are running as a tool-free child. Do not call tools or perform effects. "
-        "Return exactly one JSON object conforming to v2-model-proposal-v2, with no "
+        "Return exactly one JSON object conforming to v2-model-proposal-v3, with no "
         "Markdown fence, preface, or trailing commentary. The parent validates every field.\n\n"
         + request["messages"][0][1]
     )

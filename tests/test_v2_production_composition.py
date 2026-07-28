@@ -10,10 +10,13 @@ from pathlib import Path
 import pytest
 
 from reservation_domain import ReservationOperation
+from v2_application.critical_actions import CriticalActionDisposition
+from v2_contracts.critical_actions import CriticalActionKind
 from v2_contracts.providers import ReadKind
 from reservation_followup.workers import HandoffOutboxWorker
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import (
+    _critical_action_policy,
     ClosedCapabilityWorker,
     ReconciliationStage,
     build_read_service,
@@ -63,6 +66,113 @@ def test_default_factory_is_productive_not_qualification() -> None:
 
     assert factory is build_worker_set
     assert factory.__module__ == "v2_host.production"
+
+
+def test_critical_action_policy_is_derived_only_from_effect_gates(
+    tmp_path: Path,
+) -> None:
+    closed = _settings(tmp_path)
+    policy = _critical_action_policy(closed)
+    assert all(
+        policy.classify(kind) is CriticalActionDisposition.DENY
+        for kind in CriticalActionKind
+    )
+
+    base = replace(
+        closed,
+        runtime_mode=RuntimeMode.CONTROLLED_WRITE,
+        allowed_subscriber_ids=("1873018537",),
+        hermes_model="openai-codex/gpt-5.6-luna",
+        candidate_git_sha="a" * 40,
+        candidate_image_digest="sha256:" + "b" * 64,
+        manychat_api_key="manychat-secret",
+        hermes_command=("python", "hermes_child.py", "hermes"),
+        hermes_system_prompt="closed prompt",
+        hermes_transcript_key=b"critical-policy-test-key-00000001",
+        knowledge_base_path=(tmp_path / "knowledge.sqlite3").resolve(),
+        public_authority_manifest_path=(tmp_path / "authority.json").resolve(),
+        public_authority_hmac_key=b"critical-authority-key-000000001",
+    )
+    common = {
+        "real_effects_ack": REAL_EFFECTS_ACK,
+        "global_kill_switch_engaged": False,
+        "write_window_end": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+    lodging = _critical_action_policy(
+        replace(base, cloudbeds_writes_enabled=True, **common)
+    )
+    assert (
+        lodging.classify(CriticalActionKind.RESERVE_LODGING, now=datetime.now(timezone.utc))
+        is CriticalActionDisposition.ASK
+    )
+    assert (
+        lodging.classify(CriticalActionKind.BOOK_ACTIVITY, now=datetime.now(timezone.utc))
+        is CriticalActionDisposition.DENY
+    )
+
+    activity = _critical_action_policy(
+        replace(base, bokun_writes_enabled=True, **common)
+    )
+    assert (
+        activity.classify(CriticalActionKind.BOOK_ACTIVITY, now=datetime.now(timezone.utc))
+        is CriticalActionDisposition.ASK
+    )
+    assert activity.valid_until is not None
+    assert (
+        activity.classify(
+            CriticalActionKind.BOOK_ACTIVITY,
+            now=activity.valid_until,
+        )
+        is CriticalActionDisposition.DENY
+    )
+
+    package = _critical_action_policy(
+        replace(
+            base,
+            cloudbeds_writes_enabled=True,
+            bokun_writes_enabled=True,
+            **common,
+        )
+    )
+    assert (
+        package.classify(CriticalActionKind.BOOK_PACKAGE, now=datetime.now(timezone.utc))
+        is CriticalActionDisposition.ASK
+    )
+
+    payment = _critical_action_policy(
+        replace(
+            base,
+            stripe_links_enabled=True,
+            stripe_hostel_account_profile_id="stripe-account:hostel:test",
+            stripe_agency_account_profile_id="stripe-account:agency:test",
+            stripe_hostel_secret_key="rk_" + "test_scoped_hostel",
+            stripe_agency_secret_key="rk_" + "test_scoped_agency",
+            **common,
+        )
+    )
+    assert (
+        payment.classify(
+            CriticalActionKind.INITIATE_PAYMENT,
+            payment_method="stripe",
+            now=datetime.now(timezone.utc),
+        )
+        is CriticalActionDisposition.ASK
+    )
+    assert (
+        payment.classify(
+            CriticalActionKind.INITIATE_PAYMENT,
+            payment_method="wise",
+            now=datetime.now(timezone.utc),
+        )
+        is CriticalActionDisposition.DENY
+    )
+    for unsupported in (
+        CriticalActionKind.MODIFY_RESERVATION,
+        CriticalActionKind.CANCEL_RESERVATION,
+        CriticalActionKind.CHARGE_OR_CAPTURE,
+        CriticalActionKind.REFUND,
+    ):
+        assert payment.classify(unsupported) is CriticalActionDisposition.DENY
 
 
 def test_dark_read_only_factory_builds_closed_effect_graph_and_truthful_readiness(

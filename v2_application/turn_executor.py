@@ -59,6 +59,7 @@ from v2_application.relay_worker import (
 from v2_application.reservations import ReservationAllocator
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
+from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
@@ -67,10 +68,18 @@ from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _ZERO_HASH: Final = "0" * 64
+_REFERENCE_TOKEN_RE: Final = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 class TurnExecutionError(RuntimeError):
     """The turn could not be reduced into one authenticated v8 commit."""
+
+
+def _has_contextual_reference_shape(message: str) -> bool:
+    if type(message) is not str:
+        raise TypeError("message must be exact text")
+    tokens = tuple(_REFERENCE_TOKEN_RE.findall(message))
+    return len(tokens) >= 4 and sum(len(item) for item in tokens) >= 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,6 +402,62 @@ def _confirmation_read_requests(
     return tuple(requests)
 
 
+def _critical_confirmation_bound(
+    pending_action: PendingCriticalActionContext | None,
+    proposal: ModelProposal,
+    *,
+    now: datetime,
+    material_scope_bound: bool,
+) -> bool:
+    if pending_action is None:
+        return False
+    if type(pending_action) is not PendingCriticalActionContext:
+        raise TypeError("pending_action must be exact PendingCriticalActionContext or None")
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    if (
+        type(now) is not datetime
+        or now.tzinfo is None
+        or now.utcoffset() != timedelta(0)
+    ):
+        raise ValueError("critical confirmation time must be exact UTC")
+    if type(material_scope_bound) is not bool:
+        raise TypeError("material_scope_bound must be an exact bool")
+    return (
+        material_scope_bound
+        and now < pending_action.expires_at
+        and proposal.intent == "confirm"
+        and proposal.confirmed_summary_version == pending_action.summary_version
+        and proposal.confirmed_action_kinds == pending_action.action_kinds
+        and proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    )
+
+
+def _critical_model_reads_allowed(
+    pending_action: PendingCriticalActionContext | None,
+    proposal: ModelProposal,
+    *,
+    now: datetime,
+    material_scope_bound: bool,
+) -> bool:
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    if pending_action is None:
+        return proposal.intent != "confirm"
+    if type(pending_action) is not PendingCriticalActionContext:
+        raise TypeError("pending_action must be exact PendingCriticalActionContext or None")
+    if proposal.intent == "confirm":
+        return _critical_confirmation_bound(
+            pending_action,
+            proposal,
+            now=now,
+            material_scope_bound=material_scope_bound,
+        )
+    if proposal.intent == "adjust":
+        return False
+    return True
+
+
 def _command_relays(
     aggregate_turn_id: str,
     commands: tuple[object, ...],
@@ -557,6 +622,14 @@ class V2TurnExecutor:
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile port must return exact PrivateCustomerBinding")
+        pending_action = (
+            None
+            if current.state.handoff is not None
+            else self._reducer.pending_action(
+                current.state.workflow,
+                locale=self._locale,
+            )
+        )
         request = ModelRequest(
             request_id=_opaque("model-request", batch.batch_id, current.version, 1),
             lead_id=batch.lead_id,
@@ -565,6 +638,7 @@ class V2TurnExecutor:
             locale=self._locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
+            pending_action=pending_action,
         )
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
@@ -572,34 +646,112 @@ class V2TurnExecutor:
         first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
-        read_requests = first_proposal.read_requests or _confirmation_read_requests(
-            current.state,
-            projection,
+        if (
+            pending_action is not None
+            and first_proposal.intent == "confirm"
+            and not _has_contextual_reference_shape(batch.combined_text)
+        ):
+            first_proposal = replace(
+                first_proposal,
+                intent="inform",
+                reply_chunks=(
+                    "Para autorizar, diga naturalmente qual reserva e qual pagamento devo fazer.",
+                ),
+                read_requests=(),
+                confirmed_summary_version=None,
+                confirmed_action_kinds=(),
+                approval_basis=None,
+            )
+        material_scope_bound = (
+            self._reducer.confirmation_projection_matches(
+                current.state.workflow,
+                projection,
+            )
+            and self._reducer.confirmation_capability_available(
+                current.state.workflow,
+                now=now,
+            )
+        )
+        critical_confirmation_bound = _critical_confirmation_bound(
+            pending_action,
             first_proposal,
+            now=now,
+            material_scope_bound=material_scope_bound,
         )
-        derived_confirmation_reads = (
-            bool(read_requests) and not first_proposal.read_requests
+        model_reads_allowed = _critical_model_reads_allowed(
+            pending_action,
+            first_proposal,
+            now=now,
+            material_scope_bound=material_scope_bound,
         )
+        if pending_action is not None and first_proposal.intent == "confirm":
+            read_requests = (
+                _confirmation_read_requests(
+                    current.state,
+                    projection,
+                    first_proposal,
+                )
+                if critical_confirmation_bound
+                else ()
+            )
+            derived_confirmation_reads = bool(read_requests)
+        elif not model_reads_allowed:
+            read_requests = ()
+            derived_confirmation_reads = False
+        else:
+            read_requests = first_proposal.read_requests
+            derived_confirmation_reads = False
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
             raise TurnExecutionError("model proposed duplicate reads")
         v2_observations = ()
         if read_requests:
             accepted_observations: list[ReadObservation] = []
+            read_floor = now
             for item in read_requests:
+                read_now = self._clock.now()
+                if (
+                    type(read_now) is not datetime
+                    or read_now.tzinfo is None
+                    or read_now.utcoffset() != timedelta(0)
+                    or read_now < read_floor
+                ):
+                    raise TurnExecutionError("pre-read clock is not monotonic UTC")
+                if derived_confirmation_reads:
+                    read_scope_bound = (
+                        self._reducer.confirmation_projection_matches(
+                            current.state.workflow,
+                            projection,
+                        )
+                        and self._reducer.confirmation_capability_available(
+                            current.state.workflow,
+                            now=read_now,
+                        )
+                    )
+                    if not _critical_confirmation_bound(
+                        pending_action,
+                        first_proposal,
+                        now=read_now,
+                        material_scope_bound=read_scope_bound,
+                    ):
+                        read_requests = ()
+                        accepted_observations.clear()
+                        break
                 observation = self._reads.read(item)
                 observed_now = self._clock.now()
                 if (
                     type(observed_now) is not datetime
                     or observed_now.tzinfo is None
                     or observed_now.utcoffset() != timedelta(0)
-                    or observed_now < now
+                    or observed_now < read_now
                 ):
                     raise TurnExecutionError("read clock is not monotonic UTC")
                 accepted_observations.append(
                     self._reads.accept(observation, now=observed_now)
                 )
+                read_floor = observed_now
             v2_observations = tuple(accepted_observations)
+        if read_requests:
             followup = ModelRequest(
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
@@ -609,6 +761,7 @@ class V2TurnExecutor:
                 state_version=current.version,
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
+                pending_action=pending_action,
             )
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:
@@ -622,6 +775,9 @@ class V2TurnExecutor:
                 proposal.intent != "confirm"
                 or proposal.confirmed_summary_version
                 != first_proposal.confirmed_summary_version
+                or proposal.confirmed_action_kinds
+                != first_proposal.confirmed_action_kinds
+                or proposal.approval_basis is not first_proposal.approval_basis
             ):
                 proposal = replace(
                     first_proposal,
@@ -871,6 +1027,22 @@ class V2TurnExecutor:
             raise TurnExecutionError("commit clock is not monotonic UTC")
         if commit_now > now + self._turn_timeout:
             raise TurnExecutionError("turn deadline expired before commit")
+        approval_deadline = self._reducer.approval_deadline(pending_action)
+        if command_rows and (
+            approval_deadline is None or commit_now >= approval_deadline
+        ):
+            raise TurnExecutionError("critical approval expired before commit")
+        if command_rows and (
+            not self._reducer.confirmation_projection_matches(
+                current.state.workflow,
+                projection,
+            )
+            or not self._reducer.confirmation_capability_available(
+                current.state.workflow,
+                now=commit_now,
+            )
+        ):
+            raise TurnExecutionError("critical approval scope changed before commit")
         if not (profile.observed_at <= commit_now < profile.expires_at):
             raise TurnExecutionError("private profile expired before commit")
         for observation in v2_observations:

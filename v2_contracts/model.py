@@ -11,6 +11,11 @@ from dataclasses import field as dataclass_field
 from datetime import date
 from typing import ClassVar, Final
 
+from v2_contracts.critical_actions import (
+    ApprovalBasis,
+    CriticalActionKind,
+    PendingCriticalActionContext,
+)
 from v2_contracts.providers import ReadObservation, ReadRequest
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -143,6 +148,7 @@ class ModelRequest:
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
+    pending_action: PendingCriticalActionContext | None = None
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
@@ -166,6 +172,12 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
+        if self.pending_action is not None and type(
+            self.pending_action
+        ) is not PendingCriticalActionContext:
+            raise InvalidModelProposal(
+                "pending_action must be an exact PendingCriticalActionContext or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +191,8 @@ class ModelProposal:
     target_offer_id: str | None = None
     confirmed_summary_version: int | None = None
     target_offer_ids: tuple[str, ...] = ()
+    confirmed_action_kinds: tuple[CriticalActionKind, ...] = ()
+    approval_basis: ApprovalBasis | None = None
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -197,6 +211,8 @@ class ModelProposal:
             raise InvalidModelProposal("facts must contain exact ModelFact values")
         if len({item.name for item in self.facts}) != len(self.facts):
             raise InvalidModelProposal("facts must have unique names")
+        if self.intent == "confirm" and self.facts:
+            raise InvalidModelProposal("confirm intent cannot carry material facts")
         if type(self.read_requests) is not tuple or any(
             type(item) is not ReadRequest for item in self.read_requests
         ):
@@ -264,6 +280,38 @@ class ModelProposal:
         if self.intent != "confirm" and self.confirmed_summary_version is not None:
             raise InvalidModelProposal(
                 "confirmed_summary_version is allowed only for confirm"
+            )
+        if type(self.confirmed_action_kinds) is not tuple or any(
+            type(item) is not CriticalActionKind
+            for item in self.confirmed_action_kinds
+        ):
+            raise InvalidModelProposal(
+                "confirmed_action_kinds must contain exact CriticalActionKind values"
+            )
+        if len(set(self.confirmed_action_kinds)) != len(
+            self.confirmed_action_kinds
+        ):
+            raise InvalidModelProposal("confirmed_action_kinds must be unique")
+        if self.confirmed_action_kinds != tuple(
+            sorted(self.confirmed_action_kinds, key=lambda item: item.value)
+        ):
+            raise InvalidModelProposal("confirmed_action_kinds must be canonical")
+        if self.approval_basis is not None and type(
+            self.approval_basis
+        ) is not ApprovalBasis:
+            raise InvalidModelProposal("approval_basis must be an exact ApprovalBasis")
+        has_approval_assertion = bool(self.confirmed_action_kinds) and (
+            self.approval_basis is not None
+        )
+        if self.intent == "confirm" and not has_approval_assertion:
+            raise InvalidModelProposal(
+                "confirm intent requires a complete approval assertion"
+            )
+        if self.intent != "confirm" and (
+            self.confirmed_action_kinds or self.approval_basis is not None
+        ):
+            raise InvalidModelProposal(
+                "approval assertion fields are allowed only for confirm"
             )
 
 

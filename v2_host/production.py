@@ -34,6 +34,7 @@ from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
 from v2_application.completion_projector import CompletionProjector
+from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.relay_worker import BoundaryRelayWorker
@@ -52,6 +53,7 @@ from v2_contracts.providers import (
     ReadRequest,
 )
 from v2_contracts.payments import BusinessUnit, PaymentMethod
+from v2_contracts.critical_actions import CriticalActionKind
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
@@ -63,6 +65,27 @@ from v2_host.worker_main import WorkerQueue
 class UTCClock:
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
+
+
+def _critical_action_policy(settings: V2Settings) -> CriticalActionPolicy:
+    """Derive conversational authority only from closed runtime capabilities."""
+    if type(settings) is not V2Settings:
+        raise TypeError("critical action policy requires exact V2Settings")
+    enabled: set[CriticalActionKind] = set()
+    if settings.cloudbeds_writes_enabled:
+        enabled.add(CriticalActionKind.RESERVE_LODGING)
+    if settings.bokun_writes_enabled:
+        enabled.add(CriticalActionKind.BOOK_ACTIVITY)
+    if settings.cloudbeds_writes_enabled and settings.bokun_writes_enabled:
+        enabled.add(CriticalActionKind.BOOK_PACKAGE)
+    if settings.enabled_payment_methods:
+        enabled.add(CriticalActionKind.INITIATE_PAYMENT)
+    return CriticalActionPolicy(
+        frozenset(enabled),
+        enabled_payment_methods=frozenset(settings.enabled_payment_methods),
+        valid_until=settings.write_window_end,
+        kill_switch_engaged=settings.global_kill_switch_engaged,
+    )
 
 
 class ControlledEffectGuard:
@@ -278,7 +301,14 @@ def _build_inbox_worker(
         model=model,
         reads=reads,
         profile=profile,
-        reducer=V2ConversationReducer(),
+        reducer=V2ConversationReducer(
+            approval_ttl=timedelta(
+                seconds=settings.critical_approval_ttl_seconds
+            ),
+            agency_payment_percentage=settings.agency_payment_percentage,
+            hostel_payment_percentage=settings.hostel_payment_percentage,
+            critical_action_policy=_critical_action_policy(settings),
+        ),
         public_authority=authority,
         clock=clock,
         locale="pt-BR",

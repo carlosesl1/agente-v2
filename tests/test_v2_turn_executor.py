@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.conversation import V2ConversationReducer
+from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.public_delivery import (
     BoundaryPublicDeliveryWorker,
     BoundaryPublicDisposition,
@@ -19,12 +21,20 @@ from v2_application.public_delivery import (
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
+    _critical_confirmation_bound,
+    _critical_model_reads_allowed,
+    _has_contextual_reference_shape,
     PublicTurnAuthority,
     TurnExecutionError,
     V2TurnExecutor,
     _confirmation_read_requests,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
+from v2_contracts.critical_actions import (
+    ApprovalBasis,
+    CriticalActionKind,
+    PendingCriticalActionContext,
+)
 from v2_contracts.model import (
     AuditedModelTurn,
     AuditedTranscriptFrame,
@@ -40,6 +50,28 @@ TRANSCRIPT_KEY = b"t" * 32
 CAPABILITY_DIGEST = "a" * 64
 EFFECT_DIGEST = "b" * 64
 TARGET_DIGEST = "c" * 64
+
+
+def _enabled_reducer(
+    *,
+    approval_ttl: timedelta = timedelta(minutes=30),
+    valid_until: datetime | None = None,
+) -> V2ConversationReducer:
+    return V2ConversationReducer(
+        approval_ttl=approval_ttl,
+        critical_action_policy=CriticalActionPolicy(
+            frozenset(
+                {
+                    CriticalActionKind.RESERVE_LODGING,
+                    CriticalActionKind.BOOK_ACTIVITY,
+                    CriticalActionKind.BOOK_PACKAGE,
+                    CriticalActionKind.INITIATE_PAYMENT,
+                }
+            ),
+            enabled_payment_methods=frozenset({"stripe", "wise", "pix"}),
+            valid_until=valid_until,
+        ),
+    )
 EVENT = InboundEvent(
     event_id="event:turn-executor-001",
     lead_id="manychat:lead-executor-001",
@@ -88,6 +120,19 @@ class SequenceClock:
         value = NOW + timedelta(seconds=self.calls)
         self.calls += 1
         return value
+
+
+class ScriptedClock:
+    def __init__(self, values: tuple[datetime, ...]) -> None:
+        if not values:
+            raise ValueError("scripted clock requires values")
+        self._values = list(values)
+        self._last = values[-1]
+
+    def now(self) -> datetime:
+        if self._values:
+            self._last = self._values.pop(0)
+        return self._last
 
 
 class FakeProfile:
@@ -417,13 +462,142 @@ def _executor(
         model=model,
         reads=reads or V2ReadService({}),
         profile=profile,
-        reducer=V2ConversationReducer(),
+        reducer=_enabled_reducer(),
         public_authority=FixedAuthority(),
         clock=FixedClock(),
         locale="pt-BR",
         turn_timeout=timedelta(seconds=30),
         max_commit_attempts=2,
     )
+
+
+def _approval_expiry_fixture(
+    *,
+    approval_ttl: timedelta,
+    confirmation_clock: ScriptedClock,
+) -> tuple[
+    SQLiteBoundaryStore,
+    FakeAuditedModel,
+    FakeLodgingReadPort,
+    InboundBatch,
+    V2TurnExecutor,
+]:
+    second_event = InboundEvent(
+        event_id="event:approval-expiry-002",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        conversation_id=EVENT.conversation_id,
+        text="Pode reservar exatamente assim.",
+        media_url=None,
+        media_type=None,
+        occurred_at=NOW,
+        payload_hash="9" * 64,
+    )
+    second_batch = InboundBatch(
+        batch_id="batch:approval-expiry-002",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(second_event,),
+        combined_text=second_event.text,
+    )
+    second_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:approval-expiry-002",
+        allocation_ids=("allocation:approval-expiry-002",),
+        allocation_manifest_hash="7" * 64,
+        deadline_at=NOW + timedelta(minutes=1),
+    )
+    first_read = ReadRequest(
+        request_id="read:approval-expiry-selection",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    selection = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    confirmation = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent="confirm",
+        reply_chunks=("Confirmado.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        confirmed_summary_version=1,
+        confirmed_action_kinds=(
+            CriticalActionKind.INITIATE_PAYMENT,
+            CriticalActionKind.RESERVE_LODGING,
+        ),
+        approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+    )
+    proposals = [
+        ModelProposal(
+            source_event_id=BATCH.batch_id,
+            intent="inform",
+            reply_chunks=(),
+            facts=(),
+            read_requests=(first_read,),
+            effect_proposals=(),
+        ),
+        selection,
+        confirmation,
+        confirmation,
+    ]
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, proposals)
+    profile = FakeProfile(store)
+    read_port = FakeLodgingReadPort(store)
+    reads = V2ReadService({ReadKind.LODGING: read_port})
+    authority = MappingAuthority(
+        {
+            BATCH.batch_id: AUTHORITY,
+            second_batch.batch_id: second_authority,
+        }
+    )
+    _install_public_authority(store, AUTHORITY)
+    _install_public_authority(store, second_authority)
+    reducer = _enabled_reducer(approval_ttl=approval_ttl)
+    V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=reads,
+        profile=profile,
+        reducer=reducer,
+        public_authority=authority,
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    ).execute(BATCH)
+    confirmation_executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=reads,
+        profile=profile,
+        reducer=reducer,
+        public_authority=authority,
+        clock=confirmation_clock,
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    return store, model, read_port, second_batch, confirmation_executor
 
 
 def test_atomic_executor_commits_projection_receipt_public_row_and_replays() -> None:
@@ -502,7 +676,7 @@ def test_executor_accepts_observation_stamped_after_turn_start() -> None:
         model=model,
         reads=V2ReadService({ReadKind.LODGING: port}),
         profile=FakeProfile(store),
-        reducer=V2ConversationReducer(),
+        reducer=_enabled_reducer(),
         public_authority=MappingAuthority({BATCH.batch_id: AUTHORITY}),
         clock=clock,
         locale="pt-BR",
@@ -652,7 +826,7 @@ def test_atomic_executor_rolls_back_every_child_row_and_allocation_on_fault() ->
         model=model,
         reads=V2ReadService({}),
         profile=profile,
-        reducer=V2ConversationReducer(),
+        reducer=_enabled_reducer(),
         public_authority=FixedAuthority(),
         clock=FixedClock(),
         locale="pt-BR",
@@ -930,6 +1104,11 @@ def test_activity_confirmation_derives_current_provider_read() -> None:
             read_requests=(),
             effect_proposals=(),
             confirmed_summary_version=1,
+            confirmed_action_kinds=(
+                CriticalActionKind.BOOK_ACTIVITY,
+                CriticalActionKind.INITIATE_PAYMENT,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
         )
 
         derived = _confirmation_read_requests(state, projection, confirmation)
@@ -1011,6 +1190,11 @@ def test_confirmation_read_derivation_requires_typed_confirm_and_current_version
             read_requests=(),
             effect_proposals=(),
             confirmed_summary_version=2,
+            confirmed_action_kinds=(
+                CriticalActionKind.INITIATE_PAYMENT,
+                CriticalActionKind.RESERVE_LODGING,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
         )
         current = ModelProposal(
             source_event_id="batch:derive-guard-current",
@@ -1020,6 +1204,11 @@ def test_confirmation_read_derivation_requires_typed_confirm_and_current_version
             read_requests=(),
             effect_proposals=(),
             confirmed_summary_version=1,
+            confirmed_action_kinds=(
+                CriticalActionKind.INITIATE_PAYMENT,
+                CriticalActionKind.RESERVE_LODGING,
+            ),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
         )
 
         assert _confirmation_read_requests(state, projection, inform) == ()
@@ -1035,6 +1224,174 @@ def test_confirmation_read_derivation_requires_typed_confirm_and_current_version
         store.close()
 
 
+def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
+    pending = PendingCriticalActionContext(
+        summary_version=1,
+        action_kinds=(
+            CriticalActionKind.INITIATE_PAYMENT,
+            CriticalActionKind.RESERVE_LODGING,
+        ),
+        public_summary="Só para confirmar: vou reservar e gerar o link.",
+        expires_at=NOW + timedelta(minutes=30),
+    )
+    proposal = ModelProposal(
+        source_event_id="batch:critical-binding",
+        intent="confirm",
+        reply_chunks=("Pode seguir exatamente assim.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        confirmed_summary_version=1,
+        confirmed_action_kinds=pending.action_kinds,
+        approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+    )
+
+    def bound(
+        candidate: ModelProposal,
+        *,
+        now: datetime = NOW,
+        material_scope_bound: bool = True,
+    ) -> bool:
+        return _critical_confirmation_bound(
+            pending,
+            candidate,
+            now=now,
+            material_scope_bound=material_scope_bound,
+        )
+
+    def reads_allowed(
+        candidate: ModelProposal,
+        *,
+        now: datetime = NOW,
+        material_scope_bound: bool = True,
+    ) -> bool:
+        return _critical_model_reads_allowed(
+            pending,
+            candidate,
+            now=now,
+            material_scope_bound=material_scope_bound,
+        )
+
+    assert bound(proposal) is True
+    assert bound(proposal, now=pending.expires_at) is False
+    assert bound(proposal, material_scope_bound=False) is False
+    wrong_scope = replace(
+        proposal,
+        confirmed_action_kinds=(
+            CriticalActionKind.CANCEL_RESERVATION,
+            CriticalActionKind.INITIATE_PAYMENT,
+        ),
+    )
+    assert bound(wrong_scope) is False
+    assert (
+        _critical_confirmation_bound(
+            None,
+            proposal,
+            now=NOW,
+            material_scope_bound=True,
+        )
+        is False
+    )
+    assert (
+        _critical_model_reads_allowed(
+            None,
+            proposal,
+            now=NOW,
+            material_scope_bound=True,
+        )
+        is False
+    )
+    assert reads_allowed(proposal) is True
+    assert reads_allowed(proposal, now=pending.expires_at) is False
+    assert reads_allowed(proposal, material_scope_bound=False) is False
+    assert reads_allowed(wrong_scope) is False
+    adjustment = ModelProposal(
+        source_event_id="batch:critical-adjustment",
+        intent="adjust",
+        reply_chunks=("Vou ajustar antes de seguir.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    assert reads_allowed(adjustment) is False
+    information = replace(
+        adjustment,
+        source_event_id="batch:critical-information",
+        intent="inform",
+    )
+    assert reads_allowed(information) is True
+
+    assert _has_contextual_reference_shape("Sim") is False
+    assert _has_contextual_reference_shape("👍") is False
+    assert _has_contextual_reference_shape("Pode fazer isso") is False
+    assert (
+        _has_contextual_reference_shape(
+            "Pode reservar esse passeio e gerar o link do sinal no cartão."
+        )
+        is True
+    )
+
+
+def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(seconds=2),
+        confirmation_clock=ScriptedClock(
+            (
+                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=2),
+                NOW + timedelta(seconds=2),
+                NOW + timedelta(seconds=2),
+            )
+        ),
+    )
+    try:
+        assert len(read_port.calls) == 1
+        expired = executor.execute(second_batch)
+        assert "expirou" in " ".join(expired.reply_chunks).casefold()
+        assert len(read_port.calls) == 1
+        assert len(model.calls) == 3
+        assert expired.receipt.command_rows == ()
+        assert expired.receipt.relay_rows == ()
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone()[0] == 0
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_command_relays"
+        ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+def test_approval_expiring_between_reducer_and_commit_persists_zero_effect_rows() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(seconds=4),
+        confirmation_clock=ScriptedClock(
+            (
+                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=4),
+            )
+        ),
+    )
+    try:
+        with pytest.raises(TurnExecutionError, match="approval expired before commit"):
+            executor.execute(second_batch)
+        assert len(read_port.calls) == 2
+        assert len(model.calls) == 4
+        assert store.load_state(BATCH.lead_id).version == 1
+        assert store.load_turn_receipt(second_batch.batch_id) is None
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone()[0] == 0
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_command_relays"
+        ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
 def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
     tmp_path,
 ) -> None:
@@ -1043,7 +1400,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         lead_id=BATCH.lead_id,
         subscriber_id=BATCH.subscriber_id,
         conversation_id=EVENT.conversation_id,
-        text="Confirmo a proposta.",
+        text="Pode reservar exatamente essa hospedagem e gerar o link no cartão.",
         media_url=None,
         media_type=None,
         occurred_at=NOW,
@@ -1104,6 +1461,11 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         read_requests=(),
         effect_proposals=(),
         confirmed_summary_version=1,
+        confirmed_action_kinds=(
+            CriticalActionKind.INITIATE_PAYMENT,
+            CriticalActionKind.RESERVE_LODGING,
+        ),
+        approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
     )
     proposals = [
         ModelProposal(
@@ -1130,7 +1492,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         model=model,
         reads=V2ReadService({ReadKind.LODGING: read_port}),
         profile=profile,
-        reducer=V2ConversationReducer(),
+        reducer=_enabled_reducer(),
         public_authority=MappingAuthority(
             {
                 BATCH.batch_id: AUTHORITY,
@@ -1145,12 +1507,28 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
     try:
         summary = executor.execute(BATCH)
         confirmed = executor.execute(second_batch)
+        replayed = executor.execute(second_batch)
 
         assert summary.receipt.committed_state_version == 1
         assert confirmed.receipt.committed_state_version == 2
+        assert replayed.replayed is True
+        assert replayed.receipt == confirmed.receipt
+        assert confirmed.reply_chunks == (
+            "Perfeito — vou processar sua reserva agora.",
+        )
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
         assert len(model.calls) == 4
+        assert model.calls[0].pending_action is None
+        assert model.calls[1].pending_action is None
+        pending = model.calls[2].pending_action
+        assert pending is not None
+        assert pending.public_summary == summary.reply_chunks[0]
+        assert pending.action_kinds == (
+            CriticalActionKind.INITIATE_PAYMENT,
+            CriticalActionKind.RESERVE_LODGING,
+        )
+        assert model.calls[3].pending_action == pending
         assert len(read_port.calls) == 2
         derived = read_port.calls[-1]
         assert derived.kind is ReadKind.LODGING

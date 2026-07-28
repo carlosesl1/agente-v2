@@ -29,7 +29,7 @@ def _wire() -> bytes:
 def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> None:
     captured = {}
     proposal = {
-        "schema": "v2-model-proposal-v1",
+        "schema": "v2-model-proposal-v3",
         "source_event_id": "batch:1",
         "intent": "inform",
         "reply_chunks": ["Olá"],
@@ -37,7 +37,10 @@ def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> No
         "read_requests": [],
         "effect_proposals": [],
         "target_offer_id": None,
+        "target_offer_ids": [],
         "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
     }
 
     def execute(command, **kwargs):
@@ -52,8 +55,8 @@ def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> No
     assert captured["command"][3:5] == ("--toolsets", "")
     assert captured["command"][5] == "-z"
     assert "Do not call tools or perform effects" in captured["command"][6]
-    assert "v2-model-proposal-v2" in captured["command"][6]
-    assert "v2-model-proposal-v1" not in captured["command"][6]
+    assert "v2-model-proposal-v3" in captured["command"][6]
+    assert "v2-model-proposal-v2" not in captured["command"][6]
     assert "--max-turns" not in captured["command"]
     assert "-q" not in captured["command"]
     assert captured["kwargs"] == {

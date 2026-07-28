@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -60,6 +61,20 @@ def test_idle_controlled_canary_loads_with_all_effects_closed(tmp_path: Path) ->
     assert settings.write_window_end is None
     assert settings.stripe_environment is StripeEnvironment.TEST
     assert settings.all_real_effect_gates_closed is True
+    assert settings.critical_approval_ttl_seconds == 1800
+
+
+def test_critical_approval_ttl_is_configurable_and_strict(tmp_path: Path) -> None:
+    env = _controlled_env(tmp_path)
+    env["V2_CRITICAL_APPROVAL_TTL_SECONDS"] = "900"
+    settings = V2Settings.from_env(env)
+    assert settings.critical_approval_ttl_seconds == 900
+    with pytest.raises(ValueError, match="critical_approval_ttl_seconds"):
+        replace(settings, critical_approval_ttl_seconds=True)
+
+    env["V2_CRITICAL_APPROVAL_TTL_SECONDS"] = "0"
+    with pytest.raises(ValueError, match="critical_approval_ttl_seconds"):
+        V2Settings.from_env(env)
 
 
 def test_controlled_canary_requires_exactly_one_allowed_subscriber(tmp_path: Path) -> None:
