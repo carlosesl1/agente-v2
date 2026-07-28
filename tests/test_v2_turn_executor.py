@@ -1067,7 +1067,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         facts=(
             ModelFact("service", "agency"),
             ModelFact("product_id", "product:buracao"),
-            ModelFact("start_date", date(2026, 8, 12)),
+            ModelFact("activity_date", date(2026, 8, 12)),
             ModelFact("adults", 2),
             ModelFact("children", 0),
             ModelFact("payment_method", "stripe"),

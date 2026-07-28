@@ -288,14 +288,25 @@ def _proposal_binds_offer(proposal: ModelProposal, offer: OfferSnapshot) -> bool
     }[offer.service]
     if not (
         values.get("service") == expected_service
-        and values.get("start_date") == offer.start_date
         and values.get("adults") == offer.party.adults
         and values.get("children") == offer.party.children
     ):
         return False
     if offer.service is ServiceKind.LODGING:
-        return values.get("end_date") == offer.end_date
-    return True
+        return (
+            values.get("start_date") == offer.start_date
+            and values.get("end_date") == offer.end_date
+        )
+    product_id = values.get("product_id")
+    if not isinstance(product_id, str) or not offer.lookup_id.startswith(
+        f"lookup:{product_id}:"
+    ):
+        return False
+    start_date = values.get("start_date")
+    activity_date = values.get("activity_date")
+    if start_date is None:
+        return activity_date == offer.start_date
+    return start_date == offer.start_date and activity_date in (None, offer.start_date)
 
 
 def _proposal_binds_package(
