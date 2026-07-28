@@ -2,7 +2,7 @@
 
 Data: 2026-07-27
 Atualizado: 2026-07-28
-Status: desenho revisado para confirmação curta vinculada ao estado; aguardando aprovação da revisão
+Status: implementado e validado em sandbox sem efeitos; rollout público não autorizado
 
 ## Problema observado
 
@@ -423,6 +423,22 @@ Preservar transcript sanitizado e contadores de efeitos externos iguais a zero.
 - Nenhum efeito é afirmado antes do read-back.
 - Testes focados, sandbox real effect-denied e regressão completa passam no mesmo HEAD.
 - Git permanece limpo exceto pelo `uv.lock` preexistente e intocado.
+
+## Validação da confirmação curta — 2026-07-28
+
+- candidato de código validado: `b44d1d3f94aadbcceafe271c1e9a090524801038`;
+- regressão V2 focada: `95 passed`;
+- regressão completa em ambiente limpo: `1184 passed, 7 deselected, 2940 subtests passed`;
+- modelo real `openai-codex/gpt-5.6-luna`: `12/12` casos aprovados,
+  incluindo “Sim”, “Pode reservar”, “Pode sim”, “Confirmado”, “Isso mesmo”,
+  ausência de proposta, incerteza, pergunta, mudança material e recusa;
+- evidência sanitizada:
+  `/home/ubuntu/workspace/maya-v2-approval-sandbox-20260728/evidence-short-confirmations/`;
+- `provider_write_calls=0`, `stripe_links_created=0`,
+  `manychat_messages_sent=0`, `handoffs_sent=0`, `payment_completed=0` e
+  `model_effect_proposals=0`;
+- nenhum booking, link, pagamento, handoff, envio, deploy ou rollout público foi
+  executado.
 
 ## Fontes consultadas
 
