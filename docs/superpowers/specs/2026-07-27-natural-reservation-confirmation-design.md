@@ -2,7 +2,7 @@
 
 Data: 2026-07-27
 Atualizado: 2026-07-28
-Status: plano complementado com trava de ação crítica; aguardando aprovação final para implementação
+Status: desenho revisado para confirmação curta vinculada ao estado; aguardando aprovação da revisão
 
 ## Problema observado
 
@@ -12,7 +12,7 @@ O resumo determinístico atual também expõe vocabulário técnico (`BRL 334.95
 
 ## Objetivos
 
-1. Permitir que a Maya interprete uma aceitação contextual natural do resumo imediatamente vigente.
+1. Permitir que a Maya interprete uma aceitação natural, inclusive curta, do resumo vigente sem obrigar o cliente a repetir produto, data, preço ou pagamento.
 2. Manter a autorização inteiramente vinculada a estado estruturado, versão atual, releitura fresca e binding privado.
 3. Produzir resumo e acknowledgement naturais para WhatsApp.
 4. Não criar reconhecimento por regex, substring, lista de palavras ou frase mágica.
@@ -44,7 +44,7 @@ Padrão comum aproveitado:
 2. explicar o efeito e o risco de forma compreensível;
 3. congelar o alvo e os parâmetros daquela tentativa;
 4. aguardar uma decisão ligada à proposta congelada;
-5. negar por silêncio, expiração, ambiguidade ou mudança de escopo;
+5. negar por silêncio, expiração, recusa, conflito real de contexto ou mudança de escopo;
 6. consumir a autorização uma única vez;
 7. confirmar sucesso apenas depois de verificar o efeito.
 
@@ -144,15 +144,43 @@ captura ou reembolso é outra ação crítica e exige nova proposta.
 #### 0.4 Aprovação natural, mas ligada à proposta atual
 
 O modelo recebe a projeção pública autenticada da proposta pendente e interpreta
-a mensagem inteira. Exemplos:
+a mensagem inteira. Quando existe exatamente uma proposta autenticada, pendente,
+vigente e inalterada, a própria pergunta apresentada pela Maya fornece o objeto
+da confirmação. O cliente não precisa repetir os dados que acabou de receber.
 
-- “Pode reservar esse passeio e gerar o link” → pode ser `approve_action` para
-  a versão atual, sem exigir que o cliente repita todos os dados;
-- “Está certo, pode seguir com essa reserva” → pode ser `approve_action`;
-- “Sim” isolado → ambíguo; não abre o gate;
+São confirmações válidas nesse estado, entre outras formulações semanticamente
+equivalentes:
+
+- “Sim”;
+- “Pode reservar”;
+- “Pode sim”;
+- “Confirmado”;
+- “Isso mesmo”;
+- “Correto”;
+- “Pode seguir”;
+- “Sim, por favor”;
+- “Pode reservar esse passeio e gerar o link”.
+
+Esses exemplos não formam uma allowlist e não serão reconhecidos por regex,
+substring ou correspondência lexical. O modelo classifica a fala no contexto da
+pergunta pendente; o runtime concede autoridade somente pela proposta
+autenticada, versão, action scope, prazo, releitura e demais gates mecânicos.
+
+Uma conversa informativa intermediária não cancela a proposta. Enquanto ela não
+expirar, não for substituída e não receber recusa ou mudança material, uma
+confirmação curta posterior ainda pode consumi-la. Isso evita que a Maya repita
+o mesmo resumo e peça consentimento novamente sem necessidade.
+
+Continuam sem autorizar:
+
 - “Sim, mas agora são duas pessoas” → `adjust`, nunca aprovação;
+- “Pode, só que para outra data” → `adjust`;
+- “Talvez”, “acho que sim” ou outra resposta realmente incerta → `inform`;
 - pergunta sobre taxa, sinal ou política → `inform`, nunca aprovação;
-- aceite de um resumo antigo/superado → rejeitado pelo runtime.
+- aceite sem proposta pendente, de proposta expirada ou de resumo superado →
+  rejeitado pelo runtime;
+- qualquer retorno que misture `confirm` com fatos materiais novos → rejeitado
+  pelo contrato e tratado como mudança, nunca como grant.
 
 Botões como “Confirmar reserva”, “Quero alterar” e “Não reservar” poderão
 transportar futuramente um callback assinado do ManyChat. Esta entrega não aceita
@@ -272,7 +300,7 @@ Campos permitidos:
 
 A projeção não conterá `offer_id`, `product_id`, IDs de provider, hashes, binding privado, perfil ou dados pessoais.
 
-O adapter serializará esse contexto no payload atual do child. O prompt instruirá a Maya a interpretar a mensagem inteira contra esse resumo: aceitação contextual inequívoca → `intent=confirm` com a versão fornecida; dúvida, recusa ou mudança → `inform`/`adjust`.
+O adapter serializará esse contexto no payload atual do child. O prompt instruirá a Maya a interpretar a mensagem inteira contra esse resumo: aceitação inequívoca, curta ou detalhada → `intent=confirm` com a versão fornecida; dúvida real, recusa ou mudança → `inform`/`adjust`.
 
 ### 2. Autorização permanece determinística
 
@@ -288,7 +316,9 @@ O caminho produtivo continuará exigindo:
 - oferta, preço, pessoas e binding idênticos;
 - criação de exatamente um comando durável e workers fenced.
 
-Nenhum texto isolado abre o gate.
+Nenhum texto abre o gate sem uma proposta autenticada pendente. Com exatamente
+uma proposta vigente e inalterada, uma confirmação curta pode ser suficiente,
+pois a autoridade vem do estado e não das palavras isoladas.
 
 ### 3. Resumo natural determinístico
 
@@ -318,7 +348,9 @@ O texto não afirma que a reserva já existe. A confirmação definitiva e o lin
 ## Tratamento de mudanças e ambiguidades
 
 - Se o lead mudar data, passeio, pessoas, pagamento ou qualquer termo material, o modelo deve retornar `adjust`; o resumo anterior não é confirmado.
-- Se a resposta for ambígua, não há comando e a Maya pede esclarecimento curto.
+- Se a resposta expressar incerteza real, condição, pergunta ou conflito com a proposta, não há comando e a Maya pede esclarecimento curto somente quando necessário.
+- Uma afirmação curta não é ambígua por ser curta quando há exatamente uma proposta pendente e vigente; “Sim”, “pode reservar”, “pode sim”, “confirmado” e “isso mesmo” devem confirmar sem nova pergunta.
+- Uma conversa informativa intermediária não revoga a proposta nem torna uma afirmação curta inválida; expiração, recusa, substituição ou mudança material revogam.
 - Se o total mudar na releitura, o binding falha fechado e um novo resumo deve ser apresentado.
 - Handoff continua tendo precedência terminal.
 
@@ -338,8 +370,9 @@ O texto não afirma que a reserva já existe. A confirmação definitiva e o lin
    vez atomicamente.
 10. Grant vencido, negado, superado, de outra conversa ou já consumido não
     cria comando.
-11. “Sim” isolado, resposta a outra pergunta e confirmação ambígua não abrem o
-    gate; confirmação natural contextual abre o gate para a versão atual.
+11. “Sim”, “pode reservar”, “pode sim”, “confirmado” e “isso mesmo” abrem o gate
+    somente quando existe exatamente uma proposta autenticada, vigente e
+    inalterada; os mesmos textos sem proposta pendente não autorizam nada.
 12. “Sim, mas…” com mudança material invalida a aprovação.
 13. Alterar, cancelar, cobrar/capturar e reembolsar exigem suas próprias
     propostas e resumos de consequência.
@@ -357,18 +390,29 @@ Executar conversa ManyChat-shaped com modelo real, estado novo e os efeitos meca
 1. disponibilidade e total final;
 2. dados e cartão/sinal;
 3. resumo natural;
-4. lead diz naturalmente “sim, pode reservar exatamente esse passeio e gerar o link”;
-5. Maya retorna confirmação tipada no primeiro turno de aceitação, sem repetir resumo;
+4. em estados novos e isolados, o lead responde alternadamente “Sim”, “Pode
+   reservar”, “Pode sim”, “Confirmado”, “Isso mesmo” e uma formulação longa;
+5. Maya retorna confirmação tipada no primeiro turno de cada aceitação, sem
+   repetir resumo nem exigir que o cliente recite os termos;
 6. runtime prepara no máximo um comando, mas nenhum worker/provider write/Stripe/ManyChat/handoff é executado.
 7. registrar a proposta, a interpretação, o grant e a tentativa de consumo em
    evidência sanitizada, provando que o modelo sozinho não abriu o gate.
+
+Executar também casos negativos em estados isolados: afirmação curta sem
+proposta pendente, proposta expirada, proposta substituída, “talvez”, pergunta,
+recusa, mudança material e `confirm` acompanhado de fatos novos. Todos devem
+produzir zero comandos.
 
 Preservar transcript sanitizado e contadores de efeitos externos iguais a zero.
 
 ## Critérios de aceite
 
-- Uma única confirmação natural do resumo inalterado é suficiente.
+- Uma única confirmação natural do resumo inalterado é suficiente, inclusive
+  quando o cliente responde apenas “Sim”, “pode reservar”, “pode sim”,
+  “confirmado” ou “isso mesmo”.
 - Não há frase mágica nem autorização lexical.
+- A proposta continua confirmável após um desvio informativo enquanto estiver
+  pendente, vigente e inalterada; a Maya não repete confirmação sem necessidade.
 - Toda ação crítica é interceptada por política tipada antes da outbox de
   efeito; o prompt nunca é a barreira única.
 - A aprovação é one-shot e não existe opção “durante a sessão” ou “sempre” para
