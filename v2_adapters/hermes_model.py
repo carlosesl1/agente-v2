@@ -71,8 +71,10 @@ effects, IDs, or facts that are not justified by the original request and observ
 When observations are present in the request, use them and return read_requests as an
 empty list; the parent permits only one provider-read round per turn.
 When pending_action is present, classify the latest message in relation to that exact
-public summary. A confirm must copy its summary_version and action_kinds exactly and
-set approval_basis to contextual_reference. A bare or unrelated yes is not approval.
+public summary. Uma confirmação semântica curta como “Sim”, “Pode reservar”,
+“Confirmado” ou “Isso mesmo” pode usar intent=confirm; copy summary_version and
+action_kinds exactly and set approval_basis to contextual_reference. Sem pending_action,
+ou diante de dúvida, pergunta, recusa ou mudança material, não use intent=confirm.
 """.strip()
 
 

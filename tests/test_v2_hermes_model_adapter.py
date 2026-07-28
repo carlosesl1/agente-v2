@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from v2_adapters.hermes_model import _proposal, _request_wire
+from v2_adapters.hermes_model import (
+    _PROTOCOL_REPAIR_SUFFIX,
+    _proposal,
+    _request_wire,
+)
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
@@ -57,6 +61,15 @@ def _pending_action() -> PendingCriticalActionContext:
         ),
         expires_at=datetime(2026, 7, 28, 6, 30, tzinfo=timezone.utc),
     )
+
+
+def test_protocol_repair_preserves_short_contextual_confirmation_semantics() -> None:
+    normalized = _PROTOCOL_REPAIR_SUFFIX.casefold()
+
+    assert "sim" in normalized
+    assert "confirmação semântica curta" in normalized
+    assert "pending_action" in normalized
+    assert "não é aprovação" not in normalized
 
 
 def test_pending_action_wire_is_public_only() -> None:
