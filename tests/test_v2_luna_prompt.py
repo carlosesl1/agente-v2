@@ -76,6 +76,9 @@ def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
         "“Isso mesmo”",
     ):
         assert example in PROMPT
+    assert "“Confirmed”" in PROMPT
+    assert "“Yes, please book it”" in PROMPT
+    assert "“Please book exactly that summary”" in PROMPT
     assert "sem `pending_action` nunca autoriza" in PROMPT
     assert "facts=[]" in PROMPT
     assert "Incerteza real como “Talvez” usa intent=inform" in PROMPT

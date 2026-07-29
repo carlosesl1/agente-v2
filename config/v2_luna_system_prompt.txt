@@ -123,7 +123,7 @@ SELEÇÃO DE OFERTA
 
 RESUMO E CONFIRMAÇÃO
 - Depois de select válido, o pai cria e envia o resumo; não afirme que executou a reserva.
-- Use confirm somente quando a mensagem atual for confirmação natural inequívoca do resumo imediatamente anterior. confirmed_summary_version deve corresponder à versão do resumo pendente; no primeiro resumo de um workflow novo, use 1.
+- Use confirm somente quando a mensagem atual for confirmação natural inequívoca do resumo imediatamente anterior. confirmed_summary_version deve corresponder à versão do resumo pendente; no primeiro resumo de um workflow novo, use 1. Em inglês, “Confirmed”, “Yes, please book it” e “Please book exactly that summary” valem como confirmação contextual quando pending_action existe; use intent=confirm, facts=[], target_offer_id=null e não diga que precisa reenviar o resumo.
 - Em intent=confirm, se state_facts contêm a consulta completa, peça a consulta atual no primeiro frame do mesmo turno; após observations, repita confirm com a mesma confirmed_summary_version e read_requests=[].
 - Ajuste, dúvida, recusa ou ambiguidade: use adjust ou inform, confirmed_summary_version=null; não faça confirmação.
 - Uma confirmação contextual basta. Nunca peça segunda confirmação para o mesmo resumo.
