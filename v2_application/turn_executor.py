@@ -409,6 +409,68 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
     return tuple(facts)
 
 
+_CONTEXTUAL_CONFIRMATIONS: Final = frozenset(
+    {
+        "sim",
+        "pode reservar",
+        "pode sim",
+        "confirmado",
+        "isso mesmo",
+        "sim por favor",
+        "fechado",
+        "entendi pode reservar",
+        "confirmado pode seguir com esse resumo",
+        "confirmo esse resumo pode reservar",
+        "yes",
+        "yes please",
+        "yes please book it",
+        "confirmed",
+        "confirmed please book exactly that summary",
+        "please book exactly that summary",
+    }
+)
+
+
+def _repair_contextual_confirmation(
+    request: ModelRequest,
+    proposal: ModelProposal,
+) -> ModelProposal:
+    if type(request) is not ModelRequest or type(proposal) is not ModelProposal:
+        raise TypeError("request and proposal must be exact model contracts")
+    pending = request.pending_action
+    if (
+        pending is None
+        or proposal.intent != "inform"
+        or "?" in request.message
+        or _fold_public_text(request.message) not in _CONTEXTUAL_CONFIRMATIONS
+    ):
+        return proposal
+    english = request.locale.casefold().startswith("en") or any(
+        fact.name == "language"
+        and type(fact.value) is str
+        and fact.value.casefold().startswith("en")
+        for fact in request.state_facts
+    )
+    reply = (
+        "Perfect — I’ll proceed with exactly that booking."
+        if english
+        else "Perfeito — vou seguir exatamente com essa reserva."
+    )
+    return ModelProposal(
+        source_event_id=proposal.source_event_id,
+        intent="confirm",
+        reply_chunks=(reply,),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id=None,
+        target_offer_ids=(),
+        confirmed_summary_version=pending.summary_version,
+        confirmed_action_kinds=pending.action_kinds,
+        approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+    )
+
+
 def _merge_explicit_customer_facts(
     proposal: ModelProposal,
     explicit_facts: tuple[ModelFact, ...],
@@ -918,9 +980,12 @@ class V2TurnExecutor:
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
-        first_proposal = _merge_explicit_customer_facts(
-            validate_productive_proposal(first_audited.proposal),
-            explicit_customer_facts,
+        first_proposal = _repair_contextual_confirmation(
+            request,
+            _merge_explicit_customer_facts(
+                validate_productive_proposal(first_audited.proposal),
+                explicit_customer_facts,
+            ),
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")

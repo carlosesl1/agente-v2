@@ -31,6 +31,7 @@ from v2_application.turn_executor import (
     _extract_explicit_commercial_facts,
     _extract_explicit_customer_facts,
     _merge_explicit_customer_facts,
+    _repair_contextual_confirmation,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.critical_actions import (
@@ -130,6 +131,77 @@ def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() 
             replace(proposal, facts=(ModelFact("gender", "m"),)),
             extracted,
         )
+
+
+def test_parent_repairs_exact_english_confirmation_only_when_pending() -> None:
+    pending = PendingCriticalActionContext(
+        summary_version=3,
+        action_kinds=(
+            CriticalActionKind.BOOK_ACTIVITY,
+            CriticalActionKind.INITIATE_PAYMENT,
+        ),
+        public_summary="Just to confirm: I’ll book the tour. May I make this booking?",
+        expires_at=NOW + timedelta(minutes=30),
+    )
+    request = ModelRequest(
+        request_id="request:repair-english-confirmation",
+        lead_id="manychat:repair-english-confirmation",
+        source_event_id="batch:repair-english-confirmation",
+        message="Confirmed. Please book exactly that summary.",
+        locale="en-US",
+        state_version=2,
+        pending_action=pending,
+    )
+    inform = ModelProposal(
+        source_event_id=request.source_event_id,
+        intent="inform",
+        reply_chunks=("Please resend the summary.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    repaired = _repair_contextual_confirmation(request, inform)
+    assert repaired.intent == "confirm"
+    assert repaired.confirmed_summary_version == 3
+    assert repaired.confirmed_action_kinds == pending.action_kinds
+    assert repaired.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Confirmed?",
+        "Maybe",
+        "Yes, but now it is for two people",
+        "Sim, mas agora são duas pessoas",
+    ),
+)
+def test_parent_does_not_repair_ambiguous_or_material_confirmation(message: str) -> None:
+    pending = PendingCriticalActionContext(
+        summary_version=1,
+        action_kinds=(CriticalActionKind.BOOK_ACTIVITY,),
+        public_summary="Resumo pendente.",
+        expires_at=NOW + timedelta(minutes=30),
+    )
+    request = ModelRequest(
+        request_id="request:reject-ambiguous-confirmation",
+        lead_id="manychat:reject-ambiguous-confirmation",
+        source_event_id="batch:reject-ambiguous-confirmation",
+        message=message,
+        locale="en-US",
+        state_version=1,
+        pending_action=pending,
+    )
+    inform = ModelProposal(
+        source_event_id=request.source_event_id,
+        intent="inform",
+        reply_chunks=("I need more information.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    assert _repair_contextual_confirmation(request, inform) is inform
 
 
 def _enabled_reducer(
