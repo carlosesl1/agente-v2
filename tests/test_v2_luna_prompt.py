@@ -29,6 +29,10 @@ def test_private_profile_marker_prevents_reasking_authenticated_contact() -> Non
     assert "private_profile_complete=true" in PROMPT
     assert "não peça novamente nome, e-mail, telefone ou país" in PROMPT
     assert "não contém nem autoriza revelar os valores privados" in PROMPT
+    assert "Mesmo quando a mensagem principal for uma pergunta" in PROMPT
+    assert "17 May 1991" in PROMPT
+    assert "1991-05-17" in PROMPT
+    assert "female→f" in PROMPT
 
 
 def test_informational_policy_questions_and_prompt_injection_do_not_force_handoff() -> None:
