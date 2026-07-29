@@ -1750,6 +1750,48 @@ def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
     )
     assert reads_allowed(information) is True
 
+@pytest.mark.parametrize(
+    ("locale", "expected"),
+    (
+        (
+            "pt-BR",
+            "Não consegui autorizar essa execução com segurança; nenhuma reserva foi feita.",
+        ),
+        (
+            "en-US",
+            "I could not authorize this action safely; no booking was made.",
+        ),
+    ),
+)
+def test_missing_domain_command_reply_is_localized(locale: str, expected: str) -> None:
+    from v2_application.conversation import _confirmation_not_authorized_reply
+
+    assert _confirmation_not_authorized_reply(locale) == expected
+
+
+def test_confirmation_without_domain_command_never_claims_processing() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=5),
+        confirmation_clock=FixedClock(),
+    )
+    try:
+        result = executor.execute(second_batch)
+
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert result.reply_chunks == (
+            "Não consegui autorizar essa execução com segurança; nenhuma reserva foi feita.",
+        )
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone()[0] == 0
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_command_relays"
+        ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
 def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(seconds=2),
