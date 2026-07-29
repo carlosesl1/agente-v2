@@ -256,6 +256,13 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         raise InvalidModelProposal("model response fields mismatch")
     if decoded["source_event_id"] != source_event_id:
         raise InvalidModelProposal("model response source event mismatch")
+    pending_disposition = (
+        decoded["pending_disposition"]
+        if schema == "v2-model-proposal-v5"
+        else None
+    )
+    if decoded["intent"] == "inform" and pending_disposition == "preserve":
+        pending_disposition = None
     try:
         return ModelProposal(
             source_event_id=decoded["source_event_id"],
@@ -319,11 +326,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                 if schema in ("v2-model-proposal-v4", "v2-model-proposal-v5")
                 else False
             ),
-            pending_disposition=(
-                decoded["pending_disposition"]
-                if schema == "v2-model-proposal-v5"
-                else None
-            ),
+            pending_disposition=pending_disposition,
         )
     except (TypeError, ValueError) as exc:
         if type(exc) is InvalidModelProposal:

@@ -272,6 +272,15 @@ def test_v5_parser_distinguishes_preserve_from_revocation() -> None:
     assert proposal.intent == "adjust"
     assert proposal.pending_disposition == "preserve"
 
+    payload["intent"] = "inform"
+    informational = _proposal(
+        json.dumps(payload, ensure_ascii=False).encode(),
+        "batch:pending-preserve",
+    )
+    assert informational.intent == "inform"
+    assert informational.pending_disposition is None
+
+    payload["intent"] = "adjust"
     payload["pending_disposition"] = "unknown"
     with pytest.raises(InvalidModelProposal, match="pending_disposition"):
         _proposal(
