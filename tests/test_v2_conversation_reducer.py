@@ -786,6 +786,27 @@ def test_adjustment_or_refusal_revokes_the_pending_proposal_version() -> None:
         locale="pt-BR",
     ) is None
 
+    preserved = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=replace(
+            adjustment,
+            source_event_id="event:adjust-preserve",
+            reply_chunks=("Vou manter o resumo para você conferir novamente.",),
+            pending_disposition="preserve",
+        ),
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert preserved.next_state.workflow == awaiting
+    assert preserved.public_reply.kind == "inform"
+    assert _reducer().pending_action(
+        preserved.next_state.workflow,
+        locale="pt-BR",
+    ) is not None
+
     late_confirmation = _reducer().reduce(
         state=revoked.next_state,
         projection=revoked.projection,

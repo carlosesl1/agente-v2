@@ -1003,6 +1003,24 @@ class V2ConversationReducer:
 
         workflow = state.workflow
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "adjust":
+            if (
+                proposal.pending_disposition == "preserve"
+                and self.confirmation_projection_matches(workflow, merged)
+            ):
+                return V2ConversationDecision(
+                    next_state=_consume_without_workflow_transition(
+                        state,
+                        proposal.source_event_id,
+                    ),
+                    projection=merged,
+                    commands=(),
+                    public_reply=ConversationReply(
+                        "inform",
+                        proposal.reply_chunks
+                        or ("O resumo continua válido; fico aguardando sua decisão.",),
+                    ),
+                    receipt_requirements=("proposal_preserved",),
+                )
             transition = reduce_domain(
                 workflow,
                 ConfirmationReceived(

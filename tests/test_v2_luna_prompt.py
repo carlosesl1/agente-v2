@@ -53,6 +53,8 @@ def test_unsupported_multiple_activity_passengers_route_to_handoff() -> None:
     assert "mais de 1 participante no passeio" in PROMPT
     assert "request_handoff" in PROMPT
     assert "voltar de mais de 1 participante para exatamente 1" in PROMPT
+    assert "`handoff_active: bool`" in PROMPT
+    assert "não use request_handoff novamente" in PROMPT
 
 
 def test_select_prepares_summary_without_executing() -> None:
@@ -69,8 +71,9 @@ def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
 
 
-def test_luna_prompt_requires_contextual_v4_critical_approval() -> None:
-    assert "v2-model-proposal-v4" in PROMPT
+def test_luna_prompt_requires_contextual_v5_critical_approval() -> None:
+    assert "v2-model-proposal-v5" in PROMPT
+    assert "v2-model-proposal-v4" not in PROMPT
     assert "v2-model-proposal-v3" not in PROMPT
     assert "v2-model-proposal-v2" not in PROMPT
     assert "pending_action" in PROMPT
@@ -80,6 +83,9 @@ def test_luna_prompt_requires_contextual_v4_critical_approval() -> None:
     assert "Uma confirmação afirmativa curta é válida" in PROMPT
     assert "`confirmation_review_required: bool`" in PROMPT
     assert "`selection_review_required: bool`" in PROMPT
+    assert "pending_disposition" in PROMPT
+    assert '"preserve"' in PROMPT
+    assert '"revoke"' in PROMPT
     assert "nunca devolva saudação genérica" in PROMPT
     for example in (
         "“Sim”",

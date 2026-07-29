@@ -1083,6 +1083,7 @@ class V2TurnExecutor:
             state_facts=_state_model_facts(projection),
             pending_action=pending_action,
             private_profile_complete=profile.complete,
+            handoff_active=current.state.handoff is not None,
         )
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
@@ -1094,7 +1095,8 @@ class V2TurnExecutor:
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
         selection_review = (
-            pending_action is None
+            current.state.handoff is None
+            and pending_action is None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
             and _structured_selection_review_required(
@@ -1237,6 +1239,7 @@ class V2TurnExecutor:
                 state_facts=_state_model_facts(projection),
                 pending_action=pending_action,
                 private_profile_complete=profile.complete,
+                handoff_active=current.state.handoff is not None,
             )
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:

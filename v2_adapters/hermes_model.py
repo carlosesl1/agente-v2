@@ -63,10 +63,11 @@ _RESPONSE_FIELDS_V3: Final = frozenset(
     (*_RESPONSE_FIELDS_V2, "confirmed_action_kinds", "approval_basis")
 )
 _RESPONSE_FIELDS_V4: Final = frozenset((*_RESPONSE_FIELDS_V3, "selection_requested"))
+_RESPONSE_FIELDS_V5: Final = frozenset((*_RESPONSE_FIELDS_V4, "pending_disposition"))
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v4 JSON object and no commentary. reply_chunks
+Return exactly one v2-model-proposal-v5 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
@@ -74,6 +75,8 @@ empty list; the parent permits only one provider-read round per turn. selection_
 must be false by default; it may be true only on an inform proposal with a fresh read when
 the current message unambiguously asks to prepare or reserve the current option. It is
 false for questions, hypotheticals, uncertainty or informational availability checks.
+pending_disposition must be null except for adjust: preserve keeps an unchanged pending
+summary during questions or recap requests; revoke is for refusal or material change.
 When pending_action is present, classify the latest message in relation to that exact
 public summary. Uma confirmação semântica curta como “Sim”, “Pode reservar”,
 “Confirmado” ou “Isso mesmo” pode usar intent=confirm; copy summary_version and
@@ -127,6 +130,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "locale": request.locale,
         "state_version": request.state_version,
         "private_profile_complete": request.private_profile_complete,
+        "handoff_active": request.handoff_active,
         "confirmation_review_required": request.confirmation_review_required,
         "selection_review_required": request.selection_review_required,
         "observations": observations,
@@ -243,6 +247,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         expected_fields = _RESPONSE_FIELDS_V3
     elif schema == "v2-model-proposal-v4":
         expected_fields = _RESPONSE_FIELDS_V4
+    elif schema == "v2-model-proposal-v5":
+        expected_fields = _RESPONSE_FIELDS_V5
     else:
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
@@ -283,23 +289,39 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v2",
                     "v2-model-proposal-v3",
                     "v2-model-proposal-v4",
+                    "v2-model-proposal-v5",
                 )
                 else ()
             ),
             confirmed_action_kinds=(
                 _critical_actions(decoded["confirmed_action_kinds"])
-                if schema in ("v2-model-proposal-v3", "v2-model-proposal-v4")
+                if schema
+                in (
+                    "v2-model-proposal-v3",
+                    "v2-model-proposal-v4",
+                    "v2-model-proposal-v5",
+                )
                 else ()
             ),
             approval_basis=(
                 _approval_basis(decoded["approval_basis"])
-                if schema in ("v2-model-proposal-v3", "v2-model-proposal-v4")
+                if schema
+                in (
+                    "v2-model-proposal-v3",
+                    "v2-model-proposal-v4",
+                    "v2-model-proposal-v5",
+                )
                 else None
             ),
             selection_requested=(
                 decoded["selection_requested"]
-                if schema == "v2-model-proposal-v4"
+                if schema in ("v2-model-proposal-v4", "v2-model-proposal-v5")
                 else False
+            ),
+            pending_disposition=(
+                decoded["pending_disposition"]
+                if schema == "v2-model-proposal-v5"
+                else None
             ),
         )
     except (TypeError, ValueError) as exc:

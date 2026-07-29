@@ -120,6 +120,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     user = json.loads(envelope["messages"][0][1])
 
     assert user["private_profile_complete"] is True
+    assert user["handoff_active"] is False
     assert user["confirmation_review_required"] is False
     assert user["selection_review_required"] is False
     serialized = json.dumps(user, ensure_ascii=False)
@@ -213,6 +214,38 @@ def test_v4_parser_exposes_structured_selection_request_without_authority() -> N
         _proposal(
             json.dumps(payload, ensure_ascii=False).encode(),
             "batch:structured-selection",
+        )
+
+
+def test_v5_parser_distinguishes_preserve_from_revocation() -> None:
+    payload = {
+        "schema": "v2-model-proposal-v5",
+        "source_event_id": "batch:pending-preserve",
+        "intent": "adjust",
+        "reply_chunks": ["Vou manter o mesmo resumo para você revisar."],
+        "facts": [],
+        "read_requests": [],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "selection_requested": False,
+        "pending_disposition": "preserve",
+    }
+    proposal = _proposal(
+        json.dumps(payload, ensure_ascii=False).encode(),
+        "batch:pending-preserve",
+    )
+    assert proposal.intent == "adjust"
+    assert proposal.pending_disposition == "preserve"
+
+    payload["pending_disposition"] = "unknown"
+    with pytest.raises(InvalidModelProposal, match="pending_disposition"):
+        _proposal(
+            json.dumps(payload, ensure_ascii=False).encode(),
+            "batch:pending-preserve",
         )
 
 

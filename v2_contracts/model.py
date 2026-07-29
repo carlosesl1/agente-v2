@@ -150,6 +150,7 @@ class ModelRequest:
     state_facts: tuple[ModelFact, ...] = ()
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
+    handoff_active: bool = False
     confirmation_review_required: bool = False
     selection_review_required: bool = False
 
@@ -185,6 +186,8 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "private_profile_complete must be an exact boolean"
             )
+        if type(self.handoff_active) is not bool:
+            raise InvalidModelProposal("handoff_active must be an exact boolean")
         if type(self.confirmation_review_required) is not bool:
             raise InvalidModelProposal(
                 "confirmation_review_required must be an exact boolean"
@@ -225,6 +228,7 @@ class ModelProposal:
     confirmed_action_kinds: tuple[CriticalActionKind, ...] = ()
     approval_basis: ApprovalBasis | None = None
     selection_requested: bool = False
+    pending_disposition: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -265,6 +269,15 @@ class ModelProposal:
             raise InvalidModelProposal(
                 "selection_requested requires inform intent with a fresh read"
             )
+        if self.pending_disposition is not None:
+            if self.pending_disposition not in ("preserve", "revoke"):
+                raise InvalidModelProposal(
+                    "pending_disposition must be preserve, revoke, or None"
+                )
+            if self.intent != "adjust":
+                raise InvalidModelProposal(
+                    "pending_disposition is allowed only for adjust intent"
+                )
         if self.target_offer_id is not None:
             _text(self.target_offer_id, "target_offer_id", identifier=True)
             if not self.target_offer_id.startswith("offer:"):
