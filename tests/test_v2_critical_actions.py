@@ -55,7 +55,9 @@ def _enabled_policy(*, valid_until: datetime | None = None) -> CriticalActionPol
     )
 
 
-def _activity_draft(*, amount: str = "334.95", version: int = 1):
+def _activity_draft(
+    *, amount: str = "334.95", version: int = 1, participants: int = 1
+):
     offer = OfferSnapshot(
         offer_id="offer:" + "a" * 32,
         lookup_id="lookup:product:tour-4ps:" + "b" * 64,
@@ -65,7 +67,7 @@ def _activity_draft(*, amount: str = "334.95", version: int = 1):
         start_date=date(2026, 11, 18),
         end_date=None,
         start_time=None,
-        party=Party(adults=1, children=0),
+        party=Party(adults=participants, children=0),
         total=Money(amount=Decimal(amount), currency="BRL"),
         available=True,
     )
@@ -295,6 +297,24 @@ def test_policy_is_runtime_owned_with_deny_ask_allow_precedence() -> None:
             hostel_payment_percentage=100,
             policy=wise_only,
         )
+
+
+def test_runtime_policy_denies_activity_above_composed_transport_limit() -> None:
+    limited = replace(_enabled_policy(), activity_participant_limit=1)
+
+    with pytest.raises(CriticalActionDenied, match="runtime policy"):
+        critical_action_context(
+            _activity_draft(participants=2, amount="669.90"),
+            summary_version=1,
+            presented_at=NOW,
+            locale="pt-BR",
+            approval_ttl=TTL,
+            agency_payment_percentage=20,
+            hostel_payment_percentage=100,
+            policy=limited,
+        )
+
+    assert _context(draft=_activity_draft(participants=2, amount="669.90"))
 
 
 def test_bokun_summary_explains_exact_effect_fee_and_rounded_deposit() -> None:

@@ -630,6 +630,7 @@ class V2TurnExecutor:
             state_version=current.version,
             state_facts=_state_model_facts(projection),
             pending_action=pending_action,
+            private_profile_complete=profile.complete,
         )
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
@@ -737,6 +738,7 @@ class V2TurnExecutor:
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
                 pending_action=pending_action,
+                private_profile_complete=profile.complete,
             )
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:

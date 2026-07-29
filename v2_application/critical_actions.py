@@ -46,6 +46,7 @@ class ApprovalMatch(str, Enum):
 class CriticalActionPolicy:
     enabled: frozenset[CriticalActionKind]
     enabled_payment_methods: frozenset[str] = frozenset()
+    activity_participant_limit: int | None = None
     valid_until: datetime | None = None
     kill_switch_engaged: bool = False
 
@@ -60,6 +61,14 @@ class CriticalActionPolicy:
         ):
             raise TypeError(
                 "enabled_payment_methods must be an exact closed string frozenset"
+            )
+        if self.activity_participant_limit is not None and (
+            type(self.activity_participant_limit) is not int
+            or isinstance(self.activity_participant_limit, bool)
+            or self.activity_participant_limit < 1
+        ):
+            raise ValueError(
+                "activity_participant_limit must be a positive exact integer or None"
             )
         if self.valid_until is not None:
             _utc(self.valid_until, "valid_until")
@@ -313,6 +322,13 @@ def critical_action_scope_available(
     if type(policy) is not CriticalActionPolicy:
         raise TypeError("policy must be an exact CriticalActionPolicy")
     instant = _utc(now, "now")
+    if policy.activity_participant_limit is not None and any(
+        component.service is ServiceKind.ACTIVITY
+        and component.party.adults + component.party.children
+        > policy.activity_participant_limit
+        for component in draft.components
+    ):
+        return False
     return all(
         policy.classify(
             action,

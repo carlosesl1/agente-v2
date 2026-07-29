@@ -118,6 +118,7 @@ def test_critical_action_policy_is_derived_only_from_effect_gates(
         is CriticalActionDisposition.ASK
     )
     assert activity.valid_until is not None
+    assert activity.activity_participant_limit == 1
     assert (
         activity.classify(
             CriticalActionKind.BOOK_ACTIVITY,

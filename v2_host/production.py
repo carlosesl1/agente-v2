@@ -83,6 +83,7 @@ def _critical_action_policy(settings: V2Settings) -> CriticalActionPolicy:
     return CriticalActionPolicy(
         frozenset(enabled),
         enabled_payment_methods=frozenset(settings.enabled_payment_methods),
+        activity_participant_limit=1,
         valid_until=settings.write_window_end,
         kill_switch_engaged=settings.global_kill_switch_engaged,
     )

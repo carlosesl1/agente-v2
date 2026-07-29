@@ -105,6 +105,32 @@ def test_pending_action_wire_is_public_only() -> None:
         assert forbidden not in serialized
 
 
+def test_private_profile_completeness_wire_is_boolean_only() -> None:
+    request = ModelRequest(
+        request_id="request:private-profile-marker",
+        lead_id="manychat:private-profile-marker",
+        source_event_id="batch:private-profile-marker",
+        message="Quero reservar.",
+        locale="pt-BR",
+        state_version=0,
+        private_profile_complete=True,
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    user = json.loads(envelope["messages"][0][1])
+
+    assert user["private_profile_complete"] is True
+    serialized = json.dumps(user, ensure_ascii=False)
+    for forbidden in (
+        "Pessoa Qualificação",
+        "person@example.invalid",
+        "+551",
+        "profile-binding:",
+        "content_hash",
+    ):
+        assert forbidden not in serialized
+
+
 def test_v3_parser_binds_natural_confirmation_to_exact_action_scope() -> None:
     payload = {
         "schema": "v2-model-proposal-v3",

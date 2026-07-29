@@ -122,6 +122,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "message": request.message,
         "locale": request.locale,
         "state_version": request.state_version,
+        "private_profile_complete": request.private_profile_complete,
         "observations": observations,
     }
     if request.state_facts:

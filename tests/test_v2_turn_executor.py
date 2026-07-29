@@ -918,6 +918,8 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         result = executor.execute(BATCH)
 
         assert len(model.calls) == 2
+        assert model.calls[0].private_profile_complete is True
+        assert model.calls[1].private_profile_complete is True
         assert len(model.calls[1].observations) == 1
         assert read_port.calls == [request]
         assert result.receipt.uds_final_seq == 2
