@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
 from reservation_boundary.conversation import (
@@ -278,6 +281,134 @@ def _extract_explicit_customer_facts(message: str) -> tuple[ModelFact, ...]:
     return tuple(facts)
 
 
+_COMMERCIAL_CATALOG_PATH: Final = (
+    Path(__file__).resolve().parents[1] / "config" / "v2_public_commercial_catalog.json"
+)
+_EN_ACTIVITY_DATE_RE: Final = re.compile(
+    r"\b(january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"\s+(\d{1,2}),?\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_PT_ACTIVITY_DATE_RE: Final = re.compile(
+    r"\b(\d{1,2})\s+de\s+"
+    r"(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)"
+    r"\s+de\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_PT_MONTHS: Final = {
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
+
+
+def _fold_public_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.casefold())
+    ascii_like = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", ascii_like).split())
+
+
+@lru_cache(maxsize=1)
+def _catalog_aliases() -> tuple[tuple[str, str], ...]:
+    payload = json.loads(_COMMERCIAL_CATALOG_PATH.read_text(encoding="utf-8"))
+    if payload.get("schema") != "v2-public-commercial-catalog-v1":
+        raise TurnExecutionError("public commercial catalog schema drifted")
+    aliases: dict[str, str] = {}
+    for product in payload.get("products", ()):
+        canonical_id = product.get("canonical_id")
+        candidates = (product.get("public_name"), *(product.get("aliases") or ()))
+        if type(canonical_id) is not str:
+            raise TurnExecutionError("public commercial catalog product is malformed")
+        for candidate in candidates:
+            if type(candidate) is not str:
+                raise TurnExecutionError("public commercial catalog alias is malformed")
+            folded = _fold_public_text(candidate)
+            previous = aliases.get(folded)
+            if previous is not None and previous != canonical_id:
+                raise TurnExecutionError("public commercial catalog alias is ambiguous")
+            aliases[folded] = canonical_id
+    return tuple(sorted(aliases.items(), key=lambda item: (-len(item[0]), item[0])))
+
+
+def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
+    if type(message) is not str or not message:
+        raise ValueError("message must be non-empty exact text")
+    folded = _fold_public_text(message)
+    padded = f" {folded} "
+    products = {
+        canonical_id
+        for alias, canonical_id in _catalog_aliases()
+        if f" {alias} " in padded
+    }
+    if len(products) != 1:
+        return ()
+    product_id = next(iter(products))
+
+    activity_dates: set[date] = set()
+    for match in _EN_ACTIVITY_DATE_RE.finditer(message):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _EN_MONTHS[match.group(1).casefold()],
+            int(match.group(2)),
+        )
+        if parsed is not None:
+            activity_dates.add(parsed)
+    for match in _PT_ACTIVITY_DATE_RE.finditer(message):
+        month = _fold_public_text(match.group(2))
+        parsed = _safe_date(int(match.group(3)), _PT_MONTHS[month], int(match.group(1)))
+        if parsed is not None:
+            activity_dates.add(parsed)
+    for match in re.finditer(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", message):
+        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        if parsed is not None:
+            activity_dates.add(parsed)
+    activity_dates.difference_update(
+        fact.value
+        for fact in _extract_explicit_customer_facts(message)
+        if fact.name == "birth_date" and type(fact.value) is date
+    )
+
+    number_words = {"one": 1, "um": 1, "uma": 1, "dois": 2, "duas": 2}
+    adults: set[int] = set()
+    for pattern in (
+        r"\bfor\s+(one|\d+)\s+(?:adult|person|participant)s?\b",
+        r"\bpara\s+(um|uma|dois|duas|\d+)\s+(?:adulto|adulta|pessoa|participante)s?\b",
+    ):
+        for match in re.finditer(pattern, folded):
+            token = match.group(1)
+            adults.add(number_words.get(token, int(token) if token.isdigit() else 0))
+    if re.search(r"\b(?:so eu|just me)\b", folded):
+        adults.add(1)
+    adults.discard(0)
+
+    facts: list[ModelFact] = []
+    english_markers = len(
+        re.findall(r"\b(?:i|please|tour|booking|what|can|adult|person)\b", folded)
+    )
+    if english_markers >= 2:
+        facts.append(ModelFact("language", "en"))
+    facts.extend(
+        (
+            ModelFact("service", "agency"),
+            ModelFact("product_id", product_id),
+        )
+    )
+    if len(activity_dates) == 1:
+        facts.append(ModelFact("activity_date", next(iter(activity_dates))))
+    if len(adults) == 1:
+        facts.extend((ModelFact("adults", next(iter(adults))), ModelFact("children", 0)))
+    return tuple(facts)
+
+
 def _merge_explicit_customer_facts(
     proposal: ModelProposal,
     explicit_facts: tuple[ModelFact, ...],
@@ -288,6 +419,15 @@ def _merge_explicit_customer_facts(
     additions: list[ModelFact] = []
     for fact in explicit_facts:
         current = existing.get(fact.name)
+        if (
+            current is not None
+            and fact.name == "language"
+            and type(current.value) is str
+            and type(fact.value) is str
+            and current.value.casefold().split("-", 1)[0]
+            == fact.value.casefold().split("-", 1)[0]
+        ):
+            continue
         if current is not None and current.value != fact.value:
             raise TurnExecutionError(
                 f"model fact {fact.name} conflicts with explicit customer fact"
@@ -752,7 +892,10 @@ class V2TurnExecutor:
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile port must return exact PrivateCustomerBinding")
-        explicit_customer_facts = _extract_explicit_customer_facts(batch.combined_text)
+        explicit_customer_facts = (
+            *_extract_explicit_commercial_facts(batch.combined_text),
+            *_extract_explicit_customer_facts(batch.combined_text),
+        )
         pending_action = (
             None
             if current.state.handoff is not None

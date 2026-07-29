@@ -28,6 +28,7 @@ from v2_application.turn_executor import (
     V2TurnExecutor,
     _confirmation_read_requests,
     _explicit_customer_fact_commitment,
+    _extract_explicit_commercial_facts,
     _extract_explicit_customer_facts,
     _merge_explicit_customer_facts,
 )
@@ -80,6 +81,25 @@ def test_parent_extracts_only_explicit_customer_facts(
 def test_parent_customer_fact_extraction_ignores_unbound_dates_and_gender_words() -> None:
     assert _extract_explicit_customer_facts(
         "The tour is on 17 May 2026 and the guide may be female."
+    ) == ()
+
+
+def test_parent_extracts_unambiguous_catalog_product_date_and_party() -> None:
+    assert _extract_explicit_commercial_facts(
+        "Hi! I am considering the 4Ps Tour on November 18, 2026, for one adult."
+    ) == (
+        ModelFact("language", "en"),
+        ModelFact("service", "agency"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("activity_date", date(2026, 11, 18)),
+        ModelFact("adults", 1),
+        ModelFact("children", 0),
+    )
+
+
+def test_parent_commercial_extraction_ignores_date_without_product() -> None:
+    assert _extract_explicit_commercial_facts(
+        "I will be free on November 18, 2026, but have not chosen a tour."
     ) == ()
 
 
