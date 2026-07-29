@@ -12,6 +12,8 @@ from reservation_boundary import (
     ConversationProjection,
     ConversationStage,
     DesiredService,
+    StringSlot,
+    TypedFact,
 )
 from reservation_domain import (
     AwaitingAdjustmentState,
@@ -708,6 +710,83 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert type(decision.commands[0]) is ReservationCommand
     assert decision.commands[0].operation is ReservationOperation.RESERVE_LODGING
     assert type(decision.next_state.workflow) is ExecutionQueuedState
+
+
+@pytest.mark.parametrize(
+    ("service", "mutator", "expected_kind", "expected_text"),
+    (
+        (
+            ServiceKind.ACTIVITY,
+            lambda read: replace(
+                read,
+                public_payload={**read.public_payload, "available": False},
+            ),
+            "offer_unavailable",
+            "A vaga não está mais disponível",
+        ),
+        (
+            ServiceKind.LODGING,
+            lambda read: replace(
+                read,
+                public_payload={**read.public_payload, "total_amount": "510.00"},
+                private_binding_hash="1" * 64,
+            ),
+            "proposal_changed",
+            "A disponibilidade ou o valor mudou",
+        ),
+    ),
+)
+def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
+    service: ServiceKind,
+    mutator,
+    expected_kind: str,
+    expected_text: str,
+) -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=service, workflow_id=f"workflow:refresh-{service.value}")
+    )
+    projection = _projection()
+    proposal_service = "hostel"
+    if service is ServiceKind.ACTIVITY:
+        projection = replace(
+            projection,
+            desired_services=(DesiredService.AGENCY,),
+            facts=(
+                TypedFact(
+                    "product_id",
+                    StringSlot("product:buracao-001"),
+                    FRAME_HASH,
+                ),
+            ),
+        )
+        proposal_service = "agency"
+    fresh_read = _read_for_component(awaiting.draft.components[0])
+
+    decision = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=projection,
+        proposal=_proposal(
+            source=f"event:refresh-{service.value}",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+            service=proposal_service,
+        ),
+        profile=_profile(),
+        reads=(mutator(fresh_read),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert decision.commands == ()
+    assert type(decision.next_state.workflow) is AwaitingAdjustmentState
+    assert _reducer().pending_action(
+        decision.next_state.workflow,
+        locale="pt-BR",
+    ) is None
+    assert decision.public_reply.kind == expected_kind
+    assert expected_text in decision.public_reply.chunks[0]
+    assert "Nada foi reservado" in decision.public_reply.chunks[0]
+    assert decision.receipt_requirements == ("proposal_revoked_after_refresh",)
 
 
 def test_confirmation_scope_mismatch_and_expiry_fail_closed_without_command() -> None:

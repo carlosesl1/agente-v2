@@ -670,6 +670,50 @@ def _reads_bind_draft(
     return True
 
 
+def _reads_explicitly_unavailable(reads: tuple[ReadObservation, ...]) -> bool:
+    for observation in reads:
+        payload = observation.public_payload
+        if observation.provider == "bokun" and payload.get("available") is False:
+            return True
+        if observation.provider != "cloudbeds":
+            continue
+        raw_options = payload.get("options")
+        options = (
+            tuple(item for item in raw_options if type(item) is dict)
+            if type(raw_options) is list
+            else (payload,)
+        )
+        if options and all(
+            type(item.get("available_units")) is int
+            and item.get("available_units") < 1
+            for item in options
+        ):
+            return True
+    return False
+
+
+def _refresh_revoked_reply(*, unavailable: bool, locale: str) -> str:
+    if locale.casefold().startswith("en"):
+        if unavailable:
+            return (
+                "The spot is no longer available. Nothing was booked; "
+                "I’ll need to check another option before asking for confirmation again."
+            )
+        return (
+            "Availability or price changed. Nothing was booked; "
+            "I’ll present a new summary before asking for confirmation again."
+        )
+    if unavailable:
+        return (
+            "A vaga não está mais disponível. Nada foi reservado; "
+            "vou verificar outra opção antes de pedir uma nova confirmação."
+        )
+    return (
+        "A disponibilidade ou o valor mudou. Nada foi reservado; "
+        "vou apresentar um novo resumo antes de pedir outra confirmação."
+    )
+
+
 def _generic_reply(proposal: ModelProposal) -> ConversationReply:
     chunks = proposal.reply_chunks or ("Preciso de mais informações para continuar.",)
     return ConversationReply("inform", chunks)
@@ -1165,6 +1209,49 @@ class V2ConversationReducer:
                     receipt_requirements=("profile_completion",),
                 )
             if not _reads_bind_draft(workflow, reads, now=instant):
+                current_refresh = bool(reads) and all(
+                    observation.observed_at <= instant < observation.expires_at
+                    for observation in reads
+                )
+                if current_refresh:
+                    unavailable = _reads_explicitly_unavailable(reads)
+                    transition = reduce_domain(
+                        workflow,
+                        ConfirmationReceived(
+                            event_id=_event_id(
+                                proposal.source_event_id,
+                                "refresh-mismatch",
+                            ),
+                            occurred_at=instant,
+                            confirmation_event_id=_identity(
+                                proposal.source_event_id,
+                                workflow.draft.subject_signature,
+                                prefix="refresh-mismatch",
+                            ),
+                            decision=ConfirmationDecisionKind.ADJUST,
+                            target_draft_version=workflow.draft.version,
+                            subject_signature=workflow.draft.subject_signature,
+                        ),
+                    )
+                    return V2ConversationDecision(
+                        next_state=_replace_boundary(
+                            state,
+                            workflow=transition.state,
+                            source_event_id=proposal.source_event_id,
+                        ),
+                        projection=merged,
+                        commands=(),
+                        public_reply=ConversationReply(
+                            "offer_unavailable" if unavailable else "proposal_changed",
+                            (
+                                _refresh_revoked_reply(
+                                    unavailable=unavailable,
+                                    locale=merged.locale,
+                                ),
+                            ),
+                        ),
+                        receipt_requirements=("proposal_revoked_after_refresh",),
+                    )
                 return V2ConversationDecision(
                     next_state=_consume_without_workflow_transition(
                         state, proposal.source_event_id
