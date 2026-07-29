@@ -1870,9 +1870,12 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert confirmed.receipt.committed_state_version == 2
         assert replayed.replayed is True
         assert replayed.receipt == confirmed.receipt
-        assert confirmed.reply_chunks == (
-            "Perfeito — vou processar sua reserva agora.",
+        expected_confirmation_reply = (
+            "Perfect — I’ll process your booking now."
+            if selection_language == "en"
+            else "Perfeito — vou processar sua reserva agora."
         )
+        assert confirmed.reply_chunks == (expected_confirmation_reply,)
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
         assert len(model.calls) == (5 if review_expected else 4)

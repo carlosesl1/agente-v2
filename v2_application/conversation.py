@@ -675,6 +675,12 @@ def _generic_reply(proposal: ModelProposal) -> ConversationReply:
     return ConversationReply("inform", chunks)
 
 
+def _confirmed_reply(locale: str) -> str:
+    if locale.casefold().startswith("en"):
+        return "Perfect — I’ll process your booking now."
+    return "Perfeito — vou processar sua reserva agora."
+
+
 def _handoff_effect_guard_reply(locale: str) -> str:
     if type(locale) is not str or not locale:
         raise ValueError("locale must be non-empty exact text")
@@ -1199,7 +1205,7 @@ class V2ConversationReducer:
                 commands=transition.commands,
                 public_reply=ConversationReply(
                     "reservation_authorized",
-                    ("Perfeito — vou processar sua reserva agora.",),
+                    (_confirmed_reply(merged.locale),),
                 ),
                 receipt_requirements=("reservation_command",),
             )
