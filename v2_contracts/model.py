@@ -198,6 +198,7 @@ class ModelProposal:
     target_offer_ids: tuple[str, ...] = ()
     confirmed_action_kinds: tuple[CriticalActionKind, ...] = ()
     approval_basis: ApprovalBasis | None = None
+    selection_requested: bool = False
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -229,6 +230,14 @@ class ModelProposal:
         ):
             raise InvalidModelProposal(
                 "effect_proposals must contain exact EffectProposal values"
+            )
+        if type(self.selection_requested) is not bool:
+            raise InvalidModelProposal("selection_requested must be an exact boolean")
+        if self.selection_requested and (
+            self.intent != "inform" or not self.read_requests
+        ):
+            raise InvalidModelProposal(
+                "selection_requested requires inform intent with a fresh read"
             )
         if self.target_offer_id is not None:
             _text(self.target_offer_id, "target_offer_id", identifier=True)

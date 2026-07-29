@@ -31,6 +31,7 @@ from v2_application.turn_executor import (
     _extract_explicit_commercial_facts,
     _extract_explicit_customer_facts,
     _merge_explicit_customer_facts,
+    _repair_requested_activity_selection,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.critical_actions import (
@@ -130,6 +131,87 @@ def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() 
             replace(proposal, facts=(ModelFact("gender", "m"),)),
             extracted,
         )
+
+
+def test_parent_repairs_only_structured_requested_activity_selection() -> None:
+    request = ReadRequest(
+        request_id="batch:structured-selection:read:activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:tour-4ps",
+        activity_date=date(2026, 11, 18),
+        participants=1,
+    )
+    state_facts = (
+        ModelFact("language", "pt-BR"),
+        ModelFact("service", "agency"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("activity_date", date(2026, 11, 18)),
+        ModelFact("adults", 1),
+        ModelFact("children", 0),
+        ModelFact("payment_method", "stripe"),
+        ModelFact("birth_date", date(1990, 4, 14)),
+        ModelFact("gender", "f"),
+    )
+    first = ModelProposal(
+        source_event_id="batch:structured-selection",
+        intent="inform",
+        reply_chunks=("Vou verificar a oferta atual.",),
+        facts=(),
+        read_requests=(request,),
+        effect_proposals=(),
+        selection_requested=True,
+    )
+    second = ModelProposal(
+        source_event_id=first.source_event_id,
+        intent="inform",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    observation = ReadObservation(
+        request_hash=request.canonical_hash(),
+        provider="bokun",
+        observed_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+        public_payload={
+            "offer_id": "offer:" + "a" * 64,
+            "product_id": "product:tour-4ps",
+            "activity_date": "2026-11-18",
+            "participants": 1,
+            "available": True,
+            "price_includes_booking_fee": True,
+            "total_amount": "334.95",
+            "currency": "BRL",
+        },
+        private_binding_hash="f" * 64,
+    )
+
+    repaired = _repair_requested_activity_selection(
+        first,
+        second,
+        state_facts=state_facts,
+        observations=(observation,),
+        private_profile_complete=True,
+    )
+    assert repaired.intent == "select"
+    assert repaired.target_offer_id == "offer:" + "a" * 64
+    assert repaired.selection_requested is False
+
+    assert _repair_requested_activity_selection(
+        replace(first, selection_requested=False),
+        second,
+        state_facts=state_facts,
+        observations=(observation,),
+        private_profile_complete=True,
+    ) is second
+    assert _repair_requested_activity_selection(
+        first,
+        second,
+        state_facts=state_facts,
+        observations=(observation,),
+        private_profile_complete=False,
+    ) is second
 
 
 def _enabled_reducer(

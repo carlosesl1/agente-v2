@@ -173,6 +173,47 @@ def test_v3_parser_binds_natural_confirmation_to_exact_action_scope() -> None:
         )
 
 
+def test_v4_parser_exposes_structured_selection_request_without_authority() -> None:
+    payload = {
+        "schema": "v2-model-proposal-v4",
+        "source_event_id": "batch:structured-selection",
+        "intent": "inform",
+        "reply_chunks": ["Vou verificar a oferta atual."],
+        "facts": [],
+        "read_requests": [
+            {
+                "request_id": "batch:structured-selection:read:activity",
+                "kind": "activity",
+                "product_id": "product:tour-4ps",
+                "activity_date": "2026-11-18",
+                "participants": 1,
+            }
+        ],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "selection_requested": True,
+    }
+
+    proposal = _proposal(
+        json.dumps(payload, ensure_ascii=False).encode(),
+        "batch:structured-selection",
+    )
+    assert proposal.selection_requested is True
+    assert proposal.intent == "inform"
+    assert len(proposal.read_requests) == 1
+
+    payload["read_requests"] = []
+    with pytest.raises(InvalidModelProposal, match="selection_requested"):
+        _proposal(
+            json.dumps(payload, ensure_ascii=False).encode(),
+            "batch:structured-selection",
+        )
+
+
 def test_legacy_schema_cannot_confirm_a_pending_critical_action() -> None:
     payload = {
         "schema": "v2-model-proposal-v2",

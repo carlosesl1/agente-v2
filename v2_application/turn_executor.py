@@ -437,6 +437,86 @@ def _merge_explicit_customer_facts(
     return replace(proposal, facts=(*proposal.facts, *additions))
 
 
+def _repair_requested_activity_selection(
+    first_proposal: ModelProposal,
+    second_proposal: ModelProposal,
+    *,
+    state_facts: tuple[ModelFact, ...],
+    observations: tuple[ReadObservation, ...],
+    private_profile_complete: bool,
+) -> ModelProposal:
+    """Complete an explicitly signalled selection from exact structured evidence."""
+
+    if (
+        type(first_proposal) is not ModelProposal
+        or type(second_proposal) is not ModelProposal
+        or type(state_facts) is not tuple
+        or any(type(item) is not ModelFact for item in state_facts)
+        or type(observations) is not tuple
+        or any(type(item) is not ReadObservation for item in observations)
+        or type(private_profile_complete) is not bool
+    ):
+        raise TypeError("selection repair requires exact V2 contracts")
+    if second_proposal.intent == "select":
+        return second_proposal
+    if (
+        not first_proposal.selection_requested
+        or not private_profile_complete
+        or second_proposal.intent != "inform"
+        or second_proposal.read_requests
+        or len(first_proposal.read_requests) != 1
+        or len(observations) != 1
+    ):
+        return second_proposal
+    request = first_proposal.read_requests[0]
+    observation = observations[0]
+    if request.kind is not ReadKind.ACTIVITY:
+        return second_proposal
+
+    values: dict[str, str | int | date] = {}
+    for fact in (*state_facts, *first_proposal.facts, *second_proposal.facts):
+        current = values.get(fact.name)
+        if current is not None and current != fact.value:
+            return second_proposal
+        values[fact.name] = fact.value
+    activity_date = values.get("activity_date") or values.get("start_date")
+    adults = values.get("adults")
+    children = values.get("children", 0)
+    if (
+        values.get("service") != "agency"
+        or values.get("product_id") != request.product_id
+        or activity_date != request.activity_date
+        or type(adults) is not int
+        or type(children) is not int
+        or adults + children != 1
+        or request.participants != adults + children
+        or values.get("payment_method") not in {"stripe", "wise", "pix"}
+        or type(values.get("birth_date")) is not date
+        or values.get("gender") not in {"m", "f"}
+    ):
+        return second_proposal
+
+    payload = observation.public_payload
+    offer_id = payload.get("offer_id")
+    if (
+        observation.request_hash != request.canonical_hash()
+        or payload.get("available") is not True
+        or payload.get("price_includes_booking_fee") is not True
+        or payload.get("product_id") != request.product_id
+        or payload.get("activity_date") != request.activity_date.isoformat()
+        or payload.get("participants") != request.participants
+        or type(offer_id) is not str
+        or not offer_id.startswith("offer:")
+    ):
+        return second_proposal
+    return replace(
+        second_proposal,
+        intent="select",
+        target_offer_id=offer_id,
+        selection_requested=False,
+    )
+
+
 def _explicit_customer_fact_commitment(
     frame_hash: str,
     event_hash: str,
@@ -1049,6 +1129,13 @@ class V2TurnExecutor:
             )
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
+            proposal = _repair_requested_activity_selection(
+                first_proposal,
+                proposal,
+                state_facts=_state_model_facts(projection),
+                observations=v2_observations,
+                private_profile_complete=profile.complete,
+            )
             if derived_confirmation_reads and (
                 proposal.intent != "confirm"
                 or proposal.confirmed_summary_version

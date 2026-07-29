@@ -62,14 +62,18 @@ _RESPONSE_FIELDS_V2: Final = frozenset((*_RESPONSE_FIELDS_V1, "target_offer_ids"
 _RESPONSE_FIELDS_V3: Final = frozenset(
     (*_RESPONSE_FIELDS_V2, "confirmed_action_kinds", "approval_basis")
 )
+_RESPONSE_FIELDS_V4: Final = frozenset((*_RESPONSE_FIELDS_V3, "selection_requested"))
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v3 JSON object and no commentary. reply_chunks
+Return exactly one v2-model-proposal-v4 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
-empty list; the parent permits only one provider-read round per turn.
+empty list; the parent permits only one provider-read round per turn. selection_requested
+must be false by default; it may be true only on an inform proposal with a fresh read when
+the current message unambiguously asks to prepare or reserve the current option. It is
+false for questions, hypotheticals, uncertainty or informational availability checks.
 When pending_action is present, classify the latest message in relation to that exact
 public summary. Uma confirmação semântica curta como “Sim”, “Pode reservar”,
 “Confirmado” ou “Isso mesmo” pode usar intent=confirm; copy summary_version and
@@ -235,6 +239,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         expected_fields = _RESPONSE_FIELDS_V2
     elif schema == "v2-model-proposal-v3":
         expected_fields = _RESPONSE_FIELDS_V3
+    elif schema == "v2-model-proposal-v4":
+        expected_fields = _RESPONSE_FIELDS_V4
     else:
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
@@ -270,18 +276,28 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                 tuple(
                     _tuple_items(decoded["target_offer_ids"], "target_offer_ids")
                 )
-                if schema in ("v2-model-proposal-v2", "v2-model-proposal-v3")
+                if schema
+                in (
+                    "v2-model-proposal-v2",
+                    "v2-model-proposal-v3",
+                    "v2-model-proposal-v4",
+                )
                 else ()
             ),
             confirmed_action_kinds=(
                 _critical_actions(decoded["confirmed_action_kinds"])
-                if schema == "v2-model-proposal-v3"
+                if schema in ("v2-model-proposal-v3", "v2-model-proposal-v4")
                 else ()
             ),
             approval_basis=(
                 _approval_basis(decoded["approval_basis"])
-                if schema == "v2-model-proposal-v3"
+                if schema in ("v2-model-proposal-v3", "v2-model-proposal-v4")
                 else None
+            ),
+            selection_requested=(
+                decoded["selection_requested"]
+                if schema == "v2-model-proposal-v4"
+                else False
             ),
         )
     except (TypeError, ValueError) as exc:
