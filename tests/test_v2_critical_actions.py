@@ -317,6 +317,40 @@ def test_runtime_policy_denies_activity_above_composed_transport_limit() -> None
     assert _context(draft=_activity_draft(participants=2, amount="669.90"))
 
 
+def test_critical_activity_summary_supports_english_locale() -> None:
+    context = critical_action_context(
+        _activity_draft(),
+        summary_version=1,
+        presented_at=NOW,
+        locale="en-US",
+        approval_ttl=TTL,
+        agency_payment_percentage=20,
+        hostel_payment_percentage=100,
+        policy=_enabled_policy(),
+    )
+
+    assert context.public_summary == (
+        "Just to confirm: I’ll book Roteiro dos 4Ps on November 18, 2026 "
+        "for 1 person, at a final total of BRL 334.95 including the booking fee, "
+        "and then generate the card link for the BRL 66.99 deposit. "
+        "May I make this booking?"
+    )
+
+
+def test_critical_summary_rejects_unknown_locale() -> None:
+    with pytest.raises(ValueError, match="supports pt or en locale only"):
+        critical_action_context(
+            _activity_draft(),
+            summary_version=1,
+            presented_at=NOW,
+            locale="fr-FR",
+            approval_ttl=TTL,
+            agency_payment_percentage=20,
+            hostel_payment_percentage=100,
+            policy=_enabled_policy(),
+        )
+
+
 def test_bokun_summary_explains_exact_effect_fee_and_rounded_deposit() -> None:
     context = _context()
 

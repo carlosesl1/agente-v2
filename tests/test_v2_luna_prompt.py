@@ -42,6 +42,7 @@ def test_informational_policy_questions_and_prompt_injection_do_not_force_handof
 def test_unsupported_multiple_activity_passengers_route_to_handoff() -> None:
     assert "mais de 1 participante no passeio" in PROMPT
     assert "request_handoff" in PROMPT
+    assert "voltar de mais de 1 participante para exatamente 1" in PROMPT
 
 
 def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:

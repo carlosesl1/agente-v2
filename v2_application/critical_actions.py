@@ -185,6 +185,125 @@ def _payment_text(
     raise ValueError("draft payment method is outside the closed catalog")
 
 
+def _money_en(amount: Decimal, currency: str) -> str:
+    rounded = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{currency} {rounded:,.2f}"
+
+
+def _date_en(value) -> str:
+    months = (
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    )
+    return f"{months[value.month - 1]} {value.day}, {value.year}"
+
+
+def _people_en(count: int) -> str:
+    return "1 person" if count == 1 else f"{count} people"
+
+
+def _payment_text_en(
+    *,
+    method: str,
+    amount: Decimal,
+    currency: str,
+    percentage: int,
+    unit: ServiceKind,
+) -> str:
+    rendered = _money_en(_payment_amount(amount, percentage), currency)
+    is_deposit = unit is ServiceKind.ACTIVITY and percentage < 100
+    label = f"the {rendered} deposit" if is_deposit else f"the {rendered} payment"
+    if method == "stripe":
+        return f"generate the card link for {label}"
+    if method == "pix":
+        return f"send the Pix instructions for {label}"
+    if method == "wise":
+        return f"send the Wise instructions for {label}"
+    raise ValueError("draft payment method is outside the closed catalog")
+
+
+def _public_summary_en(
+    draft: CommercialDraft,
+    *,
+    agency_payment_percentage: int,
+    hostel_payment_percentage: int,
+) -> str:
+    method = draft.terms.payment_method
+    components = draft.components
+    if len(components) == 1:
+        component = components[0]
+        count = component.party.adults + component.party.children
+        total = _money_en(component.total.amount, component.total.currency)
+        if component.service is ServiceKind.ACTIVITY:
+            effect = (
+                f"I’ll book {component.public_label} on {_date_en(component.start_date)} "
+                f"for {_people_en(count)}, at a final total of {total} including the booking fee"
+            )
+            payment = _payment_text_en(
+                method=method,
+                amount=component.total.amount,
+                currency=component.total.currency,
+                percentage=agency_payment_percentage,
+                unit=ServiceKind.ACTIVITY,
+            )
+        else:
+            if component.end_date is None:
+                raise ValueError("lodging critical summary requires checkout")
+            effect = (
+                f"I’ll book {component.public_label} from {_date_en(component.start_date)} "
+                f"to {_date_en(component.end_date)} for {_people_en(count)}, "
+                f"at a final total of {total}"
+            )
+            payment = _payment_text_en(
+                method=method,
+                amount=component.total.amount,
+                currency=component.total.currency,
+                percentage=hostel_payment_percentage,
+                unit=ServiceKind.LODGING,
+            )
+        return (
+            f"Just to confirm: {effect}, and then {payment}. "
+            "May I make this booking?"
+        )
+
+    lodging = next(item for item in components if item.service is ServiceKind.LODGING)
+    activity = next(item for item in components if item.service is ServiceKind.ACTIVITY)
+    if lodging.end_date is None:
+        raise ValueError("package lodging summary requires checkout")
+    lodging_people = lodging.party.adults + lodging.party.children
+    activity_people = activity.party.adults + activity.party.children
+    lodging_total = _money_en(lodging.total.amount, lodging.total.currency)
+    activity_total = _money_en(activity.total.amount, activity.total.currency)
+    lodging_payment = _money_en(
+        _payment_amount(lodging.total.amount, hostel_payment_percentage),
+        lodging.total.currency,
+    )
+    activity_payment = _money_en(
+        _payment_amount(activity.total.amount, agency_payment_percentage),
+        activity.total.currency,
+    )
+    if method == "stripe":
+        payment = (
+            f"generate the card links: {lodging_payment} for the lodging and "
+            f"a {activity_payment} deposit for the tour"
+        )
+    else:
+        channel = "Pix" if method == "pix" else "Wise"
+        payment = (
+            f"send the {channel} payment instructions for {lodging_payment} for the lodging "
+            f"and a {activity_payment} deposit for the tour"
+        )
+    return (
+        "Just to confirm: I’ll book "
+        f"{lodging.public_label} from {_date_en(lodging.start_date)} "
+        f"to {_date_en(lodging.end_date)} for {_people_en(lodging_people)}, "
+        f"at a total of {lodging_total}, and {activity.public_label} on "
+        f"{_date_en(activity.start_date)} for {_people_en(activity_people)}, "
+        f"at a final total of {activity_total} including the booking fee; "
+        f"then I’ll {payment}. May I make these bookings?"
+    )
+
+
 def _public_summary(
     draft: CommercialDraft,
     *,
@@ -194,8 +313,15 @@ def _public_summary(
 ) -> str:
     if type(locale) is not str or not locale:
         raise ValueError("locale must be non-empty exact text")
-    if not locale.casefold().startswith("pt"):
-        raise ValueError("critical approval renderer currently supports pt locale only")
+    folded_locale = locale.casefold()
+    if folded_locale.startswith("en"):
+        return _public_summary_en(
+            draft,
+            agency_payment_percentage=agency_payment_percentage,
+            hostel_payment_percentage=hostel_payment_percentage,
+        )
+    if not folded_locale.startswith("pt"):
+        raise ValueError("critical approval renderer supports pt or en locale only")
     method = draft.terms.payment_method
     components = draft.components
     if len(components) == 1:
