@@ -787,6 +787,47 @@ def _reservation_already_processing_reply(locale: str) -> str:
     )
 
 
+_POST_COMMAND_WORKFLOW_TYPES = {
+    ExecutionQueuedState,
+    ExecutingState,
+    SucceededState,
+    UncertainState,
+    ManualReviewState,
+}
+
+
+def _post_command_offer_ids(workflow: object) -> tuple[str, ...] | None:
+    if type(workflow) not in _POST_COMMAND_WORKFLOW_TYPES:
+        return None
+    return tuple(
+        sorted(component.offer_id for component in workflow.command.payload.components)
+    )
+
+
+def _post_command_guard_decision(
+    *,
+    state: BoundaryState,
+    projection: ConversationProjection,
+    source_event_id: str,
+) -> V2ConversationDecision:
+    return V2ConversationDecision(
+        next_state=_consume_without_workflow_transition(
+            state,
+            source_event_id,
+        ),
+        projection=replace(
+            projection,
+            stage=ConversationStage.CLOSING,
+        ),
+        commands=(),
+        public_reply=ConversationReply(
+            "reservation_already_processing",
+            (_reservation_already_processing_reply(projection.locale),),
+        ),
+        receipt_requirements=("reservation_already_processing",),
+    )
+
+
 def _handoff_effect_guard_reply(locale: str) -> str:
     if type(locale) is not str or not locale:
         raise ValueError("locale must be non-empty exact text")
@@ -1076,28 +1117,12 @@ class V2ConversationReducer:
             )
 
         workflow = state.workflow
-        if type(workflow) in {
-            ExecutionQueuedState,
-            ExecutingState,
-            SucceededState,
-            UncertainState,
-            ManualReviewState,
-        } and proposal.intent in {"select", "confirm"}:
-            return V2ConversationDecision(
-                next_state=_consume_without_workflow_transition(
-                    state,
-                    proposal.source_event_id,
-                ),
-                projection=replace(
-                    projection,
-                    stage=ConversationStage.CLOSING,
-                ),
-                commands=(),
-                public_reply=ConversationReply(
-                    "reservation_already_processing",
-                    (_reservation_already_processing_reply(projection.locale),),
-                ),
-                receipt_requirements=("reservation_already_processing",),
+        post_command_offer_ids = _post_command_offer_ids(workflow)
+        if post_command_offer_ids is not None and proposal.intent == "confirm":
+            return _post_command_guard_decision(
+                state=state,
+                projection=projection,
+                source_event_id=proposal.source_event_id,
             )
 
         # A complete customer binding is a write-boundary requirement, not a
@@ -1525,6 +1550,14 @@ class V2ConversationReducer:
                 activity=activity_state,
                 now=instant,
             )
+            if post_command_offer_ids == tuple(
+                component.offer_id for component in domain_state.draft.components
+            ):
+                return _post_command_guard_decision(
+                    state=state,
+                    projection=projection,
+                    source_event_id=proposal.source_event_id,
+                )
             summary_id = _identity(
                 domain_state.draft.draft_id,
                 str(domain_state.draft.version),
@@ -1649,6 +1682,14 @@ class V2ConversationReducer:
             if type(domain_state) is not ReadyToSummarizeState:
                 raise ConversationReductionError(
                     "domain did not create a commercial draft"
+                )
+            if post_command_offer_ids == tuple(
+                component.offer_id for component in domain_state.draft.components
+            ):
+                return _post_command_guard_decision(
+                    state=state,
+                    projection=projection,
+                    source_event_id=proposal.source_event_id,
                 )
             summary_id = _identity(
                 domain_state.draft.draft_id,

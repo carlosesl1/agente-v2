@@ -725,6 +725,59 @@ def test_post_command_guard_reply_is_localized() -> None:
     )
 
 
+def test_execution_queued_allows_materially_different_offer_selection() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:queued-new-offer")
+    )
+    confirmed = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=_proposal(
+            source="event:queued-first-confirm",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert type(confirmed.next_state.workflow) is ExecutionQueuedState
+
+    different_offer_id = "offer:" + "9" * 32
+    different_read = replace(
+        _lodging_read(amount="520.00"),
+        request_hash="8" * 64,
+        private_binding_hash="7" * 64,
+        public_payload={
+            **_lodging_read(amount="520.00").public_payload,
+            "offer_id": different_offer_id,
+            "room_public_name": "Outra Suíte",
+        },
+    )
+    selected = _reducer().reduce(
+        state=confirmed.next_state,
+        projection=confirmed.projection,
+        proposal=_proposal(
+            source="event:queued-different-offer",
+            intent="select",
+            target_offer_id=different_offer_id,
+        ),
+        profile=_profile(),
+        reads=(different_read,),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert selected.commands == ()
+    assert type(selected.next_state.workflow) is AwaitingConfirmationState
+    assert (
+        selected.next_state.workflow.draft.subject_signature
+        != confirmed.next_state.workflow.command.subject_signature
+    )
+    assert selected.public_reply.kind == "summary"
+
+
 def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -> None:
     awaiting = _awaiting_from_ready(
         _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:queued-guard")
