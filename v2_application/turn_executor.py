@@ -466,6 +466,33 @@ def _merge_explicit_customer_facts(
     return replace(proposal, facts=(*proposal.facts, *additions))
 
 
+def _explicit_summary_preparation_requested(message: str) -> bool:
+    if type(message) is not str or not message:
+        raise ValueError("message must be non-empty exact text")
+    folded = _fold_public_text(message)
+    if any(
+        phrase in folded
+        for phrase in (
+            "do not prepare the final booking summary",
+            "dont prepare the final booking summary",
+            "do not prepare the booking summary",
+            "dont prepare the booking summary",
+            "nao prepare o resumo final",
+            "nao preparar o resumo final",
+        )
+    ):
+        return False
+    return any(
+        phrase in folded
+        for phrase in (
+            "prepare the final booking summary",
+            "prepare the booking summary",
+            "prepare o resumo final",
+            "preparar o resumo final",
+        )
+    )
+
+
 def _structured_selection_review_required(
     state_facts: tuple[ModelFact, ...],
     explicit_facts: tuple[ModelFact, ...],
@@ -504,6 +531,45 @@ def _structured_selection_review_required(
         and values.get("payment_method") in {"stripe", "wise", "pix"}
         and type(values.get("birth_date")) is date
         and values.get("gender") in {"m", "f"}
+    )
+
+
+def _force_structured_activity_summary_preparation(
+    proposal: ModelProposal,
+    *,
+    state_facts: tuple[ModelFact, ...],
+    explicit_facts: tuple[ModelFact, ...],
+) -> ModelProposal:
+    """Prepare one provider read; this cannot authorize or emit an effect."""
+
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    if not _structured_selection_review_required(
+        state_facts,
+        explicit_facts,
+        private_profile_complete=True,
+    ):
+        return proposal
+    values = {fact.name: fact.value for fact in (*state_facts, *explicit_facts)}
+    activity_date = values.get("activity_date") or values.get("start_date")
+    adults = values["adults"]
+    children = values.get("children", 0)
+    return replace(
+        proposal,
+        intent="inform",
+        read_requests=(
+            ReadRequest(
+                request_id=f"{proposal.source_event_id}:read:activity",
+                kind=ReadKind.ACTIVITY,
+                product_id=values["product_id"],
+                activity_date=activity_date,
+                participants=adults + children,
+            ),
+        ),
+        target_offer_id=None,
+        target_offer_ids=(),
+        selection_requested=True,
+        pending_disposition=None,
     )
 
 
@@ -1137,6 +1203,21 @@ class V2TurnExecutor:
                 proposal=first_proposal,
                 frames=(*first_audited.frames, *review_audited.frames),
                 ephemeral_session_id=review_audited.closure.ephemeral_session_id,
+            )
+        if (
+            selection_review
+            and not first_proposal.selection_requested
+            and _explicit_summary_preparation_requested(batch.combined_text)
+        ):
+            first_proposal = _force_structured_activity_summary_preparation(
+                first_proposal,
+                state_facts=_state_model_facts(projection),
+                explicit_facts=explicit_customer_facts,
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
             )
         material_scope_bound = (
             self._reducer.confirmation_projection_matches(

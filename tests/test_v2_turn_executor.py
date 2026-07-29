@@ -30,6 +30,8 @@ from v2_application.turn_executor import (
     _explicit_customer_fact_commitment,
     _extract_explicit_commercial_facts,
     _extract_explicit_customer_facts,
+    _explicit_summary_preparation_requested,
+    _force_structured_activity_summary_preparation,
     _merge_explicit_customer_facts,
     _repair_requested_activity_selection,
     _structured_selection_review_required,
@@ -142,6 +144,55 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         payment,
         private_profile_complete=True,
     )
+
+
+def test_explicit_summary_preparation_is_strict_and_non_authorizing() -> None:
+    assert _explicit_summary_preparation_requested(
+        "I choose card. Please prepare the final booking summary before executing anything."
+    )
+    assert _explicit_summary_preparation_requested(
+        "Pode preparar o resumo final, mas ainda não execute."
+    )
+    assert not _explicit_summary_preparation_requested(
+        "Do not prepare the final booking summary yet."
+    )
+    assert not _explicit_summary_preparation_requested(
+        "Can you explain what a booking summary is?"
+    )
+
+
+def test_parent_forces_only_a_fresh_read_for_explicit_summary_preparation() -> None:
+    proposal = ModelProposal(
+        source_event_id="batch:force-summary",
+        intent="inform",
+        reply_chunks=("I can continue helping.",),
+        facts=(ModelFact("payment_method", "stripe"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    state_facts = (
+        ModelFact("service", "agency"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("activity_date", date(2026, 11, 18)),
+        ModelFact("adults", 1),
+        ModelFact("children", 0),
+        ModelFact("birth_date", date(1991, 5, 17)),
+        ModelFact("gender", "f"),
+    )
+    forced = _force_structured_activity_summary_preparation(
+        proposal,
+        state_facts=state_facts,
+        explicit_facts=(ModelFact("payment_method", "stripe"),),
+    )
+    assert forced.intent == "inform"
+    assert forced.selection_requested is True
+    assert forced.effect_proposals == ()
+    assert len(forced.read_requests) == 1
+    request = forced.read_requests[0]
+    assert request.kind is ReadKind.ACTIVITY
+    assert request.product_id == "product:tour-4ps"
+    assert request.activity_date == date(2026, 11, 18)
+    assert request.participants == 1
 
 
 def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() -> None:
