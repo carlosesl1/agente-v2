@@ -32,6 +32,7 @@ from v2_application.turn_executor import (
     _extract_explicit_customer_facts,
     _merge_explicit_customer_facts,
     _repair_requested_activity_selection,
+    _structured_selection_review_required,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.critical_actions import (
@@ -102,6 +103,45 @@ def test_parent_commercial_extraction_ignores_date_without_product() -> None:
     assert _extract_explicit_commercial_facts(
         "I will be free on November 18, 2026, but have not chosen a tour."
     ) == ()
+
+
+def test_parent_extracts_only_explicit_payment_choice() -> None:
+    assert _extract_explicit_commercial_facts(
+        "I choose card. Please prepare the final booking summary."
+    ) == (ModelFact("payment_method", "stripe"),)
+    assert _extract_explicit_commercial_facts(
+        "Pensando melhor, vou usar cartão com sinal de 20%."
+    ) == (ModelFact("payment_method", "stripe"),)
+    assert _extract_explicit_commercial_facts("Can I use card?") == ()
+    assert _extract_explicit_commercial_facts("Maybe Pix would be better.") == ()
+
+
+def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
+    state_facts = (
+        ModelFact("service", "agency"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("activity_date", date(2026, 11, 18)),
+        ModelFact("adults", 1),
+        ModelFact("children", 0),
+        ModelFact("birth_date", date(1991, 5, 17)),
+        ModelFact("gender", "f"),
+    )
+    payment = (ModelFact("payment_method", "stripe"),)
+    assert _structured_selection_review_required(
+        state_facts,
+        payment,
+        private_profile_complete=True,
+    )
+    assert not _structured_selection_review_required(
+        state_facts,
+        (),
+        private_profile_complete=True,
+    )
+    assert not _structured_selection_review_required(
+        state_facts[:-1],
+        payment,
+        private_profile_complete=True,
+    )
 
 
 def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() -> None:

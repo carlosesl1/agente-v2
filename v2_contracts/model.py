@@ -151,6 +151,7 @@ class ModelRequest:
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
     confirmation_review_required: bool = False
+    selection_review_required: bool = False
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
@@ -192,6 +193,22 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "confirmation review requires a pending critical action"
             )
+        if type(self.selection_review_required) is not bool:
+            raise InvalidModelProposal(
+                "selection_review_required must be an exact boolean"
+            )
+        if self.selection_review_required and self.pending_action is not None:
+            raise InvalidModelProposal(
+                "selection review cannot coexist with a pending critical action"
+            )
+        if self.selection_review_required and not self.private_profile_complete:
+            raise InvalidModelProposal(
+                "selection review requires a complete private profile marker"
+            )
+        if self.selection_review_required and self.observations:
+            raise InvalidModelProposal("selection review is allowed only before reads")
+        if self.selection_review_required and self.confirmation_review_required:
+            raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
 
 
 @dataclass(frozen=True, slots=True)

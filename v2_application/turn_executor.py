@@ -344,13 +344,43 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
         raise ValueError("message must be non-empty exact text")
     folded = _fold_public_text(message)
     padded = f" {folded} "
+    payment_methods: set[str] = set()
+    payment_patterns = {
+        "stripe": (
+            r"\bi choose card\b",
+            r"\bi will use card\b",
+            r"\bill use card\b",
+            r"\b(?:eu )?vou usar cartao\b",
+            r"\b(?:eu )?escolho cartao\b",
+        ),
+        "wise": (
+            r"\bi choose wise\b",
+            r"\bi will use wise\b",
+            r"\bill use wise\b",
+            r"\b(?:eu )?vou usar wise\b",
+            r"\b(?:eu )?escolho wise\b",
+        ),
+        "pix": (
+            r"\bi choose pix\b",
+            r"\bi will use pix\b",
+            r"\bill use pix\b",
+            r"\b(?:eu )?vou usar pix\b",
+            r"\b(?:eu )?escolho pix\b",
+        ),
+    }
+    for method, patterns in payment_patterns.items():
+        if any(re.search(pattern, folded) is not None for pattern in patterns):
+            payment_methods.add(method)
+    facts: list[ModelFact] = []
+    if len(payment_methods) == 1:
+        facts.append(ModelFact("payment_method", next(iter(payment_methods))))
     products = {
         canonical_id
         for alias, canonical_id in _catalog_aliases()
         if f" {alias} " in padded
     }
     if len(products) != 1:
-        return ()
+        return tuple(facts)
     product_id = next(iter(products))
 
     activity_dates: set[date] = set()
@@ -390,7 +420,6 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
         adults.add(1)
     adults.discard(0)
 
-    facts: list[ModelFact] = []
     english_markers = len(
         re.findall(r"\b(?:i|please|tour|booking|what|can|adult|person)\b", folded)
     )
@@ -435,6 +464,47 @@ def _merge_explicit_customer_facts(
         if current is None:
             additions.append(fact)
     return replace(proposal, facts=(*proposal.facts, *additions))
+
+
+def _structured_selection_review_required(
+    state_facts: tuple[ModelFact, ...],
+    explicit_facts: tuple[ModelFact, ...],
+    *,
+    private_profile_complete: bool,
+) -> bool:
+    """Gate one semantic selection review from closed structured facts only."""
+
+    if (
+        type(state_facts) is not tuple
+        or any(type(item) is not ModelFact for item in state_facts)
+        or type(explicit_facts) is not tuple
+        or any(type(item) is not ModelFact for item in explicit_facts)
+        or type(private_profile_complete) is not bool
+    ):
+        raise TypeError("selection review gate requires exact V2 contracts")
+    if not private_profile_complete or not any(
+        fact.name == "payment_method" for fact in explicit_facts
+    ):
+        return False
+    values: dict[str, str | int | date] = {}
+    for fact in (*state_facts, *explicit_facts):
+        current = values.get(fact.name)
+        if current is not None and current != fact.value:
+            return False
+        values[fact.name] = fact.value
+    adults = values.get("adults")
+    children = values.get("children", 0)
+    return (
+        values.get("service") == "agency"
+        and type(values.get("product_id")) is str
+        and type(values.get("activity_date") or values.get("start_date")) is date
+        and type(adults) is int
+        and type(children) is int
+        and adults + children == 1
+        and values.get("payment_method") in {"stripe", "wise", "pix"}
+        and type(values.get("birth_date")) is date
+        and values.get("gender") in {"m", "f"}
+    )
 
 
 def _repair_requested_activity_selection(
@@ -1023,14 +1093,26 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
-        if (
+        selection_review = (
+            pending_action is None
+            and first_proposal.intent == "inform"
+            and not first_proposal.read_requests
+            and _structured_selection_review_required(
+                _state_model_facts(projection),
+                explicit_customer_facts,
+                private_profile_complete=profile.complete,
+            )
+        )
+        confirmation_review = (
             pending_action is not None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
-        ):
+        )
+        if selection_review or confirmation_review:
             review_request = replace(
                 request,
-                confirmation_review_required=True,
+                confirmation_review_required=confirmation_review,
+                selection_review_required=selection_review,
             )
             review_audited = self._model.complete_audited(review_request)
             if type(review_audited) is not AuditedModelTurn:
@@ -1040,13 +1122,13 @@ class V2TurnExecutor:
                 explicit_customer_facts,
             )
             if review_proposal.source_event_id != batch.batch_id:
-                raise TurnExecutionError(
-                    "confirmation review source event diverged"
-                )
-            if review_proposal.intent in (
-                "confirm",
-                "adjust",
-                "request_handoff",
+                raise TurnExecutionError("semantic review source event diverged")
+            if (
+                selection_review
+                and review_proposal.selection_requested
+                or confirmation_review
+                and review_proposal.intent
+                in ("confirm", "adjust", "request_handoff")
             ):
                 first_proposal = review_proposal
             first_audited = AuditedModelTurn.from_frames(

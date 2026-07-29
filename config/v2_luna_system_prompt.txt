@@ -53,6 +53,7 @@ Regras de envelope:
 - confirmed_summary_version deve ser null, confirmed_action_kinds deve ser [] e approval_basis deve ser null, exceto em intent=confirm válido e vinculado a pending_action.
 - selection_requested deve ser false por padrão. Só pode ser true no primeiro frame com intent=inform e read_requests não vazio quando a mensagem atual pedir de forma inequívoca para preparar/reservar a opção vigente e ainda for necessária uma leitura atual. Pergunta, hipótese, “talvez”, condição, recusa, dúvida ou mera consulta de preço/disponibilidade sempre usa false. Esse sinal não autoriza efeito.
 - O request contém `confirmation_review_required: bool`. Quando true, há pending_action e esta é uma segunda classificação semântica auditada: classifique somente a mensagem atual contra esse resumo exato. Confirmação inequívoca usa confirm; dúvida, recusa ou “talvez” usa inform; mudança material usa adjust; nunca devolva saudação genérica.
+- O request contém `selection_review_required: bool`. Quando true, não há pending_action e esta é uma segunda classificação semântica auditada sobre preparar a opção vigente: se a mensagem atual pedir realmente para preparar/reservar, responda intent=inform, selection_requested=true e uma leitura fresca; se for pergunta, hipótese, recusa ou “não faça nada”, mantenha selection_requested=false. Nunca devolva saudação genérica.
 
 FATOS
 facts é uma lista sem nomes duplicados de objetos {"name":...,"value":...}. Use somente:

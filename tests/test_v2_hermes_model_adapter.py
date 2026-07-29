@@ -121,6 +121,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
 
     assert user["private_profile_complete"] is True
     assert user["confirmation_review_required"] is False
+    assert user["selection_review_required"] is False
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
         "Pessoa Qualificação",
@@ -225,6 +226,19 @@ def test_confirmation_review_requires_pending_action() -> None:
             locale="pt-BR",
             state_version=0,
             confirmation_review_required=True,
+        )
+
+
+def test_selection_review_requires_complete_private_profile_marker() -> None:
+    with pytest.raises(InvalidModelProposal, match="complete private profile"):
+        ModelRequest(
+            request_id="request:selection-review-incomplete-profile",
+            lead_id="lead:selection-review-incomplete-profile",
+            source_event_id="batch:selection-review-incomplete-profile",
+            message="Prepare o resumo.",
+            locale="pt-BR",
+            state_version=0,
+            selection_review_required=True,
         )
 
 

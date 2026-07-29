@@ -128,6 +128,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "state_version": request.state_version,
         "private_profile_complete": request.private_profile_complete,
         "confirmation_review_required": request.confirmation_review_required,
+        "selection_review_required": request.selection_review_required,
         "observations": observations,
     }
     if request.state_facts:
