@@ -787,6 +787,27 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
     assert expected_text in decision.public_reply.chunks[0]
     assert "Nada foi reservado" in decision.public_reply.chunks[0]
     assert decision.receipt_requirements == ("proposal_revoked_after_refresh",)
+    assert {
+        fact.name: fact.value.value for fact in decision.projection.facts
+    }["critical_outcome"] == "proposal_revoked_after_refresh"
+
+    if service is ServiceKind.LODGING:
+        reselection = _reducer().reduce(
+            state=decision.next_state,
+            projection=decision.projection,
+            proposal=_proposal(
+                source="event:selection-after-refresh-revocation",
+                intent="select",
+                target_offer_id=LODGING_OFFER_ID,
+            ),
+            profile=_profile(),
+            reads=(_lodging_read(),),
+            fact_commitment_hash="2" * 64,
+            now=NOW + timedelta(seconds=2),
+        )
+        assert "critical_outcome" not in {
+            fact.name for fact in reselection.projection.facts
+        }
 
 
 def test_confirmation_scope_mismatch_and_expiry_fail_closed_without_command() -> None:

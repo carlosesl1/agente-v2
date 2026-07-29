@@ -847,7 +847,22 @@ def _state_model_facts(
     return tuple(
         ModelFact(item.name, item.value.value)
         for item in projection.facts
+        if item.name != "critical_outcome"
     )
+
+
+def _critical_outcome(projection: ConversationProjection) -> str | None:
+    matches = tuple(
+        item for item in projection.facts if item.name == "critical_outcome"
+    )
+    if not matches:
+        return None
+    if len(matches) != 1 or type(matches[0].value) is not StringSlot:
+        raise TurnExecutionError("critical outcome projection is invalid")
+    outcome = matches[0].value.value
+    if outcome != "proposal_revoked_after_refresh":
+        raise TurnExecutionError("critical outcome projection is outside the catalog")
+    return outcome
 
 
 def _confirmation_read_requests(
@@ -1147,6 +1162,7 @@ class V2TurnExecutor:
             locale=projection.locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
+            critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
             private_profile_complete=profile.complete,
             handoff_active=current.state.handoff is not None,
@@ -1318,6 +1334,7 @@ class V2TurnExecutor:
                 state_version=current.version,
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
+                critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
                 private_profile_complete=profile.complete,
                 handoff_active=current.state.handoff is not None,

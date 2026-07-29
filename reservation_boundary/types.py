@@ -331,6 +331,7 @@ class TypedFact:
             "country_code": StringSlot,
             "birth_date": DateSlot,
             "gender": StringSlot,
+            "critical_outcome": StringSlot,
         }
         expected = expected_types.get(self.name)
         if expected is None:
@@ -355,6 +356,10 @@ class TypedFact:
             "pix",
         ):
             raise ValueError("payment_method fact is outside the closed catalog")
+        if self.name == "critical_outcome" and self.value.value != (
+            "proposal_revoked_after_refresh"
+        ):
+            raise ValueError("critical_outcome fact is outside the closed catalog")
 
     def to_canonical_bytes(self) -> bytes:
         if self.frame_commitment_hash is None:

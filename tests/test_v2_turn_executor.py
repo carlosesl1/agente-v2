@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from reservation_boundary import ConversationStage, StringSlot, TypedFact
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.effects import HandoffRelayBundle, ReservationRelayBundle
 from reservation_boundary.sqlite_store import ConcurrencyConflict, SQLiteBoundaryStore
@@ -22,6 +23,7 @@ from v2_application.reads import V2ReadService
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
     _critical_confirmation_bound,
+    _critical_outcome,
     _critical_model_reads_allowed,
     PublicTurnAuthority,
     TurnExecutionError,
@@ -35,6 +37,7 @@ from v2_application.turn_executor import (
     _merge_explicit_customer_facts,
     _repair_requested_activity_selection,
     _structured_selection_review_required,
+    _state_model_facts,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.critical_actions import (
@@ -57,6 +60,25 @@ TRANSCRIPT_KEY = b"t" * 32
 CAPABILITY_DIGEST = "a" * 64
 EFFECT_DIGEST = "b" * 64
 TARGET_DIGEST = "c" * 64
+
+
+def test_critical_outcome_is_separate_from_material_state_facts() -> None:
+    projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(
+            TypedFact(
+                "critical_outcome",
+                StringSlot("proposal_revoked_after_refresh"),
+                "d" * 64,
+            ),
+        ),
+        reservation_execution_projection=None,
+    )
+
+    assert _critical_outcome(projection) == "proposal_revoked_after_refresh"
+    assert _state_model_facts(projection) == ()
 
 
 @pytest.mark.parametrize(

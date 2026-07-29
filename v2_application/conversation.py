@@ -86,6 +86,7 @@ _FACT_ORDER = {
     "country_code": 12,
     "birth_date": 13,
     "gender": 14,
+    "critical_outcome": 15,
 }
 
 
@@ -233,6 +234,41 @@ def _merge_projection(
         locale=locale,
         facts=facts,
         reservation_execution_projection=projection.reservation_execution_projection,
+    )
+
+
+def _with_critical_outcome(
+    projection: ConversationProjection,
+    *,
+    outcome: str,
+    fact_commitment_hash: str,
+) -> ConversationProjection:
+    facts = {
+        item.name: item
+        for item in projection.facts
+        if item.name != "critical_outcome"
+    }
+    facts["critical_outcome"] = TypedFact(
+        "critical_outcome",
+        StringSlot(outcome),
+        fact_commitment_hash,
+    )
+    return replace(
+        projection,
+        facts=tuple(
+            sorted(facts.values(), key=lambda item: _FACT_ORDER[item.name])
+        ),
+    )
+
+
+def _without_critical_outcome(
+    projection: ConversationProjection,
+) -> ConversationProjection:
+    return replace(
+        projection,
+        facts=tuple(
+            item for item in projection.facts if item.name != "critical_outcome"
+        ),
     )
 
 
@@ -945,6 +981,8 @@ class V2ConversationReducer:
             proposal,
             fact_commitment_hash=fact_commitment_hash,
         )
+        if proposal.intent == "select":
+            merged = _without_critical_outcome(merged)
         if proposal.intent == "request_handoff":
             if state.handoff is None:
                 handoff_request = HandoffRequested(
@@ -1215,6 +1253,11 @@ class V2ConversationReducer:
                 )
                 if current_refresh:
                     unavailable = _reads_explicitly_unavailable(reads)
+                    revoked_projection = _with_critical_outcome(
+                        merged,
+                        outcome="proposal_revoked_after_refresh",
+                        fact_commitment_hash=fact_commitment_hash,
+                    )
                     transition = reduce_domain(
                         workflow,
                         ConfirmationReceived(
@@ -1239,7 +1282,7 @@ class V2ConversationReducer:
                             workflow=transition.state,
                             source_event_id=proposal.source_event_id,
                         ),
-                        projection=merged,
+                        projection=revoked_projection,
                         commands=(),
                         public_reply=ConversationReply(
                             "offer_unavailable" if unavailable else "proposal_changed",

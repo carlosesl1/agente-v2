@@ -148,6 +148,7 @@ class ModelRequest:
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
+    critical_outcome: str | None = None
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
     handoff_active: bool = False
@@ -176,6 +177,10 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
+        if self.critical_outcome not in (None, "proposal_revoked_after_refresh"):
+            raise InvalidModelProposal(
+                "critical_outcome must be proposal_revoked_after_refresh or None"
+            )
         if self.pending_action is not None and type(
             self.pending_action
         ) is not PendingCriticalActionContext:

@@ -134,6 +134,37 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         assert forbidden not in serialized
 
 
+def test_refresh_revocation_outcome_is_a_closed_non_private_request_marker() -> None:
+    request = ModelRequest(
+        request_id="request:refresh-revocation-outcome",
+        lead_id="manychat:refresh-revocation-outcome",
+        source_event_id="batch:refresh-revocation-outcome",
+        message="Foi criada alguma reserva?",
+        locale="pt-BR",
+        state_version=5,
+        critical_outcome="proposal_revoked_after_refresh",
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    user = json.loads(envelope["messages"][0][1])
+
+    assert user["critical_outcome"] == "proposal_revoked_after_refresh"
+    serialized = json.dumps(user, ensure_ascii=False)
+    assert "example.invalid" not in serialized
+    assert "profile-binding:" not in serialized
+
+    with pytest.raises(InvalidModelProposal, match="critical_outcome"):
+        ModelRequest(
+            request_id="request:invalid-critical-outcome",
+            lead_id="manychat:invalid-critical-outcome",
+            source_event_id="batch:invalid-critical-outcome",
+            message="Status?",
+            locale="pt-BR",
+            state_version=5,
+            critical_outcome="model_may_invent_anything",
+        )
+
+
 def test_v3_parser_binds_natural_confirmation_to_exact_action_scope() -> None:
     payload = {
         "schema": "v2-model-proposal-v3",

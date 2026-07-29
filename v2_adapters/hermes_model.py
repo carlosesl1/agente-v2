@@ -129,6 +129,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "message": request.message,
         "locale": request.locale,
         "state_version": request.state_version,
+        "critical_outcome": request.critical_outcome,
         "private_profile_complete": request.private_profile_complete,
         "handoff_active": request.handoff_active,
         "confirmation_review_required": request.confirmation_review_required,
