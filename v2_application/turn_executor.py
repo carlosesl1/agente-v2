@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Final
 
 from reservation_boundary.conversation import (
@@ -189,6 +189,145 @@ def _domain_hash(domain: str, payload: bytes) -> str:
 def _opaque(prefix: str, *parts: object) -> str:
     payload = "\x00".join(str(item) for item in parts).encode("utf-8")
     return f"{prefix}:" + hashlib.sha256(payload).hexdigest()[:32]
+
+
+_EN_MONTHS: Final = {
+    name: index
+    for index, name in enumerate(
+        (
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+        ),
+        start=1,
+    )
+}
+_BIRTH_DMY_RE: Final = re.compile(
+    r"\b(?:nasci\s+em|(?:minha\s+)?data\s+de\s+nascimento\s*(?:é|e|is|:)?|"
+    r"i\s+was\s+born\s+(?:on\s+)?|(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
+    r"\s*(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b",
+    re.IGNORECASE,
+)
+_BIRTH_ISO_RE: Final = re.compile(
+    r"\b(?:nasci\s+em|(?:minha\s+)?data\s+de\s+nascimento\s*(?:é|e|is|:)?|"
+    r"i\s+was\s+born\s+(?:on\s+)?|(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
+    r"\s*(\d{4})-(\d{2})-(\d{2})\b",
+    re.IGNORECASE,
+)
+_BIRTH_EN_MONTH_RE: Final = re.compile(
+    r"\b(?:i\s+was\s+born\s+(?:on\s+)?|"
+    r"(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
+    r"\s*(\d{1,2})\s+"
+    r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_GENDER_EN_RE: Final = re.compile(
+    r"\b(?:i\s+am|i['’]m|(?:my\s+)?gender\s*(?:is|:)?)\s+(female|male)\b",
+    re.IGNORECASE,
+)
+_GENDER_PT_RE: Final = re.compile(
+    r"\b(?:sou|(?:meu\s+)?g[eê]nero(?:\s+cadastral)?\s*(?:é|e|:)?)\s+"
+    r"(mulher|homem|feminino|masculino)\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _extract_explicit_customer_facts(message: str) -> tuple[ModelFact, ...]:
+    if type(message) is not str or not message:
+        raise ValueError("message must be non-empty exact text")
+    birth_dates: set[date] = set()
+    for match in _BIRTH_DMY_RE.finditer(message):
+        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        if parsed is not None:
+            birth_dates.add(parsed)
+    for match in _BIRTH_ISO_RE.finditer(message):
+        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if parsed is not None:
+            birth_dates.add(parsed)
+    for match in _BIRTH_EN_MONTH_RE.finditer(message):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _EN_MONTHS[match.group(2).casefold()],
+            int(match.group(1)),
+        )
+        if parsed is not None:
+            birth_dates.add(parsed)
+
+    genders: set[str] = set()
+    for match in _GENDER_EN_RE.finditer(message):
+        genders.add("f" if match.group(1).casefold() == "female" else "m")
+    for match in _GENDER_PT_RE.finditer(message):
+        genders.add(
+            "f"
+            if match.group(1).casefold() in {"mulher", "feminino"}
+            else "m"
+        )
+
+    facts: list[ModelFact] = []
+    if len(birth_dates) == 1:
+        facts.append(ModelFact("birth_date", next(iter(birth_dates))))
+    if len(genders) == 1:
+        facts.append(ModelFact("gender", next(iter(genders))))
+    return tuple(facts)
+
+
+def _merge_explicit_customer_facts(
+    proposal: ModelProposal,
+    explicit_facts: tuple[ModelFact, ...],
+) -> ModelProposal:
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    existing = {item.name: item for item in proposal.facts}
+    additions: list[ModelFact] = []
+    for fact in explicit_facts:
+        current = existing.get(fact.name)
+        if current is not None and current.value != fact.value:
+            raise TurnExecutionError(
+                f"model fact {fact.name} conflicts with explicit customer fact"
+            )
+        if current is None:
+            additions.append(fact)
+    return replace(proposal, facts=(*proposal.facts, *additions))
+
+
+def _explicit_customer_fact_commitment(
+    frame_hash: str,
+    event_hash: str,
+    explicit_facts: tuple[ModelFact, ...],
+) -> str:
+    if not explicit_facts:
+        return frame_hash
+    for name, value in (("frame_hash", frame_hash), ("event_hash", event_hash)):
+        if type(value) is not str or _HASH_RE.fullmatch(value) is None:
+            raise ValueError(f"{name} must be a lowercase SHA-256")
+    return _domain_hash(
+        "v2-explicit-customer-facts-v1",
+        _canonical(
+            "v2-explicit-customer-facts",
+            {
+                "frame_hash": frame_hash,
+                "event_hash": event_hash,
+                "facts": [
+                    {
+                        "name": fact.name,
+                        "value": (
+                            fact.value.isoformat()
+                            if type(fact.value) is date
+                            else fact.value
+                        ),
+                    }
+                    for fact in explicit_facts
+                ],
+            },
+        ),
+    )
 
 
 def _source_events(batch: InboundBatch) -> tuple[SourceEventIdentity, ...]:
@@ -613,6 +752,7 @@ class V2TurnExecutor:
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile port must return exact PrivateCustomerBinding")
+        explicit_customer_facts = _extract_explicit_customer_facts(batch.combined_text)
         pending_action = (
             None
             if current.state.handoff is not None
@@ -635,7 +775,10 @@ class V2TurnExecutor:
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
-        first_proposal = validate_productive_proposal(first_audited.proposal)
+        first_proposal = _merge_explicit_customer_facts(
+            validate_productive_proposal(first_audited.proposal),
+            explicit_customer_facts,
+        )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
         material_scope_bound = (
@@ -743,7 +886,10 @@ class V2TurnExecutor:
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
-            proposal = validate_productive_proposal(second_audited.proposal)
+            proposal = _merge_explicit_customer_facts(
+                validate_productive_proposal(second_audited.proposal),
+                explicit_customer_facts,
+            )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
             second_fact_names = {item.name for item in proposal.facts}
@@ -791,6 +937,11 @@ class V2TurnExecutor:
 
         frames = _frame_commitments(audited)
         final_frame_hash = frames[-1].canonical_hash()
+        fact_commitment_hash = _explicit_customer_fact_commitment(
+            final_frame_hash,
+            event_hash,
+            explicit_customer_facts,
+        )
         boundary_reads = tuple(
             bridge_availability_observation(
                 read_request,
@@ -812,7 +963,7 @@ class V2TurnExecutor:
             proposal=proposal,
             profile=profile,
             reads=v2_observations,
-            fact_commitment_hash=final_frame_hash,
+            fact_commitment_hash=fact_commitment_hash,
             now=decision_now,
         )
         if not any(item.name == "language" for item in decision.projection.facts):

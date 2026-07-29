@@ -27,6 +27,9 @@ from v2_application.turn_executor import (
     TurnExecutionError,
     V2TurnExecutor,
     _confirmation_read_requests,
+    _explicit_customer_fact_commitment,
+    _extract_explicit_customer_facts,
+    _merge_explicit_customer_facts,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
 from v2_contracts.critical_actions import (
@@ -49,6 +52,64 @@ TRANSCRIPT_KEY = b"t" * 32
 CAPABILITY_DIGEST = "a" * 64
 EFFECT_DIGEST = "b" * 64
 TARGET_DIGEST = "c" * 64
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    (
+        (
+            "I was born on 17 May 1991 and I am female.",
+            (ModelFact("birth_date", date(1991, 5, 17)), ModelFact("gender", "f")),
+        ),
+        (
+            "Nasci em 14/04/1990 e sou mulher.",
+            (ModelFact("birth_date", date(1990, 4, 14)), ModelFact("gender", "f")),
+        ),
+        (
+            "Minha data de nascimento é 11/01/1988. Sou homem.",
+            (ModelFact("birth_date", date(1988, 1, 11)), ModelFact("gender", "m")),
+        ),
+    ),
+)
+def test_parent_extracts_only_explicit_customer_facts(
+    message: str, expected: tuple[ModelFact, ...]
+) -> None:
+    assert _extract_explicit_customer_facts(message) == expected
+
+
+def test_parent_customer_fact_extraction_ignores_unbound_dates_and_gender_words() -> None:
+    assert _extract_explicit_customer_facts(
+        "The tour is on 17 May 2026 and the guide may be female."
+    ) == ()
+
+
+def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() -> None:
+    extracted = _extract_explicit_customer_facts(
+        "I was born on 17 May 1991 and I am female."
+    )
+    proposal = ModelProposal(
+        source_event_id="batch:explicit-customer-facts",
+        intent="inform",
+        reply_chunks=("Got it.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    merged = _merge_explicit_customer_facts(proposal, extracted)
+    assert merged.facts == extracted
+    commitment = _explicit_customer_fact_commitment(
+        "d" * 64,
+        "e" * 64,
+        extracted,
+    )
+    assert len(commitment) == 64
+    assert commitment != "d" * 64
+
+    with pytest.raises(TurnExecutionError, match="conflicts with explicit customer fact"):
+        _merge_explicit_customer_facts(
+            replace(proposal, facts=(ModelFact("gender", "m"),)),
+            extracted,
+        )
 
 
 def _enabled_reducer(
