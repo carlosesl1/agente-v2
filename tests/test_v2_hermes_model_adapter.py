@@ -120,6 +120,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     user = json.loads(envelope["messages"][0][1])
 
     assert user["private_profile_complete"] is True
+    assert user["confirmation_review_required"] is False
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
         "Pessoa Qualificação",
@@ -211,6 +212,19 @@ def test_v4_parser_exposes_structured_selection_request_without_authority() -> N
         _proposal(
             json.dumps(payload, ensure_ascii=False).encode(),
             "batch:structured-selection",
+        )
+
+
+def test_confirmation_review_requires_pending_action() -> None:
+    with pytest.raises(InvalidModelProposal, match="pending critical action"):
+        ModelRequest(
+            request_id="request:review-without-pending",
+            lead_id="lead:review-without-pending",
+            source_event_id="batch:review-without-pending",
+            message="Confirmado.",
+            locale="pt-BR",
+            state_version=0,
+            confirmation_review_required=True,
         )
 
 

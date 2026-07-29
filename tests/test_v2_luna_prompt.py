@@ -78,6 +78,8 @@ def test_luna_prompt_requires_contextual_v4_critical_approval() -> None:
     assert "approval_basis" in PROMPT
     assert "contextual_reference" in PROMPT
     assert "Uma confirmação afirmativa curta é válida" in PROMPT
+    assert "`confirmation_review_required: bool`" in PROMPT
+    assert "nunca devolva saudação genérica" in PROMPT
     for example in (
         "“Sim”",
         "“Pode reservar”",

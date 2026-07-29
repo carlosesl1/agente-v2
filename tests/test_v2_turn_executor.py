@@ -197,9 +197,21 @@ def test_parent_repairs_only_structured_requested_activity_selection() -> None:
     assert repaired.intent == "select"
     assert repaired.target_offer_id == "offer:" + "a" * 64
     assert repaired.selection_requested is False
+    repaired_facts = {item.name: item.value for item in repaired.facts}
+    assert repaired_facts == {
+        "service": "agency",
+        "product_id": "product:tour-4ps",
+        "activity_date": date(2026, 11, 18),
+        "adults": 1,
+        "children": 0,
+        "payment_method": "stripe",
+        "birth_date": date(1990, 4, 14),
+        "gender": "f",
+    }
 
+    not_requested = replace(first, selection_requested=False)
     assert _repair_requested_activity_selection(
-        replace(first, selection_requested=False),
+        not_requested,
         second,
         state_facts=state_facts,
         observations=(observation,),
@@ -1762,6 +1774,15 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         ),
         approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
     )
+    review_expected = selection_language == "en"
+    initial_confirmation = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent="inform",
+        reply_chunks=("How can I help?",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
     proposals = [
         ModelProposal(
             source_event_id=BATCH.batch_id,
@@ -1772,6 +1793,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
             effect_proposals=(),
         ),
         selection,
+        *((initial_confirmation,) if review_expected else ()),
         confirmation,
         confirmation,
     ]
@@ -1813,7 +1835,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         )
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
-        assert len(model.calls) == 4
+        assert len(model.calls) == (5 if review_expected else 4)
         assert model.calls[0].pending_action is None
         assert model.calls[1].pending_action is None
         pending = model.calls[2].pending_action
@@ -1823,7 +1845,13 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
             CriticalActionKind.INITIATE_PAYMENT,
             CriticalActionKind.RESERVE_LODGING,
         )
-        assert model.calls[3].pending_action == pending
+        assert model.calls[2].confirmation_review_required is False
+        review_index = 3 if review_expected else 2
+        followup_index = review_index + 1
+        assert model.calls[review_index].pending_action == pending
+        assert model.calls[review_index].confirmation_review_required is review_expected
+        assert model.calls[followup_index].pending_action == pending
+        assert model.calls[followup_index].confirmation_review_required is False
         assert len(read_port.calls) == 2
         derived = read_port.calls[-1]
         assert derived.kind is ReadKind.LODGING

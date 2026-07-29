@@ -509,9 +509,28 @@ def _repair_requested_activity_selection(
         or not offer_id.startswith("offer:")
     ):
         return second_proposal
+    existing_fact_names = {item.name for item in second_proposal.facts}
+    canonical_selection_facts = (
+        ModelFact("service", "agency"),
+        ModelFact("product_id", request.product_id),
+        ModelFact("activity_date", request.activity_date),
+        ModelFact("adults", adults),
+        ModelFact("children", children),
+        ModelFact("payment_method", values["payment_method"]),
+        ModelFact("birth_date", values["birth_date"]),
+        ModelFact("gender", values["gender"]),
+    )
     return replace(
         second_proposal,
         intent="select",
+        facts=(
+            *second_proposal.facts,
+            *(
+                fact
+                for fact in canonical_selection_facts
+                if fact.name not in existing_fact_names
+            ),
+        ),
         target_offer_id=offer_id,
         selection_requested=False,
     )
@@ -1004,6 +1023,37 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        if (
+            pending_action is not None
+            and first_proposal.intent == "inform"
+            and not first_proposal.read_requests
+        ):
+            review_request = replace(
+                request,
+                confirmation_review_required=True,
+            )
+            review_audited = self._model.complete_audited(review_request)
+            if type(review_audited) is not AuditedModelTurn:
+                raise TypeError("model must return exact AuditedModelTurn")
+            review_proposal = _merge_explicit_customer_facts(
+                validate_productive_proposal(review_audited.proposal),
+                explicit_customer_facts,
+            )
+            if review_proposal.source_event_id != batch.batch_id:
+                raise TurnExecutionError(
+                    "confirmation review source event diverged"
+                )
+            if review_proposal.intent in (
+                "confirm",
+                "adjust",
+                "request_handoff",
+            ):
+                first_proposal = review_proposal
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=(*first_audited.frames, *review_audited.frames),
+                ephemeral_session_id=review_audited.closure.ephemeral_session_id,
+            )
         material_scope_bound = (
             self._reducer.confirmation_projection_matches(
                 current.state.workflow,
