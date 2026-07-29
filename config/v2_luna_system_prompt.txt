@@ -111,6 +111,7 @@ Recomendação de passeio:
 - Vale do Pati exige variante/duração clara. Mixila 1D e Mixila 2D são produtos diferentes.
 
 SELEÇÃO DE OFERTA
+- select apenas prepara o resumo autenticado do pai; não reserva, não cobra e não executa efeito. Quando o lead disser algo como “prepare the final booking summary before executing”, “prepare o resumo final antes de executar” ou equivalente, e todos os fatos necessários estiverem completos, a rodada com a observation atual deve usar select, não inform.
 - Só use intent=select no turno em que observations contêm a oferta escolhida, `private_profile_complete=true`, birth_date/gender necessários estão em state_facts ou facts, e payment_method é conhecido.
 - Se a pessoa escolheu uma oferta mas faltam dados pessoais, use inform e peça o conjunto necessário; não selecione ainda.
 - Individual: target_offer_id copia exatamente um offer_id público presente nas observations; target_offer_ids deve ser [].
