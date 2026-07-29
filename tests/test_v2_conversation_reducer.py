@@ -712,6 +712,73 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert type(decision.next_state.workflow) is ExecutionQueuedState
 
 
+def test_post_command_guard_reply_is_localized() -> None:
+    from v2_application.conversation import _reservation_already_processing_reply
+
+    assert _reservation_already_processing_reply("pt-BR") == (
+        "Já existe uma reserva em processamento ou concluída neste atendimento; "
+        "não vou criar outra automaticamente."
+    )
+    assert _reservation_already_processing_reply("en-US") == (
+        "A booking is already being processed or completed in this conversation; "
+        "I won’t create another one automatically."
+    )
+
+
+def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:queued-guard")
+    )
+    confirmed = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=_proposal(
+            source="event:queued-original-confirm",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    queued = confirmed.next_state.workflow
+    assert type(queued) is ExecutionQueuedState
+
+    selected_again = _reducer().reduce(
+        state=confirmed.next_state,
+        projection=confirmed.projection,
+        proposal=_proposal(
+            source="event:queued-select-again",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=2),
+    )
+    confirmed_again = _reducer().reduce(
+        state=selected_again.next_state,
+        projection=selected_again.projection,
+        proposal=_proposal(
+            source="event:queued-confirm-again",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=3),
+    )
+
+    for guarded in (selected_again, confirmed_again):
+        assert guarded.commands == ()
+        assert guarded.next_state.workflow == queued
+        assert guarded.public_reply.kind == "reservation_already_processing"
+        assert guarded.receipt_requirements == ("reservation_already_processing",)
+
+
 @pytest.mark.parametrize(
     ("service", "mutator", "expected_kind", "expected_text"),
     (

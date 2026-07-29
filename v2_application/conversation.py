@@ -27,9 +27,12 @@ from reservation_domain import (
     CustomerFacts,
     DraftRequested,
     EconomicTerms,
+    ExecutionQueuedState,
+    ExecutingState,
     LookupEvidence,
     LookupRecorded,
     LookupStatus,
+    ManualReviewState,
     Money,
     OfferChosen,
     OfferSnapshot,
@@ -40,6 +43,8 @@ from reservation_domain import (
     ServiceKind,
     StartSearch,
     SummaryRecorded,
+    SucceededState,
+    UncertainState,
     build_commercial_draft,
     new_workflow,
 )
@@ -770,6 +775,18 @@ def _confirmation_not_authorized_reply(locale: str) -> str:
     )
 
 
+def _reservation_already_processing_reply(locale: str) -> str:
+    if locale.casefold().startswith("en"):
+        return (
+            "A booking is already being processed or completed in this conversation; "
+            "I won’t create another one automatically."
+        )
+    return (
+        "Já existe uma reserva em processamento ou concluída neste atendimento; "
+        "não vou criar outra automaticamente."
+    )
+
+
 def _handoff_effect_guard_reply(locale: str) -> str:
     if type(locale) is not str or not locale:
         raise ValueError("locale must be non-empty exact text")
@@ -1058,6 +1075,31 @@ class V2ConversationReducer:
                 receipt_requirements=("handoff_effect_guard",),
             )
 
+        workflow = state.workflow
+        if type(workflow) in {
+            ExecutionQueuedState,
+            ExecutingState,
+            SucceededState,
+            UncertainState,
+            ManualReviewState,
+        } and proposal.intent in {"select", "confirm"}:
+            return V2ConversationDecision(
+                next_state=_consume_without_workflow_transition(
+                    state,
+                    proposal.source_event_id,
+                ),
+                projection=replace(
+                    projection,
+                    stage=ConversationStage.CLOSING,
+                ),
+                commands=(),
+                public_reply=ConversationReply(
+                    "reservation_already_processing",
+                    (_reservation_already_processing_reply(projection.locale),),
+                ),
+                receipt_requirements=("reservation_already_processing",),
+            )
+
         # A complete customer binding is a write-boundary requirement, not a
         # prerequisite for greetings, discovery, FAQ, or read-only provider work.
         if proposal.intent in {"select", "confirm"} and not _profile_ready(
@@ -1098,7 +1140,6 @@ class V2ConversationReducer:
                     receipt_requirements=("profile_completion",),
                 )
 
-        workflow = state.workflow
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "adjust":
             if (
                 proposal.pending_disposition == "preserve"
