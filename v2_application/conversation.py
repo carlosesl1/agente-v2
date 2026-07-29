@@ -804,6 +804,15 @@ def _post_command_offer_ids(workflow: object) -> tuple[str, ...] | None:
     )
 
 
+def _post_command_offer_overlap(
+    existing_offer_ids: tuple[str, ...] | None,
+    candidate_offer_ids: tuple[str, ...],
+) -> bool:
+    if existing_offer_ids is None:
+        return False
+    return bool(set(existing_offer_ids).intersection(candidate_offer_ids))
+
+
 def _post_command_guard_decision(
     *,
     state: BoundaryState,
@@ -1550,8 +1559,11 @@ class V2ConversationReducer:
                 activity=activity_state,
                 now=instant,
             )
-            if post_command_offer_ids == tuple(
-                component.offer_id for component in domain_state.draft.components
+            if _post_command_offer_overlap(
+                post_command_offer_ids,
+                tuple(
+                    component.offer_id for component in domain_state.draft.components
+                ),
             ):
                 return _post_command_guard_decision(
                     state=state,
@@ -1683,8 +1695,11 @@ class V2ConversationReducer:
                 raise ConversationReductionError(
                     "domain did not create a commercial draft"
                 )
-            if post_command_offer_ids == tuple(
-                component.offer_id for component in domain_state.draft.components
+            if _post_command_offer_overlap(
+                post_command_offer_ids,
+                tuple(
+                    component.offer_id for component in domain_state.draft.components
+                ),
             ):
                 return _post_command_guard_decision(
                     state=state,

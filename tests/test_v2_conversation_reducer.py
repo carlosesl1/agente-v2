@@ -725,6 +725,16 @@ def test_post_command_guard_reply_is_localized() -> None:
     )
 
 
+def test_post_command_offer_overlap_detects_partial_package_duplicate() -> None:
+    from v2_application.conversation import _post_command_offer_overlap
+
+    assert _post_command_offer_overlap(("offer:a",), ("offer:a",)) is True
+    assert _post_command_offer_overlap(("offer:a",), ("offer:a", "offer:b")) is True
+    assert _post_command_offer_overlap(("offer:a", "offer:b"), ("offer:b",)) is True
+    assert _post_command_offer_overlap(("offer:a",), ("offer:c",)) is False
+    assert _post_command_offer_overlap(None, ("offer:a",)) is False
+
+
 def test_execution_queued_allows_materially_different_offer_selection() -> None:
     awaiting = _awaiting_from_ready(
         _ready_state(service=ServiceKind.LODGING, workflow_id="workflow:queued-new-offer")
