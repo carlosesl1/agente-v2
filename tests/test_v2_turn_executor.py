@@ -322,6 +322,21 @@ def test_parent_repairs_only_structured_requested_activity_selection() -> None:
         "gender": "f",
     }
 
+    forged_selection = replace(
+        second,
+        intent="select",
+        target_offer_id="offer:" + "b" * 64,
+    )
+    canonicalized = _repair_requested_activity_selection(
+        first,
+        forged_selection,
+        state_facts=state_facts,
+        observations=(observation,),
+        private_profile_complete=True,
+    )
+    assert canonicalized.intent == "select"
+    assert canonicalized.target_offer_id == "offer:" + "a" * 64
+
     not_requested = replace(first, selection_requested=False)
     assert _repair_requested_activity_selection(
         not_requested,

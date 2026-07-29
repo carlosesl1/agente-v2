@@ -1213,25 +1213,58 @@ class V2ConversationReducer:
             )
             if approval_match is not ApprovalMatch.MATCH:
                 if approval_match is ApprovalMatch.EXPIRED:
-                    kind = "approval_expired"
-                    chunks = (
-                        "Esse resumo expirou. Vou atualizar disponibilidade e valores antes de pedir uma nova confirmação.",
+                    transition = reduce_domain(
+                        workflow,
+                        ConfirmationReceived(
+                            event_id=_event_id(
+                                proposal.source_event_id,
+                                "approval-expired",
+                            ),
+                            occurred_at=instant,
+                            confirmation_event_id=_identity(
+                                proposal.source_event_id,
+                                workflow.draft.subject_signature,
+                                prefix="approval-expired",
+                            ),
+                            decision=ConfirmationDecisionKind.ADJUST,
+                            target_draft_version=workflow.draft.version,
+                            subject_signature=workflow.draft.subject_signature,
+                        ),
                     )
-                    requirement = "approval_expired"
-                else:
-                    kind = "stale_confirmation"
-                    chunks = (
-                        "Essa resposta não autoriza exatamente o resumo atual. Vou apresentar os termos novamente.",
+                    expired_projection = _with_critical_outcome(
+                        merged,
+                        outcome="proposal_expired",
+                        fact_commitment_hash=fact_commitment_hash,
                     )
-                    requirement = "stale_confirmation"
+                    return V2ConversationDecision(
+                        next_state=_replace_boundary(
+                            state,
+                            workflow=transition.state,
+                            source_event_id=proposal.source_event_id,
+                        ),
+                        projection=expired_projection,
+                        commands=(),
+                        public_reply=ConversationReply(
+                            "approval_expired",
+                            (
+                                "Esse resumo expirou. Vou atualizar disponibilidade e valores antes de pedir uma nova confirmação.",
+                            ),
+                        ),
+                        receipt_requirements=("approval_expired",),
+                    )
                 return V2ConversationDecision(
                     next_state=_consume_without_workflow_transition(
                         state, proposal.source_event_id
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(kind, chunks),
-                    receipt_requirements=(requirement,),
+                    public_reply=ConversationReply(
+                        "stale_confirmation",
+                        (
+                            "Essa resposta não autoriza exatamente o resumo atual. Vou apresentar os termos novamente.",
+                        ),
+                    ),
+                    receipt_requirements=("stale_confirmation",),
                 )
             if workflow.draft.customer != _customer(profile, merged):
                 return V2ConversationDecision(

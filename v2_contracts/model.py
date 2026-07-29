@@ -177,9 +177,13 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
-        if self.critical_outcome not in (None, "proposal_revoked_after_refresh"):
+        if self.critical_outcome not in (
+            None,
+            "proposal_revoked_after_refresh",
+            "proposal_expired",
+        ):
             raise InvalidModelProposal(
-                "critical_outcome must be proposal_revoked_after_refresh or None"
+                "critical_outcome is outside the closed request catalog"
             )
         if self.pending_action is not None and type(
             self.pending_action

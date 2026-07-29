@@ -853,6 +853,14 @@ def test_confirmation_scope_mismatch_and_expiry_fail_closed_without_command() ->
     )
     assert expired.commands == ()
     assert expired.public_reply.kind == "approval_expired"
+    assert type(expired.next_state.workflow) is AwaitingAdjustmentState
+    assert _reducer().pending_action(
+        expired.next_state.workflow,
+        locale="pt-BR",
+    ) is None
+    assert {
+        fact.name: fact.value.value for fact in expired.projection.facts
+    }["critical_outcome"] == "proposal_expired"
 
 
 def test_adjustment_or_refusal_revokes_the_pending_proposal_version() -> None:

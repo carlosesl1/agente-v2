@@ -593,12 +593,10 @@ def _repair_requested_activity_selection(
         or type(private_profile_complete) is not bool
     ):
         raise TypeError("selection repair requires exact V2 contracts")
-    if second_proposal.intent == "select":
-        return second_proposal
     if (
         not first_proposal.selection_requested
         or not private_profile_complete
-        or second_proposal.intent != "inform"
+        or second_proposal.intent not in ("inform", "select")
         or second_proposal.read_requests
         or len(first_proposal.read_requests) != 1
         or len(observations) != 1
@@ -860,7 +858,7 @@ def _critical_outcome(projection: ConversationProjection) -> str | None:
     if len(matches) != 1 or type(matches[0].value) is not StringSlot:
         raise TurnExecutionError("critical outcome projection is invalid")
     outcome = matches[0].value.value
-    if outcome != "proposal_revoked_after_refresh":
+    if outcome not in ("proposal_revoked_after_refresh", "proposal_expired"):
         raise TurnExecutionError("critical outcome projection is outside the catalog")
     return outcome
 

@@ -356,8 +356,9 @@ class TypedFact:
             "pix",
         ):
             raise ValueError("payment_method fact is outside the closed catalog")
-        if self.name == "critical_outcome" and self.value.value != (
-            "proposal_revoked_after_refresh"
+        if self.name == "critical_outcome" and self.value.value not in (
+            "proposal_revoked_after_refresh",
+            "proposal_expired",
         ):
             raise ValueError("critical_outcome fact is outside the closed catalog")
 
