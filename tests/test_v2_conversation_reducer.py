@@ -41,6 +41,12 @@ from reservation_domain import (
     reduce as reduce_domain,
 )
 from reservation_execution import PreparationFailure
+from reservation_followup import (
+    HandoffEffectPolicy,
+    HandoffReasonCode,
+    HandoffRequested,
+    new_handoff,
+)
 from v2_adapters.cloudbeds import CloudbedsReadAdapter
 from v2_application.conversation import (
     ConversationReductionError,
@@ -86,6 +92,49 @@ def test_active_handoff_effect_guard_is_localized() -> None:
     )
     assert _handoff_effect_guard_reply("en-US") == (
         "Your human support conversation is still active; I won’t execute any actions."
+    )
+
+
+def test_active_handoff_reducer_guard_uses_projection_locale() -> None:
+    handoff = new_handoff(
+        HandoffRequested(
+            handoff_id="handoff:english-guard",
+            lead_key_hash="a" * 64,
+            incident_key="incident:english-guard",
+            reason_code=HandoffReasonCode.CUSTOMER_REQUESTED,
+            source_event_id="event:open-english-handoff",
+            reservation_anchor=None,
+            requested_at=NOW,
+        ),
+        HandoffEffectPolicy.default_email_disabled(),
+    ).state
+    state = replace(_boundary(), handoff=handoff)
+    proposal = _proposal(
+        source="event:english-select-after-handoff",
+        intent="select",
+        target_offer_id=LODGING_OFFER_ID,
+    )
+    proposal = replace(
+        proposal,
+        facts=tuple(
+            ModelFact("language", "en-US") if fact.name == "language" else fact
+            for fact in proposal.facts
+        ),
+    )
+
+    decision = _reducer().reduce(
+        state=state,
+        projection=replace(_projection(), locale="en-US"),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.public_reply.chunks == (
+        "Your human support conversation is still active; I won’t execute any actions.",
     )
 
 

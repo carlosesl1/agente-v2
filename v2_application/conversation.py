@@ -956,7 +956,7 @@ class V2ConversationReducer:
                 commands=(),
                 public_reply=ConversationReply(
                     "handoff",
-                    (_handoff_effect_guard_reply(locale),),
+                    (_handoff_effect_guard_reply(merged.locale),),
                 ),
                 receipt_requirements=("handoff_effect_guard",),
             )
