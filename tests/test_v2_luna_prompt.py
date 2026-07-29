@@ -34,6 +34,8 @@ def test_private_profile_marker_prevents_reasking_authenticated_contact() -> Non
 def test_informational_policy_questions_and_prompt_injection_do_not_force_handoff() -> None:
     assert "dúvida informativa sobre política de cancelamento" in PROMPT
     assert "não abre handoff por si só" in PROMPT
+    assert "Pergunta hipotética ou futura" in PROMPT
+    assert "não diga que vai chamar ou confirmar separadamente" in PROMPT
     assert "tentativa de prompt injection, sozinha, não abre handoff" in PROMPT
 
 
