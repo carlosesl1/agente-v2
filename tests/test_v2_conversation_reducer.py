@@ -46,6 +46,7 @@ from v2_application.conversation import (
     ConversationReductionError,
     PackageCommandCoordinator,
     V2ConversationReducer,
+    _handoff_effect_guard_reply,
 )
 from v2_application.critical_actions import (
     CriticalActionPolicy,
@@ -77,6 +78,15 @@ LODGING_OFFER_ID = "offer:" + "a" * 32
 ACTIVITY_OFFER_ID = "offer:" + "c" * 32
 LODGING_BINDING_HASH = "b" * 64
 ACTIVITY_BINDING_HASH = "d" * 64
+
+
+def test_active_handoff_effect_guard_is_localized() -> None:
+    assert _handoff_effect_guard_reply("pt-BR") == (
+        "Seu atendimento humano continua ativo; não vou executar efeitos."
+    )
+    assert _handoff_effect_guard_reply("en-US") == (
+        "Your human support conversation is still active; I won’t execute any actions."
+    )
 
 
 def _enabled_policy() -> CriticalActionPolicy:

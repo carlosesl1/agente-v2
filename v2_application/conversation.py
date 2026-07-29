@@ -675,6 +675,17 @@ def _generic_reply(proposal: ModelProposal) -> ConversationReply:
     return ConversationReply("inform", chunks)
 
 
+def _handoff_effect_guard_reply(locale: str) -> str:
+    if type(locale) is not str or not locale:
+        raise ValueError("locale must be non-empty exact text")
+    if locale.casefold().startswith("en"):
+        return (
+            "Your human support conversation is still active; "
+            "I won’t execute any actions."
+        )
+    return "Seu atendimento humano continua ativo; não vou executar efeitos."
+
+
 class PackageCommandCoordinator:
     """Combine two authorized drafts into one package confirmation subject."""
 
@@ -945,9 +956,7 @@ class V2ConversationReducer:
                 commands=(),
                 public_reply=ConversationReply(
                     "handoff",
-                    (
-                        "Seu atendimento humano continua ativo; não vou executar efeitos.",
-                    ),
+                    (_handoff_effect_guard_reply(locale),),
                 ),
                 receipt_requirements=("handoff_effect_guard",),
             )

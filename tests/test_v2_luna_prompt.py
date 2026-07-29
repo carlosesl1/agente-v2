@@ -45,6 +45,11 @@ def test_unsupported_multiple_activity_passengers_route_to_handoff() -> None:
     assert "voltar de mais de 1 participante para exatamente 1" in PROMPT
 
 
+def test_healthy_adult_suitability_question_stays_in_automation() -> None:
+    assert "adulto saudável com preparo normal ou razoável" in PROMPT
+    assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
+
+
 def test_luna_prompt_requires_contextual_v3_critical_approval() -> None:
     assert "v2-model-proposal-v3" in PROMPT
     assert "v2-model-proposal-v2" not in PROMPT
