@@ -2,12 +2,13 @@
 
 ## Autoridade
 
-- Estado: `OPERATIONAL_REPAIRS_LOCAL_QUALIFIED`
+- Estado: `BOKUN_MULTI_PASSENGER_IMPLEMENTATION`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-07-27-maya-v2-operational-readiness-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-07-27-maya-v2-operational-readiness.md`
-- Base funcional anterior ao plano: `084f338a9a67dcc52c568a420a276174e8ecedca`
+- Especificação ativa: `docs/superpowers/specs/2026-07-30-maya-v2-bokun-multi-passenger-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-07-30-maya-v2-bokun-multi-passenger.md`
+- Base funcional anterior ao reparo: `71ff137e9d9d35cc8f8cd1211ceca0744dd0d6dc`
+- Commit da especificação: `4381c74dd35c4da5208b112c91894ffa36711fd3`
 - Rollout: `DARK_CANARY_PENDING`
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
@@ -17,6 +18,24 @@
 Carlos autorizou em 2026-07-27 a correção de conversa pré-reserva, relógio de consultas, fallback de protocolo, conhecimento comercial e controle operacional, além da preparação de todas as funções sob testes limitados.
 
 O candidato está qualificado localmente. O próximo avanço autorizado é: revisão final, commit/push do branch, CI no SHA exato, imagem imutável e dark canary com todos os efeitos externos fechados. Provider writes e entrega ManyChat só podem abrir um por vez, para o subscriber `1873018537`, com janela finita, autoridade assinada, read-back e rollback/fallback ao legado.
+
+## REPARO BÓKUN MULTI-PASSAGEIRO ATIVO
+
+Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e crianças, com dados individuais por passageiro. O reparo precisa preservar manifesto privado, proposta assinada, cotação por categoria, idempotência, submit único e read-back exato. Não está autorizado nenhum write real de provider durante a implementação.
+
+| Task do reparo | Estado | Commit |
+|---|---|---|
+| 1. Ativar cadeia de autoridade | `IN_PROGRESS` | `PENDING` |
+| 2. Domínio assinado de passageiros | `NEXT` | `PENDING` |
+| 3. Protocolo v6 e manifesto privado | `PENDING` | `PENDING` |
+| 4. Reads por composição adulto/criança | `PENDING` | `PENDING` |
+| 5. Coleta e seleção de grupos | `PENDING` | `PENDING` |
+| 6. Dispatch Bókun v2 | `PENDING` | `PENDING` |
+| 7. Transport e read-back exato | `PENDING` | `PENDING` |
+| 8. Regressões e qualificação local | `PENDING` | `PENDING` |
+| 9. Revisão terminal e candidata | `PENDING` | `PENDING` |
+
+- NEXT: `Task 2 — domínio assinado de passageiros`
 
 ### Decisão de topologia da Task 7
 
