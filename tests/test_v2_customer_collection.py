@@ -5,14 +5,27 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from reservation_boundary import BoundaryState, ConversationProjection, ConversationStage
+from reservation_boundary import (
+    BoundaryState,
+    ConversationProjection,
+    ConversationStage,
+    DateSlot,
+    StringSlot,
+    TypedFact,
+)
 from reservation_domain import CustomerFacts, PassengerFacts, effective_passengers
 from reservation_domain.serialization import _decode_dataclass, _encode
 from reservation_domain.signature import canonical_subject, subject_signature
 from reservation_domain.types import EconomicTerms, Money, OfferSnapshot, Party, ServiceKind
 from v2_adapters.hermes_model import _request_wire
 from v2_application.conversation import V2ConversationReducer
-from v2_contracts.model import ModelFact, ModelProposal, ModelRequest
+from v2_application.turn_executor import _private_customer_fact_names, _state_model_facts
+from v2_contracts.model import (
+    InvalidModelProposal,
+    ModelFact,
+    ModelProposal,
+    ModelRequest,
+)
 from v2_contracts.profile import PrivateCustomerBinding
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
@@ -43,7 +56,7 @@ def _proposal(event_id: str, facts: tuple[ModelFact, ...]) -> ModelProposal:
     )
 
 
-def test_closed_customer_facts_validate_and_round_trip_as_model_state() -> None:
+def test_private_customer_facts_are_presence_markers_not_model_state() -> None:
     facts = (
         ModelFact("full_name", "Carlos Eduardo"),
         ModelFact("email", "carlos@example.invalid"),
@@ -59,20 +72,62 @@ def test_closed_customer_facts_validate_and_round_trip_as_model_state() -> None:
         message="Pode continuar",
         locale="pt-BR",
         state_version=3,
-        state_facts=facts,
+        private_customer_fact_names=tuple(item.name for item in facts),
     )
 
     wire = json.loads(_request_wire(request, "closed prompt"))
     user = json.loads(wire["messages"][0][1])
 
-    assert user["state_facts"] == [
-        {"name": "full_name", "value": "Carlos Eduardo"},
-        {"name": "email", "value": "carlos@example.invalid"},
-        {"name": "phone_e164", "value": "+5571999999999"},
-        {"name": "country_code", "value": "BR"},
-        {"name": "birth_date", "value": "1990-01-02"},
-        {"name": "gender", "value": "m"},
+    assert "state_facts" not in user
+    assert user["private_customer_fact_names"] == [
+        "full_name",
+        "email",
+        "phone_e164",
+        "country_code",
+        "birth_date",
+        "gender",
     ]
+    serialized = json.dumps(user, ensure_ascii=False)
+    assert "Carlos Eduardo" not in serialized
+    assert "carlos@example.invalid" not in serialized
+    assert "1990-01-02" not in serialized
+
+
+def test_model_request_rejects_private_values_in_state_facts() -> None:
+    with pytest.raises(InvalidModelProposal, match="private"):
+        ModelRequest(
+            request_id="request:private-state",
+            lead_id="manychat:private-state",
+            source_event_id="event:private-state",
+            message="Pode continuar",
+            locale="pt-BR",
+            state_version=3,
+            state_facts=(ModelFact("email", "carlos@example.invalid"),),
+        )
+
+
+def test_executor_exposes_only_private_fact_presence() -> None:
+    projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(
+            TypedFact("service", StringSlot("agency"), "a" * 64),
+            TypedFact("full_name", StringSlot("Carlos Eduardo"), "b" * 64),
+            TypedFact("email", StringSlot("carlos@example.invalid"), "c" * 64),
+            TypedFact("birth_date", DateSlot(date(1990, 1, 2)), "d" * 64),
+            TypedFact("gender", StringSlot("m"), "e" * 64),
+        ),
+        reservation_execution_projection=None,
+    )
+
+    assert _state_model_facts(projection) == (ModelFact("service", "agency"),)
+    assert _private_customer_fact_names(projection) == (
+        "full_name",
+        "email",
+        "birth_date",
+        "gender",
+    )
 
 
 def test_reducer_accumulates_user_supplied_customer_facts_when_profile_is_empty() -> None:

@@ -772,6 +772,9 @@ class BokunHTTPTransport:
             cart_payload,
             session_id=session_id,
             product_id=product_id,
+            activity_date=activity_date,
+            start_time_id=private["start_time_id"],
+            rate_id=private["rate_id"],
             category_ids=tuple(
                 item["pricingCategoryId"]
                 for item in self._pricing_category_bookings(
@@ -848,6 +851,9 @@ class BokunHTTPTransport:
         *,
         session_id: str,
         product_id: str,
+        activity_date: str,
+        start_time_id: str,
+        rate_id: str,
         category_ids: tuple[str, ...],
     ) -> None:
         cart = payload.get("data") if isinstance(payload, Mapping) else None
@@ -865,6 +871,12 @@ class BokunHTTPTransport:
         ] if isinstance(activities, list) else []
         if len(matches) != 1:
             raise ProviderHTTPError("Bókun quote cart activity binding is invalid")
+        BokunHTTPTransport._validate_cart_offer_binding(
+            matches[0],
+            activity_date=activity_date,
+            start_time_id=start_time_id,
+            rate_id=rate_id,
+        )
         pricing = matches[0].get("pricingCategoryBookings")
         passengers = [
             item
@@ -908,6 +920,32 @@ class BokunHTTPTransport:
         if direct is None and isinstance(category, Mapping):
             direct = _first(category, "id", "pricingCategoryId")
         return direct
+
+    @staticmethod
+    def _validate_cart_offer_binding(
+        activity: Mapping[str, object],
+        *,
+        activity_date: str,
+        start_time_id: str,
+        rate_id: str,
+    ) -> None:
+        returned_date = _first(activity, "date", "activityDate", "startDate")
+        returned_start = _first(activity, "startTimeId", "start_time_id")
+        if returned_start is None:
+            start = activity.get("startTime")
+            if isinstance(start, Mapping):
+                returned_start = _first(start, "id", "startTimeId")
+        returned_rate = _first(activity, "rateId", "rate_id")
+        if returned_rate is None:
+            rate = activity.get("rate")
+            if isinstance(rate, Mapping):
+                returned_rate = _first(rate, "id", "rateId")
+        if (
+            (returned_date is not None and returned_date != activity_date)
+            or (returned_start is not None and returned_start != start_time_id)
+            or (returned_rate is not None and returned_rate != rate_id)
+        ):
+            raise ProviderHTTPError("Bókun cart offer binding diverged")
 
     def _book_activity_v2(
         self,
@@ -1141,6 +1179,9 @@ class BokunHTTPTransport:
                 cart_payload,
                 session_id=session_id,
                 product_id=product_id,
+                activity_date=activity_date,
+                start_time_id=start_time_id,
+                rate_id=rate_id,
                 passengers=tuple(passengers),
             )
         except ProviderHTTPError:
@@ -1193,8 +1234,9 @@ class BokunHTTPTransport:
         )
         booking_id = self._booking_reference(submit_payload)
         if booking_id is None:
-            if 400 <= status < 500 or (
-                isinstance(submit_payload, Mapping)
+            if status in {400, 401, 403, 404, 405, 406, 415, 422} or (
+                200 <= status < 300
+                and isinstance(submit_payload, Mapping)
                 and submit_payload.get("success") is False
             ):
                 return {"status": "rejected"}
@@ -1213,6 +1255,7 @@ class BokunHTTPTransport:
             product_id=product_id,
             activity_date=activity_date,
             category_ids=tuple(item["category_id"] for item in passengers),
+            expected_amount=amount,
         )
         return {"status": "confirmed", "booking_id": booking_id}
 
@@ -1222,6 +1265,9 @@ class BokunHTTPTransport:
         *,
         session_id: str,
         product_id: str,
+        activity_date: str,
+        start_time_id: str,
+        rate_id: str,
         passengers: tuple[dict[str, str], ...],
     ) -> tuple[str, tuple[dict[str, str], ...]]:
         cart = payload.get("data") if isinstance(payload, Mapping) else None
@@ -1240,6 +1286,12 @@ class BokunHTTPTransport:
         if len(matches) != 1:
             raise ProviderHTTPError("Bókun cart activity binding is invalid")
         activity = matches[0]
+        BokunHTTPTransport._validate_cart_offer_binding(
+            activity,
+            activity_date=activity_date,
+            start_time_id=start_time_id,
+            rate_id=rate_id,
+        )
         activity_booking = _first(activity, "bookingId", "booking_id", "id")
         pricing = activity.get("pricingCategoryBookings")
         rows = [item for item in pricing if isinstance(item, Mapping)] if isinstance(pricing, list) else []
@@ -1445,6 +1497,7 @@ class BokunHTTPTransport:
         product_id: str,
         activity_date: str,
         category_ids: tuple[str, ...],
+        expected_amount: Decimal,
     ) -> None:
         candidates: list[Mapping[str, object]] = []
 
@@ -1464,7 +1517,29 @@ class BokunHTTPTransport:
         visit(payload)
         if len(candidates) != 1:
             raise ProviderHTTPError("Bókun write read-back did not match")
-        activities = candidates[0].get("activityBookings")
+        booking = candidates[0]
+        returned_status = _first(booking, "status", "bookingStatus")
+        if returned_status is not None and returned_status.upper() not in {
+            "BOOKED",
+            "CONFIRMED",
+            "PAID",
+            "PENDING",
+            "RESERVED",
+        }:
+            raise ProviderHTTPError("Bókun booking read-back status mismatch")
+        returned_amount = _first_amount(
+            booking,
+            "totalPrice",
+            "totalAmount",
+            "amount",
+            "totalDue",
+        )
+        if (
+            returned_amount is not None
+            and returned_amount.quantize(Decimal("0.01")) != expected_amount
+        ):
+            raise ProviderHTTPError("Bókun booking read-back amount mismatch")
+        activities = booking.get("activityBookings")
         matches = [
             item
             for item in activities

@@ -45,6 +45,15 @@ _ALLOWED_FACTS: Final = frozenset(
     )
 )
 _ALLOWED_PAYMENT_METHODS: Final = frozenset(("stripe", "wise", "pix"))
+PRIVATE_CUSTOMER_FACT_ORDER: Final = (
+    "full_name",
+    "email",
+    "phone_e164",
+    "country_code",
+    "birth_date",
+    "gender",
+)
+_PRIVATE_CUSTOMER_FACTS: Final = frozenset(PRIVATE_CUSTOMER_FACT_ORDER)
 
 
 class InvalidModelProposal(ValueError):
@@ -149,6 +158,7 @@ class ModelRequest:
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
+    private_customer_fact_names: tuple[str, ...] = ()
     passenger_manifest_status: PassengerManifestStatus | None = None
     critical_outcome: str | None = None
     pending_action: PendingCriticalActionContext | None = None
@@ -179,6 +189,27 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
+        if any(item.name in _PRIVATE_CUSTOMER_FACTS for item in self.state_facts):
+            raise InvalidModelProposal("private customer values are forbidden in state_facts")
+        if (
+            type(self.private_customer_fact_names) is not tuple
+            or any(
+                type(item) is not str or item not in _PRIVATE_CUSTOMER_FACTS
+                for item in self.private_customer_fact_names
+            )
+            or len(set(self.private_customer_fact_names))
+            != len(self.private_customer_fact_names)
+        ):
+            raise InvalidModelProposal(
+                "private_customer_fact_names must be a unique closed tuple"
+            )
+        expected_private_names = tuple(
+            item
+            for item in PRIVATE_CUSTOMER_FACT_ORDER
+            if item in self.private_customer_fact_names
+        )
+        if self.private_customer_fact_names != expected_private_names:
+            raise InvalidModelProposal("private_customer_fact_names must be canonical")
         if self.passenger_manifest_status is not None and type(
             self.passenger_manifest_status
         ) is not PassengerManifestStatus:
@@ -275,6 +306,8 @@ class ModelProposal:
             raise InvalidModelProposal("passenger updates must have unique positions")
         if self.intent == "confirm" and self.passengers:
             raise InvalidModelProposal("confirm intent cannot carry passenger updates")
+        if self.intent == "request_handoff" and self.passengers:
+            raise InvalidModelProposal("handoff intent cannot carry passenger updates")
         if self.intent == "confirm" and self.facts:
             raise InvalidModelProposal("confirm intent cannot carry material facts")
         if type(self.read_requests) is not tuple or any(

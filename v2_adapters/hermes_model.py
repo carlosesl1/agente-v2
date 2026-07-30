@@ -150,6 +150,10 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
             }
             for item in request.state_facts
         ]
+    if request.private_customer_fact_names:
+        user_payload["private_customer_fact_names"] = list(
+            request.private_customer_fact_names
+        )
     if request.passenger_manifest_status is not None:
         user_payload["passenger_manifest_status"] = (
             request.passenger_manifest_status.to_public_dict()
@@ -278,6 +282,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
     if type(decoded) is not dict:
         raise InvalidModelProposal("model response fields mismatch")
     schema = decoded.get("schema")
+
     if schema == "v2-model-proposal-v1":
         expected_fields = _RESPONSE_FIELDS_V1
     elif schema == "v2-model-proposal-v2":

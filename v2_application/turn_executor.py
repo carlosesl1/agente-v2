@@ -71,7 +71,13 @@ from v2_application.reservations import ReservationAllocator
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
-from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
+from v2_contracts.model import (
+    AuditedModelTurn,
+    ModelFact,
+    ModelProposal,
+    ModelRequest,
+    PRIVATE_CUSTOMER_FACT_ORDER,
+)
 from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
@@ -885,7 +891,15 @@ def _state_model_facts(
         ModelFact(item.name, item.value.value)
         for item in projection.facts
         if item.name not in ("critical_outcome", "passenger_manifest")
+        and item.name not in PRIVATE_CUSTOMER_FACT_ORDER
     )
+
+
+def _private_customer_fact_names(
+    projection: ConversationProjection,
+) -> tuple[str, ...]:
+    present = {item.name for item in projection.facts}
+    return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
 
 
 def _activity_party_for_manifest(
@@ -952,6 +966,10 @@ def _merge_passenger_updates(
             proposal.passengers,
             party,
             frame_commitment_hash=frame_commitment_hash,
+            allow_replacement=(
+                proposal.intent == "adjust"
+                and proposal.pending_disposition == "revoke"
+            ),
         )
     except (PassengerManifestConflict, TypeError, ValueError) as exc:
         raise TurnExecutionError("passenger manifest update was rejected") from exc
@@ -1277,6 +1295,7 @@ class V2TurnExecutor:
             locale=projection.locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
+            private_customer_fact_names=_private_customer_fact_names(projection),
             passenger_manifest_status=_passenger_status(projection),
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
@@ -1474,6 +1493,7 @@ class V2TurnExecutor:
                 state_version=current.version,
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
+                private_customer_fact_names=_private_customer_fact_names(projection),
                 passenger_manifest_status=_passenger_status(
                     projection,
                     first_proposal,

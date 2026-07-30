@@ -19,8 +19,8 @@ from v2_application.passengers import (
     manifest_status,
     merge_manifest,
 )
-from v2_application.turn_executor import _state_model_facts
-from v2_contracts.model import ModelRequest
+from v2_application.turn_executor import _merge_passenger_updates, _state_model_facts
+from v2_contracts.model import ModelProposal, ModelRequest
 from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
 
 
@@ -127,6 +127,28 @@ def test_v6_parser_rejects_invalid_or_open_passenger_updates(
         _proposal(
             json.dumps(payload, ensure_ascii=False).encode(),
             "batch:passenger-invalid",
+        )
+
+
+def test_handoff_proposal_cannot_persist_passenger_updates() -> None:
+    with pytest.raises(ValueError, match="handoff"):
+        ModelProposal(
+            source_event_id="batch:handoff-private",
+            intent="request_handoff",
+            reply_chunks=("Vou chamar uma pessoa da equipe.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            passengers=(
+                _input(
+                    1,
+                    "adult",
+                    full_name="Pessoa Sintética",
+                    birth_date=date(1990, 1, 2),
+                    gender="f",
+                    country_code="BR",
+                ),
+            ),
         )
 
 
@@ -315,3 +337,58 @@ def test_private_manifest_fact_round_trips_but_is_not_model_state() -> None:
 
     assert TypedFact.from_canonical_bytes(fact.to_canonical_bytes()) == fact
     assert _state_model_facts(projection) == ()
+
+
+def test_executor_premerge_allows_only_explicit_revoking_passenger_correction() -> None:
+    manifest = merge_manifest(
+        None,
+        (
+            _input(
+                1,
+                "adult",
+                full_name="Pessoa Original",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+                country_code="BR",
+            ),
+        ),
+        Party(1, 0),
+    )
+    projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(TypedFact("passenger_manifest", StringSlot(manifest), "a" * 64),),
+        reservation_execution_projection=None,
+    )
+    proposal = ModelProposal(
+        source_event_id="batch:passenger-correction",
+        intent="adjust",
+        reply_chunks=("Vou atualizar os dados antes de um novo resumo.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        pending_disposition="revoke",
+        passengers=(
+            _input(
+                1,
+                "adult",
+                full_name="Pessoa Corrigida",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+                country_code="BR",
+            ),
+        ),
+    )
+
+    updated = _merge_passenger_updates(
+        projection,
+        proposal,
+        frame_commitment_hash="b" * 64,
+    )
+
+    serialized = next(
+        item.value.value for item in updated.facts if item.name == "passenger_manifest"
+    )
+    assert "Pessoa Corrigida" in serialized
+    assert "Pessoa Original" not in serialized

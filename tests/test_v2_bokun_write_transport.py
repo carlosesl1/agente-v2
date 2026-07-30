@@ -551,6 +551,46 @@ def test_bokun_submit_rejection_is_no_booking_and_never_read_back() -> None:
     assert len(seen) == 3
 
 
+def test_bokun_submit_conflict_is_ambiguous_and_never_read_back() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-booking-1",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-booking-1",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        if len(seen) == 2:
+            return httpx.Response(200, request=request, json=_checkout())
+        return httpx.Response(409, request=request, json={"success": False})
+
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        _transport(handler)(
+            "book_activity",
+            _dispatch_payload(),
+            idempotency_key="idem:bokun-submit-conflict",
+        )
+
+    assert len(seen) == 3
+
+
 def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
     seen: list[httpx.Request] = []
     category_rows = (
@@ -853,7 +893,99 @@ def test_bokun_cart_rejects_duplicate_passenger_booking_ids() -> None:
             cart,
             session_id="session:group",
             product_id="913372",
+            activity_date="2026-08-11",
+            start_time_id="start-1",
+            rate_id="rate-1",
             passengers=passengers,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("date", "2026-08-12"),
+        ("startTimeId", "start-stale"),
+        ("rateId", "rate-stale"),
+    ),
+)
+def test_bokun_reservation_cart_rejects_returned_offer_binding_divergence(
+    field: str,
+    value: str,
+) -> None:
+    activity = {
+        "bookingId": "activity-booking-1",
+        "activityId": "913372",
+        "date": "2026-08-11",
+        "startTimeId": "start-1",
+        "rateId": "rate-1",
+        "pricingCategoryBookings": [
+            {
+                "bookingId": "passenger-booking-1",
+                "pricingCategoryId": "857489",
+            }
+        ],
+    }
+    activity[field] = value
+    cart = {"uuid": "session:bound", "activityBookings": [activity]}
+    passenger = {
+        "category_id": "857489",
+        "firstName": "Pessoa",
+        "lastName": "Um",
+        "nationality": "BR",
+        "dateOfBirth": "1990-01-02",
+        "gender": "f",
+        "full_name": "Pessoa Um",
+    }
+
+    with pytest.raises(ProviderHTTPError, match="offer binding"):
+        BokunHTTPTransport._cart_bindings_v2(
+            cart,
+            session_id="session:bound",
+            product_id="913372",
+            activity_date="2026-08-11",
+            start_time_id="start-1",
+            rate_id="rate-1",
+            passengers=(passenger,),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("date", "2026-08-12"),
+        ("startTimeId", "start-stale"),
+        ("rateId", "rate-stale"),
+    ),
+)
+def test_bokun_quote_cart_rejects_returned_offer_binding_divergence(
+    field: str,
+    value: str,
+) -> None:
+    activity = {
+        "bookingId": "activity-booking-1",
+        "activityId": "913372",
+        "date": "2026-08-11",
+        "startTimeId": "start-1",
+        "rateId": "rate-1",
+        "pricingCategoryBookings": [
+            {
+                "bookingId": "passenger-booking-1",
+                "pricingCategoryId": "857489",
+            }
+        ],
+    }
+    activity[field] = value
+    cart = {"uuid": "session:quote", "activityBookings": [activity]}
+
+    with pytest.raises(ProviderHTTPError, match="offer binding"):
+        BokunHTTPTransport._validate_quote_cart(
+            cart,
+            session_id="session:quote",
+            product_id="913372",
+            activity_date="2026-08-11",
+            start_time_id="start-1",
+            rate_id="rate-1",
+            category_ids=("857489",),
         )
 
 
@@ -966,6 +1098,44 @@ def test_bokun_readback_rejects_date_or_party_divergence(
             product_id="913372",
             activity_date="2026-08-11",
             category_ids=("adult-1", "adult-1", "child-1"),
+            expected_amount=Decimal("750.00"),
+        )
+
+
+@pytest.mark.parametrize(
+    "booking_fields",
+    (
+        {"status": "CANCELLED"},
+        {"totalPrice": "999.00"},
+    ),
+)
+def test_bokun_readback_rejects_status_or_amount_divergence(
+    booking_fields: dict[str, str],
+) -> None:
+    readback = {
+        "booking": {
+            "bookingId": "booking-group-123",
+            **booking_fields,
+            "activityBookings": [
+                {
+                    "activityId": "913372",
+                    "date": "2026-08-11",
+                    "pricingCategoryBookings": [
+                        {"pricingCategoryId": "adult-1"},
+                    ],
+                }
+            ],
+        }
+    }
+
+    with pytest.raises(ProviderHTTPError, match="read-back"):
+        BokunHTTPTransport._validate_booking_readback_v2(
+            readback,
+            booking_id="booking-group-123",
+            product_id="913372",
+            activity_date="2026-08-11",
+            category_ids=("adult-1",),
+            expected_amount=Decimal("300.00"),
         )
 
 
