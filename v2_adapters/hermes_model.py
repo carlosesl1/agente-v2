@@ -22,6 +22,7 @@ from v2_contracts.model import (
     ModelRequest,
 )
 from v2_contracts.providers import ReadKind, ReadRequest
+from v2_contracts.passengers import PassengerInput
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
 _CHILD_ENV_ALLOWLIST: Final = frozenset(
@@ -64,10 +65,11 @@ _RESPONSE_FIELDS_V3: Final = frozenset(
 )
 _RESPONSE_FIELDS_V4: Final = frozenset((*_RESPONSE_FIELDS_V3, "selection_requested"))
 _RESPONSE_FIELDS_V5: Final = frozenset((*_RESPONSE_FIELDS_V4, "pending_disposition"))
+_RESPONSE_FIELDS_V6: Final = frozenset((*_RESPONSE_FIELDS_V5, "passengers"))
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v5 JSON object and no commentary. reply_chunks
+Return exactly one v2-model-proposal-v6 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
@@ -148,6 +150,10 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
             }
             for item in request.state_facts
         ]
+    if request.passenger_manifest_status is not None:
+        user_payload["passenger_manifest_status"] = (
+            request.passenger_manifest_status.to_public_dict()
+        )
     if request.pending_action is not None:
         user_payload["pending_action"] = {
             "summary_version": request.pending_action.summary_version,
@@ -209,6 +215,38 @@ def _effect(value: object) -> EffectProposal:
     return EffectProposal(value["kind"], value["arguments"])
 
 
+def _passenger(value: object) -> PassengerInput:
+    expected = {
+        "position",
+        "participant_type",
+        "full_name",
+        "birth_date",
+        "gender",
+        "country_code",
+    }
+    if type(value) is not dict or set(value) != expected:
+        raise InvalidModelProposal("passenger update fields mismatch")
+    birth_date = value["birth_date"]
+    if birth_date is not None:
+        if type(birth_date) is not str:
+            raise InvalidModelProposal("passenger birth_date must be ISO text or null")
+        try:
+            birth_date = date.fromisoformat(birth_date)
+        except ValueError as exc:
+            raise InvalidModelProposal("passenger birth_date is invalid") from exc
+    try:
+        return PassengerInput(
+            position=value["position"],
+            participant_type=value["participant_type"],
+            full_name=value["full_name"],
+            birth_date=birth_date,
+            gender=value["gender"],
+            country_code=value["country_code"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelProposal("passenger update is invalid") from exc
+
+
 def _tuple_items(value: object, name: str) -> tuple[object, ...]:
     if type(value) is not list:
         raise InvalidModelProposal(f"{name} must be an exact list")
@@ -250,6 +288,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         expected_fields = _RESPONSE_FIELDS_V4
     elif schema == "v2-model-proposal-v5":
         expected_fields = _RESPONSE_FIELDS_V5
+    elif schema == "v2-model-proposal-v6":
+        expected_fields = _RESPONSE_FIELDS_V6
     else:
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
@@ -258,7 +298,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         raise InvalidModelProposal("model response source event mismatch")
     pending_disposition = (
         decoded["pending_disposition"]
-        if schema == "v2-model-proposal-v5"
+        if schema in ("v2-model-proposal-v5", "v2-model-proposal-v6")
         else None
     )
     if decoded["intent"] == "inform" and pending_disposition == "preserve":
@@ -298,6 +338,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v3",
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
+                    "v2-model-proposal-v6",
                 )
                 else ()
             ),
@@ -308,6 +349,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v3",
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
+                    "v2-model-proposal-v6",
                 )
                 else ()
             ),
@@ -318,15 +360,29 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v3",
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
+                    "v2-model-proposal-v6",
                 )
                 else None
             ),
             selection_requested=(
                 decoded["selection_requested"]
-                if schema in ("v2-model-proposal-v4", "v2-model-proposal-v5")
+                if schema
+                in (
+                    "v2-model-proposal-v4",
+                    "v2-model-proposal-v5",
+                    "v2-model-proposal-v6",
+                )
                 else False
             ),
             pending_disposition=pending_disposition,
+            passengers=(
+                tuple(
+                    _passenger(item)
+                    for item in _tuple_items(decoded["passengers"], "passengers")
+                )
+                if schema == "v2-model-proposal-v6"
+                else ()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if type(exc) is InvalidModelProposal:

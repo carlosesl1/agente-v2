@@ -395,7 +395,8 @@ class ConversationProjection:
             "country_code": 12,
             "birth_date": 13,
             "gender": 14,
-            "critical_outcome": 15,
+            "passenger_manifest": 15,
+            "critical_outcome": 16,
         }
         fact_positions: list[int] = []
         for fact in self.facts:
@@ -1372,7 +1373,8 @@ class MayaTurnProposal:
             "country_code": 12,
             "birth_date": 13,
             "gender": 14,
-            "critical_outcome": 15,
+            "passenger_manifest": 15,
+            "critical_outcome": 16,
         }
         fact_positions = tuple(fact_order[item.name] for item in self.facts)
         if (

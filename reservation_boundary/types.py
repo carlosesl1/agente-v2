@@ -331,6 +331,7 @@ class TypedFact:
             "country_code": StringSlot,
             "birth_date": DateSlot,
             "gender": StringSlot,
+            "passenger_manifest": StringSlot,
             "critical_outcome": StringSlot,
         }
         expected = expected_types.get(self.name)

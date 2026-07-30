@@ -17,6 +17,7 @@ from v2_contracts.critical_actions import (
     PendingCriticalActionContext,
 )
 from v2_contracts.providers import ReadObservation, ReadRequest
+from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -148,6 +149,7 @@ class ModelRequest:
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
+    passenger_manifest_status: PassengerManifestStatus | None = None
     critical_outcome: str | None = None
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
@@ -177,6 +179,12 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
+        if self.passenger_manifest_status is not None and type(
+            self.passenger_manifest_status
+        ) is not PassengerManifestStatus:
+            raise InvalidModelProposal(
+                "passenger_manifest_status must be exact or None"
+            )
         if self.critical_outcome not in (
             None,
             "proposal_revoked_after_refresh",
@@ -238,6 +246,7 @@ class ModelProposal:
     approval_basis: ApprovalBasis | None = None
     selection_requested: bool = False
     pending_disposition: str | None = None
+    passengers: tuple[PassengerInput, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -256,6 +265,16 @@ class ModelProposal:
             raise InvalidModelProposal("facts must contain exact ModelFact values")
         if len({item.name for item in self.facts}) != len(self.facts):
             raise InvalidModelProposal("facts must have unique names")
+        if type(self.passengers) is not tuple or any(
+            type(item) is not PassengerInput for item in self.passengers
+        ):
+            raise InvalidModelProposal(
+                "passengers must contain exact PassengerInput values"
+            )
+        if len({item.position for item in self.passengers}) != len(self.passengers):
+            raise InvalidModelProposal("passenger updates must have unique positions")
+        if self.intent == "confirm" and self.passengers:
+            raise InvalidModelProposal("confirm intent cannot carry passenger updates")
         if self.intent == "confirm" and self.facts:
             raise InvalidModelProposal("confirm intent cannot carry material facts")
         if type(self.read_requests) is not tuple or any(

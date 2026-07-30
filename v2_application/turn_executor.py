@@ -845,7 +845,7 @@ def _state_model_facts(
     return tuple(
         ModelFact(item.name, item.value.value)
         for item in projection.facts
-        if item.name != "critical_outcome"
+        if item.name not in ("critical_outcome", "passenger_manifest")
     )
 
 
