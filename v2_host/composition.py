@@ -258,10 +258,6 @@ class V2Container:
             raise ValueError("controlled ingress now must be exact UTC")
         if self.settings.runtime_mode is not RuntimeMode.CONTROLLED_WRITE:
             return None
-        if not self.settings.manychat_delivery_enabled:
-            return "manychat_delivery_gate_closed"
-        if not self.settings.write_window_is_open(now):
-            return "write_window_closed"
         if self.settings.public_authority_manifest_path is None:
             return "public_authority_missing"
         reason = active_authority_reason(

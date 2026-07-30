@@ -239,7 +239,8 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         "contract_digest": "4" * 64,
         "deadline_at": "2099-01-01T00:00:00+00:00",
         "allocations": [
-            {"allocation_id": "allocation:controlled-0", "ordinal": 0}
+            {"allocation_id": "allocation:controlled-0", "ordinal": 0},
+            {"allocation_id": "allocation:controlled-1", "ordinal": 1},
         ],
     }
     signed = {
@@ -284,6 +285,15 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert type(workers[WorkerQueue.RESERVATION]) is ClosedCapabilityWorker
         assert workers[WorkerQueue.RECONCILIATION]._manual_handoff is not None
         assert settings.all_real_effect_gates_closed is True
+        assert container.public_turn_capacity(
+            now=datetime(2026, 8, 1, tzinfo=timezone.utc)
+        ) == 1
+        assert (
+            container.controlled_public_ingress_reason(
+                now=datetime(2026, 8, 1, tzinfo=timezone.utc)
+            )
+            is None
+        )
         assert container.readiness().status == "ready"
     finally:
         container.close()
