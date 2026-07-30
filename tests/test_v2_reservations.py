@@ -15,6 +15,8 @@ from reservation_domain import (
     ExecutionCertainty,
     ManualReviewState,
     Money,
+    PassengerFacts,
+    Party,
     ReservationCommand,
     ReservationOperation,
     ServiceKind,
@@ -31,6 +33,7 @@ from v2_application.reservations import (
     DispatchRejected,
     ReservationAllocator,
     V2ReservationExecutionAdapter,
+    _provider_payload,
 )
 from v2_application.relay_worker import (
     build_reservation_relay_bundle,
@@ -262,6 +265,161 @@ def _package_command(*, booking_profile: bool = False) -> ReservationCommand:
         payload=CommandPayload(components, customer, terms),
         created_at=NOW,
     )
+
+
+def _group_activity_command(
+    passengers: tuple[PassengerFacts, ...],
+) -> ReservationCommand:
+    component = replace(
+        _lookup("bokun").offers[0],
+        party=Party(2, 1),
+    )
+    customer = CustomerFacts(
+        customer_ref="customer:v2-group-001",
+        full_name="Contato Grupo",
+        email="group@example.invalid",
+        phone_e164="+1" + "202" + "555" + "0456",
+        country_code="BR",
+        passengers=passengers,
+    )
+    terms = EconomicTerms(payment_method="wise")
+    components = (component,)
+    signature = subject_signature(
+        components=components,
+        customer=customer,
+        terms=terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id="workflow:v2-group-001",
+        draft_id="draft:v2-group-001",
+        draft_version=1,
+        signature=signature,
+        operation=ReservationOperation.BOOK_ACTIVITY,
+    )
+    return ReservationCommand(
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        workflow_id="workflow:v2-group-001",
+        draft_id="draft:v2-group-001",
+        draft_version=1,
+        subject_signature=signature,
+        operation=ReservationOperation.BOOK_ACTIVITY,
+        payload=CommandPayload(components, customer, terms),
+        created_at=NOW,
+    )
+
+
+def _group_passengers() -> tuple[PassengerFacts, ...]:
+    return (
+        PassengerFacts(1, "adult", "Pessoa Um", date(1990, 1, 2), "f", "BR"),
+        PassengerFacts(2, "adult", "Pessoa Dois", date(1992, 3, 4), "m", "BR"),
+        PassengerFacts(3, "child", "Pessoa Três", date(2016, 5, 6), "f", "BR"),
+    )
+
+
+def test_group_activity_prepare_accepts_exact_complete_manifest() -> None:
+    command = _group_activity_command(_group_passengers())
+    adapter = V2ReservationExecutionAdapter(
+        provider="bokun",
+        port=FakeReservationPort(
+            "bokun", _result(ProviderCertainty.EFFECT_CONFIRMED)
+        ),
+        authorization=_authorization("bokun"),
+        require_private_binding=False,
+    )
+
+    request = adapter.prepare(command)
+
+    assert request.canonical_payload == dumps_command(command)
+
+
+def test_group_activity_dispatch_v2_binds_each_passenger_in_party_order() -> None:
+    command = _group_activity_command(_group_passengers())
+    payload = json.loads(
+        _provider_payload(
+            command,
+            "bokun",
+            {
+                "bokun_product_id": "912303",
+                "start_time_id": "start-1",
+                "rate_id": "rate-1",
+                "adult_pricing_category_id": "adult-1",
+                "child_pricing_category_id": "child-1",
+            },
+        )
+    )
+
+    assert payload["schema"] == "v2-reservation-dispatch-v2"
+    assert payload["offer"]["party"] == {"adults": 2, "children": 1}
+    assert payload["customer"]["passengers"] == [
+        {
+            "position": 1,
+            "participant_type": "adult",
+            "full_name": "Pessoa Um",
+            "birth_date": "1990-01-02",
+            "gender": "f",
+            "country_code": "BR",
+        },
+        {
+            "position": 2,
+            "participant_type": "adult",
+            "full_name": "Pessoa Dois",
+            "birth_date": "1992-03-04",
+            "gender": "m",
+            "country_code": "BR",
+        },
+        {
+            "position": 3,
+            "participant_type": "child",
+            "full_name": "Pessoa Três",
+            "birth_date": "2016-05-06",
+            "gender": "f",
+            "country_code": "BR",
+        },
+    ]
+    assert "birth_date" not in payload["customer"]
+    assert "gender" not in payload["customer"]
+
+
+def test_group_activity_incomplete_manifest_fails_before_fence() -> None:
+    command = _group_activity_command(_group_passengers()[:2])
+    adapter = V2ReservationExecutionAdapter(
+        provider="bokun",
+        port=FakeReservationPort(
+            "bokun", _result(ProviderCertainty.EFFECT_CONFIRMED)
+        ),
+        authorization=_authorization("bokun"),
+        require_private_binding=False,
+    )
+
+    with pytest.raises(PreparationFailure) as raised:
+        adapter.prepare(command)
+
+    assert raised.value.reason == "booking_profile_incomplete"
+    assert raised.value.retryable is False
+
+
+def test_single_activity_dispatch_v2_derives_one_passenger_from_legacy_profile() -> None:
+    activity = ReservationAllocator().allocate(
+        _package_command(booking_profile=True)
+    ).commands[1]
+    payload = json.loads(
+        _provider_payload(
+            activity,
+            "bokun",
+            {
+                "bokun_product_id": "912303",
+                "start_time_id": "start-1",
+                "rate_id": "rate-1",
+                "adult_pricing_category_id": "adult-1",
+            },
+        )
+    )
+
+    assert payload["schema"] == "v2-reservation-dispatch-v2"
+    assert len(payload["customer"]["passengers"]) == 1
+    assert payload["customer"]["passengers"][0]["participant_type"] == "adult"
+    assert payload["customer"]["passengers"][0]["birth_date"] == "1990-01-02"
 
 
 def test_private_binding_prepare_keeps_exact_command_payload_through_fence(

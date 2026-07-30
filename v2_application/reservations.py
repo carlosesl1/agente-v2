@@ -15,6 +15,7 @@ from reservation_domain import (
     ReservationOperation,
     ServiceKind,
     dumps_command,
+    effective_passengers,
     loads_command,
 )
 from reservation_domain.signature import (
@@ -64,6 +65,19 @@ _CERTAINTY: Final = {
 }
 
 
+def _private_provider_fields(
+    provider: str,
+    command: ReservationCommand,
+) -> frozenset[str]:
+    expected = _PRIVATE_PROVIDER_FIELDS[provider]
+    if provider == "bokun":
+        if len(command.payload.components) != 1:
+            raise DispatchRejected("Bókun command must bind one component")
+        if command.payload.components[0].party.children:
+            expected = frozenset((*expected, "child_pricing_category_id"))
+    return expected
+
+
 def _provider_payload(
     command: ReservationCommand,
     provider: str,
@@ -79,8 +93,20 @@ def _provider_payload(
         raise DispatchRejected("provider and component service do not match")
     customer = command.payload.customer
     terms = command.payload.terms
+    passengers = ()
+    if provider == "bokun":
+        try:
+            passengers = effective_passengers(customer, component.party)
+        except (TypeError, ValueError) as exc:
+            raise DispatchRejected(
+                "Bókun passenger manifest is incomplete or divergent"
+            ) from exc
     payload = {
-        "schema": "v2-reservation-dispatch-v1",
+        "schema": (
+            "v2-reservation-dispatch-v2"
+            if provider == "bokun"
+            else "v2-reservation-dispatch-v1"
+        ),
         "command_id": command.command_id,
         "operation": command.operation.value,
         "offer": {
@@ -108,13 +134,20 @@ def _provider_payload(
             "phone_e164": customer.phone_e164,
             "country_code": customer.country_code,
             **(
-                {"birth_date": customer.birth_date.isoformat()}
-                if customer.birth_date is not None and provider == "bokun"
-                else {}
-            ),
-            **(
-                {"gender": customer.gender}
-                if customer.gender is not None and provider == "bokun"
+                {
+                    "passengers": [
+                        {
+                            "position": item.position,
+                            "participant_type": item.participant_type,
+                            "full_name": item.full_name,
+                            "birth_date": item.birth_date.isoformat(),
+                            "gender": item.gender,
+                            "country_code": item.country_code,
+                        }
+                        for item in passengers
+                    ]
+                }
+                if provider == "bokun"
                 else {}
             ),
         },
@@ -179,11 +212,6 @@ def _load_prepared_payload(
     private_binding = decoded["private_binding"]
     if type(command_value) is not dict or type(private_binding) is not dict:
         raise DispatchRejected("prepared reservation payload has invalid objects")
-    if set(private_binding) != _PRIVATE_PROVIDER_FIELDS[provider] or any(
-        type(name) is not str or type(value) is not str or not value
-        for name, value in private_binding.items()
-    ):
-        raise DispatchRejected("prepared reservation private binding is invalid")
     command_wire = json.dumps(
         command_value,
         ensure_ascii=False,
@@ -192,6 +220,11 @@ def _load_prepared_payload(
         allow_nan=False,
     )
     command = loads_command(command_wire)
+    if set(private_binding) != _private_provider_fields(provider, command) or any(
+        type(name) is not str or type(value) is not str or not value
+        for name, value in private_binding.items()
+    ):
+        raise DispatchRejected("prepared reservation private binding is invalid")
     if (
         len(command.payload.components) != 1
         or decoded["private_binding_hash"] != command.payload.components[0].provider_ref
@@ -348,12 +381,12 @@ class V2ReservationExecutionAdapter:
         if self.provider == "bokun":
             customer = command.payload.customer
             component = command.payload.components[0]
-            if customer.birth_date is None or customer.gender is None:
-                raise PreparationFailure("booking_profile_incomplete", False, ())
-            if component.party.adults + component.party.children != 1:
+            try:
+                effective_passengers(customer, component.party)
+            except (TypeError, ValueError) as exc:
                 raise PreparationFailure(
-                    "canary_passenger_count_unsupported", False, ()
-                )
+                    "booking_profile_incomplete", False, ()
+                ) from exc
         if self._binding_resolver is None and self._require_private_binding:
             raise PreparationFailure("private_binding_resolver_unavailable", False, ())
         payload = dumps_command(command)
