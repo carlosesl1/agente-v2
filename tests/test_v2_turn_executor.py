@@ -613,7 +613,7 @@ class FakeActivityReadPort:
                 "product_id": "product:buracao",
                 "product_public_name": "Cachoeira do Buracão",
                 "activity_date": "2026-08-12",
-                "participants": 2,
+                "participants": request.participants,
                 "total_amount": "1300.00",
                 "currency": "BRL",
                 "available": True,
@@ -1352,7 +1352,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         kind=ReadKind.ACTIVITY,
         product_id="product:buracao",
         activity_date=date(2026, 8, 12),
-        participants=2,
+        participants=1,
     )
     first = ModelProposal(
         source_event_id=BATCH.batch_id,
@@ -1373,7 +1373,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
             ModelFact("service", "agency"),
             ModelFact("product_id", "product:buracao"),
             ModelFact("activity_date", date(2026, 8, 12)),
-            ModelFact("adults", 2),
+            ModelFact("adults", 1),
             ModelFact("children", 0),
             ModelFact("payment_method", "stripe"),
         ),
@@ -1442,7 +1442,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
                     kind=ReadKind.ACTIVITY,
                     product_id="product:buracao",
                     activity_date=date(2026, 8, 12),
-                    participants=2,
+                    participants=1,
                 ),
             ),
         )
@@ -1477,7 +1477,7 @@ def test_activity_confirmation_derives_current_provider_read() -> None:
         kind=ReadKind.ACTIVITY,
         product_id="product:buracao",
         activity_date=date(2026, 8, 12),
-        participants=2,
+        participants=1,
     )
     selection = ModelProposal(
         source_event_id=BATCH.batch_id,
@@ -1488,7 +1488,7 @@ def test_activity_confirmation_derives_current_provider_read() -> None:
             ModelFact("service", "agency"),
             ModelFact("product_id", "product:buracao"),
             ModelFact("start_date", date(2026, 8, 12)),
-            ModelFact("adults", 2),
+            ModelFact("adults", 1),
             ModelFact("children", 0),
             ModelFact("payment_method", "stripe"),
             ModelFact("birth_date", date(1992, 4, 15)),
@@ -1545,7 +1545,7 @@ def test_activity_confirmation_derives_current_provider_read() -> None:
         assert derived[0].kind is ReadKind.ACTIVITY
         assert derived[0].product_id == "product:buracao"
         assert derived[0].activity_date == date(2026, 8, 12)
-        assert derived[0].participants == 2
+        assert derived[0].participants == 1
     finally:
         store.close()
 

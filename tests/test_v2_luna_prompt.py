@@ -35,6 +35,14 @@ def test_private_profile_marker_prevents_reasking_authenticated_contact() -> Non
     assert "female→f" in PROMPT
 
 
+def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> None:
+    assert "Toda data de serviço explícita na mensagem atual" in PROMPT
+    assert "toda quantidade explícita de adultos/crianças/participantes" in PROMPT
+    assert "não mencione a data ou quantidade em reply_chunks sem também persisti-la" in PROMPT
+    assert "Nov 18 2026" in PROMPT
+    assert "one person" in PROMPT
+
+
 def test_informational_policy_questions_and_prompt_injection_do_not_force_handoff() -> None:
     assert "dúvida informativa sobre política de cancelamento" in PROMPT
     assert "não abre handoff por si só" in PROMPT

@@ -852,6 +852,29 @@ def _handoff_effect_guard_reply(locale: str) -> str:
     return "Seu atendimento humano continua ativo; não vou executar efeitos."
 
 
+def _unsupported_activity_party(projection: ConversationProjection) -> bool:
+    if DesiredService.AGENCY not in projection.desired_services:
+        return False
+    values = {fact.name: fact.value.value for fact in projection.facts}
+    adults = values.get("adults", 0)
+    children = values.get("children", 0)
+    if type(adults) is not int or type(children) is not int:
+        return False
+    return adults + children > 1
+
+
+def _activity_group_handoff_reply(locale: str) -> str:
+    if locale.casefold().startswith("en"):
+        return (
+            "For this tour with more than one person, I’ll ask the team "
+            "to continue the group booking."
+        )
+    return (
+        "Para esse passeio com mais de uma pessoa, vou chamar a equipe "
+        "para continuar a reserva do grupo."
+    )
+
+
 class PackageCommandCoordinator:
     """Combine two authorized drafts into one package confirmation subject."""
 
@@ -1063,7 +1086,12 @@ class V2ConversationReducer:
         )
         if proposal.intent == "select":
             merged = _without_critical_outcome(merged)
-        if proposal.intent == "request_handoff":
+        force_activity_group_handoff = (
+            proposal.intent != "request_handoff"
+            and state.handoff is None
+            and _unsupported_activity_party(merged)
+        )
+        if proposal.intent == "request_handoff" or force_activity_group_handoff:
             if state.handoff is None:
                 handoff_request = HandoffRequested(
                     handoff_id=_identity(
@@ -1078,7 +1106,11 @@ class V2ConversationReducer:
                         proposal.source_event_id,
                         prefix="incident",
                     ),
-                    reason_code=HandoffReasonCode.CUSTOMER_REQUESTED,
+                    reason_code=(
+                        HandoffReasonCode.OPERATIONAL_REVIEW
+                        if force_activity_group_handoff
+                        else HandoffReasonCode.CUSTOMER_REQUESTED
+                    ),
                     source_event_id=proposal.source_event_id,
                     reservation_anchor=None,
                     requested_at=instant,
@@ -1106,8 +1138,12 @@ class V2ConversationReducer:
                 commands=(),
                 public_reply=ConversationReply(
                     "handoff",
-                    proposal.reply_chunks
-                    or ("Vou encaminhar seu atendimento para uma pessoa.",),
+                    (
+                        (_activity_group_handoff_reply(merged.locale),)
+                        if force_activity_group_handoff
+                        else proposal.reply_chunks
+                        or ("Vou encaminhar seu atendimento para uma pessoa.",)
+                    ),
                 ),
                 handoff_request=handoff_request,
                 receipt_requirements=("handoff_relay",),

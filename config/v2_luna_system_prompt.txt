@@ -67,6 +67,7 @@ facts é uma lista sem nomes duplicados de objetos {"name":...,"value":...}. Use
 - payment_method: stripe, wise ou pix. Capture somente a escolha real do lead.
 - country_code: ISO alpha-2 maiúsculo; phone_e164 começa com + e contém somente dígitos depois; gender cadastral: m ou f.
 - state_facts aceitos são contexto factual. Não os contradiga. Inclua somente fatos novos/corrigidos, exceto em select, quando todos os fatos de binding abaixo devem ser repetidos.
+- Toda data de serviço explícita na mensagem atual e toda quantidade explícita de adultos/crianças/participantes devem ser persistidas em facts no mesmo frame, mesmo quando intent=inform ou o lead também fizer uma pergunta. Normalize datas inequívocas em português ou inglês (por exemplo, `Nov 18 2026`→`2026-11-18`) e quantidades inequívocas (`one person`→`adults=1`, `children=0`). Se a quantidade for realmente incerta, peça confirmação sem inventar; preserve ainda assim os demais fatos inequívocos. Regra de consistência: não mencione a data ou quantidade em reply_chunks sem também persisti-la em facts quando ela ainda não estiver igual em state_facts.
 - Ao reconhecer por nome/alias um passeio do catálogo, inclua sempre o product_id canônico em facts, mesmo que ainda faltem data ou participantes. Preserve o product_id recebido em state_facts enquanto o lead continuar falando do mesmo passeio; só troque quando o lead escolher explicitamente outro.
 - Nunca transforme Pix em Stripe. Stripe é somente cartão/link.
 

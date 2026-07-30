@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -92,6 +91,61 @@ LODGING_OFFER_ID = "offer:" + "a" * 32
 ACTIVITY_OFFER_ID = "offer:" + "c" * 32
 LODGING_BINDING_HASH = "b" * 64
 ACTIVITY_BINDING_HASH = "d" * 64
+
+
+def test_activity_party_over_one_forces_operational_handoff_from_structured_facts() -> None:
+    proposal = _proposal(
+        source="event:unsupported-activity-party",
+        intent="adjust",
+        service="agency",
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.handoff_request is not None
+    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
+    assert decision.next_state.handoff is not None
+    assert decision.public_reply.chunks == (
+        "Para esse passeio com mais de uma pessoa, vou chamar a equipe para continuar a reserva do grupo.",
+    )
+    assert decision.receipt_requirements == ("handoff_relay",)
+
+
+def test_single_activity_participant_does_not_force_operational_handoff() -> None:
+    proposal = _proposal(
+        source="event:supported-activity-party",
+        intent="adjust",
+        service="agency",
+    )
+    proposal = replace(
+        proposal,
+        facts=tuple(
+            ModelFact("adults", 1) if fact.name == "adults" else fact
+            for fact in proposal.facts
+        ),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.handoff_request is None
+    assert decision.next_state.handoff is None
 
 
 def test_active_handoff_effect_guard_is_localized() -> None:
@@ -255,7 +309,7 @@ def _proposal(
     )
 
 
-def _lodging_read(*, amount: str = "480.00") -> ReadObservation:
+def _lodging_read(*, amount: str = "480.00", adults: int = 2) -> ReadObservation:
     return ReadObservation(
         request_hash="1" * 64,
         provider="cloudbeds",
@@ -266,7 +320,7 @@ def _lodging_read(*, amount: str = "480.00") -> ReadObservation:
             "room_public_name": "Suíte Casal",
             "check_in": "2026-08-10",
             "check_out": "2026-08-12",
-            "adults": 2,
+            "adults": adults,
             "children": 0,
             "total_amount": amount,
             "currency": "BRL",
@@ -276,7 +330,7 @@ def _lodging_read(*, amount: str = "480.00") -> ReadObservation:
     )
 
 
-def _activity_read() -> ReadObservation:
+def _activity_read(*, participants: int = 2) -> ReadObservation:
     return ReadObservation(
         request_hash="2" * 64,
         provider="bokun",
@@ -287,7 +341,7 @@ def _activity_read() -> ReadObservation:
             "product_id": "product:buracao-001",
             "product_public_name": "Buracão",
             "activity_date": "2026-08-11",
-            "participants": 2,
+            "participants": participants,
             "total_amount": "400.00",
             "currency": "BRL",
             "available": True,
@@ -1256,7 +1310,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
             ModelFact("start_date", date(2026, 8, 10)),
             ModelFact("end_date", date(2026, 8, 12)),
             ModelFact("activity_date", date(2026, 8, 11)),
-            ModelFact("adults", 2),
+            ModelFact("adults", 1),
             ModelFact("children", 0),
             ModelFact("payment_method", "stripe"),
             ModelFact("birth_date", date(1990, 1, 2)),
@@ -1271,7 +1325,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
         projection=_projection(package=True),
         proposal=proposal,
         profile=_profile(),
-        reads=(_lodging_read(), _activity_read()),
+        reads=(_lodging_read(adults=1), _activity_read(participants=1)),
         fact_commitment_hash=FRAME_HASH,
         now=NOW,
     )
@@ -1306,7 +1360,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
             effect_proposals=(),
         ),
         profile=_profile(),
-        reads=(_lodging_read(), _activity_read()),
+        reads=(_lodging_read(adults=1), _activity_read(participants=1)),
         fact_commitment_hash=FRAME_HASH,
         now=NOW + timedelta(seconds=1),
     )
