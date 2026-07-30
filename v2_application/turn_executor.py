@@ -15,6 +15,7 @@ from typing import Final
 from reservation_boundary.conversation import (
     ConversationProjection,
     ConversationStage,
+    DesiredService,
     MayaIntentClosure,
     MayaTurnClosure,
     MayaTurnProposal,
@@ -47,6 +48,7 @@ from reservation_boundary.types import (
 )
 from reservation_domain import (
     AwaitingConfirmationState,
+    Party,
     ReservationCommand,
     ServiceKind,
     dumps_command,
@@ -54,6 +56,12 @@ from reservation_domain import (
 from reservation_followup import HandoffRequested
 from v2_application.conversation import V2ConversationReducer
 from v2_application.read_bridge import bridge_availability_observation
+from v2_application.passengers import (
+    PassengerManifestConflict,
+    merge_projection_manifest,
+    projection_manifest_party,
+    projection_manifest_status,
+)
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import (
     build_handoff_relay_bundle,
@@ -64,6 +72,7 @@ from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
 from v2_contracts.model import AuditedModelTurn, ModelFact, ModelProposal, ModelRequest
+from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -498,6 +507,7 @@ def _structured_selection_review_required(
     explicit_facts: tuple[ModelFact, ...],
     *,
     private_profile_complete: bool,
+    passenger_manifest_complete: bool = False,
 ) -> bool:
     """Gate one semantic selection review from closed structured facts only."""
 
@@ -507,6 +517,7 @@ def _structured_selection_review_required(
         or type(explicit_facts) is not tuple
         or any(type(item) is not ModelFact for item in explicit_facts)
         or type(private_profile_complete) is not bool
+        or type(passenger_manifest_complete) is not bool
     ):
         raise TypeError("selection review gate requires exact V2 contracts")
     if not private_profile_complete or not any(
@@ -521,16 +532,22 @@ def _structured_selection_review_required(
         values[fact.name] = fact.value
     adults = values.get("adults")
     children = values.get("children", 0)
+    if type(adults) is not int or type(children) is not int:
+        return False
+    passenger_ready = (
+        type(values.get("birth_date")) is date
+        and values.get("gender") in {"m", "f"}
+        if adults + children == 1
+        else passenger_manifest_complete
+    )
     return (
         values.get("service") == "agency"
         and type(values.get("product_id")) is str
         and type(values.get("activity_date") or values.get("start_date")) is date
-        and type(adults) is int
-        and type(children) is int
-        and adults + children == 1
+        and adults >= 1
+        and children >= 0
         and values.get("payment_method") in {"stripe", "wise", "pix"}
-        and type(values.get("birth_date")) is date
-        and values.get("gender") in {"m", "f"}
+        and passenger_ready
     )
 
 
@@ -539,6 +556,7 @@ def _force_structured_activity_summary_preparation(
     *,
     state_facts: tuple[ModelFact, ...],
     explicit_facts: tuple[ModelFact, ...],
+    passenger_manifest_complete: bool = False,
 ) -> ModelProposal:
     """Prepare one provider read; this cannot authorize or emit an effect."""
 
@@ -548,6 +566,7 @@ def _force_structured_activity_summary_preparation(
         state_facts,
         explicit_facts,
         private_profile_complete=True,
+        passenger_manifest_complete=passenger_manifest_complete,
     ):
         return proposal
     values = {fact.name: fact.value for fact in (*state_facts, *explicit_facts)}
@@ -581,6 +600,7 @@ def _repair_requested_activity_selection(
     state_facts: tuple[ModelFact, ...],
     observations: tuple[ReadObservation, ...],
     private_profile_complete: bool,
+    passenger_manifest_complete: bool = False,
 ) -> ModelProposal:
     """Complete an explicitly signalled selection from exact structured evidence."""
 
@@ -592,6 +612,7 @@ def _repair_requested_activity_selection(
         or type(observations) is not tuple
         or any(type(item) is not ReadObservation for item in observations)
         or type(private_profile_complete) is not bool
+        or type(passenger_manifest_complete) is not bool
     ):
         raise TypeError("selection repair requires exact V2 contracts")
     if (
@@ -624,12 +645,19 @@ def _repair_requested_activity_selection(
         or activity_date != request.activity_date
         or type(adults) is not int
         or type(children) is not int
-        or adults + children != 1
+        or adults < 1
+        or children < 0
         or request_adults != adults
         or request_children != children
         or values.get("payment_method") not in {"stripe", "wise", "pix"}
-        or type(values.get("birth_date")) is not date
-        or values.get("gender") not in {"m", "f"}
+        or (
+            adults + children == 1
+            and (
+                type(values.get("birth_date")) is not date
+                or values.get("gender") not in {"m", "f"}
+            )
+        )
+        or (adults + children > 1 and not passenger_manifest_complete)
     ):
         return second_proposal
 
@@ -656,8 +684,14 @@ def _repair_requested_activity_selection(
         ModelFact("adults", adults),
         ModelFact("children", children),
         ModelFact("payment_method", values["payment_method"]),
-        ModelFact("birth_date", values["birth_date"]),
-        ModelFact("gender", values["gender"]),
+        *(
+            (
+                ModelFact("birth_date", values["birth_date"]),
+                ModelFact("gender", values["gender"]),
+            )
+            if adults + children == 1
+            else ()
+        ),
     )
     return replace(
         second_proposal,
@@ -852,6 +886,83 @@ def _state_model_facts(
         for item in projection.facts
         if item.name not in ("critical_outcome", "passenger_manifest")
     )
+
+
+def _activity_party_for_manifest(
+    projection: ConversationProjection,
+    proposal: ModelProposal | None = None,
+) -> Party | None:
+    values = {
+        item.name: item.value.value
+        for item in projection.facts
+        if item.name != "passenger_manifest"
+    }
+    if proposal is not None:
+        values.update({item.name: item.value for item in proposal.facts})
+    service = values.get("service")
+    activity_desired = (
+        service in ("agency", "package")
+        or DesiredService.AGENCY in projection.desired_services
+    )
+    if not activity_desired:
+        if service == "hostel":
+            return None
+        try:
+            return projection_manifest_party(projection)
+        except (TypeError, ValueError) as exc:
+            raise TurnExecutionError(
+                "persisted passenger manifest party is invalid"
+            ) from exc
+    adults = values.get("adults")
+    children = values.get("children", 0)
+    if type(adults) is not int or type(children) is not int:
+        try:
+            return projection_manifest_party(projection)
+        except (TypeError, ValueError) as exc:
+            raise TurnExecutionError(
+                "persisted passenger manifest party is invalid"
+            ) from exc
+    try:
+        return Party(adults, children)
+    except (TypeError, ValueError) as exc:
+        raise TurnExecutionError("activity party for passenger manifest is invalid") from exc
+
+
+def _passenger_status(
+    projection: ConversationProjection,
+    proposal: ModelProposal | None = None,
+) -> PassengerManifestStatus | None:
+    party = _activity_party_for_manifest(projection, proposal)
+    try:
+        return projection_manifest_status(projection, party)
+    except (TypeError, ValueError) as exc:
+        raise TurnExecutionError("passenger manifest status is invalid") from exc
+
+
+def _merge_passenger_updates(
+    projection: ConversationProjection,
+    proposal: ModelProposal,
+    *,
+    frame_commitment_hash: str,
+) -> ConversationProjection:
+    party = _activity_party_for_manifest(projection, proposal)
+    try:
+        return merge_projection_manifest(
+            projection,
+            proposal.passengers,
+            party,
+            frame_commitment_hash=frame_commitment_hash,
+        )
+    except (PassengerManifestConflict, TypeError, ValueError) as exc:
+        raise TurnExecutionError("passenger manifest update was rejected") from exc
+
+
+def _passenger_manifest_complete(
+    projection: ConversationProjection,
+    proposal: ModelProposal | None = None,
+) -> bool:
+    status = _passenger_status(projection, proposal)
+    return status is not None and not status.missing_by_position
 
 
 def _critical_outcome(projection: ConversationProjection) -> str | None:
@@ -1166,6 +1277,7 @@ class V2TurnExecutor:
             locale=projection.locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
+            passenger_manifest_status=_passenger_status(projection),
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
             private_profile_complete=profile.complete,
@@ -1180,6 +1292,12 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        first_frame_hash = _frame_commitments(first_audited)[-1].canonical_hash()
+        projection = _merge_passenger_updates(
+            projection,
+            first_proposal,
+            frame_commitment_hash=first_frame_hash,
+        )
         selection_review = (
             current.state.handoff is None
             and pending_action is None
@@ -1189,6 +1307,10 @@ class V2TurnExecutor:
                 _state_model_facts(projection),
                 explicit_customer_facts,
                 private_profile_complete=profile.complete,
+                passenger_manifest_complete=_passenger_manifest_complete(
+                    projection,
+                    first_proposal,
+                ),
             )
         )
         confirmation_review = (
@@ -1201,6 +1323,10 @@ class V2TurnExecutor:
                 request,
                 confirmation_review_required=confirmation_review,
                 selection_review_required=selection_review,
+                passenger_manifest_status=_passenger_status(
+                    projection,
+                    first_proposal,
+                ),
             )
             review_audited = self._model.complete_audited(review_request)
             if type(review_audited) is not AuditedModelTurn:
@@ -1219,6 +1345,12 @@ class V2TurnExecutor:
                 in ("confirm", "adjust", "request_handoff")
             ):
                 first_proposal = review_proposal
+                review_frame_hash = _frame_commitments(review_audited)[-1].canonical_hash()
+                projection = _merge_passenger_updates(
+                    projection,
+                    review_proposal,
+                    frame_commitment_hash=review_frame_hash,
+                )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
                 frames=(*first_audited.frames, *review_audited.frames),
@@ -1233,6 +1365,10 @@ class V2TurnExecutor:
                 first_proposal,
                 state_facts=_state_model_facts(projection),
                 explicit_facts=explicit_customer_facts,
+                passenger_manifest_complete=_passenger_manifest_complete(
+                    projection,
+                    first_proposal,
+                ),
             )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
@@ -1338,6 +1474,10 @@ class V2TurnExecutor:
                 state_version=current.version,
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
+                passenger_manifest_status=_passenger_status(
+                    projection,
+                    first_proposal,
+                ),
                 critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
                 private_profile_complete=profile.complete,
@@ -1352,6 +1492,12 @@ class V2TurnExecutor:
             )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
+            second_frame_hash = _frame_commitments(second_audited)[-1].canonical_hash()
+            projection = _merge_passenger_updates(
+                projection,
+                proposal,
+                frame_commitment_hash=second_frame_hash,
+            )
             second_fact_names = {item.name for item in proposal.facts}
             proposal = replace(
                 proposal,
@@ -1372,6 +1518,10 @@ class V2TurnExecutor:
                 state_facts=_state_model_facts(projection),
                 observations=v2_observations,
                 private_profile_complete=profile.complete,
+                passenger_manifest_complete=_passenger_manifest_complete(
+                    projection,
+                    proposal,
+                ),
             )
             if derived_confirmation_reads and (
                 proposal.intent != "confirm"

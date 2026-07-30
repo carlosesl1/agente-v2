@@ -6,6 +6,7 @@ from datetime import date
 import json
 from typing import Final
 
+from reservation_boundary import ConversationProjection, StringSlot, TypedFact
 from reservation_domain import PassengerFacts, Party
 from v2_contracts.passengers import (
     PASSENGER_FIELD_ORDER,
@@ -19,6 +20,25 @@ _MANIFEST_FIELDS: Final = frozenset(("schema", "adults", "children", "passengers
 _PASSENGER_FIELDS: Final = frozenset(
     ("position", "participant_type", *PASSENGER_FIELD_ORDER)
 )
+_FACT_ORDER: Final = {
+    "language": 0,
+    "service": 1,
+    "product_id": 2,
+    "start_date": 3,
+    "end_date": 4,
+    "activity_date": 5,
+    "adults": 6,
+    "children": 7,
+    "payment_method": 8,
+    "full_name": 9,
+    "email": 10,
+    "phone_e164": 11,
+    "country_code": 12,
+    "birth_date": 13,
+    "gender": 14,
+    "passenger_manifest": 15,
+    "critical_outcome": 16,
+}
 
 
 class PassengerManifestConflict(ValueError):
@@ -225,9 +245,106 @@ def complete_manifest(
     return tuple(result)
 
 
+def projection_manifest_json(
+    projection: ConversationProjection,
+) -> str | None:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be an exact ConversationProjection")
+    matches = tuple(
+        item for item in projection.facts if item.name == "passenger_manifest"
+    )
+    if not matches:
+        return None
+    if len(matches) != 1 or type(matches[0].value) is not StringSlot:
+        raise ValueError("projection passenger manifest fact is invalid")
+    return matches[0].value.value
+
+
+def projection_manifest_party(
+    projection: ConversationProjection,
+) -> Party | None:
+    manifest_json = projection_manifest_json(projection)
+    if manifest_json is None:
+        return None
+    try:
+        decoded = json.loads(manifest_json, object_pairs_hook=_unique_object)
+        if type(decoded) is not dict:
+            raise ValueError("passenger manifest root is invalid")
+        party = Party(decoded.get("adults"), decoded.get("children"))
+        _load(manifest_json, party)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("projection passenger manifest party is invalid") from exc
+    return party
+
+
+def merge_projection_manifest(
+    projection: ConversationProjection,
+    updates: tuple[PassengerInput, ...],
+    party: Party | None,
+    *,
+    frame_commitment_hash: str,
+) -> ConversationProjection:
+    """Persist a canonical manifest without exposing it as model state facts."""
+
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be an exact ConversationProjection")
+    if party is not None and type(party) is not Party:
+        raise TypeError("party must be an exact Party or None")
+    existing_json = projection_manifest_json(projection)
+    if party is None:
+        if updates:
+            raise PassengerManifestConflict(
+                "passenger updates require a complete activity party"
+            )
+        return projection
+    if existing_json is None and not updates:
+        return projection
+    merged_json = merge_manifest(existing_json, updates, party)
+    facts = {item.name: item for item in projection.facts}
+    facts["passenger_manifest"] = TypedFact(
+        "passenger_manifest",
+        StringSlot(merged_json),
+        frame_commitment_hash,
+    )
+    return ConversationProjection(
+        stage=projection.stage,
+        desired_services=projection.desired_services,
+        locale=projection.locale,
+        facts=tuple(sorted(facts.values(), key=lambda item: _FACT_ORDER[item.name])),
+        reservation_execution_projection=projection.reservation_execution_projection,
+    )
+
+
+def projection_manifest_status(
+    projection: ConversationProjection,
+    party: Party | None,
+) -> PassengerManifestStatus | None:
+    if party is None:
+        return None
+    manifest_json = projection_manifest_json(projection)
+    if manifest_json is None:
+        manifest_json = merge_manifest(None, (), party)
+    return manifest_status(manifest_json, party)
+
+
+def projection_passengers(
+    projection: ConversationProjection,
+    party: Party,
+) -> tuple[PassengerFacts, ...] | None:
+    manifest_json = projection_manifest_json(projection)
+    if manifest_json is None:
+        return None
+    return complete_manifest(manifest_json, party)
+
+
 __all__ = [
     "PassengerManifestConflict",
     "complete_manifest",
     "manifest_status",
     "merge_manifest",
+    "merge_projection_manifest",
+    "projection_manifest_json",
+    "projection_manifest_party",
+    "projection_manifest_status",
+    "projection_passengers",
 ]

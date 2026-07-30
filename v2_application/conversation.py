@@ -48,6 +48,7 @@ from reservation_domain import (
     SucceededState,
     UncertainState,
     build_commercial_draft,
+    effective_passengers,
     new_workflow,
 )
 from reservation_domain import (
@@ -69,6 +70,10 @@ from v2_application.critical_actions import (
     critical_proposal_digest,
     critical_summary_outbox_id,
     pending_action_context,
+)
+from v2_application.passengers import (
+    merge_projection_manifest,
+    projection_passengers,
 )
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.critical_actions import PendingCriticalActionContext
@@ -93,7 +98,8 @@ _FACT_ORDER = {
     "country_code": 12,
     "birth_date": 13,
     "gender": 14,
-    "critical_outcome": 15,
+    "passenger_manifest": 15,
+    "critical_outcome": 16,
 }
 
 
@@ -286,6 +292,8 @@ def _projection_values(projection: ConversationProjection) -> dict[str, object]:
 def _customer(
     profile: PrivateCustomerBinding,
     projection: ConversationProjection,
+    *,
+    activity_party: Party | None = None,
 ) -> CustomerFacts:
     facts = _projection_values(projection)
     full_name = profile.full_name or facts.get("full_name")
@@ -294,7 +302,10 @@ def _customer(
     country = profile.country_code or facts.get("country_code")
     if any(type(value) is not str for value in (full_name, email, phone, country)):
         raise ConversationReductionError("complete profile has missing customer facts")
-    return CustomerFacts(
+    passengers = ()
+    if activity_party is not None:
+        passengers = projection_passengers(projection, activity_party) or ()
+    customer = CustomerFacts(
         customer_ref=profile.binding_id,
         full_name=full_name,
         email=email,
@@ -302,18 +313,29 @@ def _customer(
         country_code=country,
         birth_date=facts.get("birth_date"),
         gender=facts.get("gender"),
+        passengers=passengers,
     )
+    if activity_party is not None:
+        try:
+            effective_passengers(customer, activity_party)
+        except (TypeError, ValueError) as exc:
+            raise ConversationReductionError(
+                "activity passenger manifest is incomplete or divergent"
+            ) from exc
+    return customer
 
 
 def _profile_ready(
     profile: PrivateCustomerBinding,
     projection: ConversationProjection,
     now: datetime,
+    *,
+    activity_party: Party | None = None,
 ) -> bool:
     if not profile.observed_at <= now < profile.expires_at:
         return False
     try:
-        _customer(profile, projection)
+        _customer(profile, projection, activity_party=activity_party)
     except (ConversationReductionError, TypeError, ValueError):
         return False
     return True
@@ -370,8 +392,7 @@ def _proposal_binds_package(
         or values.get("children") != lodging.party.children
     ):
         return False
-    party_size = lodging.party.adults + lodging.party.children
-    return activity.party.adults == party_size and activity.party.children == 0
+    return activity.party == lodging.party
 
 
 def _projection_binds_draft(
@@ -428,6 +449,22 @@ def _projection_binds_draft(
             expected["product_id"] = product_id
     else:
         return False
+    activity_components = tuple(
+        item for item in components if item.service is ServiceKind.ACTIVITY
+    )
+    if activity_components:
+        if len(activity_components) != 1:
+            return False
+        activity_party = activity_components[0].party
+        try:
+            projected_passengers = projection_passengers(projection, activity_party)
+        except (TypeError, ValueError):
+            return False
+        if draft.customer.passengers:
+            if projected_passengers != draft.customer.passengers:
+                return False
+        elif activity_party.adults + activity_party.children > 1:
+            return False
     material_names = {
         "service",
         "product_id",
@@ -527,8 +564,14 @@ def _offer_and_query(
         service = ServiceKind.ACTIVITY
         start_date = _date_value(payload.get("activity_date"), "activity_date")
         end_date = None
-        adults = payload.get("participants")
-        children = 0
+        adults = payload.get("adults")
+        children = payload.get("children")
+        if payload.get("participants") != (
+            adults + children
+            if type(adults) is int and type(children) is int
+            else None
+        ):
+            raise ConversationReductionError("activity party total is inconsistent")
         if payload.get("available") is not True:
             raise ConversationReductionError("activity offer is not available")
         label = payload.get("product_public_name")
@@ -569,7 +612,8 @@ def _offer_and_query(
             kind=ReadKind.ACTIVITY,
             product_id=product_id,
             activity_date=start_date,
-            participants=adults,
+            adults=adults,
+            children=children,
         ).query_hash()
         lookup_id = f"lookup:{product_id}:{stable_query_hash}"
     offer = OfferSnapshot(
@@ -879,51 +923,6 @@ def _workflow_activity_party(state: BoundaryState) -> Party | None:
     return activity_parties[0]
 
 
-def _unsupported_activity_party(
-    state: BoundaryState,
-    projection: ConversationProjection,
-    proposal: ModelProposal,
-) -> bool:
-    current_values = {fact.name: fact.value for fact in proposal.facts}
-    workflow_party = _workflow_activity_party(state)
-    if (
-        "service" in current_values
-        and DesiredService.AGENCY not in projection.desired_services
-    ):
-        return False
-    if DesiredService.AGENCY not in projection.desired_services and workflow_party is None:
-        return False
-    if workflow_party is None and (
-        current_values.get("service") not in {"agency", "package"}
-        or not {"adults", "children"}.intersection(current_values)
-    ):
-        return False
-    base_party = workflow_party or _projection_party(projection)
-    adults = current_values.get(
-        "adults",
-        base_party.adults if base_party is not None else None,
-    )
-    children = current_values.get(
-        "children",
-        base_party.children if base_party is not None else 0,
-    )
-    if type(adults) is not int or type(children) is not int:
-        return False
-    return adults + children > 1
-
-
-def _activity_group_handoff_reply(locale: str) -> str:
-    if locale.casefold().startswith("en"):
-        return (
-            "For this tour with more than one person, I’ll ask the team "
-            "to continue the group booking."
-        )
-    return (
-        "Para esse passeio com mais de uma pessoa, vou chamar a equipe "
-        "para continuar a reserva do grupo."
-    )
-
-
 class PackageCommandCoordinator:
     """Combine two authorized drafts into one package confirmation subject."""
 
@@ -1133,13 +1132,21 @@ class V2ConversationReducer:
             proposal,
             fact_commitment_hash=fact_commitment_hash,
         )
+        projected_activity_party = (
+            _projection_party(merged)
+            if DesiredService.AGENCY in merged.desired_services
+            else None
+        )
+        activity_party = projected_activity_party or _workflow_activity_party(state)
+        merged = merge_projection_manifest(
+            merged,
+            proposal.passengers,
+            activity_party,
+            frame_commitment_hash=fact_commitment_hash,
+        )
         if proposal.intent == "select":
             merged = _without_critical_outcome(merged)
-        activity_group_requires_handoff = (
-            state.handoff is None
-            and _unsupported_activity_party(state, merged, proposal)
-        )
-        if proposal.intent == "request_handoff" or activity_group_requires_handoff:
+        if proposal.intent == "request_handoff":
             if state.handoff is None:
                 handoff_request = HandoffRequested(
                     handoff_id=_identity(
@@ -1154,11 +1161,7 @@ class V2ConversationReducer:
                         proposal.source_event_id,
                         prefix="incident",
                     ),
-                    reason_code=(
-                        HandoffReasonCode.OPERATIONAL_REVIEW
-                        if activity_group_requires_handoff
-                        else HandoffReasonCode.CUSTOMER_REQUESTED
-                    ),
+                    reason_code=HandoffReasonCode.CUSTOMER_REQUESTED,
                     source_event_id=proposal.source_event_id,
                     reservation_anchor=None,
                     requested_at=instant,
@@ -1186,12 +1189,8 @@ class V2ConversationReducer:
                 commands=(),
                 public_reply=ConversationReply(
                     "handoff",
-                    (
-                        (_activity_group_handoff_reply(merged.locale),)
-                        if activity_group_requires_handoff
-                        else proposal.reply_chunks
-                        or ("Vou encaminhar seu atendimento para uma pessoa.",)
-                    ),
+                    proposal.reply_chunks
+                    or ("Vou encaminhar seu atendimento para uma pessoa.",),
                 ),
                 handoff_request=handoff_request,
                 receipt_requirements=("handoff_relay",),
@@ -1225,8 +1224,24 @@ class V2ConversationReducer:
         # A complete customer binding is a write-boundary requirement, not a
         # prerequisite for greetings, discovery, FAQ, or read-only provider work.
         if proposal.intent in {"select", "confirm"} and not _profile_ready(
-            profile, merged, instant
+            profile,
+            merged,
+            instant,
+            activity_party=activity_party,
         ):
+            if profile.complete and activity_party is not None:
+                if activity_party.adults + activity_party.children == 1:
+                    missing_profile_text = (
+                        "Para reservar o passeio, preciso da data de nascimento e gênero cadastral."
+                    )
+                else:
+                    missing_profile_text = (
+                        "Para reservar o passeio do grupo, preciso do nome completo, data de nascimento, gênero cadastral e país de cada passageiro."
+                    )
+            else:
+                missing_profile_text = (
+                    "Para avançar com a reserva, preciso dos seus dados de contato."
+                )
             return V2ConversationDecision(
                 next_state=_consume_without_workflow_transition(
                     state, proposal.source_event_id
@@ -1235,32 +1250,17 @@ class V2ConversationReducer:
                 commands=(),
                 public_reply=ConversationReply(
                     "profile_completion",
-                    (
-                        "Para avançar com a reserva, preciso dos seus dados de contato.",
-                    ),
+                    (missing_profile_text,),
                 ),
                 receipt_requirements=("profile_completion",),
             )
 
         if proposal.intent == "select":
-            customer = _customer(profile, merged)
-            if DesiredService.AGENCY in merged.desired_services and (
-                customer.birth_date is None or customer.gender is None
-            ):
-                return V2ConversationDecision(
-                    next_state=_consume_without_workflow_transition(
-                        state, proposal.source_event_id
-                    ),
-                    projection=merged,
-                    commands=(),
-                    public_reply=ConversationReply(
-                        "profile_completion",
-                        (
-                            "Para reservar o passeio, preciso da data de nascimento e gênero cadastral.",
-                        ),
-                    ),
-                    receipt_requirements=("profile_completion",),
-                )
+            _customer(
+                profile,
+                merged,
+                activity_party=activity_party,
+            )
 
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "adjust":
             if (
@@ -1438,7 +1438,11 @@ class V2ConversationReducer:
                     ),
                     receipt_requirements=("stale_confirmation",),
                 )
-            if workflow.draft.customer != _customer(profile, merged):
+            if workflow.draft.customer != _customer(
+                profile,
+                merged,
+                activity_party=activity_party,
+            ):
                 return V2ConversationDecision(
                     next_state=_consume_without_workflow_transition(
                         state, proposal.source_event_id
@@ -1608,7 +1612,11 @@ class V2ConversationReducer:
             workflow_id = _identity(
                 state.lead_key, proposal.source_event_id, prefix="workflow"
             )
-            customer = _customer(profile, merged)
+            customer = _customer(
+                profile,
+                merged,
+                activity_party=activity_offer.party,
+            )
             terms = EconomicTerms(payment_method=payment_method, add_ons=())
             lodging_state = _ready_component(
                 workflow_id=_identity(workflow_id, "lodging", prefix="workflow"),
@@ -1775,7 +1783,15 @@ class V2ConversationReducer:
                     event_id=_event_id(proposal.source_event_id, "draft"),
                     occurred_at=instant,
                     draft_id=_identity(workflow_id, offer.offer_id, prefix="draft"),
-                    customer=_customer(profile, merged),
+                    customer=_customer(
+                        profile,
+                        merged,
+                        activity_party=(
+                            offer.party
+                            if offer.service is ServiceKind.ACTIVITY
+                            else None
+                        ),
+                    ),
                     terms=EconomicTerms(payment_method=payment_method, add_ons=()),
                 ),
             ).state

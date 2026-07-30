@@ -27,7 +27,7 @@ def test_pending_tour_schedule_question_never_uses_unrelated_hostel_hours() -> N
 
 def test_private_profile_marker_prevents_reasking_authenticated_contact() -> None:
     assert "private_profile_complete=true" in PROMPT
-    assert "não peça novamente nome, e-mail, telefone ou país" in PROMPT
+    assert "não peça novamente esses dados do contato" in PROMPT
     assert "não contém nem autoriza revelar os valores privados" in PROMPT
     assert "Mesmo quando a mensagem principal for uma pergunta" in PROMPT
     assert "17 May 1991" in PROMPT
@@ -46,11 +46,10 @@ def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> Non
 def test_profile_completion_or_refresh_never_routes_to_handoff_by_itself() -> None:
     assert "Atualizar, reler ou verificar o perfil privado, por si só" in PROMPT
     assert "sem request_handoff motivado pelo perfil" in PROMPT
-    assert "não suprime outro motivo independente" in PROMPT
+    assert "continuam sendo motivos independentes" in PROMPT
     for independent_reason in (
-        "pedido humano explícito",
-        "desconto ou negociação real",
-        "grupo não suportado",
+        "Pedido humano explícito",
+        "desconto/negociação real",
         "restrição de segurança",
     ):
         assert independent_reason in PROMPT
@@ -70,10 +69,13 @@ def test_public_payment_language_hides_internal_provider_names() -> None:
     assert "Nunca escreva os nomes internos Stripe, Bókun, Cérebro ou ManyChat" in PROMPT
 
 
-def test_unsupported_multiple_activity_passengers_route_to_handoff() -> None:
-    assert "mais de 1 participante no passeio" in PROMPT
-    assert "request_handoff" in PROMPT
-    assert "voltar de mais de 1 participante para exatamente 1" in PROMPT
+def test_multiple_activity_passengers_use_complete_private_manifest() -> None:
+    assert "qualquer composição positiva aceita pela oferta" in PROMPT
+    assert "manifesto individual estiver completo" in PROMPT
+    assert "Tamanho do grupo não abre handoff por si só" in PROMPT
+    assert "passenger_manifest_status" in PROMPT
+    assert "posição" in PROMPT
+    assert "campos ainda não fornecidos são null" in PROMPT
     assert "`handoff_active: bool`" in PROMPT
     assert "não use request_handoff novamente" in PROMPT
 
@@ -92,8 +94,9 @@ def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
 
 
-def test_luna_prompt_requires_contextual_v5_critical_approval() -> None:
-    assert "v2-model-proposal-v5" in PROMPT
+def test_luna_prompt_requires_contextual_v6_critical_approval() -> None:
+    assert "v2-model-proposal-v6" in PROMPT
+    assert "v2-model-proposal-v5" not in PROMPT
     assert "v2-model-proposal-v4" not in PROMPT
     assert "v2-model-proposal-v3" not in PROMPT
     assert "v2-model-proposal-v2" not in PROMPT

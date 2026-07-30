@@ -10,6 +10,7 @@ from reservation_boundary import (
     BoundaryState,
     ConversationProjection,
     ConversationStage,
+    DateSlot,
     DesiredService,
     IntegerSlot,
     StringSlot,
@@ -34,6 +35,7 @@ from reservation_domain import (
     Money,
     OfferChosen,
     OfferSnapshot,
+    PassengerFacts,
     Party,
     ReadyToSummarizeState,
     ReservationCommand,
@@ -77,6 +79,7 @@ from v2_application.reservations import (
 )
 from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import ModelFact, ModelProposal
+from v2_contracts.passengers import PassengerInput
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import (
     ProviderWriteAuthorization,
@@ -94,7 +97,26 @@ LODGING_BINDING_HASH = "b" * 64
 ACTIVITY_BINDING_HASH = "d" * 64
 
 
-def test_activity_party_over_one_forces_operational_handoff_from_structured_facts() -> None:
+def _passenger(
+    position: int,
+    participant_type: str,
+    *,
+    full_name: str | None,
+    birth_date: date | None,
+    gender: str | None,
+    country_code: str | None = "BR",
+) -> PassengerInput:
+    return PassengerInput(
+        position=position,
+        participant_type=participant_type,
+        full_name=full_name,
+        birth_date=birth_date,
+        gender=gender,
+        country_code=country_code,
+    )
+
+
+def test_activity_party_over_one_no_longer_forces_operational_handoff() -> None:
     proposal = _proposal(
         source="event:unsupported-activity-party",
         intent="adjust",
@@ -112,16 +134,12 @@ def test_activity_party_over_one_forces_operational_handoff_from_structured_fact
     )
 
     assert decision.commands == ()
-    assert decision.handoff_request is not None
-    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
-    assert decision.next_state.handoff is not None
-    assert decision.public_reply.chunks == (
-        "Para esse passeio com mais de uma pessoa, vou chamar a equipe para continuar a reserva do grupo.",
-    )
-    assert decision.receipt_requirements == ("handoff_relay",)
+    assert decision.handoff_request is None
+    assert decision.next_state.handoff is None
+    assert decision.public_reply.kind == "inform"
 
 
-def test_model_requested_group_handoff_is_operational() -> None:
+def test_model_requested_group_handoff_remains_customer_requested() -> None:
     proposal = _proposal(
         source="event:model-requested-group-handoff",
         intent="request_handoff",
@@ -140,10 +158,8 @@ def test_model_requested_group_handoff_is_operational() -> None:
 
     assert decision.commands == ()
     assert decision.handoff_request is not None
-    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
-    assert decision.public_reply.chunks == (
-        "Para esse passeio com mais de uma pessoa, vou chamar a equipe para continuar a reserva do grupo.",
-    )
+    assert decision.handoff_request.reason_code is HandoffReasonCode.CUSTOMER_REQUESTED
+    assert decision.public_reply.chunks == ("Mensagem pública do modelo.",)
 
 
 def test_single_activity_participant_does_not_force_operational_handoff() -> None:
@@ -174,7 +190,7 @@ def test_single_activity_participant_does_not_force_operational_handoff() -> Non
     assert decision.next_state.handoff is None
 
 
-def test_incomplete_projection_uses_authenticated_package_party_for_group_handoff() -> None:
+def test_historical_group_workflow_without_manifest_stays_blocked() -> None:
     package_ready = PackageCommandCoordinator().combine(
         workflow_id="workflow:group-package",
         draft_id="draft:group-package",
@@ -206,8 +222,147 @@ def test_incomplete_projection_uses_authenticated_package_party_for_group_handof
     )
 
     assert decision.commands == ()
-    assert decision.handoff_request is not None
-    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
+    assert decision.handoff_request is None
+    assert decision.public_reply.kind == "profile_completion"
+
+
+def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
+    proposal = ModelProposal(
+        source_event_id="event:complete-mixed-group",
+        intent="select",
+        reply_chunks=("Vou preparar o resumo do grupo.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao-001"),
+            ModelFact("activity_date", date(2026, 8, 11)),
+            ModelFact("adults", 2),
+            ModelFact("children", 1),
+            ModelFact("payment_method", "wise"),
+        ),
+        passengers=(
+            _passenger(
+                1,
+                "adult",
+                full_name="Pessoa Grupo Um",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+            ),
+            _passenger(
+                2,
+                "adult",
+                full_name="Pessoa Grupo Dois",
+                birth_date=date(1992, 3, 4),
+                gender="m",
+            ),
+            _passenger(
+                3,
+                "child",
+                full_name="Pessoa Grupo Três",
+                birth_date=date(2016, 5, 6),
+                gender="f",
+            ),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id=ACTIVITY_OFFER_ID,
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(_activity_read(adults=2, children=1),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.handoff_request is None
+    assert decision.commands == ()
+    assert decision.public_reply.kind == "summary"
+    assert type(decision.next_state.workflow) is AwaitingConfirmationState
+    assert decision.next_state.workflow.draft.customer.passengers == (
+        PassengerFacts(
+            1,
+            "adult",
+            "Pessoa Grupo Um",
+            date(1990, 1, 2),
+            "f",
+            "BR",
+        ),
+        PassengerFacts(
+            2,
+            "adult",
+            "Pessoa Grupo Dois",
+            date(1992, 3, 4),
+            "m",
+            "BR",
+        ),
+        PassengerFacts(
+            3,
+            "child",
+            "Pessoa Grupo Três",
+            date(2016, 5, 6),
+            "f",
+            "BR",
+        ),
+    )
+    values = {item.name: item.value.value for item in decision.projection.facts}
+    assert "passenger_manifest" in values
+
+
+def test_incomplete_group_manifest_is_persisted_but_cannot_select() -> None:
+    proposal = ModelProposal(
+        source_event_id="event:incomplete-mixed-group",
+        intent="select",
+        reply_chunks=("Ainda falta um dado do grupo.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao-001"),
+            ModelFact("activity_date", date(2026, 8, 11)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "wise"),
+        ),
+        passengers=(
+            _passenger(
+                1,
+                "adult",
+                full_name="Pessoa Completa",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+            ),
+            _passenger(
+                2,
+                "adult",
+                full_name="Pessoa Incompleta",
+                birth_date=None,
+                gender="m",
+            ),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id=ACTIVITY_OFFER_ID,
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(_activity_read(adults=2),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.handoff_request is None
+    assert decision.commands == ()
+    assert decision.next_state.workflow is None
+    assert decision.public_reply.kind == "profile_completion"
+    assert any(
+        item.name == "passenger_manifest" for item in decision.projection.facts
+    )
 
 
 def test_authenticated_single_party_workflow_overrides_stale_projection_group() -> None:
@@ -507,7 +662,7 @@ def _lodging_read(*, amount: str = "480.00", adults: int = 2) -> ReadObservation
     )
 
 
-def _activity_read(*, participants: int = 2) -> ReadObservation:
+def _activity_read(*, adults: int = 2, children: int = 0) -> ReadObservation:
     return ReadObservation(
         request_hash="2" * 64,
         provider="bokun",
@@ -518,7 +673,9 @@ def _activity_read(*, participants: int = 2) -> ReadObservation:
             "product_id": "product:buracao-001",
             "product_public_name": "Buracão",
             "activity_date": "2026-08-11",
-            "participants": participants,
+            "adults": adults,
+            "children": children,
+            "participants": adults + children,
             "total_amount": "400.00",
             "currency": "BRL",
             "available": True,
@@ -557,7 +714,12 @@ def test_named_activity_product_is_persisted_as_canonical_private_fact() -> None
 
 
 def _ready_state(
-    *, service: ServiceKind, workflow_id: str, adults: int = 2
+    *,
+    service: ServiceKind,
+    workflow_id: str,
+    adults: int = 2,
+    birth_date: date | None = None,
+    gender: str | None = None,
 ) -> ReadyToSummarizeState:
     query = SearchQuery(
         service=service,
@@ -587,7 +749,8 @@ def _ready_state(
             kind=ReadKind.ACTIVITY,
             product_id="product:buracao-001",
             activity_date=query.start_date,
-            participants=adults,
+            adults=adults,
+            children=0,
         ).query_hash()
     lookup_id = (
         f"lookup:{request_hash}"
@@ -657,6 +820,8 @@ def _ready_state(
                 email=_profile().email,
                 phone_e164=_profile().phone_e164,
                 country_code=_profile().country_code,
+                birth_date=birth_date,
+                gender=gender,
             ),
             terms=EconomicTerms(payment_method="wise", add_ons=()),
         ),
@@ -686,7 +851,9 @@ def _read_for_component(component: OfferSnapshot) -> ReadObservation:
             "product_id": "product:buracao-001",
             "product_public_name": component.public_label,
             "activity_date": component.start_date.isoformat(),
-            "participants": component.party.adults,
+            "adults": component.party.adults,
+            "children": component.party.children,
+            "participants": component.party.adults + component.party.children,
             "total_amount": format(component.total.amount, ".2f"),
             "currency": component.total.currency,
             "available": True,
@@ -1193,6 +1360,10 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
             service=service,
             workflow_id=f"workflow:refresh-{service.value}",
             adults=1 if service is ServiceKind.ACTIVITY else 2,
+            birth_date=(
+                date(1990, 1, 2) if service is ServiceKind.ACTIVITY else None
+            ),
+            gender="f" if service is ServiceKind.ACTIVITY else None,
         )
     )
     projection = _projection()
@@ -1207,6 +1378,8 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
                     StringSlot("product:buracao-001"),
                     FRAME_HASH,
                 ),
+                TypedFact("birth_date", DateSlot(date(1990, 1, 2)), FRAME_HASH),
+                TypedFact("gender", StringSlot("f"), FRAME_HASH),
             ),
         )
         proposal_service = "agency"
@@ -1513,7 +1686,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
         projection=_projection(package=True),
         proposal=proposal,
         profile=_profile(),
-        reads=(_lodging_read(adults=1), _activity_read(participants=1)),
+        reads=(_lodging_read(adults=1), _activity_read(adults=1)),
         fact_commitment_hash=FRAME_HASH,
         now=NOW,
     )
@@ -1548,7 +1721,7 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
             effect_proposals=(),
         ),
         profile=_profile(),
-        reads=(_lodging_read(adults=1), _activity_read(participants=1)),
+        reads=(_lodging_read(adults=1), _activity_read(adults=1)),
         fact_commitment_hash=FRAME_HASH,
         now=NOW + timedelta(seconds=1),
     )
@@ -1573,19 +1746,30 @@ def test_package_has_one_summary_one_confirmation_and_two_allocated_components()
             service=ServiceKind.LODGING,
             workflow_id="workflow:package-lodging",
             adults=1,
+            birth_date=date(1990, 1, 2),
+            gender="f",
         ),
         activity=_ready_state(
             service=ServiceKind.ACTIVITY,
             workflow_id="workflow:package-activity",
             adults=1,
+            birth_date=date(1990, 1, 2),
+            gender="f",
         ),
         now=NOW,
     )
     awaiting = _awaiting_from_ready(package_ready)
+    projection = replace(
+        _projection(package=True),
+        facts=(
+            TypedFact("birth_date", DateSlot(date(1990, 1, 2)), FRAME_HASH),
+            TypedFact("gender", StringSlot("f"), FRAME_HASH),
+        ),
+    )
 
     decision = _reducer().reduce(
         state=_boundary(awaiting),
-        projection=_projection(package=True),
+        projection=projection,
         proposal=_proposal(
             source="event:confirm-package",
             intent="confirm",
