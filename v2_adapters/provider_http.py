@@ -616,6 +616,11 @@ class BokunHTTPTransport:
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
         if operation == "book_activity":
+            if payload.get("schema") == "v2-reservation-dispatch-v2":
+                return self._book_activity_v2(
+                    payload,
+                    idempotency_key=idempotency_key,
+                )
             return self._book_activity(payload, idempotency_key=idempotency_key)
         if idempotency_key is not None:
             raise ProviderHTTPError("Bókun read forbids an idempotency key")
@@ -903,6 +908,587 @@ class BokunHTTPTransport:
         if direct is None and isinstance(category, Mapping):
             direct = _first(category, "id", "pricingCategoryId")
         return direct
+
+    def _book_activity_v2(
+        self,
+        payload: dict[str, object],
+        *,
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
+        if (
+            type(idempotency_key) is not str
+            or not idempotency_key
+            or "\x00" in idempotency_key
+        ):
+            raise ProviderHTTPError("Bókun write requires an idempotency key")
+        dispatch = _exact_object(
+            payload,
+            fields=frozenset(
+                ("schema", "command_id", "operation", "offer", "customer", "terms")
+            ),
+            name="Bókun dispatch v2",
+        )
+        if (
+            dispatch["schema"] != "v2-reservation-dispatch-v2"
+            or dispatch["operation"] != "book_activity"
+            or type(dispatch["command_id"]) is not str
+        ):
+            raise ProviderHTTPError("Bókun dispatch v2 identity mismatch")
+        offer = _exact_object(
+            dispatch["offer"],
+            fields=frozenset(
+                (
+                    "binding",
+                    "private_binding",
+                    "offer_id",
+                    "start_date",
+                    "end_date",
+                    "start_time",
+                    "party",
+                    "amount",
+                    "currency",
+                )
+            ),
+            name="Bókun offer v2",
+        )
+        party = _exact_object(
+            offer["party"],
+            fields=frozenset(("adults", "children")),
+            name="Bókun party v2",
+        )
+        adults = party["adults"]
+        children = party["children"]
+        if (
+            type(adults) is not int
+            or type(children) is not int
+            or adults < 1
+            or children < 0
+        ):
+            raise ProviderHTTPError("Bókun party v2 is invalid")
+        private_fields = {
+            "bokun_product_id",
+            "start_time_id",
+            "rate_id",
+            "adult_pricing_category_id",
+        }
+        if children:
+            private_fields.add("child_pricing_category_id")
+        private = _exact_object(
+            offer["private_binding"],
+            fields=frozenset(private_fields),
+            name="Bókun private binding v2",
+        )
+        product_id = _text(private["bokun_product_id"])
+        start_time_id = _text(private["start_time_id"])
+        rate_id = _text(private["rate_id"])
+        adult_category = _text(private["adult_pricing_category_id"])
+        child_category = (
+            _text(private["child_pricing_category_id"])
+            if children
+            else None
+        )
+        if (
+            not product_id
+            or product_id not in set(self._products.values())
+            or not start_time_id
+            or not rate_id
+            or not adult_category
+            or (children and not child_category)
+        ):
+            raise ProviderHTTPError("Bókun private binding v2 is incomplete")
+        customer = _exact_object(
+            dispatch["customer"],
+            fields=frozenset(
+                (
+                    "customer_ref",
+                    "full_name",
+                    "email",
+                    "phone_e164",
+                    "country_code",
+                    "passengers",
+                )
+            ),
+            name="Bókun customer v2",
+        )
+        terms = _exact_object(
+            dispatch["terms"],
+            fields=frozenset(("payment_method", "add_ons")),
+            name="Bókun terms v2",
+        )
+        if terms["payment_method"] not in ("stripe", "wise", "pix"):
+            raise ProviderHTTPError("Bókun payment method is invalid")
+        if terms["add_ons"] != []:
+            raise ProviderHTTPError("Bókun reservation write does not accept add-ons")
+        main_name = _text(customer["full_name"])
+        email = _text(customer["email"])
+        phone = _text(customer["phone_e164"])
+        country = _text(customer["country_code"])
+        main_name_parts = main_name.split() if main_name else []
+        if (
+            len(main_name_parts) < 2
+            or email is None
+            or email.count("@") != 1
+            or phone is None
+            or re.fullmatch(r"\+[1-9][0-9]{7,14}", phone) is None
+            or country is None
+            or re.fullmatch(r"[A-Z]{2}", country) is None
+        ):
+            raise ProviderHTTPError("Bókun customer v2 fields are invalid")
+        passenger_values = customer["passengers"]
+        if not isinstance(passenger_values, list):
+            raise ProviderHTTPError("Bókun passenger manifest is invalid")
+        passengers: list[dict[str, str]] = []
+        for expected_position, value in enumerate(passenger_values, start=1):
+            item = _exact_object(
+                value,
+                fields=frozenset(
+                    (
+                        "position",
+                        "participant_type",
+                        "full_name",
+                        "birth_date",
+                        "gender",
+                        "country_code",
+                    )
+                ),
+                name="Bókun passenger",
+            )
+            participant_type = item["participant_type"]
+            full_name = _text(item["full_name"])
+            birth_date = _text(item["birth_date"])
+            gender = _text(item["gender"])
+            passenger_country = _text(item["country_code"])
+            name_parts = full_name.split() if full_name else []
+            try:
+                parsed_birth = date.fromisoformat(birth_date or "")
+            except ValueError as exc:
+                raise ProviderHTTPError("Bókun passenger birth date is invalid") from exc
+            if (
+                item["position"] != expected_position
+                or participant_type not in ("adult", "child")
+                or len(name_parts) < 2
+                or parsed_birth.isoformat() != birth_date
+                or gender not in ("m", "f")
+                or passenger_country is None
+                or re.fullmatch(r"[A-Z]{2}", passenger_country) is None
+            ):
+                raise ProviderHTTPError("Bókun passenger fields are invalid")
+            category_id = (
+                adult_category if participant_type == "adult" else child_category
+            )
+            if category_id is None:
+                raise ProviderHTTPError("Bókun passenger category is unavailable")
+            passengers.append(
+                {
+                    "category_id": category_id,
+                    "firstName": name_parts[0],
+                    "lastName": " ".join(name_parts[1:]),
+                    "nationality": passenger_country,
+                    "dateOfBirth": birth_date,
+                    "gender": gender,
+                    "full_name": full_name,
+                }
+            )
+        if (
+            len(passengers) != adults + children
+            or sum(item["category_id"] == adult_category for item in passengers)
+            != adults
+            or sum(item["category_id"] == child_category for item in passengers)
+            != children
+        ):
+            raise ProviderHTTPError("Bókun passenger manifest diverged from party")
+        activity_date = _text(offer["start_date"])
+        try:
+            parsed_date = date.fromisoformat(activity_date or "")
+        except ValueError as exc:
+            raise ProviderHTTPError("Bókun activity date is invalid") from exc
+        amount = _amount(offer["amount"])
+        if (
+            parsed_date.isoformat() != activity_date
+            or offer["end_date"] is not None
+            or amount is None
+            or type(offer["amount"]) is not str
+            or offer["amount"] != f"{amount:.2f}"
+            or _currency(offer["currency"]) != "BRL"
+        ):
+            raise ProviderHTTPError("Bókun activity amount or interval is invalid")
+        session_id = "v2-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:32]
+        category_bookings = [
+            {"pricingCategoryId": item["category_id"]}
+            for item in passengers
+        ]
+        cart_path = (
+            f"/shopping-cart.json/session/{session_id}/activity"
+            "?lang=pt_BR&currency=BRL"
+        )
+        cart_status, cart_payload = self._write_request(
+            method="POST",
+            path=cart_path,
+            idempotency_key=idempotency_key + ":cart",
+            json_body={
+                "activityId": product_id,
+                "date": activity_date,
+                "startTimeId": start_time_id,
+                "rateId": rate_id,
+                "pricingCategoryBookings": category_bookings,
+            },
+            allow_rejection=True,
+        )
+        if not 200 <= cart_status < 300:
+            return {"status": "no_effect"}
+        try:
+            activity_booking, bound_passengers = self._cart_bindings_v2(
+                cart_payload,
+                session_id=session_id,
+                product_id=product_id,
+                passengers=tuple(passengers),
+            )
+        except ProviderHTTPError:
+            return {"status": "no_effect"}
+        checkout_path = (
+            f"/checkout.json/options/shopping-cart/{session_id}"
+            "?lang=pt_BR&currency=BRL"
+        )
+        checkout_status, checkout_payload = self._write_request(
+            method="GET",
+            path=checkout_path,
+            idempotency_key=idempotency_key + ":checkout",
+            allow_rejection=True,
+        )
+        if not 200 <= checkout_status < 300:
+            return {"status": "no_effect"}
+        main_contact = {
+            "firstName": main_name_parts[0],
+            "lastName": " ".join(main_name_parts[1:]),
+            "email": email,
+            "phoneNumber": phone,
+            "nationality": country,
+            "language": "pt",
+        }
+        if passengers[0]["full_name"] == main_name:
+            main_contact.update(
+                {
+                    "dateOfBirth": passengers[0]["dateOfBirth"],
+                    "gender": passengers[0]["gender"],
+                }
+            )
+        try:
+            submit_body = self._submit_body_v2(
+                checkout_payload,
+                session_id=session_id,
+                activity_booking=activity_booking,
+                product_id=product_id,
+                main_contact=main_contact,
+                passengers=bound_passengers,
+                expected_amount=amount,
+            )
+        except ProviderHTTPError:
+            return {"status": "no_effect"}
+        status, submit_payload = self._write_request(
+            method="POST",
+            path="/checkout.json/submit?lang=pt_BR&currency=BRL",
+            idempotency_key=idempotency_key + ":submit",
+            json_body=submit_body,
+            allow_rejection=True,
+        )
+        booking_id = self._booking_reference(submit_payload)
+        if booking_id is None:
+            if 400 <= status < 500 or (
+                isinstance(submit_payload, Mapping)
+                and submit_payload.get("success") is False
+            ):
+                return {"status": "rejected"}
+            raise ProviderHTTPError("Bókun write result is ambiguous")
+        _, readback = self._write_request(
+            method="GET",
+            path=(
+                f"/booking.json/booking/{booking_id}"
+                "?lang=pt_BR&currency=BRL"
+            ),
+            idempotency_key=idempotency_key + ":readback",
+        )
+        self._validate_booking_readback_v2(
+            readback,
+            booking_id=booking_id,
+            product_id=product_id,
+            activity_date=activity_date,
+            category_ids=tuple(item["category_id"] for item in passengers),
+        )
+        return {"status": "confirmed", "booking_id": booking_id}
+
+    @staticmethod
+    def _cart_bindings_v2(
+        payload: object,
+        *,
+        session_id: str,
+        product_id: str,
+        passengers: tuple[dict[str, str], ...],
+    ) -> tuple[str, tuple[dict[str, str], ...]]:
+        cart = payload.get("data") if isinstance(payload, Mapping) else None
+        if not isinstance(cart, Mapping):
+            cart = payload if isinstance(payload, Mapping) else {}
+        returned_session = _first(cart, "uuid", "sessionId", "session_id")
+        if returned_session is not None and returned_session != session_id:
+            raise ProviderHTTPError("Bókun cart session identity mismatch")
+        activities = cart.get("activityBookings")
+        matches = [
+            item
+            for item in activities
+            if isinstance(item, Mapping)
+            and BokunHTTPTransport._cart_activity_product_id(item) == product_id
+        ] if isinstance(activities, list) else []
+        if len(matches) != 1:
+            raise ProviderHTTPError("Bókun cart activity binding is invalid")
+        activity = matches[0]
+        activity_booking = _first(activity, "bookingId", "booking_id", "id")
+        pricing = activity.get("pricingCategoryBookings")
+        rows = [item for item in pricing if isinstance(item, Mapping)] if isinstance(pricing, list) else []
+        returned: dict[str, list[str]] = {}
+        booking_ids: list[str] = []
+        for row in rows:
+            category_id = BokunHTTPTransport._cart_pricing_category_id(row)
+            booking_id = _first(row, "bookingId", "booking_id", "id")
+            if not category_id or not booking_id:
+                raise ProviderHTTPError("Bókun cart passenger binding is invalid")
+            returned.setdefault(category_id, []).append(booking_id)
+            booking_ids.append(booking_id)
+        expected_categories = [item["category_id"] for item in passengers]
+        if (
+            not activity_booking
+            or len(booking_ids) != len(passengers)
+            or len(booking_ids) != len(set(booking_ids))
+            or sorted(returned) != sorted(set(expected_categories))
+            or any(
+                len(returned.get(category_id, ()))
+                != expected_categories.count(category_id)
+                for category_id in set(expected_categories)
+            )
+        ):
+            raise ProviderHTTPError("Bókun cart passenger binding is invalid")
+        offsets: dict[str, int] = {}
+        bound = []
+        for passenger in passengers:
+            category_id = passenger["category_id"]
+            offset = offsets.get(category_id, 0)
+            booking_id = returned[category_id][offset]
+            offsets[category_id] = offset + 1
+            bound.append({**passenger, "booking_id": booking_id})
+        return activity_booking, tuple(bound)
+
+    @staticmethod
+    def _submit_body_v2(
+        payload: object,
+        *,
+        session_id: str,
+        activity_booking: str,
+        product_id: str,
+        main_contact: dict[str, str],
+        passengers: tuple[dict[str, str], ...],
+        expected_amount: Decimal,
+    ) -> dict[str, object]:
+        checkout = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(checkout, Mapping):
+            raise ProviderHTTPError("Bókun checkout fields mismatch")
+        options = checkout.get("options")
+        option = options[0] if isinstance(options, list) and options else None
+        if not isinstance(option, Mapping):
+            raise ProviderHTTPError("Bókun checkout lacks an option")
+        checkout_amount = BokunHTTPTransport._checkout_amount(checkout)
+        if (
+            checkout_amount is None
+            or checkout_amount.quantize(Decimal("0.01")) != expected_amount
+        ):
+            raise ProviderHTTPError("Bókun checkout amount diverged after cart")
+        questions = checkout.get("questions")
+        if not isinstance(questions, Mapping):
+            raise ProviderHTTPError("Bókun checkout questions are unavailable")
+        main_questions = questions.get("mainContactDetails")
+        activities = questions.get("activityBookings")
+        if not isinstance(main_questions, list) or not isinstance(activities, list):
+            raise ProviderHTTPError("Bókun checkout question shape is invalid")
+
+        def required_ids(values: object) -> tuple[str, ...]:
+            if not isinstance(values, list):
+                return ()
+            result = []
+            for item in values:
+                if isinstance(item, Mapping) and item.get("required") is True:
+                    question_id = _first(item, "questionId", "id")
+                    if question_id:
+                        result.append(question_id)
+            return tuple(result)
+
+        def question_ids(values: object) -> tuple[str, ...]:
+            if not isinstance(values, list):
+                return ()
+            result = []
+            for item in values:
+                if isinstance(item, Mapping):
+                    question_id = _first(item, "questionId", "id")
+                    if question_id:
+                        result.append(question_id)
+            if len(result) != len(set(result)):
+                raise ProviderHTTPError("Bókun checkout question IDs are ambiguous")
+            return tuple(result)
+
+        def answers(ids: tuple[str, ...], values: Mapping[str, str]):
+            return [
+                {"questionId": question_id, "values": [values[question_id]]}
+                for question_id in ids
+            ]
+
+        main_required = required_ids(main_questions)
+        if set(main_required) - set(main_contact):
+            raise ProviderHTTPError("Bókun checkout requires unsupported customer fields")
+        main_answer_ids = tuple(
+            question_id
+            for question_id in question_ids(main_questions)
+            if question_id in main_contact
+        )
+        activity_matches = [
+            activity
+            for activity in activities
+            if isinstance(activity, Mapping)
+            and _first(activity, "bookingId", "booking_id", "id")
+            == activity_booking
+            and BokunHTTPTransport._cart_activity_product_id(activity)
+            == product_id
+        ]
+        if len(activities) != 1 or len(activity_matches) != 1:
+            raise ProviderHTTPError("Bókun checkout activity binding diverged")
+        passenger_groups = activity_matches[0].get("passengers")
+        if not isinstance(passenger_groups, list) or len(passenger_groups) != len(
+            passengers
+        ):
+            raise ProviderHTTPError("Bókun checkout passenger count diverged")
+        groups_by_booking: dict[str, Mapping[str, object]] = {}
+        for group in passenger_groups:
+            if not isinstance(group, Mapping):
+                raise ProviderHTTPError("Bókun checkout passenger shape is invalid")
+            booking_id = _first(group, "bookingId", "booking_id", "id")
+            category_id = BokunHTTPTransport._cart_pricing_category_id(group)
+            if not booking_id or not category_id or booking_id in groups_by_booking:
+                raise ProviderHTTPError("Bókun checkout passenger binding is invalid")
+            groups_by_booking[booking_id] = group
+        passenger_answers = []
+        for passenger in passengers:
+            booking_id = passenger["booking_id"]
+            group = groups_by_booking.get(booking_id)
+            if (
+                group is None
+                or BokunHTTPTransport._cart_pricing_category_id(group)
+                != passenger["category_id"]
+            ):
+                raise ProviderHTTPError("Bókun checkout passenger binding diverged")
+            details = group.get("passengerDetails")
+            required = required_ids(details)
+            values = {
+                key: passenger[key]
+                for key in (
+                    "firstName",
+                    "lastName",
+                    "nationality",
+                    "dateOfBirth",
+                    "gender",
+                )
+            }
+            if set(required) - set(values):
+                raise ProviderHTTPError(
+                    "Bókun checkout requires unsupported passenger fields"
+                )
+            if required_ids(group.get("questions")):
+                raise ProviderHTTPError(
+                    "Bókun checkout requires unsupported special answers"
+                )
+            answer_ids = tuple(
+                question_id
+                for question_id in question_ids(details)
+                if question_id in values
+            )
+            passenger_answers.append(
+                {
+                    "bookingId": booking_id,
+                    "pricingCategoryId": passenger["category_id"],
+                    "passengerDetails": answers(answer_ids, values),
+                }
+            )
+        if set(groups_by_booking) != {
+            passenger["booking_id"] for passenger in passengers
+        }:
+            raise ProviderHTTPError("Bókun checkout passenger binding diverged")
+        return {
+            "checkoutOption": "CUSTOMER_FULL_PAYMENT",
+            "paymentMethod": "RESERVE_FOR_EXTERNAL_PAYMENT",
+            "source": "SHOPPING_CART",
+            "shoppingCart": {
+                "uuid": session_id,
+                "bookingAnswers": {
+                    "mainContactDetails": answers(main_answer_ids, main_contact),
+                    "activityBookings": [
+                        {
+                            "bookingId": activity_booking,
+                            "activityId": product_id,
+                            "passengers": passenger_answers,
+                        }
+                    ],
+                },
+            },
+            "sendNotificationToMainContact": False,
+            "showPricesInNotification": False,
+        }
+
+    @staticmethod
+    def _validate_booking_readback_v2(
+        payload: object,
+        *,
+        booking_id: str,
+        product_id: str,
+        activity_date: str,
+        category_ids: tuple[str, ...],
+    ) -> None:
+        candidates: list[Mapping[str, object]] = []
+
+        def visit(value: object) -> None:
+            if isinstance(value, Mapping):
+                if (
+                    _first(value, "bookingId", "booking_id") == booking_id
+                    and isinstance(value.get("activityBookings"), list)
+                ):
+                    candidates.append(value)
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested)
+
+        visit(payload)
+        if len(candidates) != 1:
+            raise ProviderHTTPError("Bókun write read-back did not match")
+        activities = candidates[0].get("activityBookings")
+        matches = [
+            item
+            for item in activities
+            if isinstance(item, Mapping)
+            and BokunHTTPTransport._cart_activity_product_id(item) == product_id
+            and _first(item, "date", "activityDate", "startDate") == activity_date
+        ] if isinstance(activities, list) else []
+        if len(matches) != 1:
+            raise ProviderHTTPError("Bókun write read-back activity diverged")
+        pricing = matches[0].get("pricingCategoryBookings")
+        returned_categories = tuple(
+            category_id
+            for item in pricing
+            if isinstance(item, Mapping)
+            and (
+                category_id
+                := BokunHTTPTransport._cart_pricing_category_id(item)
+            ) is not None
+        ) if isinstance(pricing, list) else ()
+        if (
+            len(returned_categories) != len(category_ids)
+            or sorted(returned_categories) != sorted(category_ids)
+        ):
+            raise ProviderHTTPError("Bókun write read-back party diverged")
 
     def _book_activity(
         self,
