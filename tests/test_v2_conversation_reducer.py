@@ -121,6 +121,31 @@ def test_activity_party_over_one_forces_operational_handoff_from_structured_fact
     assert decision.receipt_requirements == ("handoff_relay",)
 
 
+def test_model_requested_group_handoff_is_operational() -> None:
+    proposal = _proposal(
+        source="event:model-requested-group-handoff",
+        intent="request_handoff",
+        service="agency",
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.handoff_request is not None
+    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
+    assert decision.public_reply.chunks == (
+        "Para esse passeio com mais de uma pessoa, vou chamar a equipe para continuar a reserva do grupo.",
+    )
+
+
 def test_single_activity_participant_does_not_force_operational_handoff() -> None:
     proposal = _proposal(
         source="event:supported-activity-party",
@@ -208,7 +233,7 @@ def test_authenticated_single_party_workflow_overrides_stale_projection_group() 
         source_event_id="event:single-party-inform",
         intent="inform",
         reply_chunks=("A reserva atual é para uma pessoa.",),
-        facts=(),
+        facts=(ModelFact("children", 0),),
         read_requests=(),
         effect_proposals=(),
     )
@@ -242,7 +267,6 @@ def test_current_return_to_one_overrides_authenticated_group_party() -> None:
         facts=(
             ModelFact("service", "agency"),
             ModelFact("adults", 1),
-            ModelFact("children", 0),
         ),
         read_requests=(),
         effect_proposals=(),
@@ -262,7 +286,6 @@ def test_current_return_to_one_overrides_authenticated_group_party() -> None:
     assert decision.next_state.handoff is None
     values = {fact.name: fact.value.value for fact in decision.projection.facts}
     assert values["adults"] == 1
-    assert values["children"] == 0
 
 
 def test_active_handoff_effect_guard_is_localized() -> None:

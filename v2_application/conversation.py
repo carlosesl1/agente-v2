@@ -887,24 +887,27 @@ def _unsupported_activity_party(
     projection: ConversationProjection,
     proposal: ModelProposal,
 ) -> bool:
-    current_fact_names = {fact.name for fact in proposal.facts}
+    current_values = {fact.name: fact.value for fact in proposal.facts}
+    workflow_party = _workflow_activity_party(state)
     if (
-        "service" in current_fact_names
+        "service" in current_values
         and DesiredService.AGENCY not in projection.desired_services
     ):
         return False
-    if current_fact_names.intersection({"adults", "children"}):
-        party = _projection_party(projection)
-    else:
-        party = _workflow_activity_party(state) or _projection_party(projection)
-    if party is None:
+    if DesiredService.AGENCY not in projection.desired_services and workflow_party is None:
         return False
-    if (
-        DesiredService.AGENCY not in projection.desired_services
-        and _workflow_activity_party(state) is None
-    ):
+    base_party = workflow_party or _projection_party(projection)
+    adults = current_values.get(
+        "adults",
+        base_party.adults if base_party is not None else None,
+    )
+    children = current_values.get(
+        "children",
+        base_party.children if base_party is not None else 0,
+    )
+    if type(adults) is not int or type(children) is not int:
         return False
-    return party.adults + party.children > 1
+    return adults + children > 1
 
 
 def _activity_group_handoff_reply(locale: str) -> str:
@@ -1130,12 +1133,11 @@ class V2ConversationReducer:
         )
         if proposal.intent == "select":
             merged = _without_critical_outcome(merged)
-        force_activity_group_handoff = (
-            proposal.intent != "request_handoff"
-            and state.handoff is None
+        activity_group_requires_handoff = (
+            state.handoff is None
             and _unsupported_activity_party(state, merged, proposal)
         )
-        if proposal.intent == "request_handoff" or force_activity_group_handoff:
+        if proposal.intent == "request_handoff" or activity_group_requires_handoff:
             if state.handoff is None:
                 handoff_request = HandoffRequested(
                     handoff_id=_identity(
@@ -1152,7 +1154,7 @@ class V2ConversationReducer:
                     ),
                     reason_code=(
                         HandoffReasonCode.OPERATIONAL_REVIEW
-                        if force_activity_group_handoff
+                        if activity_group_requires_handoff
                         else HandoffReasonCode.CUSTOMER_REQUESTED
                     ),
                     source_event_id=proposal.source_event_id,
@@ -1184,7 +1186,7 @@ class V2ConversationReducer:
                     "handoff",
                     (
                         (_activity_group_handoff_reply(merged.locale),)
-                        if force_activity_group_handoff
+                        if activity_group_requires_handoff
                         else proposal.reply_chunks
                         or ("Vou encaminhar seu atendimento para uma pessoa.",)
                     ),
