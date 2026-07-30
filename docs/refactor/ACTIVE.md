@@ -30,12 +30,12 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | 3. Protocolo v6 e manifesto privado | `DONE` | `8dccad1b33aab7135498ba2cfcab2b5b2265e9ec` |
 | 4. Reads por composição adulto/criança | `DONE` | `4883bd2f46ad5026bac6a2f710bc0e45cd054071` |
 | 5. Coleta e seleção de grupos | `DONE` | `6f39fcf7bf76feff9f43a94c6f3d98b783e9b7c6` |
-| 6. Dispatch Bókun v2 | `IN_PROGRESS` | `PENDING` |
-| 7. Transport e read-back exato | `PENDING` | `PENDING` |
+| 6. Dispatch Bókun v2 | `DONE` | `9f38fb7f616b368d97d40e6ef819889936d948e3` |
+| 7. Transport e read-back exato | `IN_PROGRESS` | `PENDING` |
 | 8. Regressões e qualificação local | `PENDING` | `PENDING` |
 | 9. Revisão terminal e candidata | `PENDING` | `PENDING` |
 
-- NEXT: `Task 6 — dispatch Bókun v2`
+- NEXT: `Task 7 — transport e read-back exato`
 
 ### Decisão de topologia da Task 7
 
