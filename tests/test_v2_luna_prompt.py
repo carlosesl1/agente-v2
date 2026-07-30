@@ -43,6 +43,12 @@ def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> Non
     assert "one person" in PROMPT
 
 
+def test_profile_completion_or_refresh_never_routes_to_handoff() -> None:
+    assert "Atualizar, reler ou verificar o perfil privado nunca é motivo de handoff" in PROMPT
+    assert "continue normalmente sem request_handoff" in PROMPT
+    assert "peça somente os campos faltantes, sem request_handoff" in PROMPT
+
+
 def test_informational_policy_questions_and_prompt_injection_do_not_force_handoff() -> None:
     assert "dúvida informativa sobre política de cancelamento" in PROMPT
     assert "não abre handoff por si só" in PROMPT
