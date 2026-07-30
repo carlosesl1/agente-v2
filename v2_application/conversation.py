@@ -852,15 +852,59 @@ def _handoff_effect_guard_reply(locale: str) -> str:
     return "Seu atendimento humano continua ativo; não vou executar efeitos."
 
 
-def _unsupported_activity_party(projection: ConversationProjection) -> bool:
-    if DesiredService.AGENCY not in projection.desired_services:
-        return False
+def _projection_party(projection: ConversationProjection) -> Party | None:
     values = {fact.name: fact.value.value for fact in projection.facts}
-    adults = values.get("adults", 0)
+    adults = values.get("adults")
     children = values.get("children", 0)
     if type(adults) is not int or type(children) is not int:
+        return None
+    return Party(adults=adults, children=children)
+
+
+def _workflow_activity_party(state: BoundaryState) -> Party | None:
+    workflow = state.workflow
+    if workflow is None:
+        return None
+    if type(workflow) in _POST_COMMAND_WORKFLOW_TYPES:
+        components = workflow.command.payload.components
+    else:
+        draft = getattr(workflow, "draft", None)
+        if type(draft) is not CommercialDraft:
+            return None
+        components = draft.components
+    activity_parties = tuple(
+        component.party
+        for component in components
+        if component.service is ServiceKind.ACTIVITY
+    )
+    if len(activity_parties) != 1:
+        return None
+    return activity_parties[0]
+
+
+def _unsupported_activity_party(
+    state: BoundaryState,
+    projection: ConversationProjection,
+    proposal: ModelProposal,
+) -> bool:
+    current_fact_names = {fact.name for fact in proposal.facts}
+    if (
+        "service" in current_fact_names
+        and DesiredService.AGENCY not in projection.desired_services
+    ):
         return False
-    return adults + children > 1
+    if current_fact_names.intersection({"adults", "children"}):
+        party = _projection_party(projection)
+    else:
+        party = _workflow_activity_party(state) or _projection_party(projection)
+    if party is None:
+        return False
+    if (
+        DesiredService.AGENCY not in projection.desired_services
+        and _workflow_activity_party(state) is None
+    ):
+        return False
+    return party.adults + party.children > 1
 
 
 def _activity_group_handoff_reply(locale: str) -> str:
@@ -1089,7 +1133,7 @@ class V2ConversationReducer:
         force_activity_group_handoff = (
             proposal.intent != "request_handoff"
             and state.handoff is None
-            and _unsupported_activity_party(merged)
+            and _unsupported_activity_party(state, merged, proposal)
         )
         if proposal.intent == "request_handoff" or force_activity_group_handoff:
             if state.handoff is None:

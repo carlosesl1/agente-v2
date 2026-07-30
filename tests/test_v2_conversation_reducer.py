@@ -11,6 +11,7 @@ from reservation_boundary import (
     ConversationProjection,
     ConversationStage,
     DesiredService,
+    IntegerSlot,
     StringSlot,
     TypedFact,
 )
@@ -146,6 +147,122 @@ def test_single_activity_participant_does_not_force_operational_handoff() -> Non
 
     assert decision.handoff_request is None
     assert decision.next_state.handoff is None
+
+
+def test_incomplete_projection_uses_authenticated_package_party_for_group_handoff() -> None:
+    package_ready = PackageCommandCoordinator().combine(
+        workflow_id="workflow:group-package",
+        draft_id="draft:group-package",
+        lodging=_ready_state(
+            service=ServiceKind.LODGING,
+            workflow_id="workflow:group-package-lodging",
+        ),
+        activity=_ready_state(
+            service=ServiceKind.ACTIVITY,
+            workflow_id="workflow:group-package-activity",
+        ),
+        now=NOW,
+    )
+    awaiting = _awaiting_from_ready(package_ready)
+
+    decision = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(package=True),
+        proposal=_proposal(
+            source="event:confirm-incomplete-group-package",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+            service="package",
+        ),
+        profile=_profile(),
+        reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert decision.commands == ()
+    assert decision.handoff_request is not None
+    assert decision.handoff_request.reason_code is HandoffReasonCode.OPERATIONAL_REVIEW
+
+
+def test_authenticated_single_party_workflow_overrides_stale_projection_group() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(
+            service=ServiceKind.ACTIVITY,
+            workflow_id="workflow:single-party",
+            adults=1,
+        )
+    )
+    stale_projection = ConversationProjection(
+        stage=ConversationStage.CLOSING,
+        desired_services=(DesiredService.AGENCY,),
+        locale="pt-BR",
+        facts=(
+            TypedFact("service", StringSlot("agency"), FRAME_HASH),
+            TypedFact("adults", IntegerSlot(2), FRAME_HASH),
+            TypedFact("children", IntegerSlot(0), FRAME_HASH),
+        ),
+        reservation_execution_projection=None,
+    )
+    proposal = ModelProposal(
+        source_event_id="event:single-party-inform",
+        intent="inform",
+        reply_chunks=("A reserva atual é para uma pessoa.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=stale_projection,
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert decision.handoff_request is None
+    assert decision.next_state.handoff is None
+    assert decision.public_reply.kind == "inform"
+
+
+def test_current_return_to_one_overrides_authenticated_group_party() -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(
+            service=ServiceKind.ACTIVITY,
+            workflow_id="workflow:return-to-one",
+        )
+    )
+    proposal = ModelProposal(
+        source_event_id="event:return-to-one",
+        intent="inform",
+        reply_chunks=("Atualizei para uma pessoa.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(package=True),
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert decision.handoff_request is None
+    assert decision.next_state.handoff is None
+    values = {fact.name: fact.value.value for fact in decision.projection.facts}
+    assert values["adults"] == 1
+    assert values["children"] == 0
 
 
 def test_active_handoff_effect_guard_is_localized() -> None:
@@ -379,13 +496,15 @@ def test_named_activity_product_is_persisted_as_canonical_private_fact() -> None
     }["product_id"] == "product:buracao"
 
 
-def _ready_state(*, service: ServiceKind, workflow_id: str) -> ReadyToSummarizeState:
+def _ready_state(
+    *, service: ServiceKind, workflow_id: str, adults: int = 2
+) -> ReadyToSummarizeState:
     query = SearchQuery(
         service=service,
         start_date=date(2026, 8, 10 if service is ServiceKind.LODGING else 11),
         end_date=date(2026, 8, 12) if service is ServiceKind.LODGING else None,
         start_time=None,
-        party=Party(adults=2, children=0),
+        party=Party(adults=adults, children=0),
     )
     binding = (
         LODGING_BINDING_HASH
@@ -399,7 +518,7 @@ def _ready_state(*, service: ServiceKind, workflow_id: str) -> ReadyToSummarizeS
             kind=ReadKind.LODGING,
             check_in=query.start_date,
             check_out=query.end_date,
-            adults=2,
+            adults=adults,
             children=0,
         ).query_hash()
     else:
@@ -408,7 +527,7 @@ def _ready_state(*, service: ServiceKind, workflow_id: str) -> ReadyToSummarizeS
             kind=ReadKind.ACTIVITY,
             product_id="product:buracao-001",
             activity_date=query.start_date,
-            participants=2,
+            participants=adults,
         ).query_hash()
     lookup_id = (
         f"lookup:{request_hash}"
@@ -1005,7 +1124,11 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
     expected_text: str,
 ) -> None:
     awaiting = _awaiting_from_ready(
-        _ready_state(service=service, workflow_id=f"workflow:refresh-{service.value}")
+        _ready_state(
+            service=service,
+            workflow_id=f"workflow:refresh-{service.value}",
+            adults=1 if service is ServiceKind.ACTIVITY else 2,
+        )
     )
     projection = _projection()
     proposal_service = "hostel"
@@ -1382,10 +1505,14 @@ def test_package_has_one_summary_one_confirmation_and_two_allocated_components()
         workflow_id="workflow:package",
         draft_id="draft:package",
         lodging=_ready_state(
-            service=ServiceKind.LODGING, workflow_id="workflow:package-lodging"
+            service=ServiceKind.LODGING,
+            workflow_id="workflow:package-lodging",
+            adults=1,
         ),
         activity=_ready_state(
-            service=ServiceKind.ACTIVITY, workflow_id="workflow:package-activity"
+            service=ServiceKind.ACTIVITY,
+            workflow_id="workflow:package-activity",
+            adults=1,
         ),
         now=NOW,
     )
