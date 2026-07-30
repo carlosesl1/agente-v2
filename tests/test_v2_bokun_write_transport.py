@@ -156,6 +156,42 @@ def _group_dispatch_payload() -> dict[str, object]:
     return payload
 
 
+def _party_dispatch_payload(adults: int, children: int) -> dict[str, object]:
+    payload = _dispatch_payload()
+    offer = payload["offer"]
+    customer = payload["customer"]
+    assert isinstance(offer, dict) and isinstance(customer, dict)
+    private = offer["private_binding"]
+    assert isinstance(private, dict)
+    offer["party"] = {"adults": adults, "children": children}
+    offer["amount"] = f"{(Decimal('100') * adults + Decimal('50') * children):.2f}"
+    private["adult_pricing_category_id"] = "adult-1"
+    if children:
+        private["child_pricing_category_id"] = "child-1"
+    else:
+        private.pop("child_pricing_category_id", None)
+    passengers = []
+    for position in range(1, adults + children + 1):
+        is_adult = position <= adults
+        passengers.append(
+            {
+                "position": position,
+                "participant_type": "adult" if is_adult else "child",
+                "full_name": f"Pessoa Sintética {position}",
+                "birth_date": (
+                    f"{1980 + position:04d}-01-02"
+                    if is_adult
+                    else f"{2010 + position:04d}-01-02"
+                ),
+                "gender": "f" if position % 2 else "m",
+                "country_code": "BR",
+            }
+        )
+    customer["full_name"] = passengers[0]["full_name"]
+    customer["passengers"] = passengers
+    return payload
+
+
 def _transport(handler) -> BokunHTTPTransport:
     return BokunHTTPTransport(
         access_key="bokun-access",
@@ -609,6 +645,142 @@ def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
 
     assert result == {"status": "confirmed", "booking_id": "booking-group-123"}
     assert len(seen) == 4
+
+
+@pytest.mark.parametrize(
+    ("adults", "children"),
+    ((1, 0), (2, 0), (1, 1), (4, 2)),
+)
+def test_supported_parties_preserve_count_end_to_end(
+    adults: int,
+    children: int,
+) -> None:
+    payload = _party_dispatch_payload(adults, children)
+    seen: list[httpx.Request] = []
+    expected_categories = ["adult-1"] * adults + ["child-1"] * children
+    offer = payload["offer"]
+    assert isinstance(offer, dict)
+    amount = offer["amount"]
+    assert isinstance(amount, str)
+    activity_date = offer["start_date"]
+    assert isinstance(activity_date, str)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        call = len(seen)
+        rows = tuple(
+            (f"passenger-{position}", category_id)
+            for position, category_id in enumerate(expected_categories, 1)
+        )
+        if call == 1:
+            body = json.loads(request.content)
+            assert [
+                item["pricingCategoryId"]
+                for item in body["pricingCategoryBookings"]
+            ] == expected_categories
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-matrix",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": booking_id,
+                                    "pricingCategoryId": category_id,
+                                }
+                                for booking_id, category_id in rows
+                            ],
+                        }
+                    ],
+                },
+            )
+        if call == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=_checkout(
+                    rows,
+                    amount=amount,
+                    activity_booking="activity-matrix",
+                ),
+            )
+        if call == 3:
+            body = json.loads(request.content)
+            details = body["shoppingCart"]["bookingAnswers"][
+                "activityBookings"
+            ][0]["passengers"]
+            assert len(details) == adults + children
+            assert [item["bookingId"] for item in details] == [
+                f"passenger-{position}"
+                for position in range(1, adults + children + 1)
+            ]
+            return httpx.Response(
+                200,
+                request=request,
+                json={"booking": {"bookingId": "booking-matrix"}},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "booking": {
+                    "bookingId": "booking-matrix",
+                    "activityBookings": [
+                        {
+                            "activityId": "913372",
+                            "date": activity_date,
+                            "pricingCategoryBookings": [
+                                {"pricingCategoryId": category_id}
+                                for category_id in expected_categories
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+    result = _transport(handler)(
+        "book_activity",
+        payload,
+        idempotency_key=f"idem:matrix:{adults}:{children}",
+    )
+
+    assert result == {"status": "confirmed", "booking_id": "booking-matrix"}
+    assert len(seen) == 4
+
+
+def test_same_idempotency_key_preserves_session_and_passenger_order() -> None:
+    payload = _party_dispatch_payload(2, 1)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(422, request=request, json={"reason": "synthetic"})
+
+    transport = _transport(handler)
+    first = transport(
+        "book_activity",
+        payload,
+        idempotency_key="idem:stable-group",
+    )
+    second = transport(
+        "book_activity",
+        payload,
+        idempotency_key="idem:stable-group",
+    )
+
+    assert first == second == {"status": "no_effect"}
+    assert len(seen) == 2
+    assert seen[0].url == seen[1].url
+    assert json.loads(seen[0].content) == json.loads(seen[1].content)
+    assert seen[0].headers["X-Idempotency-Key"] == seen[1].headers[
+        "X-Idempotency-Key"
+    ]
 
 
 def test_bokun_group_requires_child_category_before_any_http() -> None:

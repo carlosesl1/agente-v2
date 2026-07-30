@@ -269,10 +269,12 @@ def _package_command(*, booking_profile: bool = False) -> ReservationCommand:
 
 def _group_activity_command(
     passengers: tuple[PassengerFacts, ...],
+    *,
+    party: Party = Party(2, 1),
 ) -> ReservationCommand:
     component = replace(
         _lookup("bokun").offers[0],
-        party=Party(2, 1),
+        party=party,
     )
     customer = CustomerFacts(
         customer_ref="customer:v2-group-001",
@@ -314,6 +316,22 @@ def _group_passengers() -> tuple[PassengerFacts, ...]:
         PassengerFacts(1, "adult", "Pessoa Um", date(1990, 1, 2), "f", "BR"),
         PassengerFacts(2, "adult", "Pessoa Dois", date(1992, 3, 4), "m", "BR"),
         PassengerFacts(3, "child", "Pessoa Três", date(2016, 5, 6), "f", "BR"),
+    )
+
+
+def _matrix_passengers(adults: int, children: int) -> tuple[PassengerFacts, ...]:
+    return tuple(
+        PassengerFacts(
+            position,
+            "adult" if position <= adults else "child",
+            f"Pessoa Sintética {position}",
+            date(1980 + position, 1, 2)
+            if position <= adults
+            else date(2010 + position, 1, 2),
+            "f" if position % 2 else "m",
+            "BR",
+        )
+        for position in range(1, adults + children + 1)
     )
 
 
@@ -379,6 +397,40 @@ def test_group_activity_dispatch_v2_binds_each_passenger_in_party_order() -> Non
     ]
     assert "birth_date" not in payload["customer"]
     assert "gender" not in payload["customer"]
+
+
+@pytest.mark.parametrize(
+    ("adults", "children"),
+    ((1, 0), (2, 0), (1, 1), (4, 2)),
+)
+def test_supported_party_matrix_is_preserved_from_command_to_dispatch(
+    adults: int,
+    children: int,
+) -> None:
+    passengers = _matrix_passengers(adults, children)
+    command = _group_activity_command(
+        passengers,
+        party=Party(adults, children),
+    )
+    private_binding = {
+        "bokun_product_id": "912303",
+        "start_time_id": "start-1",
+        "rate_id": "rate-1",
+        "adult_pricing_category_id": "adult-1",
+    }
+    if children:
+        private_binding["child_pricing_category_id"] = "child-1"
+
+    payload = json.loads(_provider_payload(command, "bokun", private_binding))
+
+    assert payload["offer"]["party"] == {
+        "adults": adults,
+        "children": children,
+    }
+    assert len(payload["customer"]["passengers"]) == adults + children
+    assert [
+        item["participant_type"] for item in payload["customer"]["passengers"]
+    ] == ["adult"] * adults + ["child"] * children
 
 
 def test_group_activity_incomplete_manifest_fails_before_fence() -> None:
