@@ -118,17 +118,31 @@ class ReadRequest:
             self._require_product()
             if type(self.activity_date) is not date:
                 raise InvalidReadRequest("activity_date must be an exact date")
-            if type(self.participants) is not int or self.participants < 1:
+            legacy = self.participants is not None
+            composed = self.adults is not None or self.children is not None
+            if legacy == composed:
                 raise InvalidReadRequest(
-                    "participants must be a positive exact integer"
+                    "activity party must use exactly one composition shape"
+                )
+            if legacy:
+                if type(self.participants) is not int or self.participants < 1:
+                    raise InvalidReadRequest(
+                        "participants must be a positive exact integer"
+                    )
+            elif (
+                type(self.adults) is not int
+                or self.adults < 1
+                or type(self.children) is not int
+                or self.children < 0
+            ):
+                raise InvalidReadRequest(
+                    "activity adults and children must be a valid composition"
                 )
             self._require_none(
                 "query",
                 "locale",
                 "check_in",
                 "check_out",
-                "adults",
-                "children",
                 "offer_id",
             )
         elif self.kind is ReadKind.ROOM_DESCRIPTION:
@@ -169,6 +183,14 @@ class ReadRequest:
             raise InvalidReadRequest(
                 f"{self.kind.value} request has forbidden fields: {','.join(populated)}"
             )
+
+    def activity_party(self) -> tuple[int, int]:
+        if self.kind is not ReadKind.ACTIVITY:
+            raise InvalidReadRequest("activity_party is valid only for activity reads")
+        if self.participants is not None:
+            return self.participants, 0
+        assert type(self.adults) is int and type(self.children) is int
+        return self.adults, self.children
 
     def to_canonical_bytes(self) -> bytes:
         values: dict[str, object] = {

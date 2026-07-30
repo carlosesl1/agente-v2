@@ -112,6 +112,7 @@ def _offers(
                     currency=option["currency"],
                 )
             elif request.kind is ReadKind.ACTIVITY:
+                adults, children = request.activity_party()
                 offer = SanitizedOffer(
                     offer_id=option["offer_id"],
                     service=ReadService.ACTIVITY,
@@ -119,8 +120,8 @@ def _offers(
                     start_date=request.activity_date,
                     end_date=None,
                     start_time=None,
-                    adults=request.participants,
-                    children=0,
+                    adults=adults,
+                    children=children,
                     total_amount=Decimal(option["total_amount"]),
                     currency=option["currency"],
                 )
@@ -153,10 +154,11 @@ def _phase8_request(
         )
         tool_name = "cloudbeds_consultar_hospedagem_v2"
     elif request.kind is ReadKind.ACTIVITY:
+        adults, children = request.activity_party()
         arguments = ActivityReadArguments(
             request.product_id,
             request.activity_date,
-            request.participants,
+            adults + children,
         )
         tool_name = "bokun_consultar_passeio_v2"
     else:
@@ -258,12 +260,13 @@ def bridge_availability_observation(
             party=Party(request.adults, request.children),
         ).signature
     else:
+        adults, children = request.activity_party()
         query_signature = SearchQuery(
             service=ServiceKind.ACTIVITY,
             start_date=request.activity_date,
             end_date=None,
             start_time=None,
-            party=Party(request.participants, 0),
+            party=Party(adults, children),
         ).signature
     snapshot_hash = _public_payload_hash(observation.public_payload)
     content_data = {

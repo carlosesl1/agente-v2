@@ -140,7 +140,7 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
         "bokun_product_id": "913372",
         "start_time_id": "start-1",
         "rate_id": "rate-1",
-        "pricing_category_id": "857489",
+        "adult_pricing_category_id": "857489",
         "product_public_name": "Roteiro do Buracão",
         "total_amount": "600.00",
         "currency": "BRL",
@@ -306,7 +306,13 @@ def test_bokun_fee_quote_reuses_existing_deterministic_cart_without_post() -> No
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": 912303, "title": "Roteiro dos 4Ps"},
+                json={
+                    "id": 912303,
+                    "title": "Roteiro dos 4Ps",
+                    "pricingCategories": [
+                        {"id": "857489", "ticketCategory": "ADULT"}
+                    ],
+                },
             )
         if call == 2:
             return httpx.Response(

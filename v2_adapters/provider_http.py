@@ -637,9 +637,22 @@ class BokunHTTPTransport:
         activity_date = str(payload.get("activity_date") or "")
         query = urlencode({"start": activity_date, "end": activity_date, "currency": "BRL"})
         availability = self._get(f"/activity.json/{provider_id}/availabilities?{query}")
-        participants = int(payload.get("participants") or 0)
-        if participants < 1:
-            raise ProviderHTTPError("Bókun participants must be positive")
+        raw_participants = payload.get("participants")
+        raw_adults = payload.get("adults")
+        raw_children = payload.get("children")
+        if raw_participants is not None:
+            if raw_adults is not None or raw_children is not None:
+                raise ProviderHTTPError("Bókun read party shape is ambiguous")
+            adults = int(raw_participants)
+            children = 0
+        else:
+            if type(raw_adults) is not int or type(raw_children) is not int:
+                raise ProviderHTTPError("Bókun read party composition is invalid")
+            adults = raw_adults
+            children = raw_children
+        participants = adults + children
+        if adults < 1 or children < 0:
+            raise ProviderHTTPError("Bókun read party composition is invalid")
         selected = next(
             (
                 item
@@ -648,13 +661,20 @@ class BokunHTTPTransport:
             ),
             None,
         )
-        amount = self._participant_total(selected or {}, participants)
+        if selected is not None:
+            private, amount = self._activity_booking_fields(
+                selected,
+                meta=meta,
+                adults=adults,
+                children=children,
+            )
+        else:
+            private, amount = {}, None
         if amount is None:
             amount = _first_amount(meta, "price", "amount", "totalAmount", "total")
         if amount is None:
             amount = Decimal("0")
         currency = self._option_currency(selected or {}, meta)
-        private = self._booking_private(selected) if selected is not None else {}
         result = {
             "product_id": canonical_id,
             "bokun_product_id": provider_id,
@@ -673,7 +693,8 @@ class BokunHTTPTransport:
             quote_scope=quote_scope,
             product_id=provider_id,
             activity_date=activity_date,
-            participants=participants,
+            adults=adults,
+            children=children,
             private=private,
             base_amount=amount,
         )
@@ -693,7 +714,8 @@ class BokunHTTPTransport:
         quote_scope: str,
         product_id: str,
         activity_date: str,
-        participants: int,
+        adults: int,
+        children: int,
         private: Mapping[str, str],
         base_amount: Decimal,
     ) -> Decimal:
@@ -727,10 +749,11 @@ class BokunHTTPTransport:
                 "date": activity_date,
                 "startTimeId": private["start_time_id"],
                 "rateId": private["rate_id"],
-                "pricingCategoryBookings": [
-                    {"pricingCategoryId": private["pricing_category_id"]}
-                    for _ in range(participants)
-                ],
+                "pricingCategoryBookings": self._pricing_category_bookings(
+                    private,
+                    adults=adults,
+                    children=children,
+                ),
             }
             _, cart_payload = self._write_request(
                 method="POST",
@@ -744,8 +767,14 @@ class BokunHTTPTransport:
             cart_payload,
             session_id=session_id,
             product_id=product_id,
-            category_id=private["pricing_category_id"],
-            participants=participants,
+            category_ids=tuple(
+                item["pricingCategoryId"]
+                for item in self._pricing_category_bookings(
+                    private,
+                    adults=adults,
+                    children=children,
+                )
+            ),
         )
         checkout_path = (
             f"/checkout.json/options/shopping-cart/{session_id}"
@@ -760,6 +789,27 @@ class BokunHTTPTransport:
         if total is None or total < base_amount:
             raise ProviderHTTPError("Bókun quote checkout total is invalid")
         return total.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _pricing_category_bookings(
+        private: Mapping[str, str],
+        *,
+        adults: int,
+        children: int,
+    ) -> list[dict[str, str]]:
+        if adults < 1 or children < 0:
+            raise ProviderHTTPError("Bókun pricing party is invalid")
+        adult_category = private.get("adult_pricing_category_id")
+        child_category = private.get("child_pricing_category_id")
+        if not adult_category or (children and not child_category):
+            raise ProviderHTTPError("Bókun pricing category binding is incomplete")
+        category_ids = [adult_category] * adults
+        if child_category is not None:
+            category_ids.extend([child_category] * children)
+        return [
+            {"pricingCategoryId": category_id}
+            for category_id in category_ids
+        ]
 
     @staticmethod
     def _quote_cart_is_empty(
@@ -793,8 +843,7 @@ class BokunHTTPTransport:
         *,
         session_id: str,
         product_id: str,
-        category_id: str,
-        participants: int,
+        category_ids: tuple[str, ...],
     ) -> None:
         cart = payload.get("data") if isinstance(payload, Mapping) else None
         if not isinstance(cart, Mapping):
@@ -816,10 +865,21 @@ class BokunHTTPTransport:
             item
             for item in pricing
             if isinstance(item, Mapping)
-            and BokunHTTPTransport._cart_pricing_category_id(item) == category_id
+            and BokunHTTPTransport._cart_pricing_category_id(item) is not None
             and _first(item, "bookingId", "booking_id", "id") is not None
         ] if isinstance(pricing, list) else []
-        if len(passengers) != participants:
+        returned_categories = tuple(
+            BokunHTTPTransport._cart_pricing_category_id(item)
+            for item in passengers
+        )
+        booking_ids = tuple(
+            _first(item, "bookingId", "booking_id", "id")
+            for item in passengers
+        )
+        if (
+            sorted(returned_categories) != sorted(category_ids)
+            or len(booking_ids) != len(set(booking_ids))
+        ):
             raise ProviderHTTPError("Bókun quote cart passenger binding is invalid")
 
     @staticmethod
@@ -893,7 +953,7 @@ class BokunHTTPTransport:
                     "bokun_product_id",
                     "start_time_id",
                     "rate_id",
-                    "pricing_category_id",
+                    "adult_pricing_category_id",
                 )
             ),
             name="Bókun private binding",
@@ -940,7 +1000,7 @@ class BokunHTTPTransport:
         product_id = _text(private["bokun_product_id"])
         start_time_id = _text(private["start_time_id"])
         rate_id = _text(private["rate_id"])
-        category_id = _text(private["pricing_category_id"])
+        category_id = _text(private["adult_pricing_category_id"])
         if (
             not product_id
             or product_id not in set(self._products.values())
@@ -1070,44 +1130,75 @@ class BokunHTTPTransport:
         return {"status": "confirmed", "booking_id": booking_id}
 
     @staticmethod
-    def _booking_private(item: Mapping[str, object]) -> dict[str, str]:
+    def _activity_booking_fields(
+        item: Mapping[str, object],
+        *,
+        meta: Mapping[str, object],
+        adults: int,
+        children: int,
+    ) -> tuple[dict[str, str], Decimal]:
+        categories = meta.get("pricingCategories")
+        if not isinstance(categories, list):
+            raise ProviderHTTPError("Bókun metadata lacks pricing categories")
+
+        def category_id(ticket_category: str) -> str:
+            matches = tuple(
+                value
+                for category in categories
+                if isinstance(category, Mapping)
+                and (category_name := _text(category.get("ticketCategory"))) is not None
+                and category_name.upper() == ticket_category
+                and (value := _first(category, "id", "pricingCategoryId"))
+            )
+            if len(matches) != 1:
+                raise ProviderHTTPError(
+                    f"Bókun {ticket_category.lower()} pricing category is ambiguous"
+                )
+            return matches[0]
+
+        adult_category = category_id("ADULT")
+        child_category = category_id("CHILD") if children else None
         start_time_id = _first(item, "startTimeId", "start_time_id")
         start_time = item.get("startTime")
         if start_time_id is None and isinstance(start_time, Mapping):
             start_time_id = _first(start_time, "id", "startTimeId")
         rates = item.get("pricesByRate")
-        first_rate = (
-            next((rate for rate in rates if isinstance(rate, Mapping)), None)
-            if isinstance(rates, list)
-            else None
-        )
-        rate_id = (
-            _first(first_rate, "activityRateId", "rateId", "id")
-            if isinstance(first_rate, Mapping)
-            else None
-        ) or _first(item, "defaultRateId", "rateId")
-        units = (
-            first_rate.get("pricePerCategoryUnit")
-            if isinstance(first_rate, Mapping)
-            else None
-        )
-        first_unit = (
-            next((unit for unit in units if isinstance(unit, Mapping)), None)
-            if isinstance(units, list)
-            else None
-        )
-        category_id = (
-            _first(first_unit, "id", "pricingCategoryId")
-            if isinstance(first_unit, Mapping)
-            else None
-        )
-        if not start_time_id or not rate_id or not category_id:
+        if not start_time_id or not isinstance(rates, list):
             raise ProviderHTTPError("Bókun availability lacks executable booking fields")
-        return {
-            "start_time_id": start_time_id,
-            "rate_id": rate_id,
-            "pricing_category_id": category_id,
-        }
+        for rate in rates:
+            if not isinstance(rate, Mapping):
+                continue
+            rate_id = _first(rate, "activityRateId", "rateId", "id")
+            units = rate.get("pricePerCategoryUnit")
+            if not rate_id or not isinstance(units, list):
+                continue
+            by_id = {
+                category: unit
+                for unit in units
+                if isinstance(unit, Mapping)
+                and (category := _first(unit, "id", "pricingCategoryId"))
+            }
+            adult_unit = by_id.get(adult_category)
+            child_unit = by_id.get(child_category) if child_category else None
+            if adult_unit is None or (children and child_unit is None):
+                continue
+            adult_amount = _amount(adult_unit.get("amount"))
+            child_amount = (
+                _amount(child_unit.get("amount"))
+                if isinstance(child_unit, Mapping)
+                else Decimal("0")
+            )
+            if adult_amount is None or child_amount is None:
+                continue
+            private = {
+                "start_time_id": start_time_id,
+                "rate_id": rate_id,
+                "adult_pricing_category_id": adult_category,
+            }
+            if child_category is not None:
+                private["child_pricing_category_id"] = child_category
+            return private, adult_amount * adults + child_amount * children
+        raise ProviderHTTPError("Bókun required pricing category is unavailable")
 
     @staticmethod
     def _cart_bindings(

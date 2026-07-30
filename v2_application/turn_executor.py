@@ -563,7 +563,8 @@ def _force_structured_activity_summary_preparation(
                 kind=ReadKind.ACTIVITY,
                 product_id=values["product_id"],
                 activity_date=activity_date,
-                participants=adults + children,
+                adults=adults,
+                children=children,
             ),
         ),
         target_offer_id=None,
@@ -606,6 +607,7 @@ def _repair_requested_activity_selection(
     observation = observations[0]
     if request.kind is not ReadKind.ACTIVITY:
         return second_proposal
+    request_adults, request_children = request.activity_party()
 
     values: dict[str, str | int | date] = {}
     for fact in (*state_facts, *first_proposal.facts, *second_proposal.facts):
@@ -623,7 +625,8 @@ def _repair_requested_activity_selection(
         or type(adults) is not int
         or type(children) is not int
         or adults + children != 1
-        or request.participants != adults + children
+        or request_adults != adults
+        or request_children != children
         or values.get("payment_method") not in {"stripe", "wise", "pix"}
         or type(values.get("birth_date")) is not date
         or values.get("gender") not in {"m", "f"}
@@ -638,7 +641,9 @@ def _repair_requested_activity_selection(
         or payload.get("price_includes_booking_fee") is not True
         or payload.get("product_id") != request.product_id
         or payload.get("activity_date") != request.activity_date.isoformat()
-        or payload.get("participants") != request.participants
+        or payload.get("adults") != request_adults
+        or payload.get("children") != request_children
+        or payload.get("participants") != request_adults + request_children
         or type(offer_id) is not str
         or not offer_id.startswith("offer:")
     ):
@@ -911,7 +916,8 @@ def _confirmation_read_requests(
                 kind=ReadKind.ACTIVITY,
                 product_id=product_id,
                 activity_date=component.start_date,
-                participants=component.party.adults,
+                adults=component.party.adults,
+                children=component.party.children,
             )
         else:
             return ()

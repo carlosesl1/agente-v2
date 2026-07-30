@@ -52,7 +52,7 @@ _PRIVATE_PROVIDER_FIELDS: Final = {
             "bokun_product_id",
             "start_time_id",
             "rate_id",
-            "pricing_category_id",
+            "adult_pricing_category_id",
         )
     ),
 }

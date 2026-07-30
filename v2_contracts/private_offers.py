@@ -17,7 +17,7 @@ _PROVIDER_FIELDS = {
             "bokun_product_id",
             "start_time_id",
             "rate_id",
-            "pricing_category_id",
+            "adult_pricing_category_id",
         )
     ),
 }
@@ -113,6 +113,10 @@ class PrivateOfferBinding:
             raise TypeError("query must be an exact PrivateOfferQuery")
         if (self.provider == "cloudbeds") != (self.query.service == "lodging"):
             raise ValueError("provider and service disagree")
+        if self.provider == "bokun" and self.query.children:
+            expected_fields = frozenset(
+                (*expected_fields, "child_pricing_category_id")
+            )
         observed = _utc(self.observed_at, "observed_at")
         expires = _utc(self.expires_at, "expires_at")
         if expires <= observed:

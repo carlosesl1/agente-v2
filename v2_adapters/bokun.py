@@ -31,15 +31,23 @@ _BOOKING_PRIVATE_FIELDS: Final = (
     "bokun_product_id",
     "start_time_id",
     "rate_id",
-    "pricing_category_id",
+    "adult_pricing_category_id",
 )
 
 
-def _private_booking_fields(response: dict[str, object]) -> dict[str, str]:
-    return {
+def _private_booking_fields(
+    response: dict[str, object], *, children: int
+) -> dict[str, str]:
+    fields = {
         name: text(response.get(name), name)
         for name in _BOOKING_PRIVATE_FIELDS
     }
+    if children:
+        fields["child_pricing_category_id"] = text(
+            response.get("child_pricing_category_id"),
+            "child_pricing_category_id",
+        )
+    return fields
 
 
 def _fee_inclusive_public_fields(
@@ -87,13 +95,14 @@ class BokunReadAdapter:
         payload = {
             "product_id": query.canonical_product_id,
             "activity_date": query.start_date.isoformat(),
-            "participants": query.adults,
+            "adults": query.adults,
+            "children": query.children,
             "quote_scope": query.request_hash,
         }
         response = exact_dict(self._transport("activity", payload), "Bókun response")
         if response.get("product_id") not in (None, query.canonical_product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
-        private = _private_booking_fields(response)
+        private = _private_booking_fields(response, children=query.children)
         amount = text(response.get("total_amount"), "total_amount")
         currency = text(response.get("currency"), "currency")
         available = response.get("available")
@@ -127,7 +136,7 @@ class BokunReadAdapter:
             end_date=None,
             start_time=None,
             adults=query.adults,
-            children=0,
+            children=query.children,
             total_amount=amount,
             currency=currency,
             available=available,
@@ -141,16 +150,18 @@ class BokunReadAdapter:
         )
 
     def _activity(self, request: ReadRequest) -> ReadObservation:
+        adults, children = request.activity_party()
         query = {
             "product_id": request.product_id,
             "activity_date": request.activity_date.isoformat(),
-            "participants": request.participants,
+            "adults": adults,
+            "children": children,
             "quote_scope": request.query_hash(),
         }
         response = exact_dict(self._transport("activity", query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
-        private = _private_booking_fields(response)
+        private = _private_booking_fields(response, children=children)
         amount = text(response.get("total_amount"), "total_amount")
         currency = text(response.get("currency"), "currency")
         available = response.get("available")
@@ -175,7 +186,9 @@ class BokunReadAdapter:
         public = {
             "product_id": request.product_id,
             "activity_date": request.activity_date.isoformat(),
-            "participants": request.participants,
+            "adults": adults,
+            "children": children,
+            "participants": adults + children,
             "offer_id": "offer:" + private_hash,
             "product_public_name": text(
                 response.get("product_public_name"), "product_public_name"

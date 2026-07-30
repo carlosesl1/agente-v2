@@ -231,7 +231,7 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
             "bokun_product_id": "bokun-private-001",
             "start_time_id": "start-private-001",
             "rate_id": "rate-private-001",
-            "pricing_category_id": "category-private-001",
+            "adult_pricing_category_id": "category-private-001",
             "product_public_name": "Buracão",
             "base_amount": provider_state["amount"],
             "booking_fee_amount": "0.00",
@@ -258,7 +258,7 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
         start_date=ACTIVITY_REQUEST.activity_date,
         end_date=None,
         start_time=None,
-        party=Party(adults=ACTIVITY_REQUEST.participants, children=0),
+        party=Party(*ACTIVITY_REQUEST.activity_party()),
         total=Money(amount=Decimal("400.00"), currency="BRL"),
         available=True,
     )
@@ -267,7 +267,7 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
     binding = resolver.resolve(component, now=NOW)
     assert binding.private_payload() == {
         "bokun_product_id": "bokun-private-001",
-        "pricing_category_id": "category-private-001",
+        "adult_pricing_category_id": "category-private-001",
         "rate_id": "rate-private-001",
         "start_time_id": "start-private-001",
     }
@@ -287,7 +287,7 @@ def test_bokun_read_exposes_only_fee_inclusive_total_and_binds_quote_scope() -> 
             "bokun_product_id": "912303",
             "start_time_id": "start-4ps",
             "rate_id": "rate-4ps",
-            "pricing_category_id": "857489",
+            "adult_pricing_category_id": "857489",
             "product_public_name": "Roteiro dos 4Ps",
             "base_amount": "330.00",
             "booking_fee_amount": "4.95",
@@ -311,7 +311,8 @@ def test_bokun_read_exposes_only_fee_inclusive_total_and_binds_quote_scope() -> 
             {
                 "product_id": ACTIVITY_REQUEST.product_id,
                 "activity_date": "2026-08-11",
-                "participants": 2,
+                "adults": 2,
+                "children": 0,
                 "quote_scope": ACTIVITY_REQUEST.query_hash(),
             },
         )

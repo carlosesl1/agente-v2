@@ -214,7 +214,7 @@ def test_parent_forces_only_a_fresh_read_for_explicit_summary_preparation() -> N
     assert request.kind is ReadKind.ACTIVITY
     assert request.product_id == "product:tour-4ps"
     assert request.activity_date == date(2026, 11, 18)
-    assert request.participants == 1
+    assert request.activity_party() == (1, 0)
 
 
 def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() -> None:
@@ -291,6 +291,8 @@ def test_parent_repairs_only_structured_requested_activity_selection() -> None:
             "offer_id": "offer:" + "a" * 64,
             "product_id": "product:tour-4ps",
             "activity_date": "2026-11-18",
+            "adults": 1,
+            "children": 0,
             "participants": 1,
             "available": True,
             "price_includes_booking_fee": True,
@@ -603,6 +605,7 @@ class FakeActivityReadPort:
     def read(self, request: ReadRequest) -> ReadObservation:
         assert self.store._connection.in_transaction is False
         self.calls.append(request)
+        adults, children = request.activity_party()
         return ReadObservation(
             request_hash=request.canonical_hash(),
             provider="bokun",
@@ -613,7 +616,9 @@ class FakeActivityReadPort:
                 "product_id": "product:buracao",
                 "product_public_name": "Cachoeira do Buracão",
                 "activity_date": "2026-08-12",
-                "participants": request.participants,
+                "adults": adults,
+                "children": children,
+                "participants": adults + children,
                 "total_amount": "1300.00",
                 "currency": "BRL",
                 "available": True,
@@ -1545,7 +1550,7 @@ def test_activity_confirmation_derives_current_provider_read() -> None:
         assert derived[0].kind is ReadKind.ACTIVITY
         assert derived[0].product_id == "product:buracao"
         assert derived[0].activity_date == date(2026, 8, 12)
-        assert derived[0].participants == 1
+        assert derived[0].activity_party() == (1, 0)
     finally:
         store.close()
 

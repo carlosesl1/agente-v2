@@ -21,7 +21,7 @@ def _dispatch_payload(**overrides: object) -> dict[str, object]:
                 "bokun_product_id": "913372",
                 "start_time_id": "3210363",
                 "rate_id": "2375672",
-                "pricing_category_id": "857489",
+                "adult_pricing_category_id": "857489",
             },
             "offer_id": "offer:public-bokun-001",
             "start_date": "2026-08-11",
