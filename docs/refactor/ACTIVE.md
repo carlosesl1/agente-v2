@@ -32,10 +32,10 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | 5. Coleta e seleção de grupos | `DONE` | `6f39fcf7bf76feff9f43a94c6f3d98b783e9b7c6` |
 | 6. Dispatch Bókun v2 | `DONE` | `9f38fb7f616b368d97d40e6ef819889936d948e3` |
 | 7. Transport e read-back exato | `DONE` | `d9935f28049b19316de38dbf0973cea91e236c7a` |
-| 8. Regressões e qualificação local | `IN_PROGRESS` | `PENDING` |
-| 9. Revisão terminal e candidata | `PENDING` | `PENDING` |
+| 8. Regressões e qualificação local | `DONE` | `3cb84200aaab3d76344cba06623a7eaa70790865` |
+| 9. Revisão terminal e candidata | `IN_PROGRESS` | `PENDING` |
 
-- NEXT: `Task 8 — regressões e qualificação local`
+- NEXT: `Task 9 — revisão terminal e candidata`
 
 ### Decisão de topologia da Task 7
 
