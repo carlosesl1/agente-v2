@@ -608,10 +608,7 @@ def build_worker_set(
         ),
     }
     controlled_ingress_status = "closed"
-    if (
-        settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
-        and settings.manychat_delivery_enabled
-    ):
+    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
         controlled_ingress_status = (
             "ready"
             if container.controlled_public_ingress_reason(now=UTCClock().now()) is None

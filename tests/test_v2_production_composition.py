@@ -294,7 +294,10 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             )
             is None
         )
-        assert container.readiness().status == "ready"
+        readiness = container.readiness()
+        assert readiness.status == "ready"
+        assert readiness.capabilities["controlled_public_ingress"] == "ready"
+        assert readiness.capabilities["manychat_delivery"] == "closed"
     finally:
         container.close()
 
