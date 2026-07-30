@@ -828,10 +828,7 @@ def _post_command_guard_decision(
             state,
             source_event_id,
         ),
-        projection=replace(
-            projection,
-            stage=ConversationStage.CLOSING,
-        ),
+        projection=projection,
         commands=(),
         public_reply=ConversationReply(
             "reservation_already_processing",

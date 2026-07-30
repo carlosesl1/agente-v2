@@ -1081,10 +1081,14 @@ def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -
     )
     queued = confirmed.next_state.workflow
     assert type(queued) is ExecutionQueuedState
+    queued_projection = replace(
+        confirmed.projection,
+        stage=ConversationStage.HOSTEL,
+    )
 
     selected_again = _reducer().reduce(
         state=confirmed.next_state,
-        projection=confirmed.projection,
+        projection=queued_projection,
         proposal=_proposal(
             source="event:queued-select-again",
             intent="select",
@@ -1112,6 +1116,7 @@ def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -
     for guarded in (selected_again, confirmed_again):
         assert guarded.commands == ()
         assert guarded.next_state.workflow == queued
+        assert guarded.projection == queued_projection
         assert guarded.public_reply.kind == "reservation_already_processing"
         assert guarded.receipt_requirements == ("reservation_already_processing",)
 
