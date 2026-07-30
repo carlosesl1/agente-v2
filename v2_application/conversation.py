@@ -29,6 +29,8 @@ from reservation_domain import (
     EconomicTerms,
     ExecutionQueuedState,
     ExecutingState,
+    FailedBeforeProviderState,
+    FailedNoEffectState,
     LookupEvidence,
     LookupRecorded,
     LookupStatus,
@@ -790,6 +792,8 @@ def _reservation_already_processing_reply(locale: str) -> str:
 _POST_COMMAND_WORKFLOW_TYPES = {
     ExecutionQueuedState,
     ExecutingState,
+    FailedBeforeProviderState,
+    FailedNoEffectState,
     SucceededState,
     UncertainState,
     ManualReviewState,

@@ -21,7 +21,13 @@ from reservation_domain import (
     CustomerFacts,
     DraftRequested,
     EconomicTerms,
+    ExecutionCertainty,
+    ExecutionFinished,
+    ExecutionOutcome,
     ExecutionQueuedState,
+    ExecutionStarted,
+    FailedBeforeProviderState,
+    FailedNoEffectState,
     LookupEvidence,
     LookupRecorded,
     LookupStatus,
@@ -733,6 +739,78 @@ def test_post_command_offer_overlap_detects_partial_package_duplicate() -> None:
     assert _post_command_offer_overlap(("offer:a", "offer:b"), ("offer:b",)) is True
     assert _post_command_offer_overlap(("offer:a",), ("offer:c",)) is False
     assert _post_command_offer_overlap(None, ("offer:a",)) is False
+
+
+@pytest.mark.parametrize(
+    ("certainty", "expected_state"),
+    (
+        (ExecutionCertainty.NOT_CALLED, FailedBeforeProviderState),
+        (ExecutionCertainty.CALLED_NO_EFFECT, FailedNoEffectState),
+    ),
+)
+def test_proven_no_effect_states_still_block_implicit_duplicate_command(
+    certainty: ExecutionCertainty,
+    expected_state: type,
+) -> None:
+    awaiting = _awaiting_from_ready(
+        _ready_state(service=ServiceKind.LODGING, workflow_id=f"workflow:{certainty.value}")
+    )
+    confirmed = _reducer().reduce(
+        state=_boundary(awaiting),
+        projection=_projection(),
+        proposal=_proposal(
+            source=f"event:{certainty.value}:confirm",
+            intent="confirm",
+            confirmed_summary_version=awaiting.draft.version,
+        ),
+        profile=_profile(),
+        reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+    queued = confirmed.next_state.workflow
+    assert type(queued) is ExecutionQueuedState
+    executing = reduce_domain(
+        queued,
+        ExecutionStarted(
+            event_id=f"event:{certainty.value}:started",
+            occurred_at=NOW + timedelta(seconds=2),
+            command_id=queued.command.command_id,
+        ),
+    ).state
+    failed = reduce_domain(
+        executing,
+        ExecutionFinished(
+            event_id=f"event:{certainty.value}:finished",
+            occurred_at=NOW + timedelta(seconds=3),
+            command_id=queued.command.command_id,
+            outcome=ExecutionOutcome(
+                command_id=queued.command.command_id,
+                certainty=certainty,
+                normalized_status=certainty.value,
+            ),
+        ),
+    ).state
+    assert type(failed) is expected_state
+
+    guarded = _reducer().reduce(
+        state=_boundary(failed),
+        projection=confirmed.projection,
+        proposal=_proposal(
+            source=f"event:{certainty.value}:select-again",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+            payment_method="pix",
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=4),
+    )
+
+    assert guarded.commands == ()
+    assert guarded.next_state.workflow == failed
+    assert guarded.public_reply.kind == "reservation_already_processing"
 
 
 def test_execution_queued_allows_materially_different_offer_selection() -> None:
