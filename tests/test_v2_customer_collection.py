@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
+
 from reservation_boundary import BoundaryState, ConversationProjection, ConversationStage
-from reservation_domain import CustomerFacts
+from reservation_domain import CustomerFacts, PassengerFacts, effective_passengers
 from reservation_domain.serialization import _decode_dataclass, _encode
-from reservation_domain.signature import canonical_subject
+from reservation_domain.signature import canonical_subject, subject_signature
 from reservation_domain.types import EconomicTerms, Money, OfferSnapshot, Party, ServiceKind
 from v2_adapters.hermes_model import _request_wire
 from v2_application.conversation import V2ConversationReducer
@@ -189,3 +191,151 @@ def test_customer_birth_date_and_gender_are_execution_bound_but_legacy_shape_sta
     )
     assert subject["customer"]["birth_date"] == "1990-01-02"
     assert subject["customer"]["gender"] == "m"
+
+
+def _activity_offer(party: Party) -> OfferSnapshot:
+    return OfferSnapshot(
+        offer_id="offer:passenger-bound",
+        lookup_id="lookup:passenger-bound",
+        service=ServiceKind.ACTIVITY,
+        provider_ref="provider:passenger-bound",
+        public_label="Passeio sintético",
+        start_date=date(2026, 8, 11),
+        end_date=None,
+        start_time="08:00",
+        party=party,
+        total=Money("750.00", "BRL"),
+        available=True,
+    )
+
+
+def _passenger(position: int, participant_type: str, full_name: str) -> PassengerFacts:
+    return PassengerFacts(
+        position=position,
+        participant_type=participant_type,
+        full_name=full_name,
+        birth_date=date(1990 + position, 1, 2),
+        gender="f" if position % 2 else "m",
+        country_code="BR",
+    )
+
+
+def _group_customer(passengers: tuple[PassengerFacts, ...]) -> CustomerFacts:
+    return CustomerFacts(
+        customer_ref="profile:passenger-group",
+        full_name="Pessoa Sintética Um",
+        email="group@example.invalid",
+        phone_e164="+5571999999999",
+        country_code="BR",
+        passengers=passengers,
+    )
+
+
+def test_passenger_manifest_round_trips_and_is_bound_to_subject_signature() -> None:
+    passengers = (
+        _passenger(1, "adult", "Pessoa Sintética Um"),
+        _passenger(2, "adult", "Pessoa Sintética Dois"),
+        _passenger(3, "child", "Pessoa Sintética Três"),
+    )
+    customer = _group_customer(passengers)
+    wire = _encode(customer)
+
+    assert _decode_dataclass(CustomerFacts, wire) == customer
+    assert wire["passengers"][2] == {
+        "position": 3,
+        "participant_type": "child",
+        "full_name": "Pessoa Sintética Três",
+        "birth_date": "1993-01-02",
+        "gender": "f",
+        "country_code": "BR",
+    }
+    subject = canonical_subject(
+        components=(_activity_offer(Party(2, 1)),),
+        customer=customer,
+        terms=EconomicTerms("stripe"),
+    )
+    assert subject["customer"]["passengers"] == wire["passengers"]
+
+    corrected = _group_customer(
+        (
+            passengers[0],
+            PassengerFacts(
+                position=2,
+                participant_type="adult",
+                full_name="Pessoa Sintética Dois",
+                birth_date=date(1992, 1, 3),
+                gender="m",
+                country_code="BR",
+            ),
+            passengers[2],
+        )
+    )
+    assert subject_signature(
+        components=(_activity_offer(Party(2, 1)),),
+        customer=customer,
+        terms=EconomicTerms("stripe"),
+    ) != subject_signature(
+        components=(_activity_offer(Party(2, 1)),),
+        customer=corrected,
+        terms=EconomicTerms("stripe"),
+    )
+
+
+def test_legacy_customer_wire_stays_unchanged_when_manifest_is_empty() -> None:
+    customer = CustomerFacts(
+        customer_ref="profile:legacy-passenger",
+        full_name="Pessoa Sintética",
+        email="legacy-passenger@example.invalid",
+        phone_e164="+5571999999998",
+        country_code="BR",
+        birth_date=date(1990, 1, 2),
+        gender="f",
+    )
+
+    assert "passengers" not in _encode(customer)
+    assert "passengers" not in canonical_subject(
+        components=(_activity_offer(Party(1, 0)),),
+        customer=customer,
+        terms=EconomicTerms("stripe"),
+    )["customer"]
+    assert effective_passengers(customer, Party(1, 0)) == (
+        PassengerFacts(1, "adult", "Pessoa Sintética", date(1990, 1, 2), "f", "BR"),
+    )
+
+
+def test_effective_passengers_fail_closed_for_missing_or_divergent_group_manifest() -> None:
+    customer = _group_customer(
+        (
+            _passenger(1, "adult", "Pessoa Sintética Um"),
+            _passenger(2, "child", "Pessoa Sintética Dois"),
+        )
+    )
+
+    assert effective_passengers(customer, Party(1, 1)) == customer.passengers
+    with pytest.raises(ValueError, match="does not match party"):
+        effective_passengers(customer, Party(2, 0))
+    with pytest.raises(ValueError, match="explicit passenger manifest"):
+        effective_passengers(
+            CustomerFacts(
+                customer_ref="profile:no-group-manifest",
+                full_name="Pessoa Sintética",
+                email="no-group-manifest@example.invalid",
+                phone_e164="+5571999999997",
+                country_code="BR",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+            ),
+            Party(2, 0),
+        )
+
+
+def test_passenger_manifest_rejects_non_contiguous_positions_and_unknown_type() -> None:
+    with pytest.raises(ValueError, match="contiguous"):
+        _group_customer(
+            (
+                _passenger(1, "adult", "Pessoa Sintética Um"),
+                _passenger(3, "adult", "Pessoa Sintética Três"),
+            )
+        )
+    with pytest.raises(ValueError, match="participant_type"):
+        _passenger(1, "senior", "Pessoa Sintética")

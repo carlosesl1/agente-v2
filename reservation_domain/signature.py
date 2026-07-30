@@ -82,6 +82,18 @@ def canonical_subject(
         customer_payload["birth_date"] = customer.birth_date.isoformat()
     if customer.gender is not None:
         customer_payload["gender"] = customer.gender
+    if customer.passengers:
+        customer_payload["passengers"] = [
+            {
+                "position": item.position,
+                "participant_type": item.participant_type,
+                "full_name": item.full_name,
+                "birth_date": item.birth_date.isoformat(),
+                "gender": item.gender,
+                "country_code": item.country_code,
+            }
+            for item in customer.passengers
+        ]
     return {
         "components": [_offer_payload(item) for item in ordered],
         "customer": customer_payload,

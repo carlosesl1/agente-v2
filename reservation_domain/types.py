@@ -154,6 +154,35 @@ class Party:
 
 
 @dataclass(frozen=True, slots=True)
+class PassengerFacts:
+    position: int
+    participant_type: str
+    full_name: str
+    birth_date: date
+    gender: str
+    country_code: str
+
+    def __post_init__(self) -> None:
+        if type(self.position) is not int or self.position < 1:
+            raise ValueError("passenger.position must be an integer >= 1")
+        if self.participant_type not in ("adult", "child"):
+            raise ValueError("passenger.participant_type must be adult or child")
+        name = " ".join(str(self.full_name or "").split())
+        if not name or len(name) > 200:
+            raise ValueError(
+                "passenger.full_name must contain 1..200 normalized characters"
+            )
+        _require_date(self.birth_date, "passenger.birth_date")
+        if self.gender not in ("m", "f"):
+            raise ValueError("passenger.gender must be m or f")
+        country = str(self.country_code or "").strip().upper()
+        if not _COUNTRY_RE.fullmatch(country):
+            raise ValueError("passenger.country_code must contain two letters")
+        object.__setattr__(self, "full_name", name)
+        object.__setattr__(self, "country_code", country)
+
+
+@dataclass(frozen=True, slots=True)
 class CustomerFacts:
     customer_ref: str
     full_name: str
@@ -162,6 +191,7 @@ class CustomerFacts:
     country_code: str
     birth_date: date | None = None
     gender: str | None = None
+    passengers: tuple[PassengerFacts, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -195,6 +225,51 @@ class CustomerFacts:
             _require_date(self.birth_date, "customer.birth_date")
         if self.gender is not None and self.gender not in ("m", "f"):
             raise ValueError("customer.gender must be m, f or None")
+        if type(self.passengers) is not tuple or any(
+            type(item) is not PassengerFacts for item in self.passengers
+        ):
+            raise TypeError("customer.passengers must be an exact PassengerFacts tuple")
+        positions = tuple(item.position for item in self.passengers)
+        if positions != tuple(range(1, len(self.passengers) + 1)):
+            raise ValueError("customer.passengers positions must be contiguous from 1")
+
+
+def effective_passengers(
+    customer: CustomerFacts,
+    party: Party,
+) -> tuple[PassengerFacts, ...]:
+    """Return the exact signed manifest that may cross the activity write edge."""
+
+    if type(customer) is not CustomerFacts or type(party) is not Party:
+        raise TypeError("effective_passengers requires exact CustomerFacts and Party")
+    if customer.passengers:
+        adults = sum(
+            item.participant_type == "adult" for item in customer.passengers
+        )
+        children = sum(
+            item.participant_type == "child" for item in customer.passengers
+        )
+        if (
+            len(customer.passengers) != party.adults + party.children
+            or adults != party.adults
+            or children != party.children
+        ):
+            raise ValueError("passenger manifest does not match party")
+        return customer.passengers
+    if party != Party(1, 0):
+        raise ValueError("group booking requires an explicit passenger manifest")
+    if customer.birth_date is None or customer.gender is None:
+        raise ValueError("single passenger profile requires birth_date and gender")
+    return (
+        PassengerFacts(
+            position=1,
+            participant_type="adult",
+            full_name=customer.full_name,
+            birth_date=customer.birth_date,
+            gender=customer.gender,
+            country_code=customer.country_code,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1283,7 +1358,9 @@ __all__ = [
     "ReservationOperation",
     "Money",
     "Party",
+    "PassengerFacts",
     "CustomerFacts",
+    "effective_passengers",
     "AddOn",
     "EconomicTerms",
     "SearchQuery",

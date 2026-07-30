@@ -15,13 +15,11 @@ from .types import (
     EVENT_TYPES,
     SCHEMA_VERSION,
     STATE_TYPES,
-    DomainEvent,
     CustomerFacts,
     Event,
     ExecutionOutcome,
     ReservationCommand,
     State,
-    WorkflowState,
     validate_state_consistency,
 )
 
@@ -54,6 +52,8 @@ def _encode(value: Any) -> Any:
                 encoded.pop("birth_date")
             if value.gender is None:
                 encoded.pop("gender")
+            if not value.passengers:
+                encoded.pop("passengers")
         return encoded
     if isinstance(value, Enum):
         return value.value
@@ -75,7 +75,11 @@ def _decode_dataclass(cls: type, value: Any):
         raise ValueError(f"{cls.__name__} data must be an object")
     expected = {field.name for field in fields(cls)}
     actual = set(value)
-    optional = {"birth_date", "gender"} if cls is CustomerFacts else set()
+    optional = (
+        {"birth_date", "gender", "passengers"}
+        if cls is CustomerFacts
+        else set()
+    )
     if actual - optional != expected - optional or not actual <= expected:
         missing = sorted(expected - actual)
         unknown = sorted(actual - expected)
