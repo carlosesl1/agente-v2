@@ -142,8 +142,14 @@ def merge_manifest(
     existing_json: str | None,
     updates: tuple[PassengerInput, ...],
     party: Party,
+    *,
+    allow_replacement: bool = False,
 ) -> str:
-    """Merge non-conflicting partial updates into one canonical private manifest."""
+    """Merge partial updates into one canonical private manifest.
+
+    Replacement is reserved for an explicit parent-authorized adjustment that
+    revokes any pending proposal before a fresh summary can be signed.
+    """
 
     if type(party) is not Party:
         raise TypeError("party must be an exact Party")
@@ -151,6 +157,8 @@ def merge_manifest(
         type(item) is not PassengerInput for item in updates
     ):
         raise TypeError("updates must be an exact PassengerInput tuple")
+    if type(allow_replacement) is not bool:
+        raise TypeError("allow_replacement must be an exact bool")
     positions = tuple(item.position for item in updates)
     if len(positions) != len(set(positions)):
         raise ValueError("passenger updates must have unique positions")
@@ -182,9 +190,10 @@ def merge_manifest(
                 continue
             prior = row[name]
             if prior is not None and prior != value:
-                raise PassengerManifestConflict(
-                    f"passenger update conflicts at position {update.position} field {name}"
-                )
+                if not allow_replacement:
+                    raise PassengerManifestConflict(
+                        f"passenger update conflicts at position {update.position} field {name}"
+                    )
             row[name] = value
     canonical = _canonical(current)
     _load(canonical, party)
@@ -283,6 +292,7 @@ def merge_projection_manifest(
     party: Party | None,
     *,
     frame_commitment_hash: str,
+    allow_replacement: bool = False,
 ) -> ConversationProjection:
     """Persist a canonical manifest without exposing it as model state facts."""
 
@@ -290,6 +300,8 @@ def merge_projection_manifest(
         raise TypeError("projection must be an exact ConversationProjection")
     if party is not None and type(party) is not Party:
         raise TypeError("party must be an exact Party or None")
+    if type(allow_replacement) is not bool:
+        raise TypeError("allow_replacement must be an exact bool")
     existing_json = projection_manifest_json(projection)
     if party is None:
         if updates:
@@ -299,7 +311,12 @@ def merge_projection_manifest(
         return projection
     if existing_json is None and not updates:
         return projection
-    merged_json = merge_manifest(existing_json, updates, party)
+    merged_json = merge_manifest(
+        existing_json,
+        updates,
+        party,
+        allow_replacement=allow_replacement,
+    )
     facts = {item.name: item for item in projection.facts}
     facts["passenger_manifest"] = TypedFact(
         "passenger_manifest",

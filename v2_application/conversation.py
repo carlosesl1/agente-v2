@@ -1143,6 +1143,10 @@ class V2ConversationReducer:
             proposal.passengers,
             activity_party,
             frame_commitment_hash=fact_commitment_hash,
+            allow_replacement=(
+                proposal.intent == "adjust"
+                and proposal.pending_disposition == "revoke"
+            ),
         )
         if proposal.intent == "select":
             merged = _without_critical_outcome(merged)

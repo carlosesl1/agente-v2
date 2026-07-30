@@ -64,6 +64,7 @@ from v2_application.conversation import (
     V2ConversationReducer,
     _handoff_effect_guard_reply,
 )
+from v2_application.passengers import projection_passengers
 from v2_application.critical_actions import (
     CriticalActionPolicy,
     critical_action_context,
@@ -310,6 +311,96 @@ def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
     )
     values = {item.name: item.value.value for item in decision.projection.facts}
     assert "passenger_manifest" in values
+
+
+def test_post_summary_passenger_correction_revokes_old_authority_without_command() -> None:
+    reducer = _reducer()
+    selected = reducer.reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=ModelProposal(
+            source_event_id="event:group-summary-before-correction",
+            intent="select",
+            reply_chunks=("Vou preparar o resumo do grupo.",),
+            facts=(
+                ModelFact("language", "pt-BR"),
+                ModelFact("service", "agency"),
+                ModelFact("product_id", "product:buracao-001"),
+                ModelFact("activity_date", date(2026, 8, 11)),
+                ModelFact("adults", 2),
+                ModelFact("children", 0),
+                ModelFact("payment_method", "wise"),
+            ),
+            passengers=(
+                _passenger(
+                    1,
+                    "adult",
+                    full_name="Pessoa Grupo Um",
+                    birth_date=date(1990, 1, 2),
+                    gender="f",
+                ),
+                _passenger(
+                    2,
+                    "adult",
+                    full_name="Pessoa Grupo Dois",
+                    birth_date=date(1992, 3, 4),
+                    gender="m",
+                ),
+            ),
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_id=ACTIVITY_OFFER_ID,
+        ),
+        profile=_profile(),
+        reads=(_activity_read(adults=2),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+    awaiting = selected.next_state.workflow
+    assert type(awaiting) is AwaitingConfirmationState
+    old_signature = awaiting.draft.subject_signature
+
+    corrected = reducer.reduce(
+        state=selected.next_state,
+        projection=selected.projection,
+        proposal=ModelProposal(
+            source_event_id="event:group-passenger-correction",
+            intent="adjust",
+            reply_chunks=("Atualizei os dados e descartei o resumo anterior.",),
+            facts=(),
+            passengers=(
+                _passenger(
+                    2,
+                    "adult",
+                    full_name="Pessoa Grupo Corrigida",
+                    birth_date=date(1992, 3, 4),
+                    gender="m",
+                ),
+            ),
+            read_requests=(),
+            effect_proposals=(),
+            pending_disposition="revoke",
+        ),
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash="e" * 64,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert type(corrected.next_state.workflow) is AwaitingAdjustmentState
+    assert corrected.commands == ()
+    assert corrected.receipt_requirements == ("proposal_revoked",)
+    assert corrected.next_state.workflow.draft.subject_signature == old_signature
+    assert (
+        reducer.confirmation_projection_matches(
+            awaiting,
+            corrected.projection,
+        )
+        is False
+    )
+    passengers = projection_passengers(corrected.projection, Party(2, 0))
+    assert passengers is not None
+    assert passengers[1].full_name == "Pessoa Grupo Corrigida"
 
 
 def test_incomplete_group_manifest_is_persisted_but_cannot_select() -> None:
