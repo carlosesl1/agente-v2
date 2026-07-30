@@ -43,10 +43,17 @@ def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> Non
     assert "one person" in PROMPT
 
 
-def test_profile_completion_or_refresh_never_routes_to_handoff() -> None:
-    assert "Atualizar, reler ou verificar o perfil privado nunca é motivo de handoff" in PROMPT
-    assert "continue normalmente sem request_handoff" in PROMPT
-    assert "peça somente os campos faltantes, sem request_handoff" in PROMPT
+def test_profile_completion_or_refresh_never_routes_to_handoff_by_itself() -> None:
+    assert "Atualizar, reler ou verificar o perfil privado, por si só" in PROMPT
+    assert "sem request_handoff motivado pelo perfil" in PROMPT
+    assert "não suprime outro motivo independente" in PROMPT
+    for independent_reason in (
+        "pedido humano explícito",
+        "desconto ou negociação real",
+        "grupo não suportado",
+        "restrição de segurança",
+    ):
+        assert independent_reason in PROMPT
 
 
 def test_informational_policy_questions_and_prompt_injection_do_not_force_handoff() -> None:
