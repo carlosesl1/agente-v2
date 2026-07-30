@@ -253,6 +253,43 @@ def test_authenticated_single_party_workflow_overrides_stale_projection_group() 
     assert decision.public_reply.kind == "inform"
 
 
+def test_stale_group_projection_without_workflow_does_not_force_handoff() -> None:
+    stale_projection = ConversationProjection(
+        stage=ConversationStage.AGENCY,
+        desired_services=(DesiredService.AGENCY,),
+        locale="pt-BR",
+        facts=(
+            TypedFact("service", StringSlot("agency"), FRAME_HASH),
+            TypedFact("adults", IntegerSlot(2), FRAME_HASH),
+            TypedFact("children", IntegerSlot(0), FRAME_HASH),
+        ),
+        reservation_execution_projection=None,
+    )
+    proposal = ModelProposal(
+        source_event_id="event:stale-group-inform",
+        intent="inform",
+        reply_chunks=("Agora quero saber apenas sobre o hostel.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=stale_projection,
+        proposal=proposal,
+        profile=_profile(),
+        reads=(),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert decision.handoff_request is None
+    assert decision.next_state.handoff is None
+    assert decision.commands == ()
+    assert decision.public_reply.kind == "inform"
+
+
 def test_current_return_to_one_overrides_authenticated_group_party() -> None:
     awaiting = _awaiting_from_ready(
         _ready_state(

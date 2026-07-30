@@ -893,6 +893,11 @@ def _unsupported_activity_party(
         return False
     if DesiredService.AGENCY not in projection.desired_services and workflow_party is None:
         return False
+    if workflow_party is None and (
+        current_values.get("service") not in {"agency", "package"}
+        or not {"adults", "children"}.intersection(current_values)
+    ):
+        return False
     base_party = workflow_party or _projection_party(projection)
     adults = current_values.get(
         "adults",
