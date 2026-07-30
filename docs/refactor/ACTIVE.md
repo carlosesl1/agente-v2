@@ -26,8 +26,8 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | Task do reparo | Estado | Commit |
 |---|---|---|
 | 1. Ativar cadeia de autoridade | `DONE` | `63dffe5cee86dd2117fcd2b6703f47ded181dca3` |
-| 2. Domínio assinado de passageiros | `IN_PROGRESS` | `PENDING` |
-| 3. Protocolo v6 e manifesto privado | `PENDING` | `PENDING` |
+| 2. Domínio assinado de passageiros | `DONE` | `4adbdf43222ca0851dcd16c4e80585ad61bd7b61` |
+| 3. Protocolo v6 e manifesto privado | `IN_PROGRESS` | `PENDING` |
 | 4. Reads por composição adulto/criança | `PENDING` | `PENDING` |
 | 5. Coleta e seleção de grupos | `PENDING` | `PENDING` |
 | 6. Dispatch Bókun v2 | `PENDING` | `PENDING` |
@@ -35,7 +35,7 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | 8. Regressões e qualificação local | `PENDING` | `PENDING` |
 | 9. Revisão terminal e candidata | `PENDING` | `PENDING` |
 
-- NEXT: `Task 2 — domínio assinado de passageiros`
+- NEXT: `Task 3 — protocolo v6 e manifesto parcial privado`
 
 ### Decisão de topologia da Task 7
 

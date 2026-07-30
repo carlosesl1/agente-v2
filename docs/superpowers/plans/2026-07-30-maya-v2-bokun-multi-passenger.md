@@ -222,7 +222,7 @@ Expected: todos passam.
 
 ```bash
 git diff --check
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add reservation_domain tests/test_v2_customer_collection.py tests/test_phase2_serialization.py
 git commit -m "feat(v2): bind passenger manifests to reservation subjects"
 ```
@@ -348,8 +348,7 @@ python -m compileall -q v2_contracts v2_application reservation_boundary v2_adap
 
 ```bash
 git diff --check
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add v2_contracts/passengers.py v2_application/passengers.py v2_contracts/model.py reservation_boundary/types.py v2_adapters/hermes_model.py tests
 git commit -m "feat(v2): persist closed passenger manifest updates"
 ```
@@ -427,8 +426,7 @@ env PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS='-p no:cacheprovider' /home/ubuntu/
 
 ```bash
 git diff --check
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add v2_contracts/providers.py v2_contracts/private_offers.py v2_adapters/bokun.py v2_adapters/provider_http.py tests
 git commit -m "feat(v2): quote Bokun parties by pricing category"
 ```
@@ -515,8 +513,7 @@ env PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS='-p no:cacheprovider' /home/ubuntu/
 
 ```bash
 git diff --check
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add v2_application/conversation.py v2_application/turn_executor.py config/v2_luna_system_prompt.txt tests
 git commit -m "feat(v2): collect and authorize activity groups"
 ```
@@ -581,8 +578,7 @@ Expected: testes ativos passam; baseline histórica documentada permanece exclu�
 
 ```bash
 git diff --check
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add v2_application/reservations.py v2_contracts/private_offers.py tests
 git commit -m "feat(v2): fence multi-passenger Bokun dispatches"
 ```
@@ -670,8 +666,7 @@ Verificar nos testes que retry com mesma chave reproduz mesma session ID e não 
 
 ```bash
 git diff --check
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git add v2_adapters/bokun_booking.py v2_adapters/provider_http.py v2_adapters/bokun.py tests
 git commit -m "feat(v2): submit and verify Bokun passenger groups"
 ```
@@ -728,8 +723,7 @@ Expected: todos passam, zero chamadas de rede real.
 env PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS='-p no:cacheprovider' /home/ubuntu/chapada-leads-hermes/venv/bin/python -m pytest -q tests/test_v2_*.py
 /home/ubuntu/chapada-leads-hermes/venv/bin/ruff check reservation_domain reservation_boundary v2_contracts v2_application v2_adapters v2_host tests
 python -m compileall -q reservation_domain reservation_boundary v2_contracts v2_application v2_adapters v2_host
-python scripts/check_phase8_boundaries.py
-python scripts/check_v2_static_source.py
+python scripts/check_fasttrack_boundaries.py
 git diff --check
 test ! -e uv.lock
 ```
