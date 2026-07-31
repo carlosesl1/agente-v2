@@ -390,3 +390,160 @@ def test_bokun_http_transport_fails_closed_for_mixed_pricing_currencies() -> Non
             },
         )
     assert calls == 2
+
+
+def test_bokun_http_transport_rejects_later_non_brl_rate_after_mixed_rate() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": 912303,
+                    "title": "Roteiro dos 4Ps",
+                    "pricingCategories": [
+                        {"id": "adult-1", "ticketCategory": "ADULT"},
+                        {"id": "child-1", "ticketCategory": "CHILD"},
+                    ],
+                },
+            )
+        assert calls == 2
+        return httpx.Response(
+            200,
+            request=request,
+            json=[
+                {
+                    "date": "2026-11-18",
+                    "startTimeId": "start-4ps",
+                    "available": True,
+                    "availabilityCount": 5,
+                    "pricesByRate": [
+                        {
+                            "activityRateId": "rate-mixed",
+                            "pricePerCategoryUnit": [
+                                {
+                                    "id": "adult-1",
+                                    "amount": {"amount": 300, "currency": "BRL"},
+                                },
+                                {
+                                    "id": "child-1",
+                                    "amount": {"amount": 150, "currency": "USD"},
+                                },
+                            ],
+                        },
+                        {
+                            "activityRateId": "rate-eur",
+                            "pricePerCategoryUnit": [
+                                {
+                                    "id": "adult-1",
+                                    "amount": {"amount": 300, "currency": "EUR"},
+                                },
+                                {
+                                    "id": "child-1",
+                                    "amount": {"amount": 150, "currency": "EUR"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:tour-4ps": "912303"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-30 12:00:00",
+    )
+
+    with pytest.raises(ProviderHTTPError, match="currency"):
+        transport(
+            "activity",
+            {
+                "product_id": "product:tour-4ps",
+                "activity_date": "2026-11-18",
+                "adults": 1,
+                "children": 1,
+            },
+        )
+    assert calls == 2
+
+
+def test_bokun_http_transport_selects_later_valid_brl_rate() -> None:
+    metadata = {
+        "id": 912303,
+        "title": "Roteiro dos 4Ps",
+        "pricingCategories": [
+            {"id": "adult-1", "ticketCategory": "ADULT"},
+            {"id": "child-1", "ticketCategory": "CHILD"},
+        ],
+    }
+    availability = [
+        {
+            "date": "2026-11-18",
+            "startTimeId": "start-4ps",
+            "available": True,
+            "availabilityCount": 5,
+            "pricesByRate": [
+                {
+                    "activityRateId": "rate-mixed",
+                    "pricePerCategoryUnit": [
+                        {
+                            "id": "adult-1",
+                            "amount": {"amount": 300, "currency": "BRL"},
+                        },
+                        {
+                            "id": "child-1",
+                            "amount": {"amount": 150, "currency": "USD"},
+                        },
+                    ],
+                },
+                {
+                    "activityRateId": "rate-brl",
+                    "pricePerCategoryUnit": [
+                        {
+                            "id": "adult-1",
+                            "amount": {"amount": 310, "currency": "BRL"},
+                        },
+                        {
+                            "id": "child-1",
+                            "amount": {"amount": 155, "currency": "BRL"},
+                        },
+                    ],
+                },
+            ],
+        }
+    ]
+    responses = iter((metadata, availability))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, json=next(responses))
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:tour-4ps": "912303"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-30 12:00:00",
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:tour-4ps",
+            "activity_date": "2026-11-18",
+            "adults": 2,
+            "children": 1,
+        },
+    )
+
+    assert result["rate_id"] == "rate-brl"
+    assert result["total_amount"] == "775.00"
+    assert result["currency"] == "BRL"

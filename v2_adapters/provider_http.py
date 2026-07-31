@@ -1918,6 +1918,7 @@ class BokunHTTPTransport:
             if (
                 adult_currency is None
                 or child_currency is None
+                or adult_currency != "BRL"
                 or child_currency != adult_currency
             ):
                 currency_mismatch = True
