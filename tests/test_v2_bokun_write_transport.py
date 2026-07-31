@@ -356,6 +356,9 @@ def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> 
                     "bookingId": "booking-123",
                     "confirmationCode": "BK-123",
                     "status": "PENDING",
+                    "totalPrice": 300.0,
+                    "totalDue": 300.0,
+                    "currency": "BRL",
                     "activityBookings": [
                         {
                             "activity": {"id": 913372},
@@ -666,6 +669,10 @@ def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
             json={
                 "booking": {
                     "bookingId": "booking-group-123",
+                    "status": "PENDING",
+                    "totalPrice": 750.0,
+                    "totalDue": 750.0,
+                    "currency": "BRL",
                     "activityBookings": [
                         {
                             "activityId": "913372",
@@ -773,6 +780,10 @@ def test_supported_parties_preserve_count_end_to_end(
             json={
                 "booking": {
                     "bookingId": "booking-matrix",
+                    "status": "PENDING",
+                    "totalPrice": amount,
+                    "totalDue": amount,
+                    "currency": "BRL",
                     "activityBookings": [
                         {
                             "activityId": "913372",
@@ -1233,6 +1244,66 @@ def test_bokun_readback_rejects_conflicting_status_and_amount_aliases(
         )
 
 
+def test_bokun_readback_requires_status_base_total_and_currency() -> None:
+    readback = {
+        "booking": {
+            "bookingId": "booking-group-123",
+            "activityBookings": [
+                {
+                    "activityId": "913372",
+                    "date": "2026-08-11",
+                    "pricingCategoryBookings": [
+                        {"pricingCategoryId": "adult-1"},
+                    ],
+                }
+            ],
+        }
+    }
+
+    with pytest.raises(ProviderHTTPError, match="read-back"):
+        BokunHTTPTransport._validate_booking_readback_v2(
+            readback,
+            booking_id="booking-group-123",
+            product_id="913372",
+            activity_date="2026-08-11",
+            category_ids=("adult-1",),
+            expected_amount=Decimal("304.50"),
+        )
+
+
+def test_bokun_readback_distinguishes_base_price_from_fee_inclusive_due() -> None:
+    readback = {
+        "booking": {
+            "bookingId": "booking-group-123",
+            "status": "PENDING",
+            "totalPrice": 300.0,
+            "totalDue": 304.5,
+            "currency": "BRL",
+            "invoice": {"currency": "BRL"},
+            "activityBookings": [
+                {
+                    "activityId": "913372",
+                    "date": "2026-08-11",
+                    "pricingCategoryBookings": [
+                        {"pricingCategoryId": "adult-1"},
+                    ],
+                }
+            ],
+        }
+    }
+
+    BokunHTTPTransport._validate_booking_readback_v2(
+        readback,
+        booking_id="booking-group-123",
+        product_id="913372",
+        activity_date="2026-08-11",
+        category_ids=("adult-1",),
+        expected_base_amount=Decimal("300.00"),
+        expected_amount=Decimal("304.50"),
+        expected_currency="BRL",
+    )
+
+
 def test_bokun_readback_rejects_conflicting_booking_ids_across_payload_tree() -> None:
     readback = {
         "booking": {
@@ -1405,6 +1476,10 @@ def test_bokun_submit_uses_fee_inclusive_invoice_due_not_activity_subtotal() -> 
             json={
                 "booking": {
                     "bookingId": "booking-fee-123",
+                    "status": "PENDING",
+                    "totalPrice": 300.0,
+                    "totalDue": 304.5,
+                    "currency": "BRL",
                     "activityBookings": [
                         {
                             "activityId": "913372",

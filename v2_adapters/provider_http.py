@@ -1272,6 +1272,9 @@ class BokunHTTPTransport:
         )
         if not 200 <= checkout_status < 300:
             return {"status": "no_effect"}
+        checkout_base_amount = self._checkout_base_amount(checkout_payload)
+        if checkout_base_amount is None or checkout_base_amount > amount:
+            return {"status": "no_effect"}
         main_contact = {
             "firstName": main_name_parts[0],
             "lastName": " ".join(main_name_parts[1:]),
@@ -1329,7 +1332,9 @@ class BokunHTTPTransport:
             product_id=product_id,
             activity_date=activity_date,
             category_ids=tuple(item["category_id"] for item in passengers),
+            expected_base_amount=checkout_base_amount,
             expected_amount=amount,
+            expected_currency="BRL",
         )
         return {"status": "confirmed", "booking_id": booking_id}
 
@@ -1572,6 +1577,8 @@ class BokunHTTPTransport:
         activity_date: str,
         category_ids: tuple[str, ...],
         expected_amount: Decimal,
+        expected_base_amount: Decimal | None = None,
+        expected_currency: str = "BRL",
     ) -> None:
         returned_booking_id = BokunHTTPTransport._booking_reference(payload)
         if returned_booking_id != booking_id:
@@ -1605,7 +1612,7 @@ class BokunHTTPTransport:
             ("status", "bookingStatus"),
             error="Bókun booking read-back status mismatch",
         )
-        if returned_status is not None and returned_status.upper() not in {
+        if returned_status is None or returned_status.upper() not in {
             "BOOKED",
             "CONFIRMED",
             "PAID",
@@ -1613,30 +1620,56 @@ class BokunHTTPTransport:
             "RESERVED",
         }:
             raise ProviderHTTPError("Bókun booking read-back status mismatch")
-        amount_values: list[Decimal] = []
         amount_currencies: list[str] = []
-        for name in ("totalPrice", "totalAmount", "amount", "totalDue"):
-            if name not in booking:
-                continue
-            raw_amount = booking[name]
-            returned_amount = _amount(raw_amount)
-            if returned_amount is None:
+
+        def amount_aliases(names: tuple[str, ...]) -> Decimal | None:
+            values: list[Decimal] = []
+            for name in names:
+                if name not in booking:
+                    continue
+                raw_amount = booking[name]
+                returned_amount = _amount(raw_amount)
+                if returned_amount is None:
+                    raise ProviderHTTPError(
+                        "Bókun booking read-back amount mismatch"
+                    )
+                values.append(returned_amount.quantize(Decimal("0.01")))
+                if isinstance(raw_amount, Mapping):
+                    amount_currency = _consistent_text_alias(
+                        raw_amount,
+                        ("currency", "currencyCode"),
+                        error="Bókun booking read-back amount mismatch",
+                    )
+                    if amount_currency is not None:
+                        amount_currencies.append(amount_currency.upper())
+            if len(set(values)) > 1:
                 raise ProviderHTTPError("Bókun booking read-back amount mismatch")
-            amount_values.append(returned_amount.quantize(Decimal("0.01")))
-            if isinstance(raw_amount, Mapping) and (
-                "currency" in raw_amount or "currencyCode" in raw_amount
-            ):
-                raw_currency = raw_amount.get("currency") or raw_amount.get(
-                    "currencyCode"
-                )
-                returned_currency = _text(raw_currency)
-                if returned_currency is None:
-                    raise ProviderHTTPError("Bókun booking read-back amount mismatch")
+            return values[0] if values else None
+
+        returned_base_amount = amount_aliases(("totalPrice",))
+        returned_total_amount = amount_aliases(("totalDue", "totalAmount", "amount"))
+        for source in (booking, booking.get("invoice")):
+            if not isinstance(source, Mapping):
+                continue
+            returned_currency = _consistent_text_alias(
+                source,
+                ("currency", "currencyCode"),
+                error="Bókun booking read-back amount mismatch",
+            )
+            if returned_currency is not None:
                 amount_currencies.append(returned_currency.upper())
+        expected_base = (
+            expected_amount if expected_base_amount is None else expected_base_amount
+        ).quantize(Decimal("0.01"))
+        expected_total = expected_amount.quantize(Decimal("0.01"))
+        expected_currency = expected_currency.upper()
         if (
-            any(value != expected_amount for value in amount_values)
-            or len(set(amount_values)) > 1
-            or any(currency != "BRL" for currency in amount_currencies)
+            returned_base_amount is None
+            or returned_total_amount is None
+            or not amount_currencies
+            or returned_base_amount != expected_base
+            or returned_total_amount != expected_total
+            or any(currency != expected_currency for currency in amount_currencies)
             or len(set(amount_currencies)) > 1
         ):
             raise ProviderHTTPError("Bókun booking read-back amount mismatch")
@@ -2077,6 +2110,17 @@ class BokunHTTPTransport:
             "totalPrice",
             "formattedAmount",
         )
+
+    @staticmethod
+    def _checkout_base_amount(payload: object) -> Decimal | None:
+        checkout = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(checkout, Mapping):
+            return None
+        options = checkout.get("options")
+        option = options[0] if isinstance(options, list) and options else None
+        if not isinstance(option, Mapping):
+            return None
+        return _first_amount(option, "amount", "totalPrice", "formattedAmount")
 
     @staticmethod
     def _submit_body(
