@@ -64,6 +64,7 @@ def test_bokun_read_adapter_sends_composition_and_returns_public_counts() -> Non
             "product_id": "product:tour-4ps",
             "bokun_product_id": "912303",
             "start_time_id": "start-4ps",
+            "start_time": "08:30",
             "rate_id": "rate-4ps",
             "adult_pricing_category_id": "adult-1",
             "child_pricing_category_id": "child-1",
@@ -107,6 +108,7 @@ def test_bokun_read_adapter_sends_composition_and_returns_public_counts() -> Non
     assert observation.public_payload["adults"] == 2
     assert observation.public_payload["children"] == 1
     assert observation.public_payload["participants"] == 3
+    assert observation.public_payload["start_time"] == "08:30"
 
 
 def test_bokun_http_transport_prices_and_quotes_exact_mixed_party() -> None:
@@ -136,6 +138,7 @@ def test_bokun_http_transport_prices_and_quotes_exact_mixed_party() -> None:
                     {
                         "date": "2026-11-18",
                         "startTimeId": "start-4ps",
+                        "startTime": "08:30",
                         "available": True,
                         "availabilityCount": 5,
                         "pricesByRate": [
@@ -242,6 +245,7 @@ def test_bokun_http_transport_prices_and_quotes_exact_mixed_party() -> None:
         "bokun_product_id": "912303",
         "product_public_name": "Roteiro dos 4Ps",
         "start_time_id": "start-4ps",
+        "start_time": "08:30",
         "rate_id": "rate-4ps",
         "adult_pricing_category_id": "adult-1",
         "child_pricing_category_id": "child-1",

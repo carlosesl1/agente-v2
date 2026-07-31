@@ -1970,6 +1970,11 @@ class BokunHTTPTransport:
         child_category = category_id("CHILD") if children else None
         start_time_id = _first(item, "startTimeId", "start_time_id")
         start_time = item.get("startTime")
+        public_start_time = _text(start_time)
+        if public_start_time is not None and re.fullmatch(
+            r"(?:[01]\d|2[0-3]):[0-5]\d", public_start_time
+        ) is None:
+            raise ProviderHTTPError("Bókun availability start time is invalid")
         if start_time_id is None and isinstance(start_time, Mapping):
             start_time_id = _first(start_time, "id", "startTimeId")
         rates = item.get("pricesByRate")
@@ -2020,6 +2025,8 @@ class BokunHTTPTransport:
                 "rate_id": rate_id,
                 "adult_pricing_category_id": adult_category,
             }
+            if public_start_time is not None:
+                private["start_time"] = public_start_time
             if child_category is not None:
                 private["child_pricing_category_id"] = child_category
             return (

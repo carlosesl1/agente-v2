@@ -123,7 +123,7 @@ def _offers(
                     public_label=option["product_public_name"],
                     start_date=request.activity_date,
                     end_date=None,
-                    start_time=None,
+                    start_time=_minute(option.get("start_time")),
                     adults=adults,
                     children=children,
                     total_amount=Decimal(option["total_amount"]),

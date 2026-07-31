@@ -62,6 +62,7 @@ def _activity_draft(
     version: int = 1,
     participants: int = 1,
     children: int = 0,
+    start_time: str | None = None,
 ):
     passengers = tuple(
         PassengerFacts(
@@ -92,7 +93,7 @@ def _activity_draft(
         public_label="Roteiro dos 4Ps",
         start_date=date(2026, 11, 18),
         end_date=None,
-        start_time=None,
+        start_time=start_time,
         party=Party(adults=participants, children=children),
         total=Money(amount=Decimal(amount), currency="BRL"),
         available=True,
@@ -346,7 +347,12 @@ def test_runtime_policy_denies_activity_above_composed_transport_limit() -> None
 
 def test_critical_activity_summary_names_mixed_party_before_confirmation() -> None:
     context = critical_action_context(
-        _activity_draft(amount="974.40", participants=2, children=1),
+        _activity_draft(
+            amount="974.40",
+            participants=2,
+            children=1,
+            start_time="08:30",
+        ),
         summary_version=1,
         presented_at=NOW,
         locale="pt-BR",
@@ -358,6 +364,7 @@ def test_critical_activity_summary_names_mixed_party_before_confirmation() -> No
 
     assert "para 2 adultos e 1 criança" in context.public_summary
     assert "para 3 pessoas" not in context.public_summary
+    assert "em 18/11/2026 às 08:30" in context.public_summary
 
 
 def test_critical_activity_summary_supports_english_locale() -> None:

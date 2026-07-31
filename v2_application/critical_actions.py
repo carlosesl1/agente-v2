@@ -138,6 +138,11 @@ def _date(value) -> str:
     return value.strftime("%d/%m/%Y")
 
 
+def _activity_when(value, start_time: str | None) -> str:
+    rendered = _date(value)
+    return rendered if start_time is None else f"{rendered} às {start_time}"
+
+
 def _people(count: int) -> str:
     return "1 pessoa" if count == 1 else f"{count} pessoas"
 
@@ -207,6 +212,11 @@ def _date_en(value) -> str:
     return f"{months[value.month - 1]} {value.day}, {value.year}"
 
 
+def _activity_when_en(value, start_time: str | None) -> str:
+    rendered = _date_en(value)
+    return rendered if start_time is None else f"{rendered} at {start_time}"
+
+
 def _people_en(count: int) -> str:
     return "1 person" if count == 1 else f"{count} people"
 
@@ -252,7 +262,8 @@ def _public_summary_en(
         total = _money_en(component.total.amount, component.total.currency)
         if component.service is ServiceKind.ACTIVITY:
             effect = (
-                f"I’ll book {component.public_label} on {_date_en(component.start_date)} "
+                f"I’ll book {component.public_label} on "
+                f"{_activity_when_en(component.start_date, component.start_time)} "
                 f"for {_party_en(component.party)}, at a final total of {total} including the booking fee"
             )
             payment = _payment_text_en(
@@ -312,7 +323,8 @@ def _public_summary_en(
         f"{lodging.public_label} from {_date_en(lodging.start_date)} "
         f"to {_date_en(lodging.end_date)} for {_party_en(lodging.party)}, "
         f"at a total of {lodging_total}, and {activity.public_label} on "
-        f"{_date_en(activity.start_date)} for {_party_en(activity.party)}, "
+        f"{_activity_when_en(activity.start_date, activity.start_time)} "
+        f"for {_party_en(activity.party)}, "
         f"at a final total of {activity_total} including the booking fee; "
         f"then I’ll {payment}. May I make these bookings?"
     )
@@ -343,7 +355,8 @@ def _public_summary(
         total = _money(component.total.amount, component.total.currency)
         if component.service is ServiceKind.ACTIVITY:
             effect = (
-                f"vou reservar o {component.public_label} em {_date(component.start_date)} "
+                f"vou reservar o {component.public_label} em "
+                f"{_activity_when(component.start_date, component.start_time)} "
                 f"para {_party(component.party)}, pelo total final de {total} já com a taxa"
             )
             payment = _payment_text(
@@ -406,7 +419,8 @@ def _public_summary(
         "Só para confirmar: vou reservar "
         f"{lodging.public_label} de {_date(lodging.start_date)} a {_date(lodging.end_date)} "
         f"para {_party(lodging.party)}, pelo total de {lodging_total}, e "
-        f"{activity.public_label} em {_date(activity.start_date)} para "
+        f"{activity.public_label} em "
+        f"{_activity_when(activity.start_date, activity.start_time)} para "
         f"{_party(activity.party)}, pelo total final de {activity_total} já com a taxa; "
         f"depois vou {payment}. Posso fazer essas reservas?"
     )

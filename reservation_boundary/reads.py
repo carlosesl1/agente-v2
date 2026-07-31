@@ -1879,7 +1879,6 @@ def _validate_request_result_equality(
         offers_match = all(
             offer.start_date == args.activity_date
             and offer.end_date is None
-            and offer.start_time is None
             and offer.adults == args.participants
             and offer.children == 0
             for offer in result.offers
@@ -1899,7 +1898,6 @@ def _validate_request_result_equality(
         offers_match = all(
             offer.start_date == args.activity_date
             and offer.end_date is None
-            and offer.start_time is None
             and offer.adults == args.adults
             and offer.children == args.children
             for offer in result.offers

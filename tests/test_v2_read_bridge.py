@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from reservation_boundary.conversation import (
     ConversationProjection,
@@ -33,6 +33,7 @@ def test_mixed_activity_party_survives_authenticated_read_bridge() -> None:
         public_payload={
             "offer_id": "offer:" + "1" * 64,
             "product_public_name": "Roteiro dos 4Ps",
+            "start_time": "08:30",
             "total_amount": "974.40",
             "currency": "BRL",
             "available": True,
@@ -73,3 +74,4 @@ def test_mixed_activity_party_survives_authenticated_read_bridge() -> None:
     result = SanitizedLookupResult.from_canonical_bytes(bridged.typed_result_bytes)
     assert result.offers[0].adults == 2
     assert result.offers[0].children == 1
+    assert result.offers[0].start_time == time(8, 30)

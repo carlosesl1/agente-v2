@@ -198,6 +198,13 @@ class BokunReadAdapter:
             "available": available,
             **fee_fields,
         }
+        start_time = response.get("start_time")
+        if start_time is not None:
+            if type(start_time) is not str or re.fullmatch(
+                r"(?:[01]\d|2[0-3]):[0-5]\d", start_time
+            ) is None:
+                raise ProviderReadError("Bókun public start time is not canonical")
+            public["start_time"] = start_time
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         return ReadObservation(
             request_hash=request.canonical_hash(),
