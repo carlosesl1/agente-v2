@@ -210,6 +210,47 @@ def _cloudbeds_group_command() -> ReservationCommand:
     )
 
 
+def test_cloudbeds_multi_room_components_are_rejected_before_provider() -> None:
+    command = _cloudbeds_group_command()
+    first = command.payload.components[0]
+    second = replace(
+        first,
+        offer_id="offer:second-room",
+        provider_ref="b" * 64,
+    )
+    components = (first, second)
+    payload = CommandPayload(components, command.payload.customer, command.payload.terms)
+    signature = subject_signature(
+        components=components,
+        customer=payload.customer,
+        terms=payload.terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id=command.workflow_id,
+        draft_id=command.draft_id,
+        draft_version=command.draft_version,
+        signature=signature,
+        operation=command.operation,
+    )
+    multi_room = replace(
+        command,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        subject_signature=signature,
+        payload=payload,
+    )
+
+    with pytest.raises(DispatchRejected, match="exactly one component"):
+        _provider_payload(
+            multi_room,
+            "cloudbeds",
+            {
+                "room_rate_id": "rate-private-fenced-001",
+                "room_type_id": "room-private-fenced-001",
+            },
+        )
+
+
 def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
     tmp_path: Path,
 ) -> None:
