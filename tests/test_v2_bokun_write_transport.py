@@ -1242,6 +1242,63 @@ def test_bokun_booking_reference_rejects_conflicting_aliases() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "booking": {"bookingId": "booking-primary"},
+            "shadow": {"bookingId": "booking-conflict"},
+        },
+        {
+            "bookingId": "booking-primary",
+            "booking": {"bookingId": "booking-conflict"},
+        },
+    ),
+)
+def test_bokun_booking_reference_rejects_conflicting_ids_across_payload_tree(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        BokunHTTPTransport._booking_reference(payload)
+
+
+def test_bokun_booking_reference_accepts_repeated_id_across_payload_tree() -> None:
+    assert (
+        BokunHTTPTransport._booking_reference(
+            {
+                "bookingId": "booking-primary",
+                "booking": {"booking_id": "booking-primary"},
+            }
+        )
+        == "booking-primary"
+    )
+
+
+def test_bokun_booking_reference_ignores_activity_and_passenger_binding_ids() -> None:
+    assert (
+        BokunHTTPTransport._booking_reference(
+            {
+                "booking": {
+                    "bookingId": "booking-primary",
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-booking-1",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-booking-1",
+                                    "pricingCategoryId": "adult-1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        )
+        == "booking-primary"
+    )
+
+
 def test_bokun_private_execution_binding_is_required_before_http() -> None:
     seen: list[httpx.Request] = []
 

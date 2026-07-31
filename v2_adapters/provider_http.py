@@ -2152,24 +2152,40 @@ class BokunHTTPTransport:
 
     @staticmethod
     def _booking_reference(payload: object) -> str | None:
-        if isinstance(payload, Mapping):
-            direct = _consistent_text_alias(
-                payload,
-                ("bookingId", "booking_id"),
-                error="Bókun write result is ambiguous",
-            )
-            if direct:
-                return direct
-            for value in payload.values():
-                found = BokunHTTPTransport._booking_reference(value)
-                if found:
-                    return found
-        elif isinstance(payload, list):
-            for value in payload:
-                found = BokunHTTPTransport._booking_reference(value)
-                if found:
-                    return found
-        return None
+        references: list[str] = []
+        component_branches = {
+            "activityBookings",
+            "activity_bookings",
+            "pricingCategoryBookings",
+            "pricing_category_bookings",
+            "passengers",
+        }
+
+        def visit(value: object, *, include_reference: bool) -> None:
+            if isinstance(value, Mapping):
+                if include_reference:
+                    direct = _consistent_text_alias(
+                        value,
+                        ("bookingId", "booking_id"),
+                        error="Bókun write result is ambiguous",
+                    )
+                    if direct is not None:
+                        references.append(direct)
+                for name, nested in value.items():
+                    visit(
+                        nested,
+                        include_reference=(
+                            include_reference and name not in component_branches
+                        ),
+                    )
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested, include_reference=include_reference)
+
+        visit(payload, include_reference=True)
+        if len(set(references)) > 1:
+            raise ProviderHTTPError("Bókun write result is ambiguous")
+        return references[0] if references else None
 
     @staticmethod
     def _title(meta: Mapping[str, object]) -> str | None:
