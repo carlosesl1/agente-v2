@@ -33,9 +33,32 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | 6. Dispatch Bókun v2 | `DONE` | `9f38fb7f616b368d97d40e6ef819889936d948e3` |
 | 7. Transport e read-back exato | `DONE` | `d9935f28049b19316de38dbf0973cea91e236c7a` |
 | 8. Regressões e qualificação local | `DONE` | `3cb84200aaab3d76344cba06623a7eaa70790865`, `c5ee69d83345901b9ab16a36b5d18d0904f1ba50` |
-| 9. Revisão terminal e candidata | `IN_PROGRESS` | `PENDING` |
+| 9. Revisão terminal e candidata | `CANDIDATE_FROZEN` | código `b34ec0b248047f3e90b7d97220a2b60c78e0741e`; evidência e controle no HEAD |
 
-- NEXT: `Task 9 — revisão terminal e candidata`
+- NEXT: obter `APPROVE` independente sobre o SHA exato do HEAD; somente então push, CI, imagem OCI imutável e dark canary sem relay.
+
+### Candidata multi-passageiro congelada
+
+A candidata incorpora os findings reproduzíveis das revisões independentes sem executar rede ou writes reais:
+
+- correção explícita de passageiro revoga resumo e autoridade assinada anteriores;
+- intents não corretivos não podem persistir mutações do manifesto;
+- valores privados persistidos não retornam ao modelo; somente presença allowlisted é exposta;
+- `DispatchRequest`, argumento externo e comando assinado exigem a mesma idempotency key antes do provider;
+- categorias adulta/infantil exigem moeda BRL completa e a moeda, o valor e o `rate_id` publicados vêm da mesma rate selecionada;
+- quote/cart/read-back rejeitam aliases e bindings conflitantes de oferta, status, valor, moeda, composição e booking ID;
+- IDs internos de activity/passenger booking não são confundidos com o ID principal da reserva;
+- `409` e qualquer ambiguidade após submit permanecem `CALLED_UNKNOWN`; não há retry otimista;
+- submit continua único e o read-back exato é obrigatório antes de confirmação.
+
+Evidência local no código `b34ec0b248047f3e90b7d97220a2b60c78e0741e`:
+
+- transporte/reservas focados: `79 passed`;
+- suíte V2 e contrato do prompt v6: `366 passed`;
+- comando oficial de CI: `1312 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, compileall, `fasttrack-boundaries`, `git diff --check`, ausência de `uv.lock` e árvore limpa: verdes;
+- testes de provider usam somente fakes e `httpx.MockTransport`; chamadas reais e efeitos externos: zero;
+- base remota/runtime permanece `71ff137e9d9d35cc8f8cd1211ceca0744dd0d6dc` até aprovação e qualificação operacional.
 
 ### Decisão de topologia da Task 7
 
