@@ -9,6 +9,7 @@ import pytest
 
 from v2_adapters.bokun import BokunReadAdapter
 from v2_adapters.provider_http import BokunHTTPTransport, ProviderHTTPError
+from v2_contracts.private_offers import PrivateOfferQuery
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -109,6 +110,142 @@ def test_bokun_read_adapter_sends_composition_and_returns_public_counts() -> Non
     assert observation.public_payload["children"] == 1
     assert observation.public_payload["participants"] == 3
     assert observation.public_payload["start_time"] == "08:30"
+
+
+def test_bokun_private_reread_preserves_selected_public_start_time() -> None:
+    def transport(operation: str, payload: dict[str, object]) -> dict[str, object]:
+        assert operation == "activity"
+        return {
+            "product_id": "product:tour-4ps",
+            "bokun_product_id": "912303",
+            "start_time_id": "start-4ps",
+            "start_time": "08:30",
+            "rate_id": "rate-4ps",
+            "adult_pricing_category_id": "adult-1",
+            "child_pricing_category_id": "child-1",
+            "product_public_name": "Roteiro dos 4Ps",
+            "base_amount": "960.00",
+            "booking_fee_amount": "14.40",
+            "total_amount": "974.40",
+            "currency": "BRL",
+            "price_includes_booking_fee": True,
+            "available": True,
+        }
+
+    adapter = BokunReadAdapter(
+        transport=transport,
+        clock=SimpleNamespace(now=lambda: NOW),
+        ttl=timedelta(minutes=5),
+    )
+    request = ReadRequest(
+        request_id="read:mixed-private-roundtrip",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:tour-4ps",
+        activity_date=date(2026, 11, 18),
+        adults=2,
+        children=1,
+    )
+    observation = adapter.read(request)
+    query = PrivateOfferQuery(
+        service="activity",
+        offer_id=observation.public_payload["offer_id"],
+        request_hash=request.query_hash(),
+        binding_hash=observation.private_binding_hash,
+        canonical_product_id="product:tour-4ps",
+        start_date=date(2026, 11, 18),
+        end_date=None,
+        start_time="08:30",
+        adults=2,
+        children=1,
+        total_amount="974.40",
+        currency="BRL",
+        available=True,
+    )
+
+    binding = adapter.resolve(query)
+
+    assert binding.query == query
+
+
+def test_bokun_http_transport_selects_requested_start_time() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/activity.json/912303"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": 912303,
+                    "title": "Roteiro dos 4Ps",
+                    "pricingCategories": [
+                        {"id": "adult-1", "ticketCategory": "ADULT"},
+                        {"id": "child-1", "ticketCategory": "CHILD"},
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json=[
+                {
+                    "date": "2026-11-18",
+                    "startTimeId": "start-0830",
+                    "startTime": "08:30",
+                    "available": True,
+                    "availabilityCount": 5,
+                    "pricesByRate": [
+                        {
+                            "activityRateId": "rate-0830",
+                            "pricePerCategoryUnit": [
+                                {"id": "adult-1", "amount": {"amount": 300, "currency": "BRL"}},
+                                {"id": "child-1", "amount": {"amount": 150, "currency": "BRL"}},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "date": "2026-11-18",
+                    "startTimeId": "start-0930",
+                    "startTime": "09:30",
+                    "available": True,
+                    "availabilityCount": 5,
+                    "pricesByRate": [
+                        {
+                            "activityRateId": "rate-0930",
+                            "pricePerCategoryUnit": [
+                                {"id": "adult-1", "amount": {"amount": 310, "currency": "BRL"}},
+                                {"id": "child-1", "amount": {"amount": 155, "currency": "BRL"}},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:tour-4ps": "912303"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-30 12:00:00",
+        quote_checkout_enabled=False,
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:tour-4ps",
+            "activity_date": "2026-11-18",
+            "start_time": "09:30",
+            "adults": 2,
+            "children": 1,
+        },
+    )
+
+    assert result["start_time"] == "09:30"
+    assert result["start_time_id"] == "start-0930"
+    assert result["rate_id"] == "rate-0930"
+    assert result["total_amount"] == "775.00"
 
 
 def test_bokun_http_transport_prices_and_quotes_exact_mixed_party() -> None:

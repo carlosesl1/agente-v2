@@ -35,6 +35,17 @@ _BOOKING_PRIVATE_FIELDS: Final = (
 )
 
 
+def _public_start_time(response: dict[str, object]) -> str | None:
+    start_time = response.get("start_time")
+    if start_time is None:
+        return None
+    if type(start_time) is not str or re.fullmatch(
+        r"(?:[01]\d|2[0-3]):[0-5]\d", start_time
+    ) is None:
+        raise ProviderReadError("Bókun public start time is not canonical")
+    return start_time
+
+
 def _private_booking_fields(
     response: dict[str, object], *, children: int
 ) -> dict[str, str]:
@@ -99,6 +110,8 @@ class BokunReadAdapter:
             "children": query.children,
             "quote_scope": query.request_hash,
         }
+        if query.start_time is not None:
+            payload["start_time"] = query.start_time
         response = exact_dict(self._transport("activity", payload), "Bókun response")
         if response.get("product_id") not in (None, query.canonical_product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
@@ -134,7 +147,7 @@ class BokunReadAdapter:
             canonical_product_id=query.canonical_product_id,
             start_date=query.start_date,
             end_date=None,
-            start_time=None,
+            start_time=_public_start_time(response),
             adults=query.adults,
             children=query.children,
             total_amount=amount,
@@ -198,12 +211,8 @@ class BokunReadAdapter:
             "available": available,
             **fee_fields,
         }
-        start_time = response.get("start_time")
+        start_time = _public_start_time(response)
         if start_time is not None:
-            if type(start_time) is not str or re.fullmatch(
-                r"(?:[01]\d|2[0-3]):[0-5]\d", start_time
-            ) is None:
-                raise ProviderReadError("Bókun public start time is not canonical")
             public["start_time"] = start_time
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         return ReadObservation(

@@ -729,21 +729,34 @@ class BokunHTTPTransport:
         participants = adults + children
         if adults < 1 or children < 0:
             raise ProviderHTTPError("Bókun read party composition is invalid")
-        selected = next(
-            (
-                item
-                for item in _items(availability)
-                if self._available(item, participants)
-            ),
-            None,
-        )
-        if selected is not None:
-            private, amount, currency = self._activity_booking_fields(
-                selected,
+        requested_start_time = payload.get("start_time")
+        if requested_start_time is not None and (
+            type(requested_start_time) is not str
+            or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", requested_start_time)
+            is None
+        ):
+            raise ProviderHTTPError("Bókun requested start time is invalid")
+        selected = None
+        selected_fields = None
+        for item in _items(availability):
+            if not self._available(item, participants):
+                continue
+            fields = self._activity_booking_fields(
+                item,
                 meta=meta,
                 adults=adults,
                 children=children,
             )
+            if (
+                requested_start_time is not None
+                and fields[0].get("start_time") != requested_start_time
+            ):
+                continue
+            selected = item
+            selected_fields = fields
+            break
+        if selected_fields is not None:
+            private, amount, currency = selected_fields
         else:
             private, amount = {}, None
             currency = self._option_currency({}, meta)
