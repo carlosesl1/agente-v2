@@ -13,6 +13,7 @@ from reservation_domain import (
     Money,
     OfferSnapshot,
     Party,
+    PassengerFacts,
     ServiceKind,
     SummaryPresented,
     build_commercial_draft,
@@ -56,8 +57,33 @@ def _enabled_policy(*, valid_until: datetime | None = None) -> CriticalActionPol
 
 
 def _activity_draft(
-    *, amount: str = "334.95", version: int = 1, participants: int = 1
+    *,
+    amount: str = "334.95",
+    version: int = 1,
+    participants: int = 1,
+    children: int = 0,
 ):
+    passengers = tuple(
+        PassengerFacts(
+            position=position,
+            participant_type="adult",
+            full_name=f"Adulto Fictício {position}",
+            birth_date=date(1990, position, 2),
+            gender="f" if position % 2 else "m",
+            country_code="BR",
+        )
+        for position in range(1, participants + 1)
+    ) + tuple(
+        PassengerFacts(
+            position=participants + child,
+            participant_type="child",
+            full_name=f"Criança Fictícia {child}",
+            birth_date=date(2018, child, 2),
+            gender="f" if child % 2 else "m",
+            country_code="BR",
+        )
+        for child in range(1, children + 1)
+    )
     offer = OfferSnapshot(
         offer_id="offer:" + "a" * 32,
         lookup_id="lookup:product:tour-4ps:" + "b" * 64,
@@ -67,7 +93,7 @@ def _activity_draft(
         start_date=date(2026, 11, 18),
         end_date=None,
         start_time=None,
-        party=Party(adults=participants, children=0),
+        party=Party(adults=participants, children=children),
         total=Money(amount=Decimal(amount), currency="BRL"),
         available=True,
     )
@@ -84,6 +110,7 @@ def _activity_draft(
             country_code="BR",
             birth_date=date(1990, 1, 2),
             gender="f",
+            passengers=passengers if children else (),
         ),
         terms=EconomicTerms(payment_method="stripe", add_ons=()),
     )
@@ -315,6 +342,22 @@ def test_runtime_policy_denies_activity_above_composed_transport_limit() -> None
         )
 
     assert _context(draft=_activity_draft(participants=2, amount="669.90"))
+
+
+def test_critical_activity_summary_names_mixed_party_before_confirmation() -> None:
+    context = critical_action_context(
+        _activity_draft(amount="974.40", participants=2, children=1),
+        summary_version=1,
+        presented_at=NOW,
+        locale="pt-BR",
+        approval_ttl=TTL,
+        agency_payment_percentage=20,
+        hostel_payment_percentage=100,
+        policy=_enabled_policy(),
+    )
+
+    assert "para 2 adultos e 1 criança" in context.public_summary
+    assert "para 3 pessoas" not in context.public_summary
 
 
 def test_critical_activity_summary_supports_english_locale() -> None:

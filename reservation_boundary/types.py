@@ -485,6 +485,25 @@ class ActivityReadArguments:
 
 
 @dataclass(frozen=True, slots=True)
+class ActivityGroupReadArguments:
+    activity_id: str
+    activity_date: date
+    adults: int
+    children: int
+
+    def __post_init__(self) -> None:
+        _require_exact_str(
+            self.activity_id,
+            "ActivityGroupReadArguments.activity_id",
+            identifier=True,
+        )
+        if type(self.activity_date) is not date:
+            raise TypeError("ActivityGroupReadArguments.activity_date must be an exact date")
+        _require_exact_int(self.adults, "ActivityGroupReadArguments.adults", minimum=1)
+        _require_exact_int(self.children, "ActivityGroupReadArguments.children", minimum=1)
+
+
+@dataclass(frozen=True, slots=True)
 class ActivityDescriptionArguments:
     activity_id: str
 
@@ -953,6 +972,7 @@ PUBLIC_TYPES: Final = tuple(
 
 __all__ = (
     "ActivityDescriptionArguments",
+    "ActivityGroupReadArguments",
     "ActivityPaymentArguments",
     "ActivityReadArguments",
     "ActivityReservationArguments",

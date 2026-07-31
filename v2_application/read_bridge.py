@@ -24,7 +24,11 @@ from reservation_boundary.reads import (
     SanitizedLookupStatus,
     SanitizedOffer,
 )
-from reservation_boundary.types import ActivityReadArguments, LodgingReadArguments
+from reservation_boundary.types import (
+    ActivityGroupReadArguments,
+    ActivityReadArguments,
+    LodgingReadArguments,
+)
 from reservation_domain import Party, SearchQuery, ServiceKind
 from v2_contracts.providers import (
     ReadKind,
@@ -155,12 +159,21 @@ def _phase8_request(
         tool_name = "cloudbeds_consultar_hospedagem_v2"
     elif request.kind is ReadKind.ACTIVITY:
         adults, children = request.activity_party()
-        arguments = ActivityReadArguments(
-            request.product_id,
-            request.activity_date,
-            adults + children,
-        )
-        tool_name = "bokun_consultar_passeio_v2"
+        if children:
+            arguments = ActivityGroupReadArguments(
+                request.product_id,
+                request.activity_date,
+                adults,
+                children,
+            )
+            tool_name = "bokun_consultar_passeio_grupo_v2"
+        else:
+            arguments = ActivityReadArguments(
+                request.product_id,
+                request.activity_date,
+                adults,
+            )
+            tool_name = "bokun_consultar_passeio_v2"
     else:
         raise ReadBridgeError("read kind is outside the availability bridge")
     return Phase8ToolReadRequest(

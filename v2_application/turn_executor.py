@@ -422,7 +422,14 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
         if fact.name == "birth_date" and type(fact.value) is date
     )
 
-    number_words = {"one": 1, "um": 1, "uma": 1, "dois": 2, "duas": 2}
+    number_words = {
+        "zero": 0,
+        "one": 1,
+        "um": 1,
+        "uma": 1,
+        "dois": 2,
+        "duas": 2,
+    }
     adults: set[int] = set()
     for pattern in (
         r"\bfor\s+(one|\d+)\s+(?:adult|person|participant)s?\b",
@@ -434,6 +441,17 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
     if re.search(r"\b(?:so eu|just me)\b", folded):
         adults.add(1)
     adults.discard(0)
+
+    children: set[int] = set()
+    for pattern in (
+        r"\b(?:adults|people|participants)\s+(?:and\s+|with\s+)?"
+        r"(zero|one|\d+)\s+(?:child|children)\b",
+        r"\b(?:adultos|adultas|pessoas|participantes)\s+(?:e\s+|com\s+)?"
+        r"(zero|um|uma|\d+)\s+criancas?\b",
+    ):
+        for match in re.finditer(pattern, folded):
+            token = match.group(1)
+            children.add(number_words.get(token, int(token) if token.isdigit() else 0))
 
     english_markers = len(
         re.findall(r"\b(?:i|please|tour|booking|what|can|adult|person)\b", folded)
@@ -448,8 +466,14 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
     )
     if len(activity_dates) == 1:
         facts.append(ModelFact("activity_date", next(iter(activity_dates))))
-    if len(adults) == 1:
-        facts.extend((ModelFact("adults", next(iter(adults))), ModelFact("children", 0)))
+    if len(adults) == 1 and len(children) <= 1:
+        child_count = next(iter(children)) if children else 0
+        facts.extend(
+            (
+                ModelFact("adults", next(iter(adults))),
+                ModelFact("children", child_count),
+            )
+        )
     return tuple(facts)
 
 

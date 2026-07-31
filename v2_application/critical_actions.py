@@ -12,6 +12,7 @@ from enum import Enum
 from reservation_domain import (
     AwaitingConfirmationState,
     CommercialDraft,
+    Party,
     ServiceKind,
 )
 from v2_contracts.critical_actions import (
@@ -141,6 +142,14 @@ def _people(count: int) -> str:
     return "1 pessoa" if count == 1 else f"{count} pessoas"
 
 
+def _party(party: Party) -> str:
+    if party.children == 0:
+        return _people(party.adults)
+    adults = "1 adulto" if party.adults == 1 else f"{party.adults} adultos"
+    children = "1 criança" if party.children == 1 else f"{party.children} crianças"
+    return f"{adults} e {children}"
+
+
 def _payment_amount(total: Decimal, percentage: int) -> Decimal:
     return (total * Decimal(percentage) / Decimal(100)).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -202,6 +211,14 @@ def _people_en(count: int) -> str:
     return "1 person" if count == 1 else f"{count} people"
 
 
+def _party_en(party: Party) -> str:
+    if party.children == 0:
+        return _people_en(party.adults)
+    adults = "1 adult" if party.adults == 1 else f"{party.adults} adults"
+    children = "1 child" if party.children == 1 else f"{party.children} children"
+    return f"{adults} and {children}"
+
+
 def _payment_text_en(
     *,
     method: str,
@@ -232,12 +249,11 @@ def _public_summary_en(
     components = draft.components
     if len(components) == 1:
         component = components[0]
-        count = component.party.adults + component.party.children
         total = _money_en(component.total.amount, component.total.currency)
         if component.service is ServiceKind.ACTIVITY:
             effect = (
                 f"I’ll book {component.public_label} on {_date_en(component.start_date)} "
-                f"for {_people_en(count)}, at a final total of {total} including the booking fee"
+                f"for {_party_en(component.party)}, at a final total of {total} including the booking fee"
             )
             payment = _payment_text_en(
                 method=method,
@@ -251,7 +267,7 @@ def _public_summary_en(
                 raise ValueError("lodging critical summary requires checkout")
             effect = (
                 f"I’ll book {component.public_label} from {_date_en(component.start_date)} "
-                f"to {_date_en(component.end_date)} for {_people_en(count)}, "
+                f"to {_date_en(component.end_date)} for {_party_en(component.party)}, "
                 f"at a final total of {total}"
             )
             payment = _payment_text_en(
@@ -270,8 +286,6 @@ def _public_summary_en(
     activity = next(item for item in components if item.service is ServiceKind.ACTIVITY)
     if lodging.end_date is None:
         raise ValueError("package lodging summary requires checkout")
-    lodging_people = lodging.party.adults + lodging.party.children
-    activity_people = activity.party.adults + activity.party.children
     lodging_total = _money_en(lodging.total.amount, lodging.total.currency)
     activity_total = _money_en(activity.total.amount, activity.total.currency)
     lodging_payment = _money_en(
@@ -296,9 +310,9 @@ def _public_summary_en(
     return (
         "Just to confirm: I’ll book "
         f"{lodging.public_label} from {_date_en(lodging.start_date)} "
-        f"to {_date_en(lodging.end_date)} for {_people_en(lodging_people)}, "
+        f"to {_date_en(lodging.end_date)} for {_party_en(lodging.party)}, "
         f"at a total of {lodging_total}, and {activity.public_label} on "
-        f"{_date_en(activity.start_date)} for {_people_en(activity_people)}, "
+        f"{_date_en(activity.start_date)} for {_party_en(activity.party)}, "
         f"at a final total of {activity_total} including the booking fee; "
         f"then I’ll {payment}. May I make these bookings?"
     )
@@ -326,12 +340,11 @@ def _public_summary(
     components = draft.components
     if len(components) == 1:
         component = components[0]
-        count = component.party.adults + component.party.children
         total = _money(component.total.amount, component.total.currency)
         if component.service is ServiceKind.ACTIVITY:
             effect = (
                 f"vou reservar o {component.public_label} em {_date(component.start_date)} "
-                f"para {_people(count)}, pelo total final de {total} já com a taxa"
+                f"para {_party(component.party)}, pelo total final de {total} já com a taxa"
             )
             payment = _payment_text(
                 method=method,
@@ -345,7 +358,7 @@ def _public_summary(
                 raise ValueError("lodging critical summary requires checkout")
             effect = (
                 f"vou reservar {component.public_label} de {_date(component.start_date)} "
-                f"a {_date(component.end_date)} para {_people(count)}, "
+                f"a {_date(component.end_date)} para {_party(component.party)}, "
                 f"pelo total final de {total}"
             )
             payment = _payment_text(
@@ -368,8 +381,6 @@ def _public_summary(
     )
     if lodging.end_date is None:
         raise ValueError("package lodging summary requires checkout")
-    lodging_people = lodging.party.adults + lodging.party.children
-    activity_people = activity.party.adults + activity.party.children
     lodging_total = _money(lodging.total.amount, lodging.total.currency)
     activity_total = _money(activity.total.amount, activity.total.currency)
     lodging_payment = _money(
@@ -394,9 +405,9 @@ def _public_summary(
     return (
         "Só para confirmar: vou reservar "
         f"{lodging.public_label} de {_date(lodging.start_date)} a {_date(lodging.end_date)} "
-        f"para {_people(lodging_people)}, pelo total de {lodging_total}, e "
+        f"para {_party(lodging.party)}, pelo total de {lodging_total}, e "
         f"{activity.public_label} em {_date(activity.start_date)} para "
-        f"{_people(activity_people)}, pelo total final de {activity_total} já com a taxa; "
+        f"{_party(activity.party)}, pelo total final de {activity_total} já com a taxa; "
         f"depois vou {payment}. Posso fazer essas reservas?"
     )
 

@@ -22,6 +22,7 @@ from reservation_boundary.conversation import (
 )
 from reservation_boundary.types import (
     ActivityDescriptionArguments,
+    ActivityGroupReadArguments,
     ActivityReadArguments,
     DateSlot,
     FaqReadArguments,
@@ -50,6 +51,7 @@ ReadArguments: TypeAlias = (
     | LodgingReadArguments
     | RoomDescriptionArguments
     | ActivityReadArguments
+    | ActivityGroupReadArguments
     | ActivityDescriptionArguments
 )
 
@@ -58,6 +60,7 @@ _TOOL_ARGUMENT_TYPES: Final = {
     "cloudbeds_consultar_hospedagem_v2": LodgingReadArguments,
     "cloudbeds_descrever_quartos": RoomDescriptionArguments,
     "bokun_consultar_passeio_v2": ActivityReadArguments,
+    "bokun_consultar_passeio_grupo_v2": ActivityGroupReadArguments,
     "bokun_consultar_descricao": ActivityDescriptionArguments,
 }
 
@@ -188,6 +191,13 @@ def _argument_data(arguments: ReadArguments) -> dict[str, object]:
             "activity_id": arguments.activity_id,
             "activity_date": arguments.activity_date.isoformat(),
             "participants": arguments.participants,
+        }
+    if type(arguments) is ActivityGroupReadArguments:
+        return {
+            "activity_id": arguments.activity_id,
+            "activity_date": arguments.activity_date.isoformat(),
+            "adults": arguments.adults,
+            "children": arguments.children,
         }
     if type(arguments) is ActivityDescriptionArguments:
         return {"activity_id": arguments.activity_id}
@@ -1702,6 +1712,15 @@ def _decode_read_arguments(value: object, tool_name: object) -> ReadArguments:
             activity_date=_parse_date(data["activity_date"], "activity_date"),
             participants=data["participants"],
         )
+    if expected is ActivityGroupReadArguments:
+        if set(data) != {"activity_id", "activity_date", "adults", "children"}:
+            raise ValueError("ActivityGroupReadArguments fields mismatch")
+        return ActivityGroupReadArguments(
+            activity_id=data["activity_id"],
+            activity_date=_parse_date(data["activity_date"], "activity_date"),
+            adults=data["adults"],
+            children=data["children"],
+        )
     if expected is ActivityDescriptionArguments:
         if set(data) != {"activity_id"}:
             raise ValueError("ActivityDescriptionArguments fields mismatch")
@@ -1863,6 +1882,26 @@ def _validate_request_result_equality(
             and offer.start_time is None
             and offer.adults == args.participants
             and offer.children == 0
+            for offer in result.offers
+        )
+    elif request.tool_name == "bokun_consultar_passeio_grupo_v2" and type(
+        request.arguments
+    ) is ActivityGroupReadArguments:
+        args = request.arguments
+        service = ReadService.ACTIVITY
+        query = SearchQuery(
+            service=ServiceKind.ACTIVITY,
+            start_date=args.activity_date,
+            end_date=None,
+            start_time=None,
+            party=Party(args.adults, args.children),
+        )
+        offers_match = all(
+            offer.start_date == args.activity_date
+            and offer.end_date is None
+            and offer.start_time is None
+            and offer.adults == args.adults
+            and offer.children == args.children
             for offer in result.offers
         )
     else:

@@ -123,6 +123,19 @@ def test_parent_extracts_unambiguous_catalog_product_date_and_party() -> None:
     )
 
 
+def test_parent_extracts_explicit_mixed_activity_party_before_passenger_ordinals() -> None:
+    assert _extract_explicit_commercial_facts(
+        "Quero o Roteiro dos 4Ps em 18/11/2026 para 2 adultos e 1 criança. "
+        "Passageiros: adulto 1, adulto 2, criança 3."
+    ) == (
+        ModelFact("service", "agency"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("activity_date", date(2026, 11, 18)),
+        ModelFact("adults", 2),
+        ModelFact("children", 1),
+    )
+
+
 def test_parent_commercial_extraction_ignores_date_without_product() -> None:
     assert _extract_explicit_commercial_facts(
         "I will be free on November 18, 2026, but have not chosen a tour."
