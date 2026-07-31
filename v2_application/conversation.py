@@ -505,6 +505,16 @@ def _date_value(value: object, name: str) -> date:
     return parsed
 
 
+def _start_time_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str or re.fullmatch(
+        r"(?:[01]\d|2[0-3]):[0-5]\d", value
+    ) is None:
+        raise ConversationReductionError("activity start_time is invalid")
+    return value
+
+
 def _money(payload: dict[str, object]) -> Money:
     amount = payload.get("total_amount")
     currency = payload.get("currency")
@@ -564,6 +574,7 @@ def _offer_and_query(
         service = ServiceKind.ACTIVITY
         start_date = _date_value(payload.get("activity_date"), "activity_date")
         end_date = None
+        start_time = _start_time_value(payload.get("start_time"))
         adults = payload.get("adults")
         children = payload.get("children")
         if payload.get("participants") != (
@@ -624,7 +635,7 @@ def _offer_and_query(
         public_label=label,
         start_date=start_date,
         end_date=end_date,
-        start_time=None,
+        start_time=start_time if service is ServiceKind.ACTIVITY else None,
         party=party,
         total=_money(payload),
         available=True,

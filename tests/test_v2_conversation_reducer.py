@@ -274,7 +274,7 @@ def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
         projection=_projection(),
         proposal=proposal,
         profile=_profile(),
-        reads=(_activity_read(adults=2, children=1),),
+        reads=(_activity_read(adults=2, children=1, start_time="08:30"),),
         fact_commitment_hash=FRAME_HASH,
         now=NOW,
     )
@@ -283,6 +283,8 @@ def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
     assert decision.commands == ()
     assert decision.public_reply.kind == "summary"
     assert type(decision.next_state.workflow) is AwaitingConfirmationState
+    assert decision.next_state.workflow.draft.components[0].start_time == "08:30"
+    assert "às 08:30" in " ".join(decision.public_reply.chunks)
     assert decision.next_state.workflow.draft.customer.passengers == (
         PassengerFacts(
             1,
@@ -753,24 +755,29 @@ def _lodging_read(*, amount: str = "480.00", adults: int = 2) -> ReadObservation
     )
 
 
-def _activity_read(*, adults: int = 2, children: int = 0) -> ReadObservation:
+def _activity_read(
+    *, adults: int = 2, children: int = 0, start_time: str | None = None
+) -> ReadObservation:
+    public_payload = {
+        "offer_id": ACTIVITY_OFFER_ID,
+        "product_id": "product:buracao-001",
+        "product_public_name": "Buracão",
+        "activity_date": "2026-08-11",
+        "adults": adults,
+        "children": children,
+        "participants": adults + children,
+        "total_amount": "400.00",
+        "currency": "BRL",
+        "available": True,
+    }
+    if start_time is not None:
+        public_payload["start_time"] = start_time
     return ReadObservation(
         request_hash="2" * 64,
         provider="bokun",
         observed_at=NOW - timedelta(seconds=1),
         expires_at=NOW + timedelta(minutes=5),
-        public_payload={
-            "offer_id": ACTIVITY_OFFER_ID,
-            "product_id": "product:buracao-001",
-            "product_public_name": "Buracão",
-            "activity_date": "2026-08-11",
-            "adults": adults,
-            "children": children,
-            "participants": adults + children,
-            "total_amount": "400.00",
-            "currency": "BRL",
-            "available": True,
-        },
+        public_payload=public_payload,
         private_binding_hash=ACTIVITY_BINDING_HASH,
     )
 
