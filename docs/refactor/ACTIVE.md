@@ -2,14 +2,14 @@
 
 ## Autoridade
 
-- Estado: `BOKUN_MULTI_PASSENGER_IMPLEMENTATION`
+- Estado: `BOKUN_BOOKING_ID_CONFIRMATION_CANDIDATE`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-07-30-maya-v2-bokun-multi-passenger-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-07-30-maya-v2-bokun-multi-passenger.md`
-- Base funcional anterior ao reparo: `71ff137e9d9d35cc8f8cd1211ceca0744dd0d6dc`
-- Commit da especificação: `4381c74dd35c4da5208b112c91894ffa36711fd3`
-- Rollout: `DARK_CANARY_PENDING`
+- Especificação ativa: `docs/superpowers/specs/2026-07-31-bokun-submit-id-confirmation-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-07-31-bokun-booking-id-confirmation.md`
+- Base funcional anterior ao reparo: `16d4d90e45c2ceb6bba12565f1862e092bcb9c56`
+- Commit da especificação: `01336c0c4ad420404c465382c78f4959eedfdba9`
+- Rollout: `LOCAL_QUALIFIED_REVIEW_PENDING`
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
@@ -17,11 +17,37 @@
 
 Carlos autorizou em 2026-07-27 a correção de conversa pré-reserva, relógio de consultas, fallback de protocolo, conhecimento comercial e controle operacional, além da preparação de todas as funções sob testes limitados.
 
-O candidato está qualificado localmente. O próximo avanço autorizado é: revisão final, commit/push do branch, CI no SHA exato, imagem imutável e dark canary com todos os efeitos externos fechados. Provider writes e entrega ManyChat só podem abrir um por vez, para o subscriber `1873018537`, com janela finita, autoridade assinada, read-back e rollback/fallback ao legado.
+O candidato está qualificado localmente. O próximo avanço autorizado é: revisão final, push do branch, CI no SHA exato, imagem imutável e dark canary com todos os efeitos externos fechados. Provider writes e entrega ManyChat continuam bloqueados até qualificação e autoridade separadas.
+
+## CONFIRMAÇÃO BÓKUN POR BOOKING ID ATIVA
+
+Carlos autorizou em 2026-07-31 que um submit Bókun V2 aceito, com um único booking ID principal e sem aliases conflitantes, seja evidência monotônica de criação. O caminho síncrono V2 não executa mais GET depois de obter esse ID: retorna `confirmed`, o adapter grava somente o fingerprint opaco como `EFFECT_CONFIRMED`, o ledger consome um único slot e o completion projector materializa `Seu passeio foi confirmado.` uma única vez.
+
+Permanece fail-closed:
+
+- resposta sem booking ID, IDs principais conflitantes, timeout ou erro ambíguo após submit continuam `CALLED_UNKNOWN`, sem retry;
+- activity/passenger booking IDs não contam como booking ID principal;
+- produto, data, horário, rate, composição adulto/criança, manifesto e economia BRL continuam vinculados antes do submit;
+- o caminho Bókun legado e Cloudbeds não mudaram;
+- ManyChat, pagamento, cancelamento, e-mail e handoff continuam fechados;
+- auditoria GET posterior, se adicionada, será observador read-only separado e nunca poderá rebaixar uma criação já confirmada nem repetir submit.
+
+Evidência local sobre o código funcional `9e1faf5ba18c58e3aa89244dcefc6d439915b1da` e as provas duráveis no sucessor `14b61b33629664bf4b150bb2698d331149968b36`:
+
+- RED reproduziu o quarto GET indevido depois do submit com `booking-123`;
+- transporte Bókun completo: `47 passed`;
+- jornada transporte/reservas/outcome/completion: `78 passed`;
+- regressão ampla de Bókun, conversa, horário, 2+1 e produção: `189 passed`;
+- catálogo comercial fechado: `1 passed`;
+- comando oficial de CI local: `1323 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, `fasttrack-boundaries` e `git diff --check`: verdes;
+- nenhum provider, ManyChat, pagamento, cancelamento, e-mail ou handoff foi chamado para qualificar esta correção.
+
+- NEXT: obter `APPROVE` independente sobre o SHA exato do HEAD; depois publicar o mesmo SHA, exigir CI remoto verde, produzir imagem OCI imutável e atestar dark canary com efeitos fechados antes de qualquer tráfego de clientes.
 
 ## REPARO BÓKUN MULTI-PASSAGEIRO ATIVO
 
-Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e crianças, com dados individuais por passageiro. O reparo precisa preservar manifesto privado, proposta assinada, cotação por categoria, idempotência, submit único e read-back exato. Não está autorizado nenhum write real de provider durante a implementação.
+Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e crianças, com dados individuais por passageiro. O reparo preserva manifesto privado, proposta assinada, cotação por categoria, idempotência, submit único e booking ID principal inequívoco. Não está autorizado nenhum write real de provider durante a implementação.
 
 | Task do reparo | Estado | Commit |
 |---|---|---|
@@ -50,8 +76,8 @@ A candidata incorpora os findings reproduzíveis das revisões independentes e d
 - categorias públicas do Bókun são selecionadas somente quando há um único ID elegível: aliases internos com `ageQualified=false` são ignorados, valores malformados ou múltiplas categorias públicas falham fechados;
 - quote/cart/read-back rejeitam aliases e bindings conflitantes de oferta, status, valor, moeda, composição e booking ID;
 - IDs internos de activity/passenger booking não são confundidos com o ID principal da reserva;
-- `409` e qualquer ambiguidade após submit permanecem `CALLED_UNKNOWN`; não há retry otimista;
-- submit continua único e o read-back exato é obrigatório antes de confirmação.
+- `409` e qualquer ambiguidade após submit sem booking ID inequívoco permanecem `CALLED_UNKNOWN`; não há retry otimista;
+- no caminho V2 atual, um submit aceito com booking ID principal inequívoco confirma a criação imediatamente; read-back não bloqueia a confirmação.
 
 Evidência local no código `5b5dc5c88783e1c286d64b3fc915b600ea74442a`:
 
