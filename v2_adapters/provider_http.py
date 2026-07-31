@@ -49,6 +49,39 @@ def _first(mapping: Mapping[str, object], *names: str) -> str | None:
     return None
 
 
+def _consistent_text_alias(
+    mapping: Mapping[str, object],
+    names: tuple[str, ...],
+    *,
+    error: str,
+    nested: tuple[tuple[str, tuple[str, ...]], ...] = (),
+) -> str | None:
+    values: list[str] = []
+    for name in names:
+        if name not in mapping:
+            continue
+        value = _text(mapping[name])
+        if value is None:
+            raise ProviderHTTPError(error)
+        values.append(value)
+    for container_name, nested_names in nested:
+        if container_name not in mapping:
+            continue
+        container = mapping[container_name]
+        if not isinstance(container, Mapping):
+            raise ProviderHTTPError(error)
+        for name in nested_names:
+            if name not in container:
+                continue
+            value = _text(container[name])
+            if value is None:
+                raise ProviderHTTPError(error)
+            values.append(value)
+    if len(set(values)) > 1:
+        raise ProviderHTTPError(error)
+    return values[0] if values else None
+
+
 def _integer(mapping: Mapping[str, object], *names: str) -> int | None:
     for name in names:
         value = mapping.get(name)
@@ -901,25 +934,21 @@ class BokunHTTPTransport:
 
     @staticmethod
     def _cart_activity_product_id(item: Mapping[str, object]) -> str | None:
-        direct = _first(
+        return _consistent_text_alias(
             item,
-            "activityId",
-            "activity_id",
-            "productId",
-            "product_id",
+            ("activityId", "activity_id", "productId", "product_id"),
+            nested=(("activity", ("id", "activityId", "productId")),),
+            error="Bókun cart activity binding is invalid",
         )
-        activity = item.get("activity")
-        if direct is None and isinstance(activity, Mapping):
-            direct = _first(activity, "id", "activityId", "productId")
-        return direct
 
     @staticmethod
     def _cart_pricing_category_id(item: Mapping[str, object]) -> str | None:
-        direct = _first(item, "pricingCategoryId", "pricing_category_id")
-        category = item.get("pricingCategory")
-        if direct is None and isinstance(category, Mapping):
-            direct = _first(category, "id", "pricingCategoryId")
-        return direct
+        return _consistent_text_alias(
+            item,
+            ("pricingCategoryId", "pricing_category_id"),
+            nested=(("pricingCategory", ("id", "pricingCategoryId")),),
+            error="Bókun cart passenger binding is invalid",
+        )
 
     @staticmethod
     def _validate_cart_offer_binding(
@@ -929,17 +958,24 @@ class BokunHTTPTransport:
         start_time_id: str,
         rate_id: str,
     ) -> None:
-        returned_date = _first(activity, "date", "activityDate", "startDate")
-        returned_start = _first(activity, "startTimeId", "start_time_id")
-        if returned_start is None:
-            start = activity.get("startTime")
-            if isinstance(start, Mapping):
-                returned_start = _first(start, "id", "startTimeId")
-        returned_rate = _first(activity, "rateId", "rate_id")
-        if returned_rate is None:
-            rate = activity.get("rate")
-            if isinstance(rate, Mapping):
-                returned_rate = _first(rate, "id", "rateId")
+        error = "Bókun cart offer binding diverged"
+        returned_date = _consistent_text_alias(
+            activity,
+            ("date", "activityDate", "startDate"),
+            error=error,
+        )
+        returned_start = _consistent_text_alias(
+            activity,
+            ("startTimeId", "start_time_id"),
+            nested=(("startTime", ("id", "startTimeId")),),
+            error=error,
+        )
+        returned_rate = _consistent_text_alias(
+            activity,
+            ("rateId", "rate_id"),
+            nested=(("rate", ("id", "rateId")),),
+            error=error,
+        )
         if (
             (returned_date is not None and returned_date != activity_date)
             or (returned_start is not None and returned_start != start_time_id)
@@ -1503,8 +1539,13 @@ class BokunHTTPTransport:
 
         def visit(value: object) -> None:
             if isinstance(value, Mapping):
+                returned_booking_id = _consistent_text_alias(
+                    value,
+                    ("bookingId", "booking_id"),
+                    error="Bókun write read-back did not match",
+                )
                 if (
-                    _first(value, "bookingId", "booking_id") == booking_id
+                    returned_booking_id == booking_id
                     and isinstance(value.get("activityBookings"), list)
                 ):
                     candidates.append(value)
@@ -1518,7 +1559,11 @@ class BokunHTTPTransport:
         if len(candidates) != 1:
             raise ProviderHTTPError("Bókun write read-back did not match")
         booking = candidates[0]
-        returned_status = _first(booking, "status", "bookingStatus")
+        returned_status = _consistent_text_alias(
+            booking,
+            ("status", "bookingStatus"),
+            error="Bókun booking read-back status mismatch",
+        )
         if returned_status is not None and returned_status.upper() not in {
             "BOOKED",
             "CONFIRMED",
@@ -1527,16 +1572,31 @@ class BokunHTTPTransport:
             "RESERVED",
         }:
             raise ProviderHTTPError("Bókun booking read-back status mismatch")
-        returned_amount = _first_amount(
-            booking,
-            "totalPrice",
-            "totalAmount",
-            "amount",
-            "totalDue",
-        )
+        amount_values: list[Decimal] = []
+        amount_currencies: list[str] = []
+        for name in ("totalPrice", "totalAmount", "amount", "totalDue"):
+            if name not in booking:
+                continue
+            raw_amount = booking[name]
+            returned_amount = _amount(raw_amount)
+            if returned_amount is None:
+                raise ProviderHTTPError("Bókun booking read-back amount mismatch")
+            amount_values.append(returned_amount.quantize(Decimal("0.01")))
+            if isinstance(raw_amount, Mapping) and (
+                "currency" in raw_amount or "currencyCode" in raw_amount
+            ):
+                raw_currency = raw_amount.get("currency") or raw_amount.get(
+                    "currencyCode"
+                )
+                returned_currency = _text(raw_currency)
+                if returned_currency is None:
+                    raise ProviderHTTPError("Bókun booking read-back amount mismatch")
+                amount_currencies.append(returned_currency.upper())
         if (
-            returned_amount is not None
-            and returned_amount.quantize(Decimal("0.01")) != expected_amount
+            any(value != expected_amount for value in amount_values)
+            or len(set(amount_values)) > 1
+            or any(currency != "BRL" for currency in amount_currencies)
+            or len(set(amount_currencies)) > 1
         ):
             raise ProviderHTTPError("Bókun booking read-back amount mismatch")
         activities = booking.get("activityBookings")
@@ -1545,7 +1605,12 @@ class BokunHTTPTransport:
             for item in activities
             if isinstance(item, Mapping)
             and BokunHTTPTransport._cart_activity_product_id(item) == product_id
-            and _first(item, "date", "activityDate", "startDate") == activity_date
+            and _consistent_text_alias(
+                item,
+                ("date", "activityDate", "startDate"),
+                error="Bókun write read-back activity diverged",
+            )
+            == activity_date
         ] if isinstance(activities, list) else []
         if len(matches) != 1:
             raise ProviderHTTPError("Bókun write read-back activity diverged")
@@ -2087,7 +2152,11 @@ class BokunHTTPTransport:
     @staticmethod
     def _booking_reference(payload: object) -> str | None:
         if isinstance(payload, Mapping):
-            direct = _first(payload, "bookingId", "booking_id")
+            direct = _consistent_text_alias(
+                payload,
+                ("bookingId", "booking_id"),
+                error="Bókun write result is ambiguous",
+            )
             if direct:
                 return direct
             for value in payload.values():

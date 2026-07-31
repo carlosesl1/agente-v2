@@ -989,6 +989,56 @@ def test_bokun_quote_cart_rejects_returned_offer_binding_divergence(
         )
 
 
+@pytest.mark.parametrize(
+    "conflicting_fields",
+    (
+        {"activityDate": "2026-08-12"},
+        {"start_time_id": "start-stale"},
+        {"startTime": {"id": "start-stale"}},
+        {"rate_id": "rate-stale"},
+        {"rate": {"id": "rate-stale"}},
+    ),
+)
+def test_bokun_cart_rejects_conflicting_offer_aliases(
+    conflicting_fields: dict[str, object],
+) -> None:
+    activity = {
+        "bookingId": "activity-booking-1",
+        "activityId": "913372",
+        "date": "2026-08-11",
+        "startTimeId": "start-1",
+        "rateId": "rate-1",
+        "pricingCategoryBookings": [
+            {
+                "bookingId": "passenger-booking-1",
+                "pricingCategoryId": "857489",
+            }
+        ],
+        **conflicting_fields,
+    }
+    cart = {"uuid": "session:bound", "activityBookings": [activity]}
+    passenger = {
+        "category_id": "857489",
+        "firstName": "Pessoa",
+        "lastName": "Um",
+        "nationality": "BR",
+        "dateOfBirth": "1990-01-02",
+        "gender": "f",
+        "full_name": "Pessoa Um",
+    }
+
+    with pytest.raises(ProviderHTTPError, match="offer binding"):
+        BokunHTTPTransport._cart_bindings_v2(
+            cart,
+            session_id="session:bound",
+            product_id="913372",
+            activity_date="2026-08-11",
+            start_time_id="start-1",
+            rate_id="rate-1",
+            passengers=(passenger,),
+        )
+
+
 def test_bokun_checkout_rejects_passenger_booking_mismatch() -> None:
     checkout = _checkout(
         (("unexpected-booking", "adult-1"),),
@@ -1136,6 +1186,59 @@ def test_bokun_readback_rejects_status_or_amount_divergence(
             activity_date="2026-08-11",
             category_ids=("adult-1",),
             expected_amount=Decimal("300.00"),
+        )
+
+
+@pytest.mark.parametrize(
+    "conflicting_fields",
+    (
+        {"status": "PENDING", "bookingStatus": "CANCELLED"},
+        {"totalPrice": "300.00", "totalAmount": "999.00"},
+        {
+            "totalPrice": {"amount": "300.00", "currency": "BRL"},
+            "totalAmount": {"amount": "300.00", "currency": "USD"},
+        },
+    ),
+)
+def test_bokun_readback_rejects_conflicting_status_and_amount_aliases(
+    conflicting_fields: dict[str, object],
+) -> None:
+    readback = {
+        "booking": {
+            "bookingId": "booking-group-123",
+            **conflicting_fields,
+            "activityBookings": [
+                {
+                    "activityId": "913372",
+                    "date": "2026-08-11",
+                    "pricingCategoryBookings": [
+                        {"pricingCategoryId": "adult-1"},
+                    ],
+                }
+            ],
+        }
+    }
+
+    with pytest.raises(ProviderHTTPError, match="read-back"):
+        BokunHTTPTransport._validate_booking_readback_v2(
+            readback,
+            booking_id="booking-group-123",
+            product_id="913372",
+            activity_date="2026-08-11",
+            category_ids=("adult-1",),
+            expected_amount=Decimal("300.00"),
+        )
+
+
+def test_bokun_booking_reference_rejects_conflicting_aliases() -> None:
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        BokunHTTPTransport._booking_reference(
+            {
+                "booking": {
+                    "bookingId": "booking-primary",
+                    "booking_id": "booking-conflict",
+                }
+            }
         )
 
 
