@@ -262,7 +262,7 @@ def test_submit_answers_supported_checkout_fields_even_when_provider_marks_them_
     assert passenger_answers["gender"] == "m"
 
 
-def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> None:
+def test_bokun_v2_submit_booking_id_confirms_without_readback() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -344,33 +344,7 @@ def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> 
                     }
                 },
             )
-        assert call == 4
-        assert request.method == "GET"
-        assert request.url.path == "/booking.json/booking/booking-123"
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "readback-envelope-123",
-                "booking": {
-                    "bookingId": "booking-123",
-                    "confirmationCode": "BK-123",
-                    "status": "PENDING",
-                    "totalPrice": 300.0,
-                    "totalDue": 300.0,
-                    "currency": "BRL",
-                    "activityBookings": [
-                        {
-                            "activity": {"id": 913372},
-                            "date": 1786406400000,
-                            "pricingCategoryBookings": [
-                                {"pricingCategoryId": "857489"}
-                            ],
-                        }
-                    ],
-                }
-            },
-        )
+        raise AssertionError("booking ID confirmation must not depend on read-back")
 
     result = _transport(handler)(
         "book_activity",
@@ -379,7 +353,7 @@ def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> 
     )
 
     assert result == {"status": "confirmed", "booking_id": "booking-123"}
-    assert [request.method for request in seen] == ["POST", "GET", "POST", "GET"]
+    assert [request.method for request in seen] == ["POST", "GET", "POST"]
     assert all(request.headers["X-Bokun-AccessKey"] == "bokun-access" for request in seen)
     assert all(request.headers["X-Bokun-Signature"] for request in seen)
 
@@ -597,7 +571,7 @@ def test_bokun_submit_conflict_is_ambiguous_and_never_read_back() -> None:
     assert len(seen) == 3
 
 
-def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
+def test_bokun_multi_passenger_cart_checkout_submit_by_booking_id() -> None:
     seen: list[httpx.Request] = []
     category_rows = (
         ("adult-booking-1", "adult-1"),
@@ -662,30 +636,7 @@ def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
                 request=request,
                 json={"booking": {"bookingId": "booking-group-123"}},
             )
-        assert call == 4
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "booking": {
-                    "bookingId": "booking-group-123",
-                    "status": "PENDING",
-                    "totalPrice": 750.0,
-                    "totalDue": 750.0,
-                    "currency": "BRL",
-                    "activityBookings": [
-                        {
-                            "activityId": "913372",
-                            "date": "2026-08-11",
-                            "pricingCategoryBookings": [
-                                {"pricingCategoryId": category_id}
-                                for _, category_id in category_rows
-                            ],
-                        }
-                    ],
-                }
-            },
-        )
+        raise AssertionError("booking ID confirmation must not depend on read-back")
 
     result = _transport(handler)(
         "book_activity",
@@ -694,7 +645,7 @@ def test_bokun_multi_passenger_cart_checkout_submit_and_readback() -> None:
     )
 
     assert result == {"status": "confirmed", "booking_id": "booking-group-123"}
-    assert len(seen) == 4
+    assert len(seen) == 3
 
 
 @pytest.mark.parametrize(
@@ -712,8 +663,6 @@ def test_supported_parties_preserve_count_end_to_end(
     assert isinstance(offer, dict)
     amount = offer["amount"]
     assert isinstance(amount, str)
-    activity_date = offer["start_date"]
-    assert isinstance(activity_date, str)
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -774,29 +723,7 @@ def test_supported_parties_preserve_count_end_to_end(
                 request=request,
                 json={"booking": {"bookingId": "booking-matrix"}},
             )
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "booking": {
-                    "bookingId": "booking-matrix",
-                    "status": "PENDING",
-                    "totalPrice": amount,
-                    "totalDue": amount,
-                    "currency": "BRL",
-                    "activityBookings": [
-                        {
-                            "activityId": "913372",
-                            "date": activity_date,
-                            "pricingCategoryBookings": [
-                                {"pricingCategoryId": category_id}
-                                for category_id in expected_categories
-                            ],
-                        }
-                    ],
-                }
-            },
-        )
+        raise AssertionError("booking ID confirmation must not depend on read-back")
 
     result = _transport(handler)(
         "book_activity",
@@ -805,7 +732,7 @@ def test_supported_parties_preserve_count_end_to_end(
     )
 
     assert result == {"status": "confirmed", "booking_id": "booking-matrix"}
-    assert len(seen) == 4
+    assert len(seen) == 3
 
 
 def test_same_idempotency_key_preserves_session_and_passenger_order() -> None:
@@ -1470,28 +1397,7 @@ def test_bokun_submit_uses_fee_inclusive_invoice_due_not_activity_subtotal() -> 
                 request=request,
                 json={"booking": {"bookingId": "booking-fee-123"}},
             )
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "booking": {
-                    "bookingId": "booking-fee-123",
-                    "status": "PENDING",
-                    "totalPrice": 300.0,
-                    "totalDue": 304.5,
-                    "currency": "BRL",
-                    "activityBookings": [
-                        {
-                            "activityId": "913372",
-                            "date": "2026-08-11",
-                            "pricingCategoryBookings": [
-                                {"pricingCategoryId": "857489"}
-                            ],
-                        }
-                    ],
-                }
-            },
-        )
+        raise AssertionError("booking ID confirmation must not depend on read-back")
 
     payload = _dispatch_payload()
     payload["offer"] = {**payload["offer"], "amount": "304.50"}
@@ -1503,4 +1409,4 @@ def test_bokun_submit_uses_fee_inclusive_invoice_due_not_activity_subtotal() -> 
     )
 
     assert result == {"status": "confirmed", "booking_id": "booking-fee-123"}
-    assert len(seen) == 4
+    assert len(seen) == 3

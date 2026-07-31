@@ -1331,24 +1331,6 @@ class BokunHTTPTransport:
             ):
                 return {"status": "rejected"}
             raise ProviderHTTPError("Bókun write result is ambiguous")
-        _, readback = self._write_request(
-            method="GET",
-            path=(
-                f"/booking.json/booking/{booking_id}"
-                "?lang=pt_BR&currency=BRL"
-            ),
-            idempotency_key=idempotency_key + ":readback",
-        )
-        self._validate_booking_readback_v2(
-            readback,
-            booking_id=booking_id,
-            product_id=product_id,
-            activity_date=activity_date,
-            category_ids=tuple(item["category_id"] for item in passengers),
-            expected_base_amount=checkout_base_amount,
-            expected_amount=amount,
-            expected_currency="BRL",
-        )
         return {"status": "confirmed", "booking_id": booking_id}
 
     @staticmethod
