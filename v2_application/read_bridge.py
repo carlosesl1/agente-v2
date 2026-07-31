@@ -79,6 +79,27 @@ def _payload_options(observation: V2ReadObservation) -> tuple[dict[str, object],
     return tuple(options)
 
 
+def _option_is_available(
+    request: ReadRequest,
+    option: dict[str, object],
+) -> bool:
+    if request.kind is ReadKind.LODGING:
+        units = option.get("available_units")
+        if type(units) is not int or units < 0:
+            raise ReadBridgeError(
+                "lodging availability requires non-negative available_units"
+            )
+        if "available" in option:
+            explicit = option["available"]
+            if type(explicit) is not bool or explicit is not (units > 0):
+                raise ReadBridgeError("lodging availability claims conflict")
+        return units > 0
+    available = option.get("available")
+    if type(available) is not bool:
+        raise ReadBridgeError("activity availability requires an exact boolean")
+    return available
+
+
 def _minute(value: object) -> time | None:
     if value is None:
         return None
@@ -99,7 +120,7 @@ def _offers(
 ) -> tuple[SanitizedOffer, ...]:
     result = []
     for option in _payload_options(observation):
-        if option.get("available") is not True:
+        if not _option_is_available(request, option):
             continue
         try:
             if request.kind is ReadKind.LODGING:
