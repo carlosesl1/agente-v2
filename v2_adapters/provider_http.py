@@ -1323,6 +1323,8 @@ class BokunHTTPTransport:
             allow_rejection=True,
         )
         booking_id = self._booking_reference(submit_payload)
+        if booking_id is not None and not 200 <= status < 300:
+            raise ProviderHTTPError("Bókun write result is ambiguous")
         if booking_id is None:
             if status in {400, 401, 403, 404, 405, 406, 415, 422} or (
                 200 <= status < 300

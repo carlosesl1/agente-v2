@@ -571,6 +571,55 @@ def test_bokun_submit_conflict_is_ambiguous_and_never_read_back() -> None:
     assert len(seen) == 3
 
 
+@pytest.mark.parametrize("status", (409, 422))
+def test_bokun_submit_non_success_with_booking_id_is_ambiguous(
+    status: int,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-booking-1",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-booking-1",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        if len(seen) == 2:
+            return httpx.Response(200, request=request, json=_checkout())
+        if len(seen) == 3:
+            return httpx.Response(
+                status,
+                request=request,
+                json={"booking": {"bookingId": "booking-on-non-success"}},
+            )
+        raise AssertionError("ambiguous submit must not be read back or retried")
+
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        _transport(handler)(
+            "book_activity",
+            _dispatch_payload(),
+            idempotency_key=f"idem:bokun-non-success-id:{status}",
+        )
+
+    assert len(seen) == 3
+
+
 def test_bokun_multi_passenger_cart_checkout_submit_by_booking_id() -> None:
     seen: list[httpx.Request] = []
     category_rows = (
