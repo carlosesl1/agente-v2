@@ -700,7 +700,7 @@ class BokunHTTPTransport:
             None,
         )
         if selected is not None:
-            private, amount = self._activity_booking_fields(
+            private, amount, currency = self._activity_booking_fields(
                 selected,
                 meta=meta,
                 adults=adults,
@@ -708,11 +708,11 @@ class BokunHTTPTransport:
             )
         else:
             private, amount = {}, None
+            currency = self._option_currency({}, meta)
         if amount is None:
             amount = _first_amount(meta, "price", "amount", "totalAmount", "total")
         if amount is None:
             amount = Decimal("0")
-        currency = self._option_currency(selected or {}, meta)
         result = {
             "product_id": canonical_id,
             "bokun_product_id": provider_id,
@@ -1862,7 +1862,7 @@ class BokunHTTPTransport:
         meta: Mapping[str, object],
         adults: int,
         children: int,
-    ) -> tuple[dict[str, str], Decimal]:
+    ) -> tuple[dict[str, str], Decimal, str]:
         categories = meta.get("pricingCategories")
         if not isinstance(categories, list):
             raise ProviderHTTPError("Bókun metadata lacks pricing categories")
@@ -1938,7 +1938,11 @@ class BokunHTTPTransport:
             }
             if child_category is not None:
                 private["child_pricing_category_id"] = child_category
-            return private, adult_amount * adults + child_amount * children
+            return (
+                private,
+                adult_amount * adults + child_amount * children,
+                adult_currency,
+            )
         if currency_mismatch:
             raise ProviderHTTPError("Bókun pricing category currency mismatch")
         raise ProviderHTTPError("Bókun required pricing category is unavailable")

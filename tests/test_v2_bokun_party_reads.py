@@ -496,11 +496,11 @@ def test_bokun_http_transport_selects_later_valid_brl_rate() -> None:
                     "pricePerCategoryUnit": [
                         {
                             "id": "adult-1",
-                            "amount": {"amount": 300, "currency": "BRL"},
+                            "amount": {"amount": 300, "currency": "EUR"},
                         },
                         {
                             "id": "child-1",
-                            "amount": {"amount": 150, "currency": "USD"},
+                            "amount": {"amount": 150, "currency": "EUR"},
                         },
                     ],
                 },
