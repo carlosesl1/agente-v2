@@ -39,6 +39,7 @@ Activity-local and passenger-local IDs remain excluded from reservation-referenc
 ### In scope
 
 - Bókun activity reservation write transport.
+- Only the authenticated `v2-reservation-dispatch-v2` path used by the V2 agent.
 - Provider result classification and existing completion path.
 - Regression tests for confirmation, no read-back dependency, alias conflicts and submit count.
 - Existing 2-adult + 1-child path.
@@ -46,6 +47,7 @@ Activity-local and passenger-local IDs remain excluded from reservation-referenc
 ### Out of scope
 
 - Cloudbeds behavior.
+- The separate legacy Bókun payload path.
 - ManyChat delivery enablement.
 - Payment, cancellation, email or handoff.
 - A new asynchronous auditing subsystem.
