@@ -128,6 +128,7 @@ def test_parent_extracts_explicit_mixed_activity_party_before_passenger_ordinals
         "Quero o Roteiro dos 4Ps em 18/11/2026 para 2 adultos e 1 criança. "
         "Passageiros: adulto 1, adulto 2, criança 3."
     ) == (
+        ModelFact("language", "pt-BR"),
         ModelFact("service", "agency"),
         ModelFact("product_id", "product:tour-4ps"),
         ModelFact("activity_date", date(2026, 11, 18)),

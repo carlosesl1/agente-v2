@@ -456,8 +456,17 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
     english_markers = len(
         re.findall(r"\b(?:i|please|tour|booking|what|can|adult|person)\b", folded)
     )
-    if english_markers >= 2:
+    portuguese_markers = len(
+        re.findall(
+            r"\b(?:quero|reservar|roteiro|passeio|pagamento|adultos?|criancas?|"
+            r"passageiros?|disponibilidade|confirmar)\b",
+            folded,
+        )
+    )
+    if english_markers >= 2 and english_markers > portuguese_markers:
         facts.append(ModelFact("language", "en"))
+    elif portuguese_markers >= 2 and portuguese_markers > english_markers:
+        facts.append(ModelFact("language", "pt-BR"))
     facts.extend(
         (
             ModelFact("service", "agency"),
