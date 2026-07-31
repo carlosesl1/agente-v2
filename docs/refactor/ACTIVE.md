@@ -32,15 +32,16 @@ Permanece fail-closed:
 - ManyChat, pagamento, cancelamento, e-mail e handoff continuam fechados;
 - auditoria GET posterior, se adicionada, será observador read-only separado e nunca poderá rebaixar uma criação já confirmada nem repetir submit.
 
-Evidência local sobre o código funcional `01fb5a383172dad32992c33fb97f957e215d2897` e as provas duráveis no HEAD sucessor:
+Evidência local sobre o código funcional `b23998f798b81acb2c1898ff143801b22cadadff` e as provas duráveis no HEAD sucessor:
 
 - RED reproduziu o quarto GET indevido depois do submit com `booking-123`;
 - revisão do primeiro candidato reproduziu `409/422 + booking ID` sendo aceito indevidamente; o SHA foi invalidado e o novo RED exige status HTTP 2xx;
-- transporte Bókun completo: `49 passed`;
-- jornada transporte/reservas/outcome/completion: `80 passed`;
-- regressão causal de Bókun, conversa, horário, 2+1 e produção: `214 passed`;
+- escrutínio subsequente reproduziu `HTTP 200 + booking ID + success:false`; o SHA sucessor também foi invalidado e o RED exige ausência de marcador explícito de falha;
+- transporte Bókun completo: `50 passed`;
+- jornada transporte/reservas/outcome/completion: `81 passed`;
+- regressão causal de Bókun, conversa, horário, 2+1 e produção: `215 passed`;
 - catálogo comercial fechado: `1 passed`;
-- comando oficial de CI local: `1325 passed, 7 deselected, 2940 subtests passed`;
+- comando oficial de CI local: `1326 passed, 7 deselected, 2940 subtests passed`;
 - Ruff, `fasttrack-boundaries` e `git diff --check`: verdes;
 - nenhum provider, ManyChat, pagamento, cancelamento, e-mail ou handoff foi chamado para qualificar esta correção.
 
