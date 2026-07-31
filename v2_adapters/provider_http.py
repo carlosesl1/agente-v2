@@ -82,6 +82,44 @@ def _consistent_text_alias(
     return values[0] if values else None
 
 
+def _consistent_date_alias(
+    mapping: Mapping[str, object],
+    names: tuple[str, ...],
+    *,
+    error: str,
+) -> str | None:
+    values: list[str] = []
+    for name in names:
+        if name not in mapping:
+            continue
+        value = mapping[name]
+        if type(value) is str:
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError as exc:
+                raise ProviderHTTPError(error) from exc
+            if parsed.isoformat() != value:
+                raise ProviderHTTPError(error)
+            values.append(value)
+            continue
+        if type(value) is not int or value < 0:
+            raise ProviderHTTPError(error)
+        seconds = value
+        if value >= 1_000_000_000_000:
+            if value % 1000:
+                raise ProviderHTTPError(error)
+            seconds = value // 1000
+        if seconds % 86_400:
+            raise ProviderHTTPError(error)
+        try:
+            values.append(datetime.fromtimestamp(seconds, timezone.utc).date().isoformat())
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ProviderHTTPError(error) from exc
+    if len(set(values)) > 1:
+        raise ProviderHTTPError(error)
+    return values[0] if values else None
+
+
 def _integer(mapping: Mapping[str, object], *names: str) -> int | None:
     for name in names:
         value = mapping.get(name)
@@ -959,7 +997,7 @@ class BokunHTTPTransport:
         rate_id: str,
     ) -> None:
         error = "Bókun cart offer binding diverged"
-        returned_date = _consistent_text_alias(
+        returned_date = _consistent_date_alias(
             activity,
             ("date", "activityDate", "startDate"),
             error=error,
@@ -1608,7 +1646,7 @@ class BokunHTTPTransport:
             for item in activities
             if isinstance(item, Mapping)
             and BokunHTTPTransport._cart_activity_product_id(item) == product_id
-            and _consistent_text_alias(
+            and _consistent_date_alias(
                 item,
                 ("date", "activityDate", "startDate"),
                 error="Bókun write read-back activity diverged",

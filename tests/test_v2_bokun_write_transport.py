@@ -291,7 +291,10 @@ def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> 
                     "activityBookings": [
                         {
                             "bookingId": "activity-booking-1",
-                            "activityId": "913372",
+                            "date": 1786406400000,
+                            "activity": {"id": 913372},
+                            "startTime": {"id": 3210363},
+                            "rate": {"id": 2375672},
                             "pricingCategoryBookings": [
                                 {
                                     "bookingId": "passenger-booking-1",
@@ -355,8 +358,8 @@ def test_bokun_write_cart_checkout_submit_and_readback_are_one_fenced_call() -> 
                     "status": "PENDING",
                     "activityBookings": [
                         {
-                            "activityId": "913372",
-                            "date": "2026-08-11",
+                            "activity": {"id": 913372},
+                            "date": 1786406400000,
                             "pricingCategoryBookings": [
                                 {"pricingCategoryId": "857489"}
                             ],
