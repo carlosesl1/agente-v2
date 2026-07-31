@@ -20,6 +20,7 @@ from reservation_domain import (
     ReservationCommand,
     ReservationOperation,
     ServiceKind,
+    SucceededState,
     dumps_command,
 )
 from reservation_domain.signature import command_identity, subject_signature
@@ -165,6 +166,64 @@ def test_duplicate_worker_claim_calls_cloudbeds_once(tmp_path: Path) -> None:
         assert port.calls[0].provider == "cloudbeds"
         assert port.calls[0].operation == "reserve_lodging"
         assert port.calls[0].fencing_token == 1
+    finally:
+        store.close()
+
+
+def test_bokun_booking_id_confirmation_is_durable_and_not_replayed(
+    tmp_path: Path,
+) -> None:
+    command = _group_activity_command(_group_passengers())
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "bokun-confirmed.sqlite3")
+    bundle = build_reservation_relay_bundle(command)
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    raw_reference = "booking-123"
+    calls: list[tuple[str, dict[str, object], str]] = []
+
+    def transport(operation, payload, *, idempotency_key):
+        calls.append((operation, payload, idempotency_key))
+        return {"status": "confirmed", "booking_id": raw_reference}
+
+    store.accept_boundary_reservation(
+        operation_id=reservation_target_operation_id(
+            bundle_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_hash,
+        ),
+        source_turn_receipt_hash=source_hash,
+        bundle=bundle,
+    )
+    worker = V2ReservationWorker(
+        store=store,
+        adapters=(
+            V2ReservationExecutionAdapter(
+                provider="bokun",
+                port=BokunReservationPort(transport),
+                authorization=_authorization("bokun"),
+                require_private_binding=False,
+            ),
+        ),
+        effect_guard=FakeCommercialEffectGuard(),
+        worker_id="worker:bokun-confirmed",
+        lease_ttl=timedelta(seconds=30),
+    )
+    try:
+        first = worker.run_once(now=NOW + timedelta(seconds=1))
+        replay = worker.run_once(now=NOW + timedelta(seconds=2))
+
+        assert first.disposition is V2WorkerDisposition.EFFECT_CONFIRMED
+        assert replay.disposition is V2WorkerDisposition.IDLE
+        assert len(calls) == 1
+        assert isinstance(first.transition.state, SucceededState)
+        outcome = first.transition.state.outcome
+        assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+        fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
+        assert outcome.provider_reference == f"provider:bokun:{fingerprint[:32]}"
+        assert raw_reference not in repr(outcome)
+        assert store._connection.execute(
+            "SELECT dispatch_slots_consumed,status FROM execution_ledger "
+            "WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone() == (1, "outcome_recorded")
     finally:
         store.close()
 

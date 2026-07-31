@@ -189,8 +189,7 @@ env -i HOME=/home/ubuntu PATH=/usr/bin:/bin \
   tests/test_v2_bokun_write_transport.py \
   tests/test_v2_reservations.py \
   tests/test_v2_outcome_projector.py \
-  tests/test_v2_completion_projector.py \
-  tests/test_v2_workers.py
+  tests/test_v2_completion_projector.py
 ```
 
 Expected: all pass; no external network calls.

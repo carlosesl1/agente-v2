@@ -1,6 +1,6 @@
 # Bókun Submit Booking-ID Confirmation Design
 
-**Date:** 2026-07-31  
+**Date:** 2026-07-31
 **Parent candidate:** `16d4d90e45c2ceb6bba12565f1862e092bcb9c56`
 
 ## Goal

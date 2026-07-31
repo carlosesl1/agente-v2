@@ -91,6 +91,44 @@ def test_payment_link_text_uses_the_natural_article_for_each_business_unit() -> 
     ) == "Link de pagamento do passeio: https://buy.stripe.com/test_tour"
 
 
+def test_single_activity_confirmation_enters_public_outbox_once(
+    tmp_path: Path,
+) -> None:
+    execution, payments, outcome = _stores(tmp_path)
+    public = PublicOutboxStore((tmp_path / "public-activity.sqlite3").resolve())
+    try:
+        command = next(
+            item
+            for item in ReservationAllocator().allocate(_package_command()).commands
+            if item.operation.value == "book_activity"
+        )
+        _persist(execution, (command,))
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
+
+        projector = _completion(execution, payments, public)
+        first = projector.run_once(now=NOW + timedelta(seconds=3))
+        replay = projector.run_once(now=NOW + timedelta(seconds=4))
+
+        assert first.inserted == 1
+        assert replay.inserted == 0
+        texts = tuple(
+            row[0]
+            for row in public._connection.execute(
+                "SELECT text FROM public_outbox ORDER BY release_id,chunk_index"
+            )
+        )
+        assert texts == ("Seu passeio foi confirmado.",)
+    finally:
+        public.close()
+        payments.close()
+        execution.close()
+
+
 def test_package_confirmation_and_two_links_enter_public_outbox_once(
     tmp_path: Path,
 ) -> None:
