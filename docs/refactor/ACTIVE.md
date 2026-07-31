@@ -34,8 +34,9 @@ Carlos aprovou em 2026-07-30 paridade completa com o V1 para grupos de adultos e
 | 7. Transport e read-back exato | `DONE` | `d9935f28049b19316de38dbf0973cea91e236c7a` |
 | 8. Regressões e qualificação local | `DONE` | `3cb84200aaab3d76344cba06623a7eaa70790865`, `c5ee69d83345901b9ab16a36b5d18d0904f1ba50` |
 | 9. Revisão terminal e candidata | `CANDIDATE_FROZEN` | código `5b5dc5c88783e1c286d64b3fc915b600ea74442a`; evidência e controle no HEAD |
+| 10. Prova conversacional de grupo e boundary 2+1 | `DONE` | `373221f1326701bea9e1581720ffe95ab6f886be` |
 
-- NEXT: obter `APPROVE` independente sobre o SHA exato do HEAD; somente então publicar o sucessor, executar CI, produzir nova imagem OCI imutável e repetir o dark canary sem relay.
+- NEXT: obter `APPROVE` independente sobre o SHA exato do HEAD, incluindo o reparo conversacional `373221f1326701bea9e1581720ffe95ab6f886be`; somente então publicar o sucessor, executar CI, produzir nova imagem OCI imutável e repetir o dark canary sem relay.
 
 ### Candidata multi-passageiro congelada
 
@@ -61,6 +62,21 @@ Evidência local no código `5b5dc5c88783e1c286d64b3fc915b600ea74442a`:
 - witness real somente leitura: metadata com um `ADULT ageQualified=true` e três aliases internos `ageQualified=false`; o código corrigido selecionou a categoria pública com `3 GET`, sem POST ou write;
 - a imagem do SHA `400e0f4ae2a5c76a1899b7f95490f170fd1690bf` passou CI, mas seu dark canary falhou fechado nesse witness; os containers foram removidos e o audit registrou zero eventos, comandos, outbox ou efeitos;
 - branch remoto permanece em `400e0f4ae2a5c76a1899b7f95490f170fd1690bf` e o runtime dark anterior permanece em `71ff137e9d9d35cc8f8cd1211ceca0744dd0d6dc` até nova aprovação e qualificação operacional.
+
+### Evidência conversacional de grupo 2+1
+
+O teste com modelo real encontrou e fechou duas lacunas antes de qualquer efeito externo: o extrator explícito zerava crianças ao reconhecer adultos, e o boundary de leitura legado colapsava a composição para participantes adultos. O reparo `373221f1326701bea9e1581720ffe95ab6f886be` preserva `adults=2`, `children=1` num wire interno aditivo, sem alterar o catálogo público fechado da Fase 7, e expõe essa composição no resumo confirmado pelo lead.
+
+Evidência local sanitizada sobre os mesmos bytes do commit funcional:
+
+- conversa natural de dois turnos com o `HermesModelAdapter` real: resumo e confirmação;
+- resumo público explícito: `2 adultos e 1 criança`;
+- comando durável: um `book_activity`, três passageiros tipados, uma relay row e idempotency key estável;
+- replay da confirmação: mesmo receipt, sem nova chamada ao modelo e sem nova leitura;
+- provider write adapter ausente, `0` submit Bókun, `0` ManyChat e `0` pagamento; todos os gates reais continuaram fechados;
+- comando oficial de CI local: `1319 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, compileall, `fasttrack-boundaries`, `git diff --check` e ausência de `uv.lock`: verdes;
+- as sete deselections históricas foram reproduzidas sem o patch no SHA base `08f00b3a601f86d7e4fe5171f28b82ad61ef0cb4`.
 
 ### Decisão de topologia da Task 7
 
