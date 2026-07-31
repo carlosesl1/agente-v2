@@ -170,6 +170,114 @@ def test_duplicate_worker_claim_calls_cloudbeds_once(tmp_path: Path) -> None:
         store.close()
 
 
+def _cloudbeds_group_command() -> ReservationCommand:
+    component = replace(
+        _lookup("cloudbeds").offers[0],
+        party=Party(2, 1),
+        provider_ref="a" * 64,
+    )
+    customer = CustomerFacts(
+        customer_ref="customer:v2-cloudbeds-group-001",
+        full_name="Contato Hospedagem",
+        email="hosting@example.invalid",
+        phone_e164="+5571999999999",
+        country_code="BR",
+    )
+    terms = EconomicTerms(payment_method="stripe")
+    components = (component,)
+    signature = subject_signature(
+        components=components,
+        customer=customer,
+        terms=terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id="workflow:v2-cloudbeds-group-001",
+        draft_id="draft:v2-cloudbeds-group-001",
+        draft_version=1,
+        signature=signature,
+        operation=ReservationOperation.RESERVE_LODGING,
+    )
+    return ReservationCommand(
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        workflow_id="workflow:v2-cloudbeds-group-001",
+        draft_id="draft:v2-cloudbeds-group-001",
+        draft_version=1,
+        subject_signature=signature,
+        operation=ReservationOperation.RESERVE_LODGING,
+        payload=CommandPayload(components, customer, terms),
+        created_at=NOW,
+    )
+
+
+def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
+    tmp_path: Path,
+) -> None:
+    command = _cloudbeds_group_command()
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "cloudbeds-confirmed.sqlite3")
+    bundle = build_reservation_relay_bundle(command)
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    raw_reference = "reservation-123"
+    calls: list[tuple[str, dict[str, object], str]] = []
+
+    def transport(operation, payload, *, idempotency_key):
+        calls.append((operation, payload, idempotency_key))
+        assert payload["offer"]["party"] == {"adults": 2, "children": 1}
+        assert payload["offer"]["private_binding"] == {
+            "room_rate_id": "rate-private-fenced-001",
+            "room_type_id": "room-private-fenced-001",
+        }
+        return {"status": "confirmed", "reservation_id": raw_reference}
+
+    store.accept_boundary_reservation(
+        operation_id=reservation_target_operation_id(
+            bundle_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_hash,
+        ),
+        source_turn_receipt_hash=source_hash,
+        bundle=bundle,
+    )
+    worker = V2ReservationWorker(
+        store=store,
+        adapters=(
+            V2ReservationExecutionAdapter(
+                provider="cloudbeds",
+                port=CloudbedsReservationPort(transport),
+                authorization=_authorization("cloudbeds"),
+                binding_resolver=PrivateOfferBindingResolver(
+                    {ServiceKind.LODGING: FixedBindingPort()}
+                ),
+                clock=FixedReservationClock(),
+            ),
+        ),
+        effect_guard=FakeCommercialEffectGuard(),
+        worker_id="worker:cloudbeds-confirmed",
+        lease_ttl=timedelta(seconds=30),
+    )
+    try:
+        first = worker.run_once(now=NOW + timedelta(seconds=1))
+        replay = worker.run_once(now=NOW + timedelta(seconds=2))
+
+        assert first.disposition is V2WorkerDisposition.EFFECT_CONFIRMED
+        assert replay.disposition is V2WorkerDisposition.IDLE
+        assert len(calls) == 1
+        assert isinstance(first.transition.state, SucceededState)
+        outcome = first.transition.state.outcome
+        assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+        fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
+        assert outcome.provider_reference == (
+            f"provider:cloudbeds:{fingerprint[:32]}"
+        )
+        assert raw_reference not in repr(outcome)
+        assert store._connection.execute(
+            "SELECT dispatch_slots_consumed,status FROM execution_ledger "
+            "WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone() == (1, "outcome_recorded")
+    finally:
+        store.close()
+
+
 def test_bokun_booking_id_confirmation_is_durable_and_not_replayed(
     tmp_path: Path,
 ) -> None:
