@@ -1322,10 +1322,8 @@ class BokunHTTPTransport:
             json_body=submit_body,
             allow_rejection=True,
         )
-        booking_id = self._booking_reference(submit_payload)
-        explicit_failure = (
-            isinstance(submit_payload, Mapping)
-            and submit_payload.get("success") is False
+        booking_id, explicit_failure = self._booking_submit_evidence(
+            submit_payload
         )
         if booking_id is not None and (
             not 200 <= status < 300 or explicit_failure
@@ -2258,8 +2256,9 @@ class BokunHTTPTransport:
         }
 
     @staticmethod
-    def _booking_reference(payload: object) -> str | None:
+    def _booking_submit_evidence(payload: object) -> tuple[str | None, bool]:
         references: list[str] = []
+        explicit_failure = False
         component_branches = {
             "activityBookings",
             "activity_bookings",
@@ -2269,8 +2268,11 @@ class BokunHTTPTransport:
         }
 
         def visit(value: object, *, include_reference: bool) -> None:
+            nonlocal explicit_failure
             if isinstance(value, Mapping):
                 if include_reference:
+                    if value.get("success") is False:
+                        explicit_failure = True
                     direct = _consistent_text_alias(
                         value,
                         ("bookingId", "booking_id"),
@@ -2292,7 +2294,12 @@ class BokunHTTPTransport:
         visit(payload, include_reference=True)
         if len(set(references)) > 1:
             raise ProviderHTTPError("Bókun write result is ambiguous")
-        return references[0] if references else None
+        return (references[0] if references else None, explicit_failure)
+
+    @staticmethod
+    def _booking_reference(payload: object) -> str | None:
+        reference, _ = BokunHTTPTransport._booking_submit_evidence(payload)
+        return reference
 
     @staticmethod
     def _title(meta: Mapping[str, object]) -> str | None:

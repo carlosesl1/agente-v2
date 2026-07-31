@@ -583,6 +583,15 @@ def test_bokun_submit_conflict_is_ambiguous_and_never_read_back() -> None:
                 "booking": {"bookingId": "booking-on-explicit-failure"},
             },
         ),
+        (
+            200,
+            {
+                "booking": {
+                    "bookingId": "booking-on-nested-explicit-failure",
+                    "success": False,
+                }
+            },
+        ),
     ),
 )
 def test_bokun_submit_contradictory_booking_id_evidence_is_ambiguous(
@@ -1393,6 +1402,30 @@ def test_bokun_booking_reference_ignores_activity_and_passenger_binding_ids() ->
         )
         == "booking-primary"
     )
+
+
+def test_bokun_submit_evidence_tracks_failure_only_on_reservation_branches() -> None:
+    assert BokunHTTPTransport._booking_submit_evidence(
+        {
+            "booking": {
+                "bookingId": "booking-primary",
+                "success": False,
+            }
+        }
+    ) == ("booking-primary", True)
+    assert BokunHTTPTransport._booking_submit_evidence(
+        {
+            "booking": {
+                "bookingId": "booking-primary",
+                "activityBookings": [
+                    {
+                        "bookingId": "activity-booking-1",
+                        "success": False,
+                    }
+                ],
+            }
+        }
+    ) == ("booking-primary", False)
 
 
 def test_bokun_private_execution_binding_is_required_before_http() -> None:

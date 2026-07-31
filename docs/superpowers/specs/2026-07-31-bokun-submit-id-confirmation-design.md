@@ -13,7 +13,7 @@ The effect is confirmed only when all of the following hold:
 
 1. the authenticated durable command passed the existing private binding, permit, fence and idempotency checks;
 2. cart and checkout validation bound the exact product, activity date, selected start/rate, ordered passenger categories, party, base amount, fee-inclusive total and BRL currency before submit;
-3. Bókun returned an HTTP 2xx submit response without an explicit failure marker;
+3. Bókun returned an HTTP 2xx submit response without an explicit failure marker in any reservation-level branch of the envelope;
 4. the closed reservation-reference collector found exactly one unique reservation-level booking ID across the allowed submit envelope;
 5. no conflicting reservation-level ID alias exists.
 

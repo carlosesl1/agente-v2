@@ -21,11 +21,11 @@ O candidato está qualificado localmente. O próximo avanço autorizado é: revi
 
 ## CONFIRMAÇÃO BÓKUN POR BOOKING ID ATIVA
 
-Carlos autorizou em 2026-07-31 que um submit Bókun V2 aceito por HTTP 2xx sem marcador explícito de falha, com um único booking ID principal e sem aliases conflitantes, seja evidência monotônica de criação. O caminho síncrono V2 não executa mais GET depois de obter esse ID: retorna `confirmed`, o adapter grava somente o fingerprint opaco como `EFFECT_CONFIRMED`, o ledger consome um único slot e o completion projector materializa `Seu passeio foi confirmado.` uma única vez.
+Carlos autorizou em 2026-07-31 que um submit Bókun V2 aceito por HTTP 2xx sem marcador explícito de falha em qualquer branch de reserva do envelope, com um único booking ID principal e sem aliases conflitantes, seja evidência monotônica de criação. O caminho síncrono V2 não executa mais GET depois de obter esse ID: retorna `confirmed`, o adapter grava somente o fingerprint opaco como `EFFECT_CONFIRMED`, o ledger consome um único slot e o completion projector materializa `Seu passeio foi confirmado.` uma única vez.
 
 Permanece fail-closed:
 
-- resposta sem booking ID, IDs principais conflitantes, status não-2xx mesmo com ID, `success:false` mesmo com HTTP 2xx + ID, timeout ou erro ambíguo após submit continuam `CALLED_UNKNOWN`, sem retry;
+- resposta sem booking ID, IDs principais conflitantes, status não-2xx mesmo com ID, `success:false` no root ou em branch de reserva mesmo com HTTP 2xx + ID, timeout ou erro ambíguo após submit continuam `CALLED_UNKNOWN`, sem retry;
 - activity/passenger booking IDs não contam como booking ID principal;
 - produto, data, horário, rate, composição adulto/criança, manifesto e economia BRL continuam vinculados antes do submit;
 - o caminho Bókun legado e Cloudbeds não mudaram;
