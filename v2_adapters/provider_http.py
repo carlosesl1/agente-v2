@@ -1535,6 +1535,9 @@ class BokunHTTPTransport:
         category_ids: tuple[str, ...],
         expected_amount: Decimal,
     ) -> None:
+        returned_booking_id = BokunHTTPTransport._booking_reference(payload)
+        if returned_booking_id != booking_id:
+            raise ProviderHTTPError("Bókun write read-back did not match")
         candidates: list[Mapping[str, object]] = []
 
         def visit(value: object) -> None:

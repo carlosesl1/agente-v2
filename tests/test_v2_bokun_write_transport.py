@@ -1230,6 +1230,38 @@ def test_bokun_readback_rejects_conflicting_status_and_amount_aliases(
         )
 
 
+def test_bokun_readback_rejects_conflicting_booking_ids_across_payload_tree() -> None:
+    readback = {
+        "booking": {
+            "bookingId": "booking-primary",
+            "activityBookings": [
+                {
+                    "bookingId": "activity-booking-1",
+                    "activityId": "913372",
+                    "date": "2026-08-11",
+                    "pricingCategoryBookings": [
+                        {
+                            "bookingId": "passenger-booking-1",
+                            "pricingCategoryId": "adult-1",
+                        }
+                    ],
+                }
+            ],
+        },
+        "shadow": {"bookingId": "booking-conflict"},
+    }
+
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        BokunHTTPTransport._validate_booking_readback_v2(
+            readback,
+            booking_id="booking-primary",
+            product_id="913372",
+            activity_date="2026-08-11",
+            category_ids=("adult-1",),
+            expected_amount=Decimal("300.00"),
+        )
+
+
 def test_bokun_booking_reference_rejects_conflicting_aliases() -> None:
     with pytest.raises(ProviderHTTPError, match="ambiguous"):
         BokunHTTPTransport._booking_reference(
