@@ -571,9 +571,23 @@ def test_bokun_submit_conflict_is_ambiguous_and_never_read_back() -> None:
     assert len(seen) == 3
 
 
-@pytest.mark.parametrize("status", (409, 422))
-def test_bokun_submit_non_success_with_booking_id_is_ambiguous(
+@pytest.mark.parametrize(
+    ("status", "submit_payload"),
+    (
+        (409, {"booking": {"bookingId": "booking-on-non-success"}}),
+        (422, {"booking": {"bookingId": "booking-on-non-success"}}),
+        (
+            200,
+            {
+                "success": False,
+                "booking": {"bookingId": "booking-on-explicit-failure"},
+            },
+        ),
+    ),
+)
+def test_bokun_submit_contradictory_booking_id_evidence_is_ambiguous(
     status: int,
+    submit_payload: dict[str, object],
 ) -> None:
     seen: list[httpx.Request] = []
 
@@ -606,7 +620,7 @@ def test_bokun_submit_non_success_with_booking_id_is_ambiguous(
             return httpx.Response(
                 status,
                 request=request,
-                json={"booking": {"bookingId": "booking-on-non-success"}},
+                json=submit_payload,
             )
         raise AssertionError("ambiguous submit must not be read back or retried")
 
@@ -614,7 +628,7 @@ def test_bokun_submit_non_success_with_booking_id_is_ambiguous(
         _transport(handler)(
             "book_activity",
             _dispatch_payload(),
-            idempotency_key=f"idem:bokun-non-success-id:{status}",
+            idempotency_key=f"idem:bokun-contradictory-id:{status}",
         )
 
     assert len(seen) == 3
