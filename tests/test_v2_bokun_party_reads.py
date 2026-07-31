@@ -547,3 +547,111 @@ def test_bokun_http_transport_selects_later_valid_brl_rate() -> None:
     assert result["rate_id"] == "rate-brl"
     assert result["total_amount"] == "775.00"
     assert result["currency"] == "BRL"
+
+
+def test_bokun_http_transport_prefers_unique_public_age_qualified_adult_category() -> None:
+    metadata = {
+        "id": 913372,
+        "title": "Buracão",
+        "pricingCategories": [
+            {
+                "id": "adult-public",
+                "ticketCategory": "ADULT",
+                "ageQualified": True,
+                "minAge": 18,
+                "maxAge": 59,
+            },
+            {
+                "id": "adult-internal-youth",
+                "ticketCategory": "ADULT",
+                "ageQualified": False,
+            },
+            {
+                "id": "adult-internal-default",
+                "ticketCategory": "ADULT",
+                "ageQualified": False,
+            },
+            {
+                "id": "adult-internal-senior",
+                "ticketCategory": "ADULT",
+                "ageQualified": False,
+            },
+        ],
+    }
+    availability = [
+        {
+            "date": "2026-11-18",
+            "startTimeId": "start-buracao",
+            "available": True,
+            "availabilityCount": 8,
+            "pricesByRate": [
+                {
+                    "activityRateId": "rate-public",
+                    "pricePerCategoryUnit": [
+                        {
+                            "id": "adult-public",
+                            "amount": {"amount": 300, "currency": "BRL"},
+                        },
+                        {
+                            "id": "adult-internal-default",
+                            "amount": {"amount": 999, "currency": "BRL"},
+                        },
+                    ],
+                }
+            ],
+        }
+    ]
+    responses = iter((metadata, availability))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, json=next(responses))
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:buracao": "913372"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-07-31 01:30:00",
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:buracao",
+            "activity_date": "2026-11-18",
+            "adults": 2,
+            "children": 0,
+        },
+    )
+
+    assert result["adult_pricing_category_id"] == "adult-public"
+    assert result["rate_id"] == "rate-public"
+    assert result["total_amount"] == "600.00"
+    assert result["currency"] == "BRL"
+
+
+def test_bokun_http_transport_rejects_multiple_public_adult_categories() -> None:
+    with pytest.raises(ProviderHTTPError, match="adult pricing category is ambiguous"):
+        BokunHTTPTransport._activity_booking_fields(
+            {
+                "startTimeId": "start",
+                "pricesByRate": [],
+            },
+            meta={
+                "pricingCategories": [
+                    {
+                        "id": "adult-public-a",
+                        "ticketCategory": "ADULT",
+                        "ageQualified": True,
+                    },
+                    {
+                        "id": "adult-public-b",
+                        "ticketCategory": "ADULT",
+                        "ageQualified": True,
+                    },
+                ]
+            },
+            adults=1,
+            children=0,
+        )

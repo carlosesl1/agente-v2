@@ -1871,14 +1871,24 @@ class BokunHTTPTransport:
             raise ProviderHTTPError("Bókun metadata lacks pricing categories")
 
         def category_id(ticket_category: str) -> str:
-            matches = tuple(
-                value
-                for category in categories
-                if isinstance(category, Mapping)
-                and (category_name := _text(category.get("ticketCategory"))) is not None
-                and category_name.upper() == ticket_category
-                and (value := _first(category, "id", "pricingCategoryId"))
-            )
+            matches: list[str] = []
+            for category in categories:
+                if not isinstance(category, Mapping):
+                    continue
+                category_name = _text(category.get("ticketCategory"))
+                if category_name is None or category_name.upper() != ticket_category:
+                    continue
+                if "ageQualified" in category:
+                    age_qualified = category.get("ageQualified")
+                    if type(age_qualified) is not bool:
+                        raise ProviderHTTPError(
+                            f"Bókun {ticket_category.lower()} pricing category is ambiguous"
+                        )
+                    if not age_qualified:
+                        continue
+                value = _first(category, "id", "pricingCategoryId")
+                if value and value not in matches:
+                    matches.append(value)
             if len(matches) != 1:
                 raise ProviderHTTPError(
                     f"Bókun {ticket_category.lower()} pricing category is ambiguous"
