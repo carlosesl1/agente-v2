@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable, Mapping
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 import hashlib
@@ -197,21 +197,221 @@ def _exact_object(
     return value
 
 
-def _cloudbeds_reference(value: object) -> str | None:
-    if isinstance(value, Mapping):
-        direct = _first(value, "reservationID", "reservationId", "reservation_id")
-        if direct is not None:
-            return direct
-        for nested in value.values():
-            found = _cloudbeds_reference(nested)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for nested in value:
-            found = _cloudbeds_reference(nested)
-            if found is not None:
-                return found
-    return None
+_CLOUDBEDS_RESERVATION_ID_FIELDS = frozenset(
+    ("reservationID", "reservationId", "reservation_id")
+)
+
+
+def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
+    """Return one conflict-free reservation ID and any explicit failure marker."""
+
+    reservation_ids: set[str] = set()
+    explicit_failure = False
+
+    def visit(node: object) -> None:
+        nonlocal explicit_failure
+        if isinstance(node, Mapping):
+            if node.get("success") is False:
+                explicit_failure = True
+            for key, nested in node.items():
+                if key in _CLOUDBEDS_RESERVATION_ID_FIELDS:
+                    reference = _text(nested)
+                    if reference is not None:
+                        reservation_ids.add(reference)
+                else:
+                    visit(nested)
+        elif isinstance(node, list):
+            for nested in node:
+                visit(nested)
+
+    visit(value)
+    reservation_id = next(iter(reservation_ids)) if len(reservation_ids) == 1 else None
+    return reservation_id, explicit_failure
+
+
+def _cloudbeds_room_candidates(
+    payload: object,
+) -> tuple[tuple[Mapping[str, object], str | None], ...]:
+    candidates: list[tuple[Mapping[str, object], str | None]] = []
+
+    def visit(node: object, inherited_currency: str | None = None) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item, inherited_currency)
+            return
+        if not isinstance(node, Mapping):
+            return
+        local_currency = inherited_currency
+        property_currency = node.get("propertyCurrency")
+        if isinstance(property_currency, Mapping):
+            local_currency = _first(property_currency, "currencyCode", "code")
+        local_currency = _first(node, "currency", "currencyCode") or local_currency
+        property_rooms = node.get("propertyRooms")
+        if isinstance(property_rooms, list):
+            for item in property_rooms:
+                if isinstance(item, Mapping):
+                    candidates.append((item, local_currency))
+            return
+        if _first(node, "roomTypeID", "roomTypeId", "room_type_id") is not None:
+            candidates.append((node, local_currency))
+            return
+        visit(node.get("data"), local_currency)
+
+    visit(payload)
+    return tuple(candidates)
+
+
+def _cloudbeds_stay_dates(check_in: date, check_out: date) -> tuple[str, ...]:
+    return tuple(
+        (check_in + timedelta(days=offset)).isoformat()
+        for offset in range((check_out - check_in).days)
+    )
+
+
+def _cloudbeds_positive_amount(value: object) -> Decimal | None:
+    amount = _amount(value)
+    if amount is None or not amount.is_finite() or amount <= 0:
+        return None
+    return amount
+
+
+def _cloudbeds_daily_total(
+    value: object,
+    *,
+    expected_dates: tuple[str, ...],
+    require_availability: bool,
+) -> Decimal | None:
+    if not isinstance(value, list) or len(value) != len(expected_dates):
+        return None
+    rates: dict[str, Decimal] = {}
+    for row in value:
+        if not isinstance(row, Mapping):
+            return None
+        day = _text(row.get("date"))
+        amount = _cloudbeds_positive_amount(
+            row.get("rate", row.get("roomRate", row.get("amount")))
+        )
+        if day not in expected_dates or day in rates or amount is None:
+            return None
+        if require_availability:
+            raw_units = row.get("roomsAvailable")
+            if raw_units is not None:
+                units = _integer(row, "roomsAvailable")
+                if units is None or units < 1:
+                    return None
+        rates[day] = amount
+    if set(rates) != set(expected_dates):
+        return None
+    return sum((rates[day] for day in expected_dates), Decimal("0"))
+
+
+def _validate_cloudbeds_rate_revalidation(
+    payload: object,
+    *,
+    room_type_id: str,
+    room_rate_id: str,
+    expected_dates: tuple[str, ...],
+    amount: Decimal,
+    currency: str,
+) -> None:
+    if not isinstance(payload, Mapping) or payload.get("success") is not True:
+        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+    matches = []
+    for item, inherited_currency in _cloudbeds_room_candidates(payload):
+        if (
+            _first(item, "roomTypeID", "roomTypeId", "room_type_id")
+            == room_type_id
+            and _first(
+                item,
+                "roomRateID",
+                "roomRateId",
+                "room_rate_id",
+                "ratePlanID",
+                "ratePlanId",
+            )
+            == room_rate_id
+        ):
+            matches.append((item, inherited_currency))
+    if len(matches) != 1:
+        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+    selected, inherited_currency = matches[0]
+    units = _integer(
+        selected,
+        "roomsAvailable",
+        "availableRooms",
+        "quantityAvailable",
+        "available",
+    )
+    selected_currency = _first(selected, "currency", "currencyCode") or inherited_currency
+    daily_total = _cloudbeds_daily_total(
+        selected.get("roomRateDetailed")
+        or selected.get("rateDetailed")
+        or selected.get("dailyRates"),
+        expected_dates=expected_dates,
+        require_availability=True,
+    )
+    if (
+        units is None
+        or units < 1
+        or selected_currency != currency
+        or daily_total != amount
+    ):
+        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+
+
+def _validate_cloudbeds_readback(
+    payload: object,
+    *,
+    reservation_id: str,
+    room_type_id: str,
+    start_date: str,
+    end_date: str,
+    expected_dates: tuple[str, ...],
+    adults: int,
+    children: int,
+    amount: Decimal,
+) -> None:
+    if not isinstance(payload, Mapping) or payload.get("success") is not True:
+        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+    readback_id, explicit_failure = _cloudbeds_submit_evidence(payload)
+    rooms = [
+        item
+        for name in ("assigned", "unassigned")
+        for item in (data.get(name) if isinstance(data.get(name), list) else [])
+        if isinstance(item, Mapping)
+    ]
+    top_total = _cloudbeds_positive_amount(
+        data.get("total", data.get("totalAmount", data.get("grandTotal")))
+    )
+    if (
+        explicit_failure
+        or readback_id != reservation_id
+        or _text(data.get("startDate")) != start_date
+        or _text(data.get("endDate")) != end_date
+        or top_total != amount
+        or len(rooms) != 1
+    ):
+        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+    room = rooms[0]
+    room_total = _cloudbeds_positive_amount(room.get("roomTotal"))
+    daily_total = _cloudbeds_daily_total(
+        room.get("dailyRates"),
+        expected_dates=expected_dates,
+        require_availability=False,
+    )
+    if (
+        _first(room, "roomTypeID", "roomTypeId", "room_type_id") != room_type_id
+        or _text(room.get("startDate")) != start_date
+        or _text(room.get("endDate")) != end_date
+        or _integer(room, "adults") != adults
+        or _integer(room, "children") != children
+        or room_total != amount
+        or daily_total != amount
+    ):
+        raise ProviderHTTPError("Cloudbeds write read-back did not match")
 
 
 class CloudbedsHTTPTransport:
@@ -406,6 +606,30 @@ class CloudbedsHTTPTransport:
         }.get(terms["payment_method"])
         if payment_method is None:
             raise ProviderHTTPError("Cloudbeds payment method is invalid")
+        expected_dates = _cloudbeds_stay_dates(check_in, check_out)
+        try:
+            availability = self._get(
+                "/api/v1.3/getAvailableRoomTypes",
+                {
+                    "propertyID": self._property_id,
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "adults": adults,
+                    "children": children,
+                    "detailedRates": "true",
+                },
+            )
+            _validate_cloudbeds_rate_revalidation(
+                availability,
+                room_type_id=room_type_id,
+                room_rate_id=room_rate_id,
+                expected_dates=expected_dates,
+                amount=amount,
+                currency=currency,
+            )
+        except ProviderHTTPError as exc:
+            raise ProviderHTTPError("Cloudbeds offer revalidation failed") from exc
+
         def compact(value: object) -> str:
             return json.dumps(
                 value,
@@ -446,29 +670,37 @@ class CloudbedsHTTPTransport:
         try:
             response_payload = response.json()
         except (json.JSONDecodeError, ValueError) as exc:
-            if 400 <= response.status_code < 500 and response.status_code != 409:
-                return {"status": "rejected"}
             raise ProviderHTTPError("Cloudbeds write result is ambiguous") from exc
-        reservation_id = _cloudbeds_reference(response_payload)
-        if reservation_id is None:
-            if 400 <= response.status_code < 500 and response.status_code != 409:
-                return {"status": "rejected"}
-            if (
-                200 <= response.status_code < 300
-                and isinstance(response_payload, Mapping)
-                and response_payload.get("success") is False
-            ):
-                return {"status": "rejected"}
-            raise ProviderHTTPError("Cloudbeds write result is ambiguous")
-        readback = self._get(
-            "/api/v1.1/getReservation",
-            {
-                "propertyID": self._property_id,
-                "reservationID": reservation_id,
-            },
+        reservation_id, explicit_failure = _cloudbeds_submit_evidence(
+            response_payload
         )
-        if _cloudbeds_reference(readback) != reservation_id:
-            raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        if (
+            not 200 <= response.status_code < 300
+            or explicit_failure
+            or reservation_id is None
+        ):
+            raise ProviderHTTPError("Cloudbeds write result is ambiguous")
+        try:
+            readback = self._get(
+                "/api/v1.3/getReservation",
+                {
+                    "propertyID": self._property_id,
+                    "reservationID": reservation_id,
+                },
+            )
+            _validate_cloudbeds_readback(
+                readback,
+                reservation_id=reservation_id,
+                room_type_id=room_type_id,
+                start_date=start_date,
+                end_date=end_date,
+                expected_dates=expected_dates,
+                adults=adults,
+                children=children,
+                amount=amount,
+            )
+        except ProviderHTTPError as exc:
+            raise ProviderHTTPError("Cloudbeds write read-back did not match") from exc
         return {"status": "confirmed", "reservation_id": reservation_id}
 
     def _lodging(self, payload: dict[str, object]) -> dict[str, object]:
