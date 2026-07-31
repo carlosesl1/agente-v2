@@ -433,6 +433,13 @@ class V2ReservationExecutionAdapter:
         )
         if command.command_id != request.command_id:
             raise DispatchRejected("prepared command identity changed after fencing")
+        if (
+            command.idempotency_key != request.idempotency_key
+            or command.idempotency_key != idempotency_key
+        ):
+            raise DispatchRejected(
+                "prepared command idempotency key changed after fencing"
+            )
         private_binding = prepared_binding
         if self._binding_resolver is not None and private_binding is None:
             private_binding = self._prepared_private_bindings.pop(

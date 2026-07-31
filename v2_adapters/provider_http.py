@@ -1826,6 +1826,7 @@ class BokunHTTPTransport:
         rates = item.get("pricesByRate")
         if not start_time_id or not isinstance(rates, list):
             raise ProviderHTTPError("Bókun availability lacks executable booking fields")
+        currency_mismatch = False
         for rate in rates:
             if not isinstance(rate, Mapping):
                 continue
@@ -1843,6 +1844,19 @@ class BokunHTTPTransport:
             child_unit = by_id.get(child_category) if child_category else None
             if adult_unit is None or (children and child_unit is None):
                 continue
+            adult_currency = BokunHTTPTransport._pricing_unit_currency(adult_unit)
+            child_currency = (
+                BokunHTTPTransport._pricing_unit_currency(child_unit)
+                if isinstance(child_unit, Mapping)
+                else adult_currency
+            )
+            if (
+                adult_currency is None
+                or child_currency is None
+                or child_currency != adult_currency
+            ):
+                currency_mismatch = True
+                continue
             adult_amount = _amount(adult_unit.get("amount"))
             child_amount = (
                 _amount(child_unit.get("amount"))
@@ -1859,7 +1873,17 @@ class BokunHTTPTransport:
             if child_category is not None:
                 private["child_pricing_category_id"] = child_category
             return private, adult_amount * adults + child_amount * children
+        if currency_mismatch:
+            raise ProviderHTTPError("Bókun pricing category currency mismatch")
         raise ProviderHTTPError("Bókun required pricing category is unavailable")
+
+    @staticmethod
+    def _pricing_unit_currency(unit: Mapping[str, object]) -> str | None:
+        amount = unit.get("amount")
+        if not isinstance(amount, Mapping):
+            return None
+        value = amount.get("currency") or amount.get("currencyCode")
+        return _currency(value) if value is not None else None
 
     @staticmethod
     def _cart_bindings(

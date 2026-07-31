@@ -23,7 +23,7 @@ from reservation_domain import (
     dumps_command,
 )
 from reservation_domain.signature import command_identity, subject_signature
-from reservation_execution import PreparationFailure
+from reservation_execution import DispatchPermit, Lease, PreparationFailure
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from tests.phase5_helpers import T0, _lookup, persist_script, workflow_events
 from v2_adapters.bokun import BokunReservationPort
@@ -553,6 +553,44 @@ def test_private_binding_prepare_keeps_exact_command_payload_through_fence(
         }
     finally:
         store.close()
+
+
+def test_dispatch_fence_rejects_idempotency_key_divergent_from_signed_command() -> None:
+    command = _group_activity_command(_group_passengers())
+    port = FakeReservationPort(
+        "bokun", _result(ProviderCertainty.EFFECT_CONFIRMED)
+    )
+    adapter = V2ReservationExecutionAdapter(
+        provider="bokun",
+        port=port,
+        authorization=_authorization("bokun"),
+        require_private_binding=False,
+    )
+    request = replace(
+        adapter.prepare(command),
+        idempotency_key="idempotency:forged-request",
+    )
+    permit = DispatchPermit(
+        command_id=request.command_id,
+        lease=Lease(
+            owner="worker:forged-request",
+            fencing_token=1,
+            acquired_at=NOW,
+            expires_at=NOW + timedelta(seconds=30),
+        ),
+        dispatch_slot=1,
+        request_hash=request.payload_hash,
+        fenced_at=NOW,
+    )
+
+    with pytest.raises(DispatchRejected, match="idempotency"):
+        adapter.dispatch_fenced(
+            permit,
+            request,
+            idempotency_key=request.idempotency_key,
+        )
+
+    assert port.calls == []
 
 
 def test_package_allocation_produces_two_provider_commands_as_one_batch() -> None:
