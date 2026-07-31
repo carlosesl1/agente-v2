@@ -21,25 +21,26 @@ O candidato está qualificado localmente. O próximo avanço autorizado é: revi
 
 ## CONFIRMAÇÃO BÓKUN POR BOOKING ID ATIVA
 
-Carlos autorizou em 2026-07-31 que um submit Bókun V2 aceito, com um único booking ID principal e sem aliases conflitantes, seja evidência monotônica de criação. O caminho síncrono V2 não executa mais GET depois de obter esse ID: retorna `confirmed`, o adapter grava somente o fingerprint opaco como `EFFECT_CONFIRMED`, o ledger consome um único slot e o completion projector materializa `Seu passeio foi confirmado.` uma única vez.
+Carlos autorizou em 2026-07-31 que um submit Bókun V2 aceito por HTTP 2xx, com um único booking ID principal e sem aliases conflitantes, seja evidência monotônica de criação. O caminho síncrono V2 não executa mais GET depois de obter esse ID: retorna `confirmed`, o adapter grava somente o fingerprint opaco como `EFFECT_CONFIRMED`, o ledger consome um único slot e o completion projector materializa `Seu passeio foi confirmado.` uma única vez.
 
 Permanece fail-closed:
 
-- resposta sem booking ID, IDs principais conflitantes, timeout ou erro ambíguo após submit continuam `CALLED_UNKNOWN`, sem retry;
+- resposta sem booking ID, IDs principais conflitantes, status não-2xx mesmo com ID, timeout ou erro ambíguo após submit continuam `CALLED_UNKNOWN`, sem retry;
 - activity/passenger booking IDs não contam como booking ID principal;
 - produto, data, horário, rate, composição adulto/criança, manifesto e economia BRL continuam vinculados antes do submit;
 - o caminho Bókun legado e Cloudbeds não mudaram;
 - ManyChat, pagamento, cancelamento, e-mail e handoff continuam fechados;
 - auditoria GET posterior, se adicionada, será observador read-only separado e nunca poderá rebaixar uma criação já confirmada nem repetir submit.
 
-Evidência local sobre o código funcional `9e1faf5ba18c58e3aa89244dcefc6d439915b1da` e as provas duráveis no sucessor `14b61b33629664bf4b150bb2698d331149968b36`:
+Evidência local sobre o código funcional `01fb5a383172dad32992c33fb97f957e215d2897` e as provas duráveis no HEAD sucessor:
 
 - RED reproduziu o quarto GET indevido depois do submit com `booking-123`;
-- transporte Bókun completo: `47 passed`;
-- jornada transporte/reservas/outcome/completion: `78 passed`;
-- regressão ampla de Bókun, conversa, horário, 2+1 e produção: `189 passed`;
+- revisão do primeiro candidato reproduziu `409/422 + booking ID` sendo aceito indevidamente; o SHA foi invalidado e o novo RED exige status HTTP 2xx;
+- transporte Bókun completo: `49 passed`;
+- jornada transporte/reservas/outcome/completion: `80 passed`;
+- regressão causal de Bókun, conversa, horário, 2+1 e produção: `214 passed`;
 - catálogo comercial fechado: `1 passed`;
-- comando oficial de CI local: `1323 passed, 7 deselected, 2940 subtests passed`;
+- comando oficial de CI local: `1325 passed, 7 deselected, 2940 subtests passed`;
 - Ruff, `fasttrack-boundaries` e `git diff --check`: verdes;
 - nenhum provider, ManyChat, pagamento, cancelamento, e-mail ou handoff foi chamado para qualificar esta correção.
 
