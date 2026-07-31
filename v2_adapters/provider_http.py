@@ -130,6 +130,28 @@ def _integer(mapping: Mapping[str, object], *names: str) -> int | None:
     return None
 
 
+def _consistent_integer_alias(
+    mapping: Mapping[str, object],
+    names: tuple[str, ...],
+    *,
+    error: str,
+) -> int | None:
+    values: list[int] = []
+    for name in names:
+        if name not in mapping:
+            continue
+        value = mapping[name]
+        if type(value) is int:
+            values.append(value)
+        elif isinstance(value, str) and value.strip().isdigit():
+            values.append(int(value.strip()))
+        else:
+            raise ProviderHTTPError(error)
+    if len(set(values)) > 1:
+        raise ProviderHTTPError(error)
+    return values[0] if values else None
+
+
 def _amount(value: object) -> Decimal | None:
     if isinstance(value, Mapping):
         value = value.get("amount", value.get("value"))
@@ -207,16 +229,19 @@ def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
 
     reservation_ids: set[str] = set()
     explicit_failure = False
+    invalid_id_claim = False
 
     def visit(node: object) -> None:
-        nonlocal explicit_failure
+        nonlocal explicit_failure, invalid_id_claim
         if isinstance(node, Mapping):
             if node.get("success") is False:
                 explicit_failure = True
             for key, nested in node.items():
                 if key in _CLOUDBEDS_RESERVATION_ID_FIELDS:
                     reference = _text(nested)
-                    if reference is not None:
+                    if reference is None:
+                        invalid_id_claim = True
+                    else:
                         reservation_ids.add(reference)
                 else:
                     visit(nested)
@@ -225,7 +250,11 @@ def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
                 visit(nested)
 
     visit(value)
-    reservation_id = next(iter(reservation_ids)) if len(reservation_ids) == 1 else None
+    reservation_id = (
+        next(iter(reservation_ids))
+        if len(reservation_ids) == 1 and not invalid_id_claim
+        else None
+    )
     return reservation_id, explicit_failure
 
 
@@ -233,26 +262,60 @@ def _cloudbeds_room_candidates(
     payload: object,
 ) -> tuple[tuple[Mapping[str, object], str | None], ...]:
     candidates: list[tuple[Mapping[str, object], str | None]] = []
+    error = "Cloudbeds offer revalidation failed"
 
     def visit(node: object, inherited_currency: str | None = None) -> None:
         if isinstance(node, list):
             for item in node:
+                if not isinstance(item, Mapping):
+                    raise ProviderHTTPError(error)
                 visit(item, inherited_currency)
             return
         if not isinstance(node, Mapping):
             return
         local_currency = inherited_currency
         property_currency = node.get("propertyCurrency")
-        if isinstance(property_currency, Mapping):
-            local_currency = _first(property_currency, "currencyCode", "code")
-        local_currency = _first(node, "currency", "currencyCode") or local_currency
+        if property_currency is not None:
+            if not isinstance(property_currency, Mapping):
+                raise ProviderHTTPError(error)
+            property_currency_value = _consistent_text_alias(
+                property_currency,
+                ("currencyCode", "code"),
+                error=error,
+            )
+            if (
+                local_currency is not None
+                and property_currency_value is not None
+                and local_currency != property_currency_value
+            ):
+                raise ProviderHTTPError(error)
+            local_currency = property_currency_value or local_currency
+        direct_currency = _consistent_text_alias(
+            node,
+            ("currency", "currencyCode"),
+            error=error,
+        )
+        if (
+            local_currency is not None
+            and direct_currency is not None
+            and local_currency != direct_currency
+        ):
+            raise ProviderHTTPError(error)
+        local_currency = direct_currency or local_currency
         property_rooms = node.get("propertyRooms")
-        if isinstance(property_rooms, list):
+        if property_rooms is not None:
+            if not isinstance(property_rooms, list):
+                raise ProviderHTTPError(error)
             for item in property_rooms:
-                if isinstance(item, Mapping):
-                    candidates.append((item, local_currency))
+                if not isinstance(item, Mapping):
+                    raise ProviderHTTPError(error)
+                candidates.append((item, local_currency))
             return
-        if _first(node, "roomTypeID", "roomTypeId", "room_type_id") is not None:
+        if _consistent_text_alias(
+            node,
+            ("roomTypeID", "roomTypeId", "room_type_id"),
+            error=error,
+        ) is not None:
             candidates.append((node, local_currency))
             return
         visit(node.get("data"), local_currency)
@@ -275,11 +338,31 @@ def _cloudbeds_positive_amount(value: object) -> Decimal | None:
     return amount
 
 
+def _cloudbeds_consistent_positive_amount(
+    mapping: Mapping[str, object],
+    names: tuple[str, ...],
+    *,
+    error: str,
+) -> Decimal | None:
+    values: list[Decimal] = []
+    for name in names:
+        if name not in mapping:
+            continue
+        amount = _cloudbeds_positive_amount(mapping[name])
+        if amount is None:
+            raise ProviderHTTPError(error)
+        values.append(amount)
+    if len(set(values)) > 1:
+        raise ProviderHTTPError(error)
+    return values[0] if values else None
+
+
 def _cloudbeds_daily_total(
     value: object,
     *,
     expected_dates: tuple[str, ...],
     require_availability: bool,
+    error: str,
 ) -> Decimal | None:
     if not isinstance(value, list) or len(value) != len(expected_dates):
         return None
@@ -288,15 +371,21 @@ def _cloudbeds_daily_total(
         if not isinstance(row, Mapping):
             return None
         day = _text(row.get("date"))
-        amount = _cloudbeds_positive_amount(
-            row.get("rate", row.get("roomRate", row.get("amount")))
+        amount = _cloudbeds_consistent_positive_amount(
+            row,
+            ("rate", "roomRate", "amount"),
+            error=error,
         )
         if day not in expected_dates or day in rates or amount is None:
             return None
         if require_availability:
             raw_units = row.get("roomsAvailable")
             if raw_units is not None:
-                units = _integer(row, "roomsAvailable")
+                units = _consistent_integer_alias(
+                    row,
+                    ("roomsAvailable",),
+                    error=error,
+                )
                 if units is None or units < 1:
                     return None
         rates[day] = amount
@@ -314,41 +403,61 @@ def _validate_cloudbeds_rate_revalidation(
     amount: Decimal,
     currency: str,
 ) -> None:
+    error = "Cloudbeds offer revalidation failed"
     if not isinstance(payload, Mapping) or payload.get("success") is not True:
-        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+        raise ProviderHTTPError(error)
     matches = []
     for item, inherited_currency in _cloudbeds_room_candidates(payload):
-        if (
-            _first(item, "roomTypeID", "roomTypeId", "room_type_id")
-            == room_type_id
-            and _first(
-                item,
+        item_room_type_id = _consistent_text_alias(
+            item,
+            ("roomTypeID", "roomTypeId", "room_type_id"),
+            error=error,
+        )
+        item_room_rate_id = _consistent_text_alias(
+            item,
+            (
                 "roomRateID",
                 "roomRateId",
                 "room_rate_id",
                 "ratePlanID",
                 "ratePlanId",
-            )
-            == room_rate_id
-        ):
+            ),
+            error=error,
+        )
+        if item_room_type_id == room_type_id and item_room_rate_id == room_rate_id:
             matches.append((item, inherited_currency))
     if len(matches) != 1:
-        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+        raise ProviderHTTPError(error)
     selected, inherited_currency = matches[0]
-    units = _integer(
+    units = _consistent_integer_alias(
         selected,
-        "roomsAvailable",
-        "availableRooms",
-        "quantityAvailable",
-        "available",
+        (
+            "roomsAvailable",
+            "availableRooms",
+            "quantityAvailable",
+            "available",
+        ),
+        error=error,
     )
-    selected_currency = _first(selected, "currency", "currencyCode") or inherited_currency
+    direct_currency = _consistent_text_alias(
+        selected,
+        ("currency", "currencyCode"),
+        error=error,
+    )
+    if (
+        direct_currency is not None
+        and inherited_currency is not None
+        and direct_currency != inherited_currency
+    ):
+        raise ProviderHTTPError(error)
+    selected_currency = direct_currency or inherited_currency
     daily_total = _cloudbeds_daily_total(
         selected.get("roomRateDetailed")
         or selected.get("rateDetailed")
         or selected.get("dailyRates"),
         expected_dates=expected_dates,
         require_availability=True,
+        error=error,
     )
     if (
         units is None
@@ -356,7 +465,7 @@ def _validate_cloudbeds_rate_revalidation(
         or selected_currency != currency
         or daily_total != amount
     ):
-        raise ProviderHTTPError("Cloudbeds offer revalidation failed")
+        raise ProviderHTTPError(error)
 
 
 def _validate_cloudbeds_readback(
@@ -371,20 +480,27 @@ def _validate_cloudbeds_readback(
     children: int,
     amount: Decimal,
 ) -> None:
+    error = "Cloudbeds write read-back did not match"
     if not isinstance(payload, Mapping) or payload.get("success") is not True:
-        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        raise ProviderHTTPError(error)
     data = payload.get("data")
     if not isinstance(data, Mapping):
-        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        raise ProviderHTTPError(error)
     readback_id, explicit_failure = _cloudbeds_submit_evidence(payload)
-    rooms = [
-        item
-        for name in ("assigned", "unassigned")
-        for item in (data.get(name) if isinstance(data.get(name), list) else [])
-        if isinstance(item, Mapping)
-    ]
-    top_total = _cloudbeds_positive_amount(
-        data.get("total", data.get("totalAmount", data.get("grandTotal")))
+    rooms: list[Mapping[str, object]] = []
+    for name in ("assigned", "unassigned"):
+        if name not in data:
+            continue
+        collection = data[name]
+        if not isinstance(collection, list) or any(
+            not isinstance(item, Mapping) for item in collection
+        ):
+            raise ProviderHTTPError(error)
+        rooms.extend(collection)
+    top_total = _cloudbeds_consistent_positive_amount(
+        data,
+        ("total", "totalAmount", "grandTotal"),
+        error=error,
     )
     if (
         explicit_failure
@@ -394,16 +510,26 @@ def _validate_cloudbeds_readback(
         or top_total != amount
         or len(rooms) != 1
     ):
-        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        raise ProviderHTTPError(error)
     room = rooms[0]
-    room_total = _cloudbeds_positive_amount(room.get("roomTotal"))
+    room_total = _cloudbeds_consistent_positive_amount(
+        room,
+        ("roomTotal",),
+        error=error,
+    )
     daily_total = _cloudbeds_daily_total(
         room.get("dailyRates"),
         expected_dates=expected_dates,
         require_availability=False,
+        error=error,
+    )
+    readback_room_type_id = _consistent_text_alias(
+        room,
+        ("roomTypeID", "roomTypeId", "room_type_id"),
+        error=error,
     )
     if (
-        _first(room, "roomTypeID", "roomTypeId", "room_type_id") != room_type_id
+        readback_room_type_id != room_type_id
         or _text(room.get("startDate")) != start_date
         or _text(room.get("endDate")) != end_date
         or _integer(room, "adults") != adults
@@ -411,7 +537,7 @@ def _validate_cloudbeds_readback(
         or room_total != amount
         or daily_total != amount
     ):
-        raise ProviderHTTPError("Cloudbeds write read-back did not match")
+        raise ProviderHTTPError(error)
 
 
 class CloudbedsHTTPTransport:
@@ -748,10 +874,33 @@ class CloudbedsHTTPTransport:
             else:
                 room_items.append(candidate)
         for item in room_items:
-            room_type_id = _first(item, "roomTypeID", "roomTypeId", "room_type_id", "id")
-            room_rate_id = _first(item, "roomRateID", "roomRateId", "room_rate_id", "ratePlanID", "ratePlanId")
+            room_type_id = _consistent_text_alias(
+                item,
+                ("roomTypeID", "roomTypeId", "room_type_id", "id"),
+                error="Cloudbeds offer response is ambiguous",
+            )
+            room_rate_id = _consistent_text_alias(
+                item,
+                (
+                    "roomRateID",
+                    "roomRateId",
+                    "room_rate_id",
+                    "ratePlanID",
+                    "ratePlanId",
+                ),
+                error="Cloudbeds offer response is ambiguous",
+            )
             public_name = _first(item, "roomTypeName", "roomName", "room_type_name", "name")
-            available_units = _integer(item, "roomsAvailable", "availableRooms", "quantityAvailable", "available")
+            available_units = _consistent_integer_alias(
+                item,
+                (
+                    "roomsAvailable",
+                    "availableRooms",
+                    "quantityAvailable",
+                    "available",
+                ),
+                error="Cloudbeds offer response is ambiguous",
+            )
             total = _first_amount(item, "totalRate", "total", "roomTypeTotal", "grandTotal", "price", "rate", "roomRate")
             daily = item.get("roomRateDetailed") or item.get("rateDetailed") or item.get("dailyRates")
             if isinstance(daily, list):

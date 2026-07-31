@@ -95,6 +95,12 @@ def _availability(
     }
 
 
+def _availability_with_alias(field: str, value: str) -> dict[str, object]:
+    payload = _availability()
+    payload["data"][0]["propertyRooms"][0][field] = value
+    return payload
+
+
 def _readback(
     *,
     adults: int = 2,
@@ -242,6 +248,14 @@ def test_cloudbeds_single_room_party_is_revalidated_submitted_and_read_back(
                 "data": {"reservationID": "reservation-conflict"},
             },
         ),
+        (
+            200,
+            {
+                "success": True,
+                "reservationID": None,
+                "data": {"reservationID": RESERVATION_ID},
+            },
+        ),
     ),
 )
 def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
@@ -276,8 +290,12 @@ def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
         lambda body: body["data"].update(startDate="2026-08-09"),
         lambda body: body["data"].update(endDate="2026-08-13"),
         lambda body: body["data"].update(total="451.00"),
+        lambda body: body["data"].update(totalAmount="451.00"),
         lambda body: body["data"]["unassigned"][0].update(
             roomTypeID="different-room"
+        ),
+        lambda body: body["data"]["unassigned"][0].update(
+            roomTypeId="different-room"
         ),
         lambda body: body["data"]["unassigned"][0].update(
             startDate="2026-08-09"
@@ -297,6 +315,7 @@ def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
         lambda body: body["data"].update(
             assigned=[deepcopy(body["data"]["unassigned"][0])]
         ),
+        lambda body: body["data"].update(assigned=["malformed-room"]),
     ),
 )
 def test_cloudbeds_readback_mismatch_is_unknown_after_exactly_one_submit(
@@ -337,6 +356,8 @@ def test_cloudbeds_readback_mismatch_is_unknown_after_exactly_one_submit(
         _availability(room_type_id="different-room"),
         _availability(currency="USD"),
         _availability(rooms_available=0),
+        _availability_with_alias("ratePlanID", "rate-other"),
+        _availability_with_alias("roomTypeId", "room-other"),
         _availability(
             daily_rates=[
                 {

@@ -281,7 +281,7 @@ def test_cloudbeds_individualized_manifest_stops_before_fence_and_provider(
         store.close()
 
 
-def test_cloudbeds_multi_room_components_are_rejected_before_provider() -> None:
+def _cloudbeds_multi_room_command() -> ReservationCommand:
     command = _cloudbeds_group_command()
     first = command.payload.components[0]
     second = replace(
@@ -303,13 +303,50 @@ def test_cloudbeds_multi_room_components_are_rejected_before_provider() -> None:
         signature=signature,
         operation=command.operation,
     )
-    multi_room = replace(
+    return replace(
         command,
         command_id=command_id,
         idempotency_key=idempotency_key,
         subject_signature=signature,
         payload=payload,
     )
+
+
+def test_cloudbeds_multi_room_stops_before_fence_without_resolver(
+    tmp_path: Path,
+) -> None:
+    command = _cloudbeds_multi_room_command()
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "cloudbeds-multi-room-rejected.sqlite3")
+    bundle = build_reservation_relay_bundle(command)
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    port = FakeReservationPort(
+        "cloudbeds", _result(ProviderCertainty.EFFECT_CONFIRMED)
+    )
+    store.accept_boundary_reservation(
+        operation_id=reservation_target_operation_id(
+            bundle_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_hash,
+        ),
+        source_turn_receipt_hash=source_hash,
+        bundle=bundle,
+    )
+    worker = _worker(store, port)
+    try:
+        result = worker.run_once(now=NOW + timedelta(seconds=1))
+
+        assert result.disposition is V2WorkerDisposition.NOT_CALLED
+        assert port.calls == []
+        assert store._connection.execute(
+            "SELECT dispatch_slots_consumed,status FROM execution_ledger "
+            "WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone() == (0, "outcome_recorded")
+    finally:
+        store.close()
+
+
+def test_cloudbeds_multi_room_components_are_rejected_before_provider() -> None:
+    multi_room = _cloudbeds_multi_room_command()
 
     with pytest.raises(DispatchRejected, match="exactly one component"):
         _provider_payload(

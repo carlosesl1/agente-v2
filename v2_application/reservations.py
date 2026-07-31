@@ -382,10 +382,15 @@ class V2ReservationExecutionAdapter:
             raise PreparationFailure("unsupported_operation", False, ())
         if not self._authorization.enabled:
             raise PreparationFailure("write_gate_closed", False, ())
-        if self.provider == "cloudbeds" and command.payload.customer.passengers:
-            raise PreparationFailure(
-                "booking_profile_incomplete", False, ()
-            )
+        if self.provider == "cloudbeds":
+            if len(command.payload.components) != 1:
+                raise PreparationFailure(
+                    "private_binding_component_count", False, ()
+                )
+            if command.payload.customer.passengers:
+                raise PreparationFailure(
+                    "booking_profile_incomplete", False, ()
+                )
         if self.provider == "bokun":
             customer = command.payload.customer
             component = command.payload.components[0]
