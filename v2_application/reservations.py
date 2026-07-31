@@ -94,6 +94,10 @@ def _provider_payload(
     customer = command.payload.customer
     terms = command.payload.terms
     passengers = ()
+    if provider == "cloudbeds" and customer.passengers:
+        raise DispatchRejected(
+            "Cloudbeds individualized guest manifests are unsupported"
+        )
     if provider == "bokun":
         try:
             passengers = effective_passengers(customer, component.party)
@@ -378,6 +382,10 @@ class V2ReservationExecutionAdapter:
             raise PreparationFailure("unsupported_operation", False, ())
         if not self._authorization.enabled:
             raise PreparationFailure("write_gate_closed", False, ())
+        if self.provider == "cloudbeds" and command.payload.customer.passengers:
+            raise PreparationFailure(
+                "booking_profile_incomplete", False, ()
+            )
         if self.provider == "bokun":
             customer = command.payload.customer
             component = command.payload.components[0]

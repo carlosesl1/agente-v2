@@ -210,6 +210,77 @@ def _cloudbeds_group_command() -> ReservationCommand:
     )
 
 
+def _cloudbeds_group_with_manifest_command() -> ReservationCommand:
+    command = _cloudbeds_group_command()
+    customer = replace(command.payload.customer, passengers=_group_passengers())
+    payload = CommandPayload(
+        command.payload.components,
+        customer,
+        command.payload.terms,
+    )
+    signature = subject_signature(
+        components=payload.components,
+        customer=customer,
+        terms=payload.terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id=command.workflow_id,
+        draft_id=command.draft_id,
+        draft_version=command.draft_version,
+        signature=signature,
+        operation=command.operation,
+    )
+    return replace(
+        command,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        subject_signature=signature,
+        payload=payload,
+    )
+
+
+def test_cloudbeds_individualized_manifest_stops_before_fence_and_provider(
+    tmp_path: Path,
+) -> None:
+    command = _cloudbeds_group_with_manifest_command()
+    store = SQLiteUnitOfWork.open_v6(tmp_path / "cloudbeds-manifest-rejected.sqlite3")
+    bundle = build_reservation_relay_bundle(command)
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    port = FakeReservationPort(
+        "cloudbeds", _result(ProviderCertainty.EFFECT_CONFIRMED)
+    )
+    store.accept_boundary_reservation(
+        operation_id=reservation_target_operation_id(
+            bundle_hash=bundle.artifact_hash,
+            source_turn_receipt_hash=source_hash,
+        ),
+        source_turn_receipt_hash=source_hash,
+        bundle=bundle,
+    )
+    worker = _worker(store, port)
+    try:
+        result = worker.run_once(now=NOW + timedelta(seconds=1))
+
+        assert result.disposition is V2WorkerDisposition.NOT_CALLED
+        assert port.calls == []
+        assert store._connection.execute(
+            "SELECT dispatch_slots_consumed,status FROM execution_ledger "
+            "WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone() == (0, "outcome_recorded")
+        with pytest.raises(DispatchRejected, match="individualized guest"):
+            _provider_payload(
+                command,
+                "cloudbeds",
+                {
+                    "room_rate_id": "rate-private-fenced-001",
+                    "room_type_id": "room-private-fenced-001",
+                },
+            )
+    finally:
+        store.close()
+
+
 def test_cloudbeds_multi_room_components_are_rejected_before_provider() -> None:
     command = _cloudbeds_group_command()
     first = command.payload.components[0]
