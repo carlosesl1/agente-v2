@@ -524,3 +524,45 @@ def test_adapter_routes_confirmation_review_through_narrow_audited_wire() -> Non
     assert "general proposal prompt must not be used for review" not in serialized
     assert "private-lead-should-not-cross-review-wire" not in serialized
     assert "must-not-cross" not in serialized
+
+
+def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
+    attempts = 0
+
+    def run(command, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        response = (
+            b'{"schema":"v2-contextual-confirmation-review-v1",'
+            b'"source_event_id":"batch:wrong-source","decision":"approve"}'
+            if attempts == 1
+            else b'{"schema":"v2-contextual-confirmation-review-v1",'
+            b'"source_event_id":"batch:contextual-confirmation-review",'
+            b'"decision":"unknown"}'
+        )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + response,
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="unused-general-prompt",
+        timeout=10,
+        transcript_key=b"invalid-review-transcript-key-0001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(_confirmation_review_request())
+
+    assert attempts == 2
+    assert turn.proposal.intent == "inform"
+    assert turn.proposal.confirmed_summary_version is None
+    assert turn.proposal.confirmed_action_kinds == ()
+    assert turn.proposal.approval_basis is None
+    assert len(turn.frames) == 3
+    assert turn.closure.ephemeral_session_id.startswith(
+        "deterministic:protocol-fallback:"
+    )
