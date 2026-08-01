@@ -62,6 +62,10 @@ Expected: PASS.
 
 Run Ruff nos arquivos alterados, `git diff --check`, compile dos módulos e testes de confirmação/reserva/perfil relacionados.
 
+- [x] **Step 7b: Align model prompt with the effective boundary**
+
+Registrar explicitamente que nome/e-mail/telefone são autenticados pelo ManyChat e que o país canônico é validado do binding privado ou de fato tipado persistido; adicionar regressão que rejeita a afirmação anterior de que o país sempre veio autenticado do perfil.
+
 - [ ] **Step 8: Freeze and qualify**
 
 Commitar o candidato, executar a suíte final econômica uma vez, obter revisão read-only no SHA exato, publicar a branch, aguardar CI e construir/inspecionar nova OCI imutável antes de qualquer novo canário real.
