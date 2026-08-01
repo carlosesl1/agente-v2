@@ -657,6 +657,20 @@ def _profile(*, complete: bool = True) -> PrivateCustomerBinding:
     )
 
 
+def _authenticated_manychat_contact_without_country() -> PrivateCustomerBinding:
+    return PrivateCustomerBinding(
+        binding_id="profile:subscriber-contact-only",
+        content_hash="c" * 64,
+        full_name="Carlos Teste",
+        email="maya.cloudbeds.canary@example.com",
+        phone_e164="+12025550123",
+        country_code=None,
+        observed_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=10),
+        complete=False,
+    )
+
+
 def _projection(*, package: bool = False) -> ConversationProjection:
     return ConversationProjection(
         stage=ConversationStage.RECEPTIONIST,
@@ -1035,6 +1049,101 @@ def test_incomplete_profile_and_stale_confirmation_never_emit_command() -> None:
     assert stale.commands == ()
     assert stale.next_state.workflow == awaiting
     assert stale.public_reply.kind == "stale_confirmation"
+
+
+def test_conversation_country_completes_authenticated_manychat_contact() -> None:
+    projection = replace(
+        _projection(),
+        facts=(TypedFact("country_code", StringSlot("US"), FRAME_HASH),),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=projection,
+        proposal=_proposal(
+            source="event:select-with-conversation-country",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=_authenticated_manychat_contact_without_country(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert type(decision.next_state.workflow) is AwaitingConfirmationState
+    assert decision.next_state.workflow.draft.customer.full_name == "Carlos Teste"
+    assert (
+        decision.next_state.workflow.draft.customer.email
+        == "maya.cloudbeds.canary@example.com"
+    )
+    assert decision.next_state.workflow.draft.customer.phone_e164 == "+12025550123"
+    assert decision.next_state.workflow.draft.customer.country_code == "US"
+
+
+def test_conversation_country_does_not_complete_expired_manychat_contact() -> None:
+    projection = replace(
+        _projection(),
+        facts=(TypedFact("country_code", StringSlot("US"), FRAME_HASH),),
+    )
+    expired = replace(
+        _authenticated_manychat_contact_without_country(),
+        observed_at=NOW - timedelta(minutes=20),
+        expires_at=NOW - timedelta(seconds=1),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=projection,
+        proposal=_proposal(
+            source="event:select-with-expired-manychat-contact",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=expired,
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.next_state.workflow is None
+    assert decision.public_reply.kind == "profile_completion"
+
+
+def test_conversation_contact_facts_cannot_replace_authenticated_manychat_contact() -> None:
+    projection = replace(
+        _projection(),
+        facts=(
+            TypedFact("full_name", StringSlot("Conversation Name"), FRAME_HASH),
+            TypedFact(
+                "email",
+                StringSlot("conversation@example.com"),
+                FRAME_HASH,
+            ),
+            TypedFact("phone_e164", StringSlot("+12025550124"), FRAME_HASH),
+            TypedFact("country_code", StringSlot("US"), FRAME_HASH),
+        ),
+    )
+
+    decision = _reducer().reduce(
+        state=_boundary(),
+        projection=projection,
+        proposal=_proposal(
+            source="event:select-with-conversation-contact",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=_profile(complete=False),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert decision.commands == ()
+    assert decision.next_state.workflow is None
+    assert decision.public_reply.kind == "profile_completion"
 
 
 @pytest.mark.parametrize("intent", ("inform", "adjust"))

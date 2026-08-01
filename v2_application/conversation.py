@@ -296,9 +296,9 @@ def _customer(
     activity_party: Party | None = None,
 ) -> CustomerFacts:
     facts = _projection_values(projection)
-    full_name = profile.full_name or facts.get("full_name")
-    email = profile.email or facts.get("email")
-    phone = profile.phone_e164 or facts.get("phone_e164")
+    full_name = profile.full_name
+    email = profile.email
+    phone = profile.phone_e164
     country = profile.country_code or facts.get("country_code")
     if any(type(value) is not str for value in (full_name, email, phone, country)):
         raise ConversationReductionError("complete profile has missing customer facts")
@@ -325,7 +325,7 @@ def _customer(
     return customer
 
 
-def _profile_ready(
+def reservation_profile_ready(
     profile: PrivateCustomerBinding,
     projection: ConversationProjection,
     now: datetime,
@@ -1236,15 +1236,18 @@ class V2ConversationReducer:
                 source_event_id=proposal.source_event_id,
             )
 
-        # A complete customer binding is a write-boundary requirement, not a
-        # prerequisite for greetings, discovery, FAQ, or read-only provider work.
-        if proposal.intent in {"select", "confirm"} and not _profile_ready(
+        # Authenticated contact plus a country fact is a write-boundary requirement,
+        # not a prerequisite for greetings, discovery, FAQ, or read-only work.
+        if proposal.intent in {"select", "confirm"} and not reservation_profile_ready(
             profile,
             merged,
             instant,
             activity_party=activity_party,
         ):
-            if profile.complete and activity_party is not None:
+            if (
+                reservation_profile_ready(profile, merged, instant)
+                and activity_party is not None
+            ):
                 if activity_party.adults + activity_party.children == 1:
                     missing_profile_text = (
                         "Para reservar o passeio, preciso da data de nascimento e gênero cadastral."

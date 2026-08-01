@@ -54,7 +54,10 @@ from reservation_domain import (
     dumps_command,
 )
 from reservation_followup import HandoffRequested
-from v2_application.conversation import V2ConversationReducer
+from v2_application.conversation import (
+    V2ConversationReducer,
+    reservation_profile_ready,
+)
 from v2_application.read_bridge import bridge_availability_observation
 from v2_application.passengers import (
     PassengerManifestConflict,
@@ -1312,6 +1315,11 @@ class V2TurnExecutor:
             *_extract_explicit_commercial_facts(batch.combined_text),
             *_extract_explicit_customer_facts(batch.combined_text),
         )
+        effective_profile_complete = reservation_profile_ready(
+            profile,
+            projection,
+            now,
+        )
         pending_action = (
             None
             if current.state.handoff is not None
@@ -1332,7 +1340,7 @@ class V2TurnExecutor:
             passenger_manifest_status=_passenger_status(projection),
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
-            private_profile_complete=profile.complete,
+            private_profile_complete=effective_profile_complete,
             handoff_active=current.state.handoff is not None,
         )
         first_audited = self._model.complete_audited(request)
@@ -1358,7 +1366,7 @@ class V2TurnExecutor:
             and _structured_selection_review_required(
                 _state_model_facts(projection),
                 explicit_customer_facts,
-                private_profile_complete=profile.complete,
+                private_profile_complete=effective_profile_complete,
                 passenger_manifest_complete=_passenger_manifest_complete(
                     projection,
                     first_proposal,
@@ -1542,7 +1550,7 @@ class V2TurnExecutor:
                 ),
                 critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
-                private_profile_complete=profile.complete,
+                private_profile_complete=effective_profile_complete,
                 handoff_active=current.state.handoff is not None,
             )
             second_audited = self._model.complete_audited(followup)
@@ -1579,7 +1587,7 @@ class V2TurnExecutor:
                 proposal,
                 state_facts=_state_model_facts(projection),
                 observations=v2_observations,
-                private_profile_complete=profile.complete,
+                private_profile_complete=effective_profile_complete,
                 passenger_manifest_complete=_passenger_manifest_complete(
                     projection,
                     proposal,

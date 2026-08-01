@@ -474,6 +474,27 @@ class FakeProfile:
         )
 
 
+class AuthenticatedManyChatContactWithoutCountry:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+        self.calls = 0
+
+    def read(self, lead_id: str, *, now: datetime) -> PrivateCustomerBinding:
+        assert self.store._connection.in_transaction is False
+        self.calls += 1
+        return PrivateCustomerBinding(
+            binding_id="profile-binding:" + "c" * 64,
+            content_hash="b" * 64,
+            full_name="Pessoa Teste",
+            email="maya.cloudbeds.canary@example.com",
+            phone_e164="+12025550123",
+            country_code=None,
+            observed_at=now,
+            expires_at=now + timedelta(minutes=5),
+            complete=False,
+        )
+
+
 class RecordingPublicDelivery:
     def __init__(self, *, uncertain: bool = False) -> None:
         self.uncertain = uncertain
@@ -1253,6 +1274,67 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert row[0] == "read_observation"
         assert row[1] is None
         assert type(row[2]) is str and len(row[2]) == 64
+    finally:
+        store.close()
+
+
+def test_conversation_country_marks_authenticated_manychat_contact_complete_next_turn() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    second_event = replace(
+        EVENT,
+        event_id="event:conversation-country-next-turn",
+        text="Pode continuar com a reserva.",
+        payload_hash="6" * 64,
+    )
+    second_batch = InboundBatch(
+        batch_id="batch:conversation-country-next-turn",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(second_event,),
+        combined_text=second_event.text,
+    )
+    second_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:conversation-country-next-turn",
+        allocation_ids=("allocation:conversation-country-next-turn",),
+        allocation_manifest_hash="6" * 64,
+    )
+    first = replace(
+        _proposal("País registrado."),
+        facts=(ModelFact("country_code", "US"),),
+    )
+    second = replace(
+        _proposal("Vou continuar."),
+        source_event_id=second_batch.batch_id,
+    )
+    model = FakeAuditedModel(store, [first, second])
+    profile = AuthenticatedManyChatContactWithoutCountry(store)
+    _install_public_authority(store)
+    _install_public_authority(store, second_authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=profile,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(
+            {
+                BATCH.batch_id: AUTHORITY,
+                second_batch.batch_id: second_authority,
+            }
+        ),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        executor.execute(BATCH)
+        executor.execute(second_batch)
+
+        assert model.calls[0].private_profile_complete is False
+        assert model.calls[1].private_profile_complete is True
+        assert "country_code" in model.calls[1].private_customer_fact_names
     finally:
         store.close()
 
