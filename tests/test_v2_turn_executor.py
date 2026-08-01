@@ -1788,6 +1788,61 @@ def test_missing_domain_command_reply_is_localized(locale: str, expected: str) -
     assert _confirmation_not_authorized_reply(locale) == expected
 
 
+@pytest.mark.parametrize(
+    ("review_intent", "pending_disposition"),
+    (
+        ("inform", None),
+        ("adjust", "revoke"),
+    ),
+)
+def test_non_authorizing_confirmation_review_commits_zero_effect_rows(
+    review_intent: str,
+    pending_disposition: str | None,
+) -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=5),
+        confirmation_clock=FixedClock(),
+    )
+    initial = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent="inform",
+        reply_chunks=("Vou revisar sua mensagem no contexto do resumo.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    review = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent=review_intent,
+        reply_chunks=("Nenhuma execução foi autorizada.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        pending_disposition=pending_disposition,
+    )
+    model.proposals[:] = [initial, review]
+    prior_calls = len(model.calls)
+    try:
+        result = executor.execute(second_batch)
+
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert len(read_port.calls) == 1
+        assert len(model.calls) == prior_calls + 2
+        general_request, review_request = model.calls[-2:]
+        assert general_request.confirmation_review_required is False
+        assert review_request.confirmation_review_required is True
+        assert review_request.request_id != general_request.request_id
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone()[0] == 0
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_command_relays"
+        ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
 def test_confirmation_without_domain_command_never_claims_processing() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(minutes=5),
@@ -1872,21 +1927,34 @@ def test_approval_expiring_between_reducer_and_commit_persists_zero_effect_rows(
 
 
 @pytest.mark.parametrize(
-    "confirmation_text",
+    ("confirmation_text", "review_expected"),
     (
-        "Sim",
-        "Pode reservar",
-        "Pode sim",
-        "Confirmado",
-        "Isso mesmo",
-        "Sim, por favor",
-        "Pode reservar esse passeio e gerar o link do sinal no cartão.",
-        "Confirmed. Please book exactly that summary.",
+        ("Sim", False),
+        ("Pode reservar", False),
+        ("Pode sim", False),
+        ("Confirmado", False),
+        ("Isso mesmo", False),
+        ("Sim, por favor", False),
+        (
+            "Pode reservar esse passeio e gerar o link do sinal no cartão.",
+            False,
+        ),
+        (
+            "Sim, confirmo exatamente esse resumo. Pode fazer a reserva agora.",
+            True,
+        ),
+        (
+            "O que ficou descrito acima corresponde integralmente ao que quero; "
+            "siga com o conjunto completo sem mudar nada.",
+            True,
+        ),
+        ("Confirmed. Please book exactly that summary.", True),
     ),
 )
 def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
     tmp_path,
     confirmation_text: str,
+    review_expected: bool,
 ) -> None:
     second_event = InboundEvent(
         event_id="event:turn-executor-002",
@@ -1963,7 +2031,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         ),
         approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
     )
-    review_expected = selection_language == "en"
     initial_confirmation = ModelProposal(
         source_event_id=second_batch.batch_id,
         intent="inform",
@@ -2042,6 +2109,8 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         followup_index = review_index + 1
         assert model.calls[review_index].pending_action == pending
         assert model.calls[review_index].confirmation_review_required is review_expected
+        if review_expected:
+            assert model.calls[review_index].request_id != model.calls[2].request_id
         assert model.calls[followup_index].pending_action == pending
         assert model.calls[followup_index].confirmation_review_required is False
         assert len(read_port.calls) == 2

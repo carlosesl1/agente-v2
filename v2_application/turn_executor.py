@@ -1373,6 +1373,15 @@ class V2TurnExecutor:
         if selection_review or confirmation_review:
             review_request = replace(
                 request,
+                request_id=_opaque(
+                    (
+                        "model-confirmation-review"
+                        if confirmation_review
+                        else "model-selection-review"
+                    ),
+                    batch.batch_id,
+                    current.version,
+                ),
                 confirmation_review_required=confirmation_review,
                 selection_review_required=selection_review,
                 passenger_manifest_status=_passenger_status(
