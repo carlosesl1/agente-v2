@@ -1,22 +1,36 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import unicodedata
 from datetime import datetime, timezone
 
 import pytest
 
 from v2_adapters.hermes_model import (
+    _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
     _PROTOCOL_REPAIR_SUFFIX,
+    _confirmation_review,
+    _confirmation_review_wire,
     _proposal,
+    _proposal_from_confirmation_review,
     _request_wire,
+    HermesModelAdapter,
+)
+from v2_contracts.confirmation_review import (
+    ContextualConfirmationDecision,
+    ContextualConfirmationReview,
 )
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
     PendingCriticalActionContext,
 )
-from v2_contracts.model import InvalidModelProposal, ModelRequest
+from v2_contracts.model import (
+    InvalidModelProposal,
+    ModelFact,
+    ModelRequest,
+)
 
 
 def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validation() -> None:
@@ -333,3 +347,180 @@ def test_legacy_schema_cannot_confirm_a_pending_critical_action() -> None:
             json.dumps(payload, ensure_ascii=False).encode(),
             "batch:legacy-confirmation",
         )
+
+
+def _confirmation_review_request() -> ModelRequest:
+    return ModelRequest(
+        request_id="request:contextual-confirmation-review",
+        lead_id="manychat:private-lead-should-not-cross-review-wire",
+        source_event_id="batch:contextual-confirmation-review",
+        message="Está certinho como você resumiu; siga com tudo aquilo.",
+        locale="pt-BR",
+        state_version=7,
+        state_facts=(ModelFact("language", "pt-BR"),),
+        private_customer_fact_names=("full_name", "email"),
+        private_profile_complete=True,
+        handoff_active=False,
+        pending_action=_pending_action(),
+        confirmation_review_required=True,
+    )
+
+
+def _review_payload(decision: str = "approve") -> bytes:
+    return json.dumps(
+        {
+            "schema": "v2-contextual-confirmation-review-v1",
+            "source_event_id": "batch:contextual-confirmation-review",
+            "decision": decision,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def test_confirmation_review_wire_is_minimal_and_public_only() -> None:
+    envelope = json.loads(
+        _confirmation_review_wire(
+            _confirmation_review_request(),
+            _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
+        )
+    )
+    user = json.loads(envelope["messages"][0][1])
+
+    assert set(user) == {
+        "request_id",
+        "source_event_id",
+        "message",
+        "locale",
+        "pending_action",
+    }
+    assert user["pending_action"] == {
+        "summary_version": 1,
+        "action_kinds": ["book_activity", "initiate_payment"],
+        "public_summary": _pending_action().public_summary,
+        "expires_at": "2026-07-28T06:30:00+00:00",
+    }
+    serialized = json.dumps(user, ensure_ascii=False)
+    for forbidden in (
+        "private-lead-should-not-cross-review-wire",
+        "state_facts",
+        "private_customer_fact_names",
+        "private_profile_complete",
+        "handoff_active",
+        "observations",
+        "passenger_manifest_status",
+        "offer:",
+        "provider_ref",
+        "subject_signature",
+    ):
+        assert forbidden not in serialized
+
+
+def test_confirmation_review_parser_requires_exact_closed_schema_and_source() -> None:
+    review = _confirmation_review(
+        _review_payload(),
+        "batch:contextual-confirmation-review",
+    )
+    assert review == ContextualConfirmationReview(
+        source_event_id="batch:contextual-confirmation-review",
+        decision=ContextualConfirmationDecision.APPROVE,
+    )
+
+    invalid_payloads = (
+        b'{"schema":"v2-contextual-confirmation-review-v1",'
+        b'"source_event_id":"batch:contextual-confirmation-review",'
+        b'"decision":"approve","decision":"uncertain"}',
+        _review_payload("unknown"),
+        _review_payload().replace(
+            b"batch:contextual-confirmation-review",
+            b"batch:wrong-source",
+        ),
+        _review_payload().replace(
+            b"v2-contextual-confirmation-review-v1",
+            b"v2-contextual-confirmation-review-v2",
+        ),
+        _review_payload()[:-1] + b',"extra":true}',
+    )
+    for payload in invalid_payloads:
+        with pytest.raises(InvalidModelProposal):
+            _confirmation_review(payload, "batch:contextual-confirmation-review")
+
+
+@pytest.mark.parametrize(
+    ("decision", "intent", "pending_disposition"),
+    (
+        (ContextualConfirmationDecision.APPROVE, "confirm", None),
+        (ContextualConfirmationDecision.REJECT, "adjust", "revoke"),
+        (ContextualConfirmationDecision.ADJUST, "adjust", "revoke"),
+        (ContextualConfirmationDecision.UNCERTAIN, "inform", None),
+    ),
+)
+def test_parent_owns_confirmation_binding(
+    decision: ContextualConfirmationDecision,
+    intent: str,
+    pending_disposition: str | None,
+) -> None:
+    request = _confirmation_review_request()
+    proposal = _proposal_from_confirmation_review(
+        request,
+        ContextualConfirmationReview(
+            source_event_id=request.source_event_id,
+            decision=decision,
+        ),
+    )
+
+    assert proposal.intent == intent
+    assert proposal.pending_disposition == pending_disposition
+    assert proposal.facts == ()
+    assert proposal.read_requests == ()
+    assert proposal.effect_proposals == ()
+    assert proposal.passengers == ()
+    assert proposal.target_offer_id is None
+    assert proposal.target_offer_ids == ()
+    if decision is ContextualConfirmationDecision.APPROVE:
+        assert proposal.confirmed_summary_version == request.pending_action.summary_version
+        assert proposal.confirmed_action_kinds == request.pending_action.action_kinds
+        assert proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    else:
+        assert proposal.confirmed_summary_version is None
+        assert proposal.confirmed_action_kinds == ()
+        assert proposal.approval_basis is None
+
+
+def test_adapter_routes_confirmation_review_through_narrow_audited_wire() -> None:
+    captured: list[bytes] = []
+
+    def run(command, **kwargs):
+        assert command == ("python", "-m", "v2_host.hermes_child")
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + _review_payload(),
+            stderr=b"",
+        )
+
+    request = _confirmation_review_request()
+    adapter = HermesModelAdapter(
+        command=("python", "-m", "v2_host.hermes_child"),
+        system_prompt="general proposal prompt must not be used for review",
+        timeout=10,
+        transcript_key=b"contextual-review-transcript-key-001",
+        run=run,
+        environ={"PATH": "/usr/bin", "FORBIDDEN_SECRET": "must-not-cross"},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert turn.proposal.intent == "confirm"
+    assert turn.proposal.confirmed_summary_version == request.pending_action.summary_version
+    assert turn.proposal.confirmed_action_kinds == request.pending_action.action_kinds
+    assert turn.proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    assert len(turn.frames) == 1
+    assert turn.frames[0].stdin_bytes == captured[0]
+    envelope = json.loads(captured[0])
+    assert envelope["system_prompt"] == _CONFIRMATION_REVIEW_SYSTEM_PROMPT
+    serialized = captured[0].decode()
+    assert "general proposal prompt must not be used for review" not in serialized
+    assert "private-lead-should-not-cross-review-wire" not in serialized
+    assert "must-not-cross" not in serialized

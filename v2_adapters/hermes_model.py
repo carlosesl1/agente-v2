@@ -11,6 +11,11 @@ from collections.abc import Callable
 from datetime import date
 from typing import Final
 
+from v2_contracts.confirmation_review import (
+    ContextualConfirmationDecision,
+    ContextualConfirmationReview,
+    InvalidContextualConfirmationReview,
+)
 from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import (
     AuditedModelTurn,
@@ -66,6 +71,34 @@ _RESPONSE_FIELDS_V3: Final = frozenset(
 _RESPONSE_FIELDS_V4: Final = frozenset((*_RESPONSE_FIELDS_V3, "selection_requested"))
 _RESPONSE_FIELDS_V5: Final = frozenset((*_RESPONSE_FIELDS_V4, "pending_disposition"))
 _RESPONSE_FIELDS_V6: Final = frozenset((*_RESPONSE_FIELDS_V5, "passengers"))
+_CONFIRMATION_REVIEW_FIELDS: Final = frozenset(
+    ("schema", "source_event_id", "decision")
+)
+_CONFIRMATION_REVIEW_SYSTEM_PROMPT: Final = """
+You are a narrow semantic reviewer for one pending critical action. You have no tools
+and no authority to execute anything. Compare the complete current message with the
+complete pending public summary. Return exactly one JSON object with exactly these
+fields: schema, source_event_id, decision. schema must be
+"v2-contextual-confirmation-review-v1". Copy source_event_id exactly. decision must be
+one of "approve", "reject", "adjust", or "uncertain".
+
+Use "approve" only when the complete current message unconditionally approves the
+complete pending summary without changing, narrowing, postponing, or conditioning any
+material term or action. Use "reject" for refusal, cancellation, postponement, or
+withdrawal. Use "adjust" when the message adds a condition or changes any product,
+date, party, amount, currency, payment term, or action scope. Use "uncertain" for a
+question, ambiguity, hesitation, unrelated text, or insufficient evidence. Judge the
+meaning of the complete message in context; never decide from the presence or absence
+of a word, token, emoji, substring, or fixed expression. Return no rationale, reply,
+Markdown, or extra field.
+""".strip()
+_CONFIRMATION_REVIEW_REPAIR_SUFFIX: Final = """
+PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
+Return exactly one v2-contextual-confirmation-review-v1 JSON object with only schema,
+source_event_id, and decision. Copy source_event_id exactly. decision must be approve,
+reject, adjust, or uncertain under the supplied semantic contract. Return no rationale,
+reply, Markdown, or extra field.
+""".strip()
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
@@ -167,6 +200,32 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
             "public_summary": request.pending_action.public_summary,
             "expires_at": request.pending_action.expires_at.isoformat(),
         }
+    return _canonical(
+        {
+            "system_prompt": system_prompt,
+            "messages": [["user", _canonical(user_payload).decode("utf-8")]],
+        }
+    )
+
+
+def _confirmation_review_wire(request: ModelRequest, system_prompt: str) -> bytes:
+    if not request.confirmation_review_required or request.pending_action is None:
+        raise InvalidModelProposal(
+            "contextual confirmation review requires an exact pending action"
+        )
+    pending = request.pending_action
+    user_payload = {
+        "request_id": request.request_id,
+        "source_event_id": request.source_event_id,
+        "message": request.message,
+        "locale": request.locale,
+        "pending_action": {
+            "summary_version": pending.summary_version,
+            "action_kinds": [item.value for item in pending.action_kinds],
+            "public_summary": pending.public_summary,
+            "expires_at": pending.expires_at.isoformat(),
+        },
+    }
     return _canonical(
         {
             "system_prompt": system_prompt,
@@ -395,6 +454,92 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         raise InvalidModelProposal("model proposal is invalid") from exc
 
 
+def _confirmation_review(
+    payload: bytes,
+    source_event_id: str,
+) -> ContextualConfirmationReview:
+    try:
+        decoded = json.loads(payload, object_pairs_hook=_unique_object)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise InvalidModelProposal(
+            "confirmation review response is not valid JSON"
+        ) from exc
+    if type(decoded) is not dict or set(decoded) != _CONFIRMATION_REVIEW_FIELDS:
+        raise InvalidModelProposal("confirmation review response fields mismatch")
+    if decoded["schema"] != "v2-contextual-confirmation-review-v1":
+        raise InvalidModelProposal("confirmation review response schema mismatch")
+    if decoded["source_event_id"] != source_event_id:
+        raise InvalidModelProposal("confirmation review source event mismatch")
+    try:
+        decision = ContextualConfirmationDecision(decoded["decision"])
+        return ContextualConfirmationReview(
+            source_event_id=decoded["source_event_id"],
+            decision=decision,
+        )
+    except (TypeError, ValueError, InvalidContextualConfirmationReview) as exc:
+        raise InvalidModelProposal("confirmation review decision is invalid") from exc
+
+
+def _proposal_from_confirmation_review(
+    request: ModelRequest,
+    review: ContextualConfirmationReview,
+) -> ModelProposal:
+    if (
+        not request.confirmation_review_required
+        or request.pending_action is None
+        or review.source_event_id != request.source_event_id
+    ):
+        raise InvalidModelProposal(
+            "confirmation review is not bound to the pending request"
+        )
+    english = request.locale.lower().startswith("en")
+    if review.decision is ContextualConfirmationDecision.APPROVE:
+        return ModelProposal(
+            source_event_id=request.source_event_id,
+            intent="confirm",
+            reply_chunks=(
+                "Confirmation received. I will process exactly the summary above."
+                if english
+                else "Confirmação recebida. Vou processar exatamente o resumo acima.",
+            ),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=request.pending_action.summary_version,
+            confirmed_action_kinds=request.pending_action.action_kinds,
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        )
+    if review.decision in (
+        ContextualConfirmationDecision.REJECT,
+        ContextualConfirmationDecision.ADJUST,
+    ):
+        return ModelProposal(
+            source_event_id=request.source_event_id,
+            intent="adjust",
+            reply_chunks=(
+                "Understood. I will not execute the previous summary."
+                if english
+                else "Entendido. Não vou executar o resumo anterior.",
+            ),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            pending_disposition="revoke",
+        )
+    return ModelProposal(
+        source_event_id=request.source_event_id,
+        intent="inform",
+        reply_chunks=(
+            "I have not considered the pending summary confirmed."
+            if english
+            else "Ainda não considerei o resumo pendente confirmado.",
+        ),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+
 class HermesModelAdapter:
     def __init__(
         self,
@@ -464,6 +609,7 @@ class HermesModelAdapter:
         request: ModelRequest,
         *,
         stdin_bytes: bytes,
+        decode: Callable[[bytes], ModelProposal] | None = None,
     ) -> tuple[AuditedModelTurn | None, AuditedTranscriptFrame]:
         try:
             result = self._run(
@@ -515,7 +661,11 @@ class HermesModelAdapter:
             transcript_key=self._transcript_key,
         )
         try:
-            proposal = _proposal(response, request.source_event_id)
+            proposal = (
+                _proposal(response, request.source_event_id)
+                if decode is None
+                else decode(response)
+            )
         except InvalidModelProposal:
             return None, frame
         if request.observations and proposal.read_requests:
@@ -551,19 +701,37 @@ class HermesModelAdapter:
     def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
         if type(request) is not ModelRequest:
             raise TypeError("request must be an exact ModelRequest")
-        original_stdin = _request_wire(request, self._system_prompt)
-        attempted_frames: list[AuditedTranscriptFrame] = []
-        prompts = (
-            self._system_prompt,
-            self._system_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,
-        )
-        for prompt in prompts:
-            stdin_bytes = (
-                original_stdin
-                if prompt == self._system_prompt
-                else _request_wire(request, prompt)
+        if request.confirmation_review_required:
+            base_prompt = _CONFIRMATION_REVIEW_SYSTEM_PROMPT
+            prompts = (
+                base_prompt,
+                base_prompt + "\n\n" + _CONFIRMATION_REVIEW_REPAIR_SUFFIX,
             )
-            turn, frame = self._attempt(request, stdin_bytes=stdin_bytes)
+            wire = _confirmation_review_wire
+
+            def decode(response: bytes) -> ModelProposal:
+                return _proposal_from_confirmation_review(
+                    request,
+                    _confirmation_review(response, request.source_event_id),
+                )
+
+        else:
+            base_prompt = self._system_prompt
+            prompts = (
+                base_prompt,
+                base_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,
+            )
+            wire = _request_wire
+            decode = None
+        original_stdin = wire(request, base_prompt)
+        attempted_frames: list[AuditedTranscriptFrame] = []
+        for prompt in prompts:
+            stdin_bytes = original_stdin if prompt == base_prompt else wire(request, prompt)
+            turn, frame = self._attempt(
+                request,
+                stdin_bytes=stdin_bytes,
+                decode=decode,
+            )
             if turn is not None:
                 if not attempted_frames:
                     return turn
