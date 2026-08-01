@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from urllib.parse import parse_qs
 
 import httpx
@@ -199,7 +198,7 @@ def _success_handler(
 
 
 @pytest.mark.parametrize(("adults", "children"), ((1, 0), (2, 0), (2, 1)))
-def test_cloudbeds_single_room_party_is_revalidated_submitted_and_read_back(
+def test_cloudbeds_accepted_submit_is_confirmed_without_readback(
     adults: int,
     children: int,
 ) -> None:
@@ -212,12 +211,18 @@ def test_cloudbeds_single_room_party_is_revalidated_submitted_and_read_back(
     )
 
     assert result == {"status": "confirmed", "reservation_id": RESERVATION_ID}
-    assert [request.method for request in seen] == ["GET", "POST", "GET"]
+    assert [
+        request.url.path for request in seen if request.method == "POST"
+    ] == ["/api/v1.1/postReservation"]
+    assert [
+        request.url.path
+        for request in seen
+        if request.url.path.endswith("/api/v1.3/getReservation")
+    ] == []
     assert all(
         request.headers["Authorization"] == "Bearer cloudbeds-secret"
         for request in seen
     )
-    assert sum(request.method == "POST" for request in seen) == 1
 
 
 @pytest.mark.parametrize(
@@ -240,6 +245,14 @@ def test_cloudbeds_single_room_party_is_revalidated_submitted_and_read_back(
             },
         ),
         (200, {"success": True}),
+        (
+            200,
+            {
+                "success": True,
+                "reservationID": RESERVATION_ID,
+                "reservationId": "reservation-alias-conflict",
+            },
+        ),
         (
             200,
             {
@@ -283,47 +296,52 @@ def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
     assert sum(request.method == "POST" for request in seen) == 1
 
 
+def test_cloudbeds_invalid_json_submit_is_unknown_without_retry() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "GET":
+            assert request.url.path.endswith("/api/v1.3/getAvailableRoomTypes")
+            return httpx.Response(200, request=request, json=_availability())
+        assert request.url.path.endswith("/api/v1.1/postReservation")
+        return httpx.Response(
+            200,
+            request=request,
+            content=b"not-json",
+            headers={"Content-Type": "application/json"},
+        )
+
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        _transport(handler)(
+            "reserve_lodging",
+            _dispatch_payload(),
+            idempotency_key="idem:cloudbeds-invalid-json",
+        )
+
+    assert [request.method for request in seen] == ["GET", "POST"]
+    assert sum(request.method == "POST" for request in seen) == 1
+
+
+def _divergent_readback() -> dict[str, object]:
+    payload = _readback()
+    payload["data"]["reservationID"] = "reservation-divergent"
+    return payload
+
+
 @pytest.mark.parametrize(
-    "mutate",
+    ("readback_status", "readback_payload"),
     (
-        lambda body: body["data"].update(reservationID="different"),
-        lambda body: body["data"].update(startDate="2026-08-09"),
-        lambda body: body["data"].update(endDate="2026-08-13"),
-        lambda body: body["data"].update(total="451.00"),
-        lambda body: body["data"].update(totalAmount="451.00"),
-        lambda body: body["data"]["unassigned"][0].update(
-            roomTypeID="different-room"
-        ),
-        lambda body: body["data"]["unassigned"][0].update(
-            roomTypeId="different-room"
-        ),
-        lambda body: body["data"]["unassigned"][0].update(
-            startDate="2026-08-09"
-        ),
-        lambda body: body["data"]["unassigned"][0].update(
-            endDate="2026-08-13"
-        ),
-        lambda body: body["data"]["unassigned"][0].update(adults="1"),
-        lambda body: body["data"]["unassigned"][0].update(children="1"),
-        lambda body: body["data"]["unassigned"][0].update(roomTotal="451.00"),
-        lambda body: body["data"]["unassigned"][0]["dailyRates"].pop(),
-        lambda body: body["data"]["unassigned"][0]["dailyRates"][0].update(
-            rate="224.00"
-        ),
-        lambda body: body.update(success=False),
-        lambda body: body["data"].update(unassigned=[]),
-        lambda body: body["data"].update(
-            assigned=[deepcopy(body["data"]["unassigned"][0])]
-        ),
-        lambda body: body["data"].update(assigned=["malformed-room"]),
+        (404, {"success": False, "message": "synthetic not found"}),
+        (200, _divergent_readback()),
     ),
+    ids=("not-found", "divergent"),
 )
-def test_cloudbeds_readback_mismatch_is_unknown_after_exactly_one_submit(
-    mutate,
+def test_cloudbeds_readback_cannot_downgrade_accepted_submit(
+    readback_status: int,
+    readback_payload: dict[str, object],
 ) -> None:
     seen: list[httpx.Request] = []
-    readback = _readback()
-    mutate(readback)
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -336,17 +354,27 @@ def test_cloudbeds_readback_mismatch_is_unknown_after_exactly_one_submit(
                 json={"success": True, "reservationID": RESERVATION_ID},
             )
         assert request.url.path.endswith("/api/v1.3/getReservation")
-        return httpx.Response(200, request=request, json=readback)
-
-    with pytest.raises(ProviderHTTPError, match="read-back"):
-        _transport(handler)(
-            "reserve_lodging",
-            _dispatch_payload(),
-            idempotency_key="idem:cloudbeds-readback-mismatch",
+        return httpx.Response(
+            readback_status,
+            request=request,
+            json=readback_payload,
         )
 
-    assert [request.method for request in seen] == ["GET", "POST", "GET"]
-    assert sum(request.method == "POST" for request in seen) == 1
+    result = _transport(handler)(
+        "reserve_lodging",
+        _dispatch_payload(),
+        idempotency_key="idem:cloudbeds-monotonic-submit",
+    )
+
+    assert result == {"status": "confirmed", "reservation_id": RESERVATION_ID}
+    assert [
+        request.url.path for request in seen if request.method == "POST"
+    ] == ["/api/v1.1/postReservation"]
+    assert [
+        request.url.path
+        for request in seen
+        if request.url.path.endswith("/api/v1.3/getReservation")
+    ] == []
 
 
 @pytest.mark.parametrize(
