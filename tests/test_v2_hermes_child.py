@@ -55,8 +55,8 @@ def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> No
     assert captured["command"][3:5] == ("--toolsets", "")
     assert captured["command"][5] == "-z"
     assert "Do not call tools or perform effects" in captured["command"][6]
-    assert "v2-model-proposal-v3" in captured["command"][6]
-    assert "v2-model-proposal-v2" not in captured["command"][6]
+    assert "matching the supplied system contract" in captured["command"][6]
+    assert "v2-model-proposal-v" not in captured["command"][6]
     assert "--max-turns" not in captured["command"]
     assert "-q" not in captured["command"]
     assert captured["kwargs"] == {
