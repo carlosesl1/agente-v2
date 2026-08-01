@@ -145,6 +145,8 @@ def _success_handler(
     *,
     adults: int,
     children: int,
+    submit_status: int,
+    submit_payload: dict[str, object],
 ):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -180,9 +182,9 @@ def _success_handler(
             assert form["paymentMethod"] == ["credit_card"]
             assert request.headers["X-Idempotency-Key"] == "idem:cloudbeds-001"
             return httpx.Response(
-                200,
+                submit_status,
                 request=request,
-                json={"success": True, "reservationID": RESERVATION_ID},
+                json=submit_payload,
             )
         assert request.url.path.endswith("/api/v1.3/getReservation")
         assert parse_qs(request.url.query.decode())["reservationID"] == [
@@ -197,14 +199,32 @@ def _success_handler(
     return handler
 
 
-@pytest.mark.parametrize(("adults", "children"), ((1, 0), (2, 0), (2, 1)))
+@pytest.mark.parametrize(
+    ("adults", "children", "submit_status", "submit_payload"),
+    (
+        (1, 0, 200, {"success": True, "reservationID": RESERVATION_ID}),
+        (2, 0, 201, {"success": True, "reservationID": RESERVATION_ID}),
+        (2, 1, 200, {"reservationID": RESERVATION_ID}),
+    ),
+    ids=("200-success", "201-success", "200-no-success"),
+)
 def test_cloudbeds_accepted_submit_is_confirmed_without_readback(
     adults: int,
     children: int,
+    submit_status: int,
+    submit_payload: dict[str, object],
 ) -> None:
     seen: list[httpx.Request] = []
 
-    result = _transport(_success_handler(seen, adults=adults, children=children))(
+    result = _transport(
+        _success_handler(
+            seen,
+            adults=adults,
+            children=children,
+            submit_status=submit_status,
+            submit_payload=submit_payload,
+        )
+    )(
         "reserve_lodging",
         _dispatch_payload(adults=adults, children=children),
         idempotency_key="idem:cloudbeds-001",
