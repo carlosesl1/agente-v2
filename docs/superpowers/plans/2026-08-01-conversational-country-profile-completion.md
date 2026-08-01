@@ -64,7 +64,7 @@ Run Ruff nos arquivos alterados, `git diff --check`, compile dos módulos e test
 
 - [x] **Step 7b: Align model prompt with the effective boundary**
 
-Registrar explicitamente que nome/e-mail/telefone são autenticados pelo ManyChat e que o país canônico é validado do binding privado ou de fato tipado persistido; adicionar regressão que rejeita a afirmação anterior de que o país sempre veio autenticado do perfil.
+Registrar explicitamente que nome/e-mail/telefone são autenticados pelo ManyChat e que o país canônico é validado do binding privado ou de fato tipado persistido; adicionar regressão que rejeita a afirmação anterior de que o país sempre veio autenticado do perfil. Exigir também que país inequívoco informado no turno atual seja emitido como `country_code` mesmo com `intent=inform`, sem inferência por idioma, locale ou telefone.
 
 - [ ] **Step 8: Freeze and qualify**
 

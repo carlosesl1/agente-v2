@@ -30,6 +30,10 @@ def test_private_profile_marker_prevents_reasking_authenticated_contact() -> Non
     assert "autenticou nome, e-mail e telefone do contato principal" in PROMPT
     assert "validou o país canônico do binding privado ou de um fato tipado persistido" in PROMPT
     assert "autenticou nome, e-mail, telefone e país do contato principal" not in PROMPT
+    assert "país explicitamente informado na mensagem atual" in PROMPT
+    assert "Estados Unidos (US)" in PROMPT
+    assert "country_code=US" in PROMPT
+    assert "mesmo com intent=inform" in PROMPT
     assert "não peça novamente esses dados do contato" in PROMPT
     assert "não contém nem autoriza revelar os valores privados" in PROMPT
     assert "Mesmo quando a mensagem principal for uma pergunta" in PROMPT
