@@ -117,6 +117,36 @@ def _activity_draft(
     )
 
 
+def _lodging_draft():
+    offer = OfferSnapshot(
+        offer_id="offer:" + "d" * 32,
+        lookup_id="lookup:lodging:" + "e" * 64,
+        service=ServiceKind.LODGING,
+        provider_ref="f" * 64,
+        public_label="Suíte Casal",
+        start_date=date(2026, 8, 23),
+        end_date=date(2026, 8, 25),
+        start_time=None,
+        party=Party(adults=2, children=0),
+        total=Money(amount=Decimal("300.00"), currency="BRL"),
+        available=True,
+    )
+    return build_commercial_draft(
+        draft_id="draft:critical-lodging",
+        version=1,
+        created_at=NOW,
+        components=(offer,),
+        customer=CustomerFacts(
+            customer_ref="profile:critical-lodging-customer",
+            full_name="Pessoa Fictícia",
+            email="pessoa@example.invalid",
+            phone_e164="+12025550123",
+            country_code="US",
+        ),
+        terms=EconomicTerms(payment_method="stripe", add_ons=()),
+    )
+
+
 def _context(*, draft=None, presented_at: datetime = NOW):
     return critical_action_context(
         draft or _activity_draft(),
@@ -128,6 +158,52 @@ def _context(*, draft=None, presented_at: datetime = NOW):
         hostel_payment_percentage=100,
         policy=_enabled_policy(),
     )
+
+
+def test_lodging_confirmation_is_reservation_only_and_defers_payment() -> None:
+    policy = CriticalActionPolicy(
+        frozenset({CriticalActionKind.RESERVE_LODGING}),
+        enabled_payment_methods=frozenset(),
+    )
+    context = critical_action_context(
+        _lodging_draft(),
+        summary_version=1,
+        presented_at=NOW,
+        locale="pt-BR",
+        approval_ttl=TTL,
+        agency_payment_percentage=20,
+        hostel_payment_percentage=100,
+        policy=policy,
+    )
+
+    assert context.action_kinds == (CriticalActionKind.RESERVE_LODGING,)
+    assert "Suíte Casal" in context.public_summary
+    assert "R$ 300,00" in context.public_summary
+    assert "pagamento será tratado em uma etapa separada" in context.public_summary
+    assert "não faz parte desta confirmação" in context.public_summary
+    assert "link" not in context.public_summary.casefold()
+
+
+def test_lodging_reservation_only_summary_is_explicit_in_english() -> None:
+    policy = CriticalActionPolicy(
+        frozenset({CriticalActionKind.RESERVE_LODGING}),
+        enabled_payment_methods=frozenset(),
+    )
+    context = critical_action_context(
+        _lodging_draft(),
+        summary_version=1,
+        presented_at=NOW,
+        locale="en-US",
+        approval_ttl=TTL,
+        agency_payment_percentage=20,
+        hostel_payment_percentage=100,
+        policy=policy,
+    )
+
+    assert context.action_kinds == (CriticalActionKind.RESERVE_LODGING,)
+    folded = context.public_summary.casefold()
+    assert "payment will be handled in a separate step" in folded
+    assert "is not part of this confirmation" in folded
 
 
 def _awaiting(*, presented_at: datetime = NOW) -> AwaitingConfirmationState:

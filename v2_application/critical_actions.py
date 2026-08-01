@@ -164,7 +164,7 @@ def _payment_amount(total: Decimal, percentage: int) -> Decimal:
 def _actions(draft: CommercialDraft) -> tuple[CriticalActionKind, ...]:
     services = tuple(item.service for item in draft.components)
     if services == (ServiceKind.LODGING,):
-        reservation = CriticalActionKind.RESERVE_LODGING
+        return (CriticalActionKind.RESERVE_LODGING,)
     elif services == (ServiceKind.ACTIVITY,):
         reservation = CriticalActionKind.BOOK_ACTIVITY
     elif set(services) == {ServiceKind.LODGING, ServiceKind.ACTIVITY} and len(services) == 2:
@@ -281,12 +281,10 @@ def _public_summary_en(
                 f"to {_date_en(component.end_date)} for {_party_en(component.party)}, "
                 f"at a final total of {total}"
             )
-            payment = _payment_text_en(
-                method=method,
-                amount=component.total.amount,
-                currency=component.total.currency,
-                percentage=hostel_payment_percentage,
-                unit=ServiceKind.LODGING,
+            return (
+                f"Just to confirm: {effect}. Payment will be handled in a separate "
+                "step and is not part of this confirmation. May I make only this "
+                "booking?"
             )
         return (
             f"Just to confirm: {effect}, and then {payment}. "
@@ -374,12 +372,10 @@ def _public_summary(
                 f"a {_date(component.end_date)} para {_party(component.party)}, "
                 f"pelo total final de {total}"
             )
-            payment = _payment_text(
-                method=method,
-                amount=component.total.amount,
-                currency=component.total.currency,
-                percentage=hostel_payment_percentage,
-                unit=ServiceKind.LODGING,
+            return (
+                f"Só para confirmar: {effect}. O pagamento será tratado em uma "
+                "etapa separada e não faz parte desta confirmação. Posso fazer "
+                "somente essa reserva?"
             )
         return (
             f"Só para confirmar: {effect}, e depois {payment}. "

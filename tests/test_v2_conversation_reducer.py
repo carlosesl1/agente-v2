@@ -712,10 +712,14 @@ def _proposal(
             "agency": CriticalActionKind.BOOK_ACTIVITY,
             "package": CriticalActionKind.BOOK_PACKAGE,
         }[service]
-        confirmed_action_kinds = tuple(
-            sorted(
-                (action, CriticalActionKind.INITIATE_PAYMENT),
-                key=lambda item: item.value,
+        confirmed_action_kinds = (
+            (action,)
+            if service == "hostel"
+            else tuple(
+                sorted(
+                    (action, CriticalActionKind.INITIATE_PAYMENT),
+                    key=lambda item: item.value,
+                )
             )
         )
         approval_basis = ApprovalBasis.CONTEXTUAL_REFERENCE
@@ -1146,6 +1150,53 @@ def test_conversation_contact_facts_cannot_replace_authenticated_manychat_contac
     assert decision.public_reply.kind == "profile_completion"
 
 
+def test_lodging_only_policy_builds_one_action_summary_and_one_command() -> None:
+    reducer = V2ConversationReducer(
+        critical_action_policy=CriticalActionPolicy(
+            frozenset({CriticalActionKind.RESERVE_LODGING}),
+            enabled_payment_methods=frozenset(),
+        )
+    )
+    selected = reducer.reduce(
+        state=_boundary(),
+        projection=_projection(),
+        proposal=_proposal(
+            source="event:reservation-only-select",
+            intent="select",
+            target_offer_id=LODGING_OFFER_ID,
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW,
+    )
+
+    assert type(selected.next_state.workflow) is AwaitingConfirmationState
+    pending = reducer.pending_action(selected.next_state.workflow, locale="pt-BR")
+    assert pending is not None
+    assert pending.action_kinds == (CriticalActionKind.RESERVE_LODGING,)
+
+    confirmed = reducer.reduce(
+        state=selected.next_state,
+        projection=selected.projection,
+        proposal=replace(
+            _proposal(
+                source="event:reservation-only-confirm",
+                intent="confirm",
+                confirmed_summary_version=selected.next_state.workflow.draft.version,
+            ),
+            confirmed_action_kinds=(CriticalActionKind.RESERVE_LODGING,),
+        ),
+        profile=_profile(),
+        reads=(_lodging_read(),),
+        fact_commitment_hash=FRAME_HASH,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert len(confirmed.commands) == 1
+    assert confirmed.commands[0].operation is ReservationOperation.RESERVE_LODGING
+
+
 @pytest.mark.parametrize("intent", ("inform", "adjust"))
 def test_incomplete_profile_allows_non_identity_dependent_conversation(
     intent: str,
@@ -1219,8 +1270,9 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
     assert decision.public_reply.kind == "summary"
     assert decision.public_reply.chunks == (
         "Só para confirmar: vou reservar Suíte Casal de 10/08/2026 a "
-        "12/08/2026 para 2 pessoas, pelo total final de R$ 480,00, e depois "
-        "gerar o link do pagamento de R$ 480,00 no cartão. Posso fazer essa reserva?",
+        "12/08/2026 para 2 pessoas, pelo total final de R$ 480,00. O pagamento "
+        "será tratado em uma etapa separada e não faz parte desta confirmação. "
+        "Posso fazer somente essa reserva?",
     )
     assert "BRL" not in decision.public_reply.chunks[0]
     assert "stripe" not in decision.public_reply.chunks[0]
@@ -1239,7 +1291,7 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
 def test_disabled_critical_capability_fails_closed_with_public_denial() -> None:
     reducer = V2ConversationReducer(
         critical_action_policy=CriticalActionPolicy(
-            frozenset({CriticalActionKind.RESERVE_LODGING})
+            frozenset()
         )
     )
 
@@ -1852,7 +1904,6 @@ def test_informational_detour_preserves_pending_proposal_for_later_short_confirm
             effect_proposals=(),
             confirmed_summary_version=awaiting.draft.version,
             confirmed_action_kinds=(
-                CriticalActionKind.INITIATE_PAYMENT,
                 CriticalActionKind.RESERVE_LODGING,
             ),
             approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,

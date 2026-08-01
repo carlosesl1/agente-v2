@@ -883,7 +883,6 @@ def _approval_expiry_fixture(
         effect_proposals=(),
         confirmed_summary_version=1,
         confirmed_action_kinds=(
-            CriticalActionKind.INITIATE_PAYMENT,
             CriticalActionKind.RESERVE_LODGING,
         ),
         approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
@@ -1721,7 +1720,6 @@ def test_confirmation_read_derivation_requires_typed_confirm_and_current_version
             effect_proposals=(),
             confirmed_summary_version=2,
             confirmed_action_kinds=(
-                CriticalActionKind.INITIATE_PAYMENT,
                 CriticalActionKind.RESERVE_LODGING,
             ),
             approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
@@ -1735,7 +1733,6 @@ def test_confirmation_read_derivation_requires_typed_confirm_and_current_version
             effect_proposals=(),
             confirmed_summary_version=1,
             confirmed_action_kinds=(
-                CriticalActionKind.INITIATE_PAYMENT,
                 CriticalActionKind.RESERVE_LODGING,
             ),
             approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
@@ -1758,10 +1755,9 @@ def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
     pending = PendingCriticalActionContext(
         summary_version=1,
         action_kinds=(
-            CriticalActionKind.INITIATE_PAYMENT,
             CriticalActionKind.RESERVE_LODGING,
         ),
-        public_summary="Só para confirmar: vou reservar e gerar o link.",
+        public_summary="Só para confirmar: vou reservar; o pagamento fica separado.",
         expires_at=NOW + timedelta(minutes=30),
     )
     proposal = ModelProposal(
@@ -2108,7 +2104,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         effect_proposals=(),
         confirmed_summary_version=1,
         confirmed_action_kinds=(
-            CriticalActionKind.INITIATE_PAYMENT,
             CriticalActionKind.RESERVE_LODGING,
         ),
         approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
@@ -2183,7 +2178,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert pending is not None
         assert pending.public_summary == summary.reply_chunks[0]
         assert pending.action_kinds == (
-            CriticalActionKind.INITIATE_PAYMENT,
             CriticalActionKind.RESERVE_LODGING,
         )
         assert model.calls[2].confirmation_review_required is False
