@@ -75,6 +75,13 @@ from v2_application.passengers import (
     merge_projection_manifest,
     projection_passengers,
 )
+from v2_application.private_customer_facts import (
+    PrivateCustomerFactSnapshot,
+    PrivateCustomerFactValidationError,
+    canonical_country_code,
+    canonical_email,
+    canonical_full_name,
+)
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.critical_actions import PendingCriticalActionContext
 from v2_contracts.model import ModelFact, ModelProposal
@@ -289,40 +296,229 @@ def _projection_values(projection: ConversationProjection) -> dict[str, object]:
     return {item.name: item.value.value for item in projection.facts}
 
 
+_EFFECTIVE_FIELD_ORDER = ("full_name", "email", "phone_e164", "country_code")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class EffectiveCustomerResolution:
+    customer: CustomerFacts | None
+    missing_fields: tuple[str, ...]
+    conflicting_fields: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.customer is not None and type(self.customer) is not CustomerFacts:
+            raise TypeError("effective customer must be exact or None")
+        for field, values in (
+            ("missing_fields", self.missing_fields),
+            ("conflicting_fields", self.conflicting_fields),
+        ):
+            if (
+                type(values) is not tuple
+                or any(item not in _EFFECTIVE_FIELD_ORDER for item in values)
+                or tuple(
+                    item for item in _EFFECTIVE_FIELD_ORDER if item in values
+                )
+                != values
+            ):
+                raise ValueError(f"effective customer {field} is invalid")
+        if set(self.missing_fields) & set(self.conflicting_fields):
+            raise ValueError("effective customer fields cannot be missing and conflicting")
+        if self.customer is not None and (
+            self.missing_fields or self.conflicting_fields
+        ):
+            raise ValueError("ready effective customer cannot have unresolved fields")
+
+    @property
+    def ready(self) -> bool:
+        return self.customer is not None
+
+
+def _private_snapshot_hash(
+    private_facts: PrivateCustomerFactSnapshot | None,
+    *,
+    legacy_country: str | None,
+) -> str:
+    if private_facts is not None:
+        return private_facts.content_hash
+    return hashlib.sha256(
+        b"v2-private-customer-legacy-fallback-v1\0"
+        + json.dumps(
+            {"country_code": legacy_country},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _canonical_optional(
+    value: str | None,
+    canonicalizer,
+) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    try:
+        return canonicalizer(value), False
+    except PrivateCustomerFactValidationError:
+        return None, True
+
+
+def _fallback_field(
+    manychat_value: str | None,
+    private_value: str | None,
+    *,
+    canonicalizer,
+    compare_casefold: bool = False,
+    invalid_authoritative_is_missing: bool = False,
+) -> tuple[str | None, bool]:
+    authoritative, invalid_authoritative = _canonical_optional(
+        manychat_value,
+        canonicalizer,
+    )
+    fallback, invalid_fallback = _canonical_optional(private_value, canonicalizer)
+    if invalid_fallback or (
+        invalid_authoritative and not invalid_authoritative_is_missing
+    ):
+        return None, True
+    if authoritative is not None and fallback is not None:
+        left = authoritative.casefold() if compare_casefold else authoritative
+        right = fallback.casefold() if compare_casefold else fallback
+        if left != right:
+            return None, True
+    return authoritative or fallback, False
+
+
+def resolve_effective_customer(
+    profile: PrivateCustomerBinding,
+    projection: ConversationProjection,
+    now: datetime,
+    *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
+    activity_party: Party | None = None,
+) -> EffectiveCustomerResolution:
+    if type(profile) is not PrivateCustomerBinding:
+        raise TypeError("profile must be exact PrivateCustomerBinding")
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be exact ConversationProjection")
+    if private_facts is not None and type(private_facts) is not PrivateCustomerFactSnapshot:
+        raise TypeError("private_facts must be exact or None")
+    instant = _utc(now, "now")
+    facts = _projection_values(projection)
+    legacy_country = facts.get("country_code")
+    if type(legacy_country) is not str:
+        legacy_country = None
+
+    private_name = private_facts.full_name if private_facts is not None else None
+    private_email = private_facts.email if private_facts is not None else None
+    private_country = (
+        private_facts.country_code
+        if private_facts is not None and private_facts.country_code is not None
+        else legacy_country
+    )
+
+    full_name, name_conflict = _fallback_field(
+        profile.full_name,
+        private_name,
+        canonicalizer=canonical_full_name,
+        compare_casefold=True,
+        invalid_authoritative_is_missing=True,
+    )
+    email, email_conflict = _fallback_field(
+        profile.email,
+        private_email,
+        canonicalizer=canonical_email,
+    )
+    country, country_conflict = _fallback_field(
+        profile.country_code,
+        private_country,
+        canonicalizer=canonical_country_code,
+    )
+    profile_fresh = profile.observed_at <= instant < profile.expires_at
+    phone = profile.phone_e164 if profile_fresh else None
+
+    conflicts = tuple(
+        name
+        for name, conflict in (
+            ("full_name", name_conflict),
+            ("email", email_conflict),
+            ("country_code", country_conflict),
+        )
+        if conflict
+    )
+    missing = tuple(
+        name
+        for name, value in (
+            ("full_name", full_name),
+            ("email", email),
+            ("phone_e164", phone),
+            ("country_code", country),
+        )
+        if value is None and name not in conflicts
+    )
+    if conflicts or missing:
+        return EffectiveCustomerResolution(None, missing, conflicts)
+
+    assert full_name is not None
+    assert email is not None
+    assert phone is not None
+    assert country is not None
+    split_origin_used = private_facts is not None or (
+        profile.country_code is None and legacy_country is not None
+    )
+    if split_origin_used:
+        snapshot_hash = _private_snapshot_hash(
+            private_facts,
+            legacy_country=legacy_country,
+        )
+        customer_ref = "effective-customer:" + hashlib.sha256(
+            b"v2-effective-reservation-customer-v1\0"
+            + profile.binding_id.encode("utf-8")
+            + b"\0"
+            + profile.content_hash.encode("ascii")
+            + b"\0"
+            + snapshot_hash.encode("ascii")
+        ).hexdigest()
+    else:
+        customer_ref = profile.binding_id
+    passengers = ()
+    if activity_party is not None:
+        passengers = projection_passengers(projection, activity_party) or ()
+    try:
+        customer = CustomerFacts(
+            customer_ref=customer_ref,
+            full_name=full_name,
+            email=email,
+            phone_e164=phone,
+            country_code=country,
+            birth_date=facts.get("birth_date"),
+            gender=facts.get("gender"),
+            passengers=passengers,
+        )
+        if activity_party is not None:
+            effective_passengers(customer, activity_party)
+    except (TypeError, ValueError):
+        return EffectiveCustomerResolution(None, (), ("full_name",))
+    return EffectiveCustomerResolution(customer, (), ())
+
+
 def _customer(
     profile: PrivateCustomerBinding,
     projection: ConversationProjection,
     *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
     activity_party: Party | None = None,
 ) -> CustomerFacts:
-    facts = _projection_values(projection)
-    full_name = profile.full_name
-    email = profile.email
-    phone = profile.phone_e164
-    country = profile.country_code or facts.get("country_code")
-    if any(type(value) is not str for value in (full_name, email, phone, country)):
-        raise ConversationReductionError("complete profile has missing customer facts")
-    passengers = ()
-    if activity_party is not None:
-        passengers = projection_passengers(projection, activity_party) or ()
-    customer = CustomerFacts(
-        customer_ref=profile.binding_id,
-        full_name=full_name,
-        email=email,
-        phone_e164=phone,
-        country_code=country,
-        birth_date=facts.get("birth_date"),
-        gender=facts.get("gender"),
-        passengers=passengers,
+    resolution = resolve_effective_customer(
+        profile,
+        projection,
+        profile.observed_at,
+        private_facts=private_facts,
+        activity_party=activity_party,
     )
-    if activity_party is not None:
-        try:
-            effective_passengers(customer, activity_party)
-        except (TypeError, ValueError) as exc:
-            raise ConversationReductionError(
-                "activity passenger manifest is incomplete or divergent"
-            ) from exc
-    return customer
+    if not resolution.ready or resolution.customer is None:
+        raise ConversationReductionError("effective customer profile is not ready")
+    return resolution.customer
 
 
 def reservation_profile_ready(
@@ -330,15 +526,16 @@ def reservation_profile_ready(
     projection: ConversationProjection,
     now: datetime,
     *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
     activity_party: Party | None = None,
 ) -> bool:
-    if not profile.observed_at <= now < profile.expires_at:
-        return False
-    try:
-        _customer(profile, projection, activity_party=activity_party)
-    except (ConversationReductionError, TypeError, ValueError):
-        return False
-    return True
+    return resolve_effective_customer(
+        profile,
+        projection,
+        now,
+        private_facts=private_facts,
+        activity_party=activity_party,
+    ).ready
 
 
 def _proposal_values(proposal: ModelProposal) -> dict[str, object]:
@@ -1119,6 +1316,7 @@ class V2ConversationReducer:
         reads: tuple[ReadObservation, ...],
         fact_commitment_hash: str,
         now: datetime,
+        private_facts: PrivateCustomerFactSnapshot | None = None,
     ) -> V2ConversationDecision:
         if (
             type(state) is not BoundaryState
@@ -1128,6 +1326,8 @@ class V2ConversationReducer:
         proposal = validate_productive_proposal(proposal)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile must be exact PrivateCustomerBinding")
+        if private_facts is not None and type(private_facts) is not PrivateCustomerFactSnapshot:
+            raise TypeError("private_facts must be exact or None")
         if type(reads) is not tuple or any(
             type(item) is not ReadObservation for item in reads
         ):
@@ -1242,10 +1442,16 @@ class V2ConversationReducer:
             profile,
             merged,
             instant,
+            private_facts=private_facts,
             activity_party=activity_party,
         ):
             if (
-                reservation_profile_ready(profile, merged, instant)
+                reservation_profile_ready(
+                    profile,
+                    merged,
+                    instant,
+                    private_facts=private_facts,
+                )
                 and activity_party is not None
             ):
                 if activity_party.adults + activity_party.children == 1:
@@ -1277,6 +1483,7 @@ class V2ConversationReducer:
             _customer(
                 profile,
                 merged,
+                private_facts=private_facts,
                 activity_party=activity_party,
             )
 
@@ -1459,6 +1666,7 @@ class V2ConversationReducer:
             if workflow.draft.customer != _customer(
                 profile,
                 merged,
+                private_facts=private_facts,
                 activity_party=activity_party,
             ):
                 return V2ConversationDecision(
@@ -1633,6 +1841,7 @@ class V2ConversationReducer:
             customer = _customer(
                 profile,
                 merged,
+                private_facts=private_facts,
                 activity_party=activity_offer.party,
             )
             terms = EconomicTerms(payment_method=payment_method, add_ons=())
@@ -1804,6 +2013,7 @@ class V2ConversationReducer:
                     customer=_customer(
                         profile,
                         merged,
+                        private_facts=private_facts,
                         activity_party=(
                             offer.party
                             if offer.service is ServiceKind.ACTIVITY

@@ -65,6 +65,7 @@ from v2_application.conversation import (
     _handoff_effect_guard_reply,
 )
 from v2_application.passengers import projection_passengers
+from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.critical_actions import (
     CriticalActionPolicy,
     critical_action_context,
@@ -1286,6 +1287,81 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
         )
         == decision.projection
     )
+
+
+def test_selection_binds_split_origin_customer_and_confirmation_revalidates_it(
+    tmp_path,
+) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    phone_only = replace(
+        _profile(),
+        full_name=None,
+        email=None,
+        country_code=None,
+        complete=False,
+    )
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id="batch:split-origin-first",
+            source_event_hash="1" * 64,
+            facts=(
+                ModelFact("full_name", "Pessoa Reserva Silva"),
+                ModelFact("email", "reservation.person@example.invalid"),
+                ModelFact("country_code", "BR"),
+            ),
+            persisted_at=NOW,
+        )
+        original_private = store.load(LEAD_ID)
+        selected = _reducer().reduce(
+            state=_boundary(),
+            projection=_projection(),
+            proposal=_proposal(
+                source="event:select-split-origin",
+                intent="select",
+                target_offer_id=LODGING_OFFER_ID,
+            ),
+            profile=phone_only,
+            private_facts=original_private,
+            reads=(_lodging_read(),),
+            fact_commitment_hash=FRAME_HASH,
+            now=NOW,
+        )
+        awaiting = selected.next_state.workflow
+        assert type(awaiting) is AwaitingConfirmationState
+        assert awaiting.draft.customer.full_name == "Pessoa Reserva Silva"
+        assert awaiting.draft.customer.email == "reservation.person@example.invalid"
+        assert awaiting.draft.customer.phone_e164 == phone_only.phone_e164
+        assert awaiting.draft.customer.country_code == "BR"
+        assert awaiting.draft.customer.customer_ref.startswith("effective-customer:")
+
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id="batch:split-origin-changed",
+            source_event_hash="2" * 64,
+            facts=(ModelFact("full_name", "Pessoa Reserva Souza"),),
+            persisted_at=NOW + timedelta(seconds=1),
+        )
+        changed = _reducer().reduce(
+            state=selected.next_state,
+            projection=selected.projection,
+            proposal=_proposal(
+                source="event:confirm-changed-split-origin",
+                intent="confirm",
+                confirmed_summary_version=awaiting.draft.version,
+            ),
+            profile=phone_only,
+            private_facts=store.load(LEAD_ID),
+            reads=tuple(_read_for_component(item) for item in awaiting.draft.components),
+            fact_commitment_hash=FRAME_HASH,
+            now=NOW + timedelta(seconds=2),
+        )
+    finally:
+        store.close()
+
+    assert changed.commands == ()
+    assert type(changed.next_state.workflow) is AwaitingConfirmationState
+    assert changed.public_reply.kind == "profile_completion"
 
 
 def test_disabled_critical_capability_fails_closed_with_public_denial() -> None:

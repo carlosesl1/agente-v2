@@ -182,7 +182,7 @@ class PassengerFacts:
         object.__setattr__(self, "country_code", country)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class CustomerFacts:
     customer_ref: str
     full_name: str
