@@ -235,11 +235,26 @@ class ReconciliationStage:
                 "projection": empty_projection,
                 "observation": None,
             }
-        store = SQLiteCloudbedsAuditStore(
-            self._settings.sqlite_paths["cloudbeds_audit"]
-        )
+        audit_path = self._settings.sqlite_paths["cloudbeds_audit"]
+        execution_path = self._container.execution.path
+        if audit_path.exists():
+            try:
+                if audit_path.samefile(execution_path):
+                    return {
+                        "status": "degraded",
+                        "projection": empty_projection,
+                        "observation": {"status": "failed"},
+                    }
+            except OSError:
+                return {
+                    "status": "degraded",
+                    "projection": empty_projection,
+                    "observation": {"status": "failed"},
+                }
+        store: SQLiteCloudbedsAuditStore | None = None
         projection_payload = empty_projection
         try:
+            store = SQLiteCloudbedsAuditStore(audit_path)
             projection = CloudbedsAuditProjector(
                 execution=self._container.execution,
                 audit_store=store,
@@ -264,7 +279,8 @@ class ReconciliationStage:
                 "observation": {"status": "failed"},
             }
         finally:
-            store.close()
+            if store is not None:
+                store.close()
         return {
             "status": "ok",
             "projection": projection_payload,
@@ -583,6 +599,7 @@ def build_worker_set(
         else ClosedCapabilityWorker("reservation_writes")
     )
     payment_enabled = bool(settings.enabled_payment_methods)
+    completion_enabled = bool(settings.allowed_subscriber_ids)
     payment_worker: object = (
         _build_payment_worker(container=container, settings=settings)
         if payment_enabled
@@ -619,7 +636,7 @@ def build_worker_set(
             ),
             include_payment_offers=payment_enabled,
         )
-        if reservation_enabled or payment_enabled
+        if completion_enabled
         else ClosedCapabilityWorker("completion_projector")
     )
     public_delivery: object
@@ -732,7 +749,7 @@ def build_worker_set(
                 "ready" if payment_enabled else "closed"
             ),
             "completion_projector": (
-                "ready" if payment_enabled else "closed"
+                "ready" if completion_enabled else "closed"
             ),
             "stripe_test_links": (
                 "ready" if settings.stripe_links_enabled else "closed"

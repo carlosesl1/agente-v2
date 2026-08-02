@@ -645,6 +645,39 @@ def test_shadow_factory_mounts_real_model_profile_reads_and_inbox_worker(
 
 
 def _audit_enabled_settings(tmp_path: Path) -> V2Settings:
+    knowledge = (tmp_path / "knowledge.sqlite3").resolve()
+    knowledge.write_text(
+        "entries:\n  - id: faq-audit\n    topic: geral\n    question: Oi?\n    answer: Olá.\n",
+        encoding="utf-8",
+    )
+    key = b"audit-authority-key-0000000000001"
+    manifest = (tmp_path / "authority.json").resolve()
+    authority = {
+        "authorization_id": "authority:audit-composition-1",
+        "subscriber_id": "1873018537",
+        "target_binding_hash": "1" * 64,
+        "channel_id": "manychat:audit-composition",
+        "channel_scope": "manychat:subscriber-1873018537",
+        "generation": 1,
+        "capability_policy_digest": "2" * 64,
+        "effect_authorization_binding_digest": "3" * 64,
+        "contract_digest": "4" * 64,
+        "deadline_at": "2099-01-01T00:00:00+00:00",
+        "allocations": [{"allocation_id": "allocation:audit-0", "ordinal": 0}],
+    }
+    signed = {
+        "schema": "v2-public-authority-manifest-v1",
+        "authorities": [authority],
+    }
+    canonical = json.dumps(
+        signed,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    signed["hmac_sha256"] = hmac.new(key, canonical, hashlib.sha256).hexdigest()
+    manifest.write_text(json.dumps(signed), encoding="utf-8")
     return _settings(
         tmp_path,
         runtime_mode=RuntimeMode.CONTROLLED_WRITE,
@@ -660,9 +693,9 @@ def _audit_enabled_settings(tmp_path: Path) -> V2Settings:
         hermes_command=("python", "-m", "v2_host.hermes_child", "hermes"),
         hermes_system_prompt="Return the exact V2 proposal contract.",
         hermes_transcript_key=b"transcript-key-for-audit-test-00001",
-        knowledge_base_path=(tmp_path / "knowledge.sqlite3").resolve(),
-        public_authority_manifest_path=(tmp_path / "authority.json").resolve(),
-        public_authority_hmac_key=b"audit-authority-key-0000000000001",
+        knowledge_base_path=knowledge,
+        public_authority_manifest_path=manifest,
+        public_authority_hmac_key=key,
     )
 
 
@@ -791,7 +824,7 @@ def test_reconciliation_projects_one_cloudbeds_get_audit_and_owns_store_cycle(
         container.close()
 
 
-def test_reconciliation_observes_audit_failure_without_blocking_core_recovery(
+def test_reconciliation_records_transport_failure_as_bounded_retry_without_blocking_core(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -829,11 +862,112 @@ def test_reconciliation_observes_audit_failure_without_blocking_core_recovery(
         assert result["manual_handoff"] == {"manual_handoff": "projected"}
         assert result["status"] == "ok"
         assert result["cloudbeds_audit"] == {
-            "status": "degraded",
+            "status": "ok",
             "projection": {"inserted": 1, "replayed": 0, "ignored": 0},
-            "observation": {"status": "failed"},
+            "observation": {"status": "retryable_not_visible", "attempts": 1},
         }
         assert port.calls == ["reservation-composition-failure"]
+    finally:
+        container.close()
+
+
+def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _audit_enabled_settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    port = _AuditGETPort([{}])
+    monkeypatch.setattr(
+        production,
+        "CloudbedsGETAuditTransport",
+        lambda **_: port,
+        raising=False,
+    )
+    try:
+        execution = container.execution
+        assert execution is not None
+        audit_path = settings.sqlite_paths["cloudbeds_audit"]
+        audit_path.hardlink_to(execution.path)
+        tables_before = {
+            row[0]
+            for row in execution._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+
+        result = stage.run_once(now=T0 + timedelta(minutes=3))
+        tables_after = {
+            row[0]
+            for row in execution._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+
+        assert result["cloudbeds_audit"]["status"] == "degraded"
+        assert port.calls == []
+        assert execution.path.samefile(audit_path)
+        assert tables_after == tables_before
+        assert "cloudbeds_audit_tasks" not in tables_after
+    finally:
+        container.close()
+
+
+def test_confirmed_lodging_recovery_projects_completion_after_write_gate_closes(
+    tmp_path: Path,
+) -> None:
+    armed = _audit_enabled_settings(tmp_path)
+    first_container = V2Container.open(settings=armed, role=V2Role.WORKER)
+    try:
+        _seed_confirmed_cloudbeds_outcome(first_container, suffix="post-crash")
+    finally:
+        first_container.close()
+
+    closed = replace(
+        armed,
+        cloudbeds_writes_enabled=False,
+        global_kill_switch_engaged=True,
+        write_window_end=None,
+    )
+    recovered = V2Container.open(settings=closed, role=V2Role.WORKER)
+    try:
+        workers = build_worker_set(container=recovered, settings=closed)
+        completion = workers[WorkerQueue.POST_PAYMENT]
+
+        assert type(completion) is CompletionProjector
+        first = completion.run_once(now=T0 + timedelta(minutes=4))
+        replay = completion.run_once(now=T0 + timedelta(minutes=5))
+
+        assert first.inserted == 1
+        assert replay.inserted == 0
+        assert recovered.payment_initiation.completed_offers() == ()
+        payment_rows = recovered.payment_initiation._connection.execute(
+            "SELECT COUNT(*) FROM payment_initiations"
+        ).fetchone()[0]
+        assert payment_rows == 0
+        assert closed.cloudbeds_writes_enabled is False
+        assert closed.enabled_payment_methods == ()
+    finally:
+        recovered.close()
+
+
+def test_lodging_completion_readiness_is_ready_without_payment_effects(
+    tmp_path: Path,
+) -> None:
+    settings = _audit_enabled_settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        workers = build_worker_set(container=container, settings=settings)
+
+        assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert container.readiness().capabilities["completion_projector"] == "ready"
+        assert container.readiness().capabilities["outcome_projector"] == "closed"
+        assert container.readiness().capabilities["payment_initiation"] == "closed"
     finally:
         container.close()
 

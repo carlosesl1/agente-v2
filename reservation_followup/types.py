@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
@@ -563,10 +563,10 @@ class ConfirmedReservationAnchor:
     reservation_subject_signature: str
     reservation_outcome_hash: str
     reservation_outcome: ExecutionOutcome
-    provider_reference: str
+    provider_reference: str = field(repr=False)
     service: ServiceKind
     business_unit: BusinessUnit
-    payment_target_id: str
+    payment_target_id: str = field(repr=False)
     amount_minor: int
     currency: str
     receiver_profile_id: str
@@ -711,7 +711,7 @@ class PaymentSubject:
     currency: str
     receiver_profile_id: str
     business_unit: BusinessUnit
-    payment_target_id: str
+    payment_target_id: str = field(repr=False)
     method: PaymentMethod | None
     economic_signature: str
 

@@ -472,6 +472,15 @@ class V2Settings:
         paths = tuple(self.sqlite_paths.values())
         if len(set(paths)) != len(paths):
             raise ValueError("sqlite owner paths must be distinct")
+        existing_paths = tuple(path for path in paths if path.exists())
+        for index, left in enumerate(existing_paths):
+            for right in existing_paths[index + 1 :]:
+                try:
+                    same_file = left.samefile(right)
+                except OSError as exc:
+                    raise ValueError("sqlite owner paths cannot be authenticated") from exc
+                if same_file:
+                    raise ValueError("sqlite owner paths must be physically distinct")
 
     @property
     def real_effect_gates(self) -> dict[str, bool]:

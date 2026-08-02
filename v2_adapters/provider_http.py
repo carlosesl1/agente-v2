@@ -15,6 +15,7 @@ from difflib import SequenceMatcher
 import hashlib
 import hmac
 import json
+import logging
 import re
 from pathlib import Path
 import unicodedata
@@ -30,6 +31,44 @@ from v2_contracts.providers import (
     ReadRequest,
     canonical_cloudbeds_reference,
 )
+
+
+_PRIVATE_QUERY_RE = re.compile(
+    r"(?i)(reservation(?:ID|Id|_id)=)[^&\s\"']+"
+)
+
+
+def _redact_private_query_arg(value: object) -> object:
+    if isinstance(value, httpx.URL):
+        return _PRIVATE_QUERY_RE.sub(r"\1[REDACTED]", str(value))
+    if type(value) is str:
+        return _PRIVATE_QUERY_RE.sub(r"\1[REDACTED]", value)
+    if type(value) is bytes:
+        return _PRIVATE_QUERY_RE.sub(
+            r"\1[REDACTED]",
+            value.decode("utf-8", errors="replace"),
+        )
+    if type(value) is tuple:
+        return tuple(_redact_private_query_arg(item) for item in value)
+    if type(value) is list:
+        return [_redact_private_query_arg(item) for item in value]
+    if type(value) is dict:
+        return {
+            key: _redact_private_query_arg(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+class _PrivateCloudbedsReferenceLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.args = _redact_private_query_arg(record.args)
+        return True
+
+
+_PRIVATE_REFERENCE_LOG_FILTER = _PrivateCloudbedsReferenceLogFilter()
+for _private_logger_name in ("httpx", "httpcore"):
+    logging.getLogger(_private_logger_name).addFilter(_PRIVATE_REFERENCE_LOG_FILTER)
 
 
 class ProviderHTTPError(RuntimeError):
@@ -226,11 +265,27 @@ def _exact_object(
 _CLOUDBEDS_RESERVATION_ID_FIELDS = frozenset(
     ("reservationID", "reservationId", "reservation_id")
 )
+_CLOUDBEDS_COMPONENT_LOCAL_FIELDS = frozenset(
+    (
+        "activities",
+        "activity",
+        "components",
+        "component",
+        "guests",
+        "guest",
+        "passengers",
+        "passenger",
+        "rooms",
+        "room",
+    )
+)
 
 
 def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
-    """Return one conflict-free reservation ID and any explicit failure marker."""
+    """Return one conflict-free principal ID and an invalid/failure marker."""
 
+    if type(value) is not dict:
+        return None, True
     reservation_ids: set[str] = set()
     explicit_failure = False
     invalid_id_claim = False
@@ -238,8 +293,10 @@ def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
     def visit(node: object) -> None:
         nonlocal explicit_failure, invalid_id_claim
         if isinstance(node, Mapping):
-            if node.get("success") is False:
-                explicit_failure = True
+            if "success" in node:
+                success = node["success"]
+                if type(success) is not bool or success is False:
+                    explicit_failure = True
             for key, nested in node.items():
                 if key in _CLOUDBEDS_RESERVATION_ID_FIELDS:
                     try:
@@ -248,7 +305,7 @@ def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
                         invalid_id_claim = True
                     else:
                         reservation_ids.add(reference)
-                else:
+                elif key.casefold() not in _CLOUDBEDS_COMPONENT_LOCAL_FIELDS:
                     visit(nested)
         elif isinstance(node, list):
             for nested in node:
@@ -596,6 +653,7 @@ class CloudbedsGETAuditTransport:
                     "reservationID": canonical,
                 },
                 timeout=self._timeout,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
             raise ProviderHTTPError("Cloudbeds audit HTTP request failed") from exc
@@ -637,6 +695,7 @@ class CloudbedsHTTPTransport:
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 params={key: value for key, value in params.items() if value is not None},
                 timeout=self._timeout,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
             raise ProviderHTTPError("Cloudbeds HTTP request failed") from exc
@@ -852,6 +911,7 @@ class CloudbedsHTTPTransport:
                 },
                 data=form,
                 timeout=self._timeout,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
             raise ProviderHTTPError("Cloudbeds write result is ambiguous") from exc

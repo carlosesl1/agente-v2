@@ -610,5 +610,27 @@ class Phase6WireSerializationTests(unittest.TestCase):
         )
 
 
+    def test_private_cloudbeds_reference_is_absent_from_followup_repr(self) -> None:
+        raw_reference = "provider:cloudbeds:reservation-private-repr-sentinel"
+        reservation_outcome = ExecutionOutcome(
+            command_id="command:reservation:synthetic:1",
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+            normalized_status="reservation_created",
+            provider_reference=raw_reference,
+            evidence=("e" * 64,),
+        )
+        anchor = confirmed_anchor(
+            outcome=reservation_outcome,
+            payment_target_id=raw_reference,
+        )
+        subject = PaymentSubject.from_anchor(
+            anchor,
+            payment_id="payment:private-repr-sentinel",
+        )
+
+        self.assertNotIn(raw_reference, repr(anchor))
+        self.assertNotIn(raw_reference, repr(subject))
+
+
 if __name__ == "__main__":
     unittest.main()

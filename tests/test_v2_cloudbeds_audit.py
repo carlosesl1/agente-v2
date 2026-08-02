@@ -422,6 +422,137 @@ def test_attempt_budget_is_closed_and_stops_further_gets(tmp_path: Path) -> None
         execution.close()
 
 
+def test_conflicting_readback_reservation_alias_is_divergent(tmp_path: Path) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / "alias-conflict-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        initial = audit_store.list_tasks()[0]
+        payload = _exact_payload(initial)
+        payload["data"]["reservationId"] = "reservation-conflicting-alias"
+
+        result = _worker(api, audit_store, ScriptedGETPort([payload])).run_once(
+            now=NOW + timedelta(seconds=2)
+        )
+
+        assert result.status is api.CloudbedsAuditStatus.DIVERGENT
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+def test_transport_exception_consumes_one_bounded_retry_without_retaining_lease(
+    tmp_path: Path,
+) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / "transport-error-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        initial = audit_store.list_tasks()[0]
+
+        result = _worker(
+            api,
+            audit_store,
+            ScriptedGETPort([RuntimeError("synthetic transport failure")]),
+        ).run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.status is api.CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+        assert result.attempts == 1
+        assert result.lease is None
+        assert audit_store.load(initial.task.task_id) == result
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+def test_private_reservation_id_is_absent_from_audit_repr(tmp_path: Path) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / "repr-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        snapshot = audit_store.list_tasks()[0]
+
+        assert RESERVATION_ID not in repr(snapshot.task)
+        assert RESERVATION_ID not in repr(snapshot)
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+def test_audit_get_redacts_private_reservation_id_from_http_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="httpx")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"success": True, "data": {"reservationID": RESERVATION_ID}},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport = _provider_http_api().CloudbedsGETAuditTransport(
+        api_key="synthetic-cloudbeds-secret",
+        property_id=PROPERTY_ID,
+        base_url="https://api.cloudbeds.invalid",
+        client=client,
+    )
+    try:
+        transport.get_reservation(RESERVATION_ID)
+    finally:
+        client.close()
+
+    assert RESERVATION_ID not in caplog.text
+
+
+def test_audit_get_never_follows_redirects_even_when_client_default_does() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.host == "api.cloudbeds.invalid":
+            return httpx.Response(
+                307,
+                request=request,
+                headers={"Location": "https://redirect.invalid/audit"},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"success": True, "data": {"reservationID": RESERVATION_ID}},
+        )
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    transport = _provider_http_api().CloudbedsGETAuditTransport(
+        api_key="synthetic-cloudbeds-secret",
+        property_id=PROPERTY_ID,
+        base_url="https://api.cloudbeds.invalid",
+        client=client,
+    )
+    try:
+        with pytest.raises(Exception, match="status=307"):
+            transport.get_reservation(RESERVATION_ID)
+    finally:
+        client.close()
+
+    assert [(request.method, request.url.host) for request in seen] == [
+        ("GET", "api.cloudbeds.invalid")
+    ]
+
+
 def test_keyboard_interrupt_leaves_lease_then_expiry_allows_only_another_get(
     tmp_path: Path,
 ) -> None:

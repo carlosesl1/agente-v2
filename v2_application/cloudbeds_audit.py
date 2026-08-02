@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -74,7 +74,7 @@ class CloudbedsAuditExpectedFacts:
 class CloudbedsAuditTask:
     task_id: str
     command_id: str
-    reservation_id: str
+    reservation_id: str = field(repr=False)
     expected: CloudbedsAuditExpectedFacts
     max_attempts: int
 
@@ -451,7 +451,9 @@ class CloudbedsAuditProjector:
         _require_text(property_id, "property_id")
         if type(max_attempts) is not int or max_attempts < 1:
             raise ValueError("max_attempts must be a positive exact integer")
-        if audit_store.path == execution.path.resolve():
+        if audit_store.path == execution.path.resolve() or audit_store.path.samefile(
+            execution.path
+        ):
             raise ValueError("Cloudbeds audit store must be separate from execution")
         self._execution = execution
         self._audit_store = audit_store
@@ -544,8 +546,12 @@ class CloudbedsAuditWorker:
         )
         if claim is None:
             return None
-        payload = self._port.get_reservation(claim.task.reservation_id)
-        status = _validate_observation(payload, task=claim.task)
+        try:
+            payload = self._port.get_reservation(claim.task.reservation_id)
+        except RuntimeError:
+            status = CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+        else:
+            status = _validate_observation(payload, task=claim.task)
         return self._store._resolve(claim, status)
 
 
@@ -564,20 +570,25 @@ def _validate_observation(
     if type(payload) is not dict:
         return CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
     data = payload.get("data")
-    if isinstance(data, Mapping) and "reservationID" in data:
-        reservation_id = data["reservationID"]
-        if type(reservation_id) is str:
-            try:
-                canonical = canonical_cloudbeds_reference(reservation_id)
-            except ValueError:
-                canonical = None
-            if canonical is not None and canonical != task.reservation_id:
-                return CloudbedsAuditStatus.DIVERGENT
     if payload.get("success") is not True or type(data) is not dict:
         return CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+    reservation_claims: list[str] = []
+    for alias in ("reservationID", "reservationId", "reservation_id"):
+        if alias not in data:
+            continue
+        try:
+            reservation_claims.append(canonical_cloudbeds_reference(data[alias]))
+        except ValueError:
+            return CloudbedsAuditStatus.DIVERGENT
+    if not reservation_claims:
+        return CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+    if (
+        len(set(reservation_claims)) != 1
+        or reservation_claims[0] != task.reservation_id
+    ):
+        return CloudbedsAuditStatus.DIVERGENT
     expected = task.expected
     fields: tuple[tuple[str, object], ...] = (
-        ("reservationID", task.reservation_id),
         ("propertyID", expected.property_id),
         ("startDate", expected.start_date),
         ("endDate", expected.end_date),

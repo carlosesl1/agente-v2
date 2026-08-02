@@ -146,7 +146,7 @@ def _success_handler(
     adults: int,
     children: int,
     submit_status: int,
-    submit_payload: dict[str, object],
+    submit_payload: object,
 ):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -205,14 +205,35 @@ def _success_handler(
         (1, 0, 200, {"success": True, "reservationID": RESERVATION_ID}),
         (2, 0, 201, {"success": True, "reservationID": RESERVATION_ID}),
         (2, 1, 200, {"reservationID": RESERVATION_ID}),
+        (
+            2,
+            0,
+            200,
+            {
+                "reservationID": RESERVATION_ID,
+                "data": {
+                    "rooms": [
+                        {
+                            "success": False,
+                            "reservationID": "room-component-not-principal",
+                        }
+                    ]
+                },
+            },
+        ),
     ),
-    ids=("200-success", "201-success", "200-no-success"),
+    ids=(
+        "200-success",
+        "201-success",
+        "200-no-success",
+        "component-local-failure-is-not-reservation-failure",
+    ),
 )
 def test_cloudbeds_accepted_submit_is_confirmed_without_readback(
     adults: int,
     children: int,
     submit_status: int,
-    submit_payload: dict[str, object],
+    submit_payload: object,
 ) -> None:
     seen: list[httpx.Request] = []
 
@@ -252,6 +273,9 @@ def test_cloudbeds_accepted_submit_is_confirmed_without_readback(
         (409, {"success": True, "reservationID": RESERVATION_ID}),
         (500, {"success": True, "reservationID": RESERVATION_ID}),
         (200, {"success": False, "reservationID": RESERVATION_ID}),
+        (200, {"success": "false", "reservationID": RESERVATION_ID}),
+        (200, {"success": 0, "reservationID": RESERVATION_ID}),
+        (200, [{"reservationID": RESERVATION_ID}]),
         (
             200,
             {
@@ -293,7 +317,7 @@ def test_cloudbeds_accepted_submit_is_confirmed_without_readback(
 )
 def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
     status_code: int,
-    submit_payload: dict[str, object],
+    submit_payload: object,
 ) -> None:
     seen: list[httpx.Request] = []
 
@@ -536,3 +560,49 @@ def test_cloudbeds_write_timeout_is_unknown_without_retry() -> None:
 
     assert [request.method for request in seen] == ["GET", "POST"]
     assert sum(request.method == "POST" for request in seen) == 1
+
+
+def test_cloudbeds_submit_never_follows_redirects_even_when_client_default_does() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/api/v1.3/getAvailableRoomTypes"):
+            return httpx.Response(200, request=request, json=_availability())
+        if request.url.path.endswith("/api/v1.1/postReservation"):
+            return httpx.Response(
+                307,
+                request=request,
+                headers={"Location": "https://redirect.invalid/reservation"},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"reservationID": RESERVATION_ID},
+        )
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    transport = CloudbedsHTTPTransport(
+        api_key="cloudbeds-secret",
+        property_id="property-1",
+        source_id="source-1",
+        base_url="https://api.cloudbeds.invalid",
+        client=client,
+    )
+    try:
+        with pytest.raises(ProviderHTTPError, match="ambiguous"):
+            transport(
+                "reserve_lodging",
+                _dispatch_payload(),
+                idempotency_key="idem:cloudbeds-no-redirect",
+            )
+    finally:
+        client.close()
+
+    assert [(request.method, request.url.host) for request in seen] == [
+        ("GET", "api.cloudbeds.invalid"),
+        ("POST", "api.cloudbeds.invalid"),
+    ]

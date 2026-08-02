@@ -232,3 +232,12 @@ def test_sqlite_paths_include_a_separate_deterministic_cloudbeds_audit_owner(
         paths["public_outbox"],
     }
     assert len(paths) == len(set(paths.values()))
+
+
+def test_sqlite_paths_reject_existing_hardlink_aliases(tmp_path: Path) -> None:
+    settings = V2Settings.from_env(_controlled_env(tmp_path))
+    settings.sqlite_path.write_bytes(b"owner")
+    settings.sqlite_paths["execution"].hardlink_to(settings.sqlite_path)
+
+    with pytest.raises(ValueError, match="physically distinct"):
+        replace(settings)
