@@ -417,6 +417,7 @@ def _assert_signed_runtime(
             "inbox": 1,
             "payment_initiation": 1,
             "public_outbox": 1,
+            "private_customer": 1,
         }
         assert runtime.settings.all_real_effect_gates_closed is True
     finally:

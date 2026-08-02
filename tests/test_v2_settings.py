@@ -226,12 +226,25 @@ def test_sqlite_paths_include_a_separate_deterministic_cloudbeds_audit_owner(
     paths = settings.sqlite_paths
 
     assert paths["cloudbeds_audit"] == tmp_path / "v2-cloudbeds-audit.sqlite3"
+    assert paths["private_customer"] == tmp_path / "v2-private-customer.sqlite3"
     assert paths["cloudbeds_audit"] not in {
         paths["execution"],
         paths["payment_initiation"],
         paths["public_outbox"],
     }
     assert len(paths) == len(set(paths.values()))
+
+
+def test_sqlite_paths_reject_private_customer_hardlink_alias(
+    tmp_path: Path,
+) -> None:
+    settings = V2Settings.from_env(_controlled_env(tmp_path))
+    boundary = settings.sqlite_paths["boundary"]
+    boundary.write_bytes(b"boundary-owner")
+    settings.sqlite_paths["private_customer"].hardlink_to(boundary)
+
+    with pytest.raises(ValueError, match="physically distinct"):
+        replace(settings)
 
 
 def test_sqlite_paths_reject_existing_hardlink_aliases(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.completion import PublicOutboxStore
 from v2_application.inbox import SQLiteInbox
 from v2_application.payments import SQLitePaymentInitiationStore
+from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_host.public_authority import active_authority_reason
 from v2_host.settings import RuntimeMode, V2Settings
 
@@ -64,6 +65,7 @@ class V2Container:
         followup: SQLiteFollowupUnitOfWork | None,
         payment_initiation: SQLitePaymentInitiationStore | None,
         public_outbox: PublicOutboxStore | None,
+        private_customer: SQLitePrivateCustomerFactStore | None,
     ) -> None:
         self.settings = settings
         self.role = role
@@ -73,6 +75,7 @@ class V2Container:
         self.followup = followup
         self.payment_initiation = payment_initiation
         self.public_outbox = public_outbox
+        self.private_customer = private_customer
         self._runtime_capabilities: dict[str, str] | None = None
         self._public_authority_resolver: object | None = None
         self._closed = False
@@ -97,9 +100,14 @@ class V2Container:
                     followup=None,
                     payment_initiation=None,
                     public_outbox=None,
+                    private_customer=None,
                 )
             boundary = SQLiteBoundaryStore.open_path_v8(paths["boundary"])
             opened.append(boundary)
+            private_customer = SQLitePrivateCustomerFactStore(
+                paths["private_customer"]
+            )
+            opened.append(private_customer)
             execution = SQLiteUnitOfWork.open_v6(paths["execution"])
             opened.append(execution)
             followup = SQLiteFollowupUnitOfWork.open(paths["followup"])
@@ -123,6 +131,7 @@ class V2Container:
                 followup=followup,
                 payment_initiation=payment_initiation,
                 public_outbox=public_outbox,
+                private_customer=private_customer,
             )
         except BaseException:
             for owner in reversed(opened):
@@ -141,6 +150,7 @@ class V2Container:
             "inbox": 1,
             "payment_initiation": int(self.payment_initiation is not None),
             "public_outbox": int(self.public_outbox is not None),
+            "private_customer": int(self.private_customer is not None),
         }
 
     def readiness(self) -> V2Readiness:
@@ -153,6 +163,7 @@ class V2Container:
                 "inbox": 1,
                 "payment_initiation": 0,
                 "public_outbox": 0,
+                "private_customer": 0,
             },
             V2Role.WORKER: {
                 "boundary": 1,
@@ -161,6 +172,7 @@ class V2Container:
                 "inbox": 1,
                 "payment_initiation": 1,
                 "public_outbox": 1,
+                "private_customer": 1,
             },
         }[self.role]
         capabilities: dict[str, str]
@@ -304,6 +316,7 @@ class V2Container:
         if self._closed:
             return
         for owner in (
+            self.private_customer,
             self.public_outbox,
             self.payment_initiation,
             self.followup,

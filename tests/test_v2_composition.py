@@ -75,6 +75,7 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
             "inbox": 1,
             "payment_initiation": 1,
             "public_outbox": 1,
+            "private_customer": 1,
         }
         assert container.settings is settings
         assert container.role is V2Role.WORKER

@@ -388,6 +388,7 @@ def _build_inbox_worker(
         model=model,
         reads=reads,
         profile=profile,
+        private_customer_facts=container.private_customer,
         reducer=V2ConversationReducer(
             approval_ttl=timedelta(
                 seconds=settings.critical_approval_ttl_seconds

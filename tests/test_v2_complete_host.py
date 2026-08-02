@@ -123,6 +123,7 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness(
             "inbox": 1,
             "payment_initiation": 0,
             "public_outbox": 0,
+            "private_customer": 0,
         }
         assert worker.owner_counts() == {
             "boundary": 1,
@@ -131,6 +132,7 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness(
             "inbox": 1,
             "payment_initiation": 1,
             "public_outbox": 1,
+            "private_customer": 1,
         }
         assert api.readiness().status == "ready"
         assert worker.readiness().status == "not_ready"

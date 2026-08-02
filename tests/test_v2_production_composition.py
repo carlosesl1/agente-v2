@@ -27,6 +27,7 @@ from v2_host.production import (
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerQueue, _load_worker_factory
 from v2_application.payments import PaymentInitiationWorker
+from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.completion_projector import CompletionProjector
 from v2_application.public_delivery import CombinedPublicDeliveryWorker
@@ -185,10 +186,14 @@ def test_dark_read_only_factory_builds_closed_effect_graph_and_truthful_readines
 ) -> None:
     settings = _settings(tmp_path)
     container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    private_customer = container.private_customer
     try:
         workers = build_worker_set(container=container, settings=settings)
         readiness = container.readiness()
 
+        assert type(private_customer) is SQLitePrivateCustomerFactStore
+        assert private_customer.path == settings.sqlite_paths["private_customer"]
+        assert readiness.owner_counts["private_customer"] == 1
         assert set(workers) == set(WorkerQueue)
         assert readiness.status == "ready"
         assert readiness.capabilities["cloudbeds_reads"] == "ready"
@@ -215,6 +220,8 @@ def test_dark_read_only_factory_builds_closed_effect_graph_and_truthful_readines
         assert settings.all_real_effect_gates_closed is True
     finally:
         container.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        private_customer.load("manychat:closed-private-customer")
 
 
 def test_read_service_is_constructed_from_direct_provider_transports(tmp_path: Path) -> None:
