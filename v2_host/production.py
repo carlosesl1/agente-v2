@@ -571,12 +571,15 @@ def build_worker_set(
         worker_id="worker:boundary-relay",
         lease_ttl=timedelta(seconds=30),
     )
+    reservation_enabled = (
+        settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
+    )
     reservation_worker: object = (
         _build_reservation_worker(
             container=container,
             settings=settings,
         )
-        if settings.cloudbeds_writes_enabled or settings.bokun_writes_enabled
+        if reservation_enabled
         else ClosedCapabilityWorker("reservation_writes")
     )
     payment_enabled = bool(settings.enabled_payment_methods)
@@ -606,12 +609,17 @@ def build_worker_set(
             payment_store=container.payment_initiation,
             public_store=container.public_outbox,
             subscriber_id=settings.allowed_subscriber_ids[0],
-            account_profiles={
-                BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
-                BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
-            },
+            account_profiles=(
+                {
+                    BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
+                    BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
+                }
+                if payment_enabled
+                else None
+            ),
+            include_payment_offers=payment_enabled,
         )
-        if payment_enabled
+        if reservation_enabled or payment_enabled
         else ClosedCapabilityWorker("completion_projector")
     )
     public_delivery: object

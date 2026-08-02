@@ -47,7 +47,8 @@ class CompletionProjector:
         payment_store: SQLitePaymentInitiationStore,
         public_store: PublicOutboxStore,
         subscriber_id: str,
-        account_profiles: dict[BusinessUnit, str],
+        account_profiles: dict[BusinessUnit, str] | None,
+        include_payment_offers: bool = True,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
@@ -57,18 +58,24 @@ class CompletionProjector:
             raise TypeError("public_store must be exact PublicOutboxStore")
         if type(subscriber_id) is not str or not subscriber_id.isdecimal():
             raise ValueError("subscriber_id must be exact decimal text")
-        if type(account_profiles) is not dict or set(account_profiles) != set(
-            BusinessUnit
-        ):
+        if type(include_payment_offers) is not bool:
+            raise TypeError("include_payment_offers must be an exact bool")
+        profiles = {} if account_profiles is None else account_profiles
+        if type(profiles) is not dict:
+            raise TypeError("account_profiles must be an exact dict or None")
+        if profiles and set(profiles) != set(BusinessUnit):
             raise ValueError("account_profiles must cover both business units")
-        if len(set(account_profiles.values())) != len(account_profiles):
+        if include_payment_offers and set(profiles) != set(BusinessUnit):
+            raise ValueError("payment offers require both business unit profiles")
+        if len(set(profiles.values())) != len(profiles):
             raise ValueError("business units must have distinct account profiles")
         self._execution = execution
         self._payment_store = payment_store
         self._public_store = public_store
         self._lead_id = f"manychat:{subscriber_id}"
+        self._include_payment_offers = include_payment_offers
         self._unit_by_profile = {
-            profile: unit for unit, profile in account_profiles.items()
+            profile: unit for unit, profile in profiles.items()
         }
 
     def run_once(self, *, now: datetime) -> CompletionProjectionResult:
@@ -106,6 +113,8 @@ class CompletionProjector:
                 ),
                 now=instant,
             )
+        if not self._include_payment_offers:
+            return CompletionProjectionResult(inserted, attempted)
         for offer in self._payment_store.completed_offers():
             if type(offer) not in (StripePaymentLink, PaymentInstruction):
                 continue
