@@ -80,7 +80,14 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
         assert container.role is V2Role.WORKER
         assert container.execution is not None
         assert container.execution._schema_version == SCHEMA_VERSION_V6
-        assert all(path.is_file() for path in settings.sqlite_paths.values())
+        container_owned_paths = {
+            name: path
+            for name, path in settings.sqlite_paths.items()
+            if name != "cloudbeds_audit"
+        }
+        assert set(container_owned_paths) == set(container.owner_counts())
+        assert all(path.is_file() for path in container_owned_paths.values())
+        assert settings.sqlite_paths["cloudbeds_audit"].exists() is False
     finally:
         container.close()
 
