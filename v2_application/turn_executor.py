@@ -947,6 +947,7 @@ def _private_customer_fact_names(
     *,
     private_facts: PrivateCustomerFactSnapshot | None = None,
     profile: PrivateCustomerBinding | None = None,
+    now: datetime | None = None,
 ) -> tuple[str, ...]:
     present = {item.name for item in projection.facts}
     if private_facts is not None:
@@ -956,16 +957,29 @@ def _private_customer_fact_names(
     if profile is not None:
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile must be exact or None")
-        present.update(
-            name
-            for name, value in (
-                ("full_name", profile.full_name),
-                ("email", profile.email),
-                ("phone_e164", profile.phone_e164),
-                ("country_code", profile.country_code),
-            )
-            if value is not None
-        )
+        if (
+            type(now) is not datetime
+            or now.tzinfo is None
+            or now.utcoffset() != timedelta(0)
+        ):
+            raise TypeError("profile presence markers require exact UTC now")
+        for name, value, canonicalizer in (
+            ("full_name", profile.full_name, canonical_full_name),
+            ("email", profile.email, canonical_email),
+            ("country_code", profile.country_code, canonical_country_code),
+        ):
+            if value is None:
+                continue
+            try:
+                canonicalizer(value)
+            except (TypeError, ValueError):
+                continue
+            present.add(name)
+        if (
+            profile.phone_e164 is not None
+            and profile.observed_at <= now < profile.expires_at
+        ):
+            present.add("phone_e164")
     return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
 
 
@@ -973,13 +987,26 @@ def _expected_private_customer_fact_names(
     profile: PrivateCustomerBinding,
     private_facts: PrivateCustomerFactSnapshot,
 ) -> tuple[str, ...]:
-    full_name_missing = (
-        private_facts.full_name is None
-        and (profile.full_name is None or len(profile.full_name.split()) < 2)
+    def valid(value: str | None, canonicalizer) -> bool:
+        if value is None:
+            return False
+        try:
+            canonicalizer(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    full_name_missing = private_facts.full_name is None and not valid(
+        profile.full_name,
+        canonical_full_name,
     )
-    email_missing = private_facts.email is None and profile.email is None
-    country_missing = (
-        private_facts.country_code is None and profile.country_code is None
+    email_missing = private_facts.email is None and not valid(
+        profile.email,
+        canonical_email,
+    )
+    country_missing = private_facts.country_code is None and not valid(
+        profile.country_code,
+        canonical_country_code,
     )
     return tuple(
         name
@@ -1543,6 +1570,7 @@ class V2TurnExecutor:
                 projection,
                 private_facts=private_facts,
                 profile=profile,
+                now=now,
             ),
             passenger_manifest_status=_passenger_status(projection),
             critical_outcome=_critical_outcome(projection),
@@ -1838,10 +1866,11 @@ class V2TurnExecutor:
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
                 private_customer_fact_names=_private_customer_fact_names(
-                projection,
-                private_facts=private_facts,
-                profile=profile,
-            ),
+                    projection,
+                    private_facts=private_facts,
+                    profile=profile,
+                    now=now,
+                ),
                 passenger_manifest_status=_passenger_status(
                     projection,
                     first_proposal,

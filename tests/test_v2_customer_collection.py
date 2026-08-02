@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from datetime import date, datetime, timedelta, timezone
 
@@ -128,6 +129,49 @@ def test_executor_exposes_only_private_fact_presence() -> None:
         "birth_date",
         "gender",
     )
+
+
+def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields() -> None:
+    profile = PrivateCustomerBinding(
+        binding_id="profile-binding:invalid-presence-markers",
+        content_hash="f" * 64,
+        full_name="Mononym",
+        email="@example.invalid",
+        phone_e164="".join(("+1", "202", "555", "0196")),
+        country_code="ZZ",
+        observed_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=5),
+        complete=True,
+    )
+
+    assert _private_customer_fact_names(
+        ConversationProjection(
+            stage=ConversationStage.RECEPTIONIST,
+            desired_services=(),
+            locale="pt-BR",
+            facts=(),
+            reservation_execution_projection=None,
+        ),
+        profile=profile,
+        now=NOW,
+    ) == ("phone_e164",)
+
+    expired = replace(
+        profile,
+        observed_at=NOW - timedelta(minutes=6),
+        expires_at=NOW,
+    )
+    assert _private_customer_fact_names(
+        ConversationProjection(
+            stage=ConversationStage.RECEPTIONIST,
+            desired_services=(),
+            locale="pt-BR",
+            facts=(),
+            reservation_execution_projection=None,
+        ),
+        profile=expired,
+        now=NOW,
+    ) == ()
 
 
 def test_reducer_accumulates_user_supplied_customer_facts_when_profile_is_empty() -> None:
