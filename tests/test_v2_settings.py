@@ -216,3 +216,19 @@ def test_hermes_system_prompt_path_fails_closed(tmp_path: Path) -> None:
     env["V2_HERMES_SYSTEM_PROMPT_PATH"] = str(tmp_path / "missing.txt")
     with pytest.raises(ValueError, match="unreadable"):
         V2Settings.from_env(env)
+
+
+def test_sqlite_paths_include_a_separate_deterministic_cloudbeds_audit_owner(
+    tmp_path: Path,
+) -> None:
+    settings = V2Settings.from_env(_controlled_env(tmp_path))
+
+    paths = settings.sqlite_paths
+
+    assert paths["cloudbeds_audit"] == tmp_path / "v2-cloudbeds-audit.sqlite3"
+    assert paths["cloudbeds_audit"] not in {
+        paths["execution"],
+        paths["payment_initiation"],
+        paths["public_outbox"],
+    }
+    assert len(paths) == len(set(paths.values()))

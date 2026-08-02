@@ -564,6 +564,7 @@ class V2Settings:
             "followup": parent / "v2-followup.sqlite3",
             "payment_initiation": parent / "v2-payment-initiation.sqlite3",
             "public_outbox": parent / "v2-public-outbox.sqlite3",
+            "cloudbeds_audit": parent / "v2-cloudbeds-audit.sqlite3",
         }
 
     @property

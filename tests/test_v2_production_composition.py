@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from reservation_domain import ReservationOperation
+from reservation_domain import ExecutionCertainty, ReservationOperation, dumps_command
+from reservation_execution import DispatchRequest
 from v2_application.critical_actions import CriticalActionDisposition
+from v2_application.cloudbeds_audit import SQLiteCloudbedsAuditStore
 from v2_contracts.critical_actions import CriticalActionKind
 from v2_contracts.providers import ReadKind
 from reservation_followup.workers import HandoffOutboxWorker
@@ -30,6 +32,8 @@ from v2_application.completion_projector import CompletionProjector
 from v2_application.public_delivery import CombinedPublicDeliveryWorker
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.workers import V2ReservationWorker
+import v2_host.production as production
+from tests.phase5_helpers import T0, persist_script, workflow_events
 
 REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 
@@ -636,5 +640,246 @@ def test_shadow_factory_mounts_real_model_profile_reads_and_inbox_worker(
         assert container.readiness().capabilities["manychat_profile"] == "ready"
         assert container.readiness().capabilities["knowledge_reads"] == "ready"
         assert container.readiness().capabilities["manychat_delivery"] == "closed"
+    finally:
+        container.close()
+
+
+def _audit_enabled_settings(tmp_path: Path) -> V2Settings:
+    return _settings(
+        tmp_path,
+        runtime_mode=RuntimeMode.CONTROLLED_WRITE,
+        cloudbeds_writes_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
+        allowed_subscriber_ids=("1873018537",),
+        hermes_model="openai-codex/gpt-5.6-luna",
+        candidate_git_sha="a" * 40,
+        candidate_image_digest="sha256:" + "b" * 64,
+        manychat_api_key="manychat-secret",
+        hermes_command=("python", "-m", "v2_host.hermes_child", "hermes"),
+        hermes_system_prompt="Return the exact V2 proposal contract.",
+        hermes_transcript_key=b"transcript-key-for-audit-test-00001",
+        knowledge_base_path=(tmp_path / "knowledge.sqlite3").resolve(),
+        public_authority_manifest_path=(tmp_path / "authority.json").resolve(),
+        public_authority_hmac_key=b"audit-authority-key-0000000000001",
+    )
+
+
+def _seed_confirmed_cloudbeds_outcome(container: V2Container, *, suffix: str) -> None:
+    execution = container.execution
+    assert execution is not None
+    workflow_id = f"workflow:composition-audit-{suffix}"
+    initial, script = workflow_events("cloudbeds", workflow_id=workflow_id)
+    execution.create_workflow(initial)
+    persist_script(execution, workflow_id, script)
+    claim = execution.claim_command(
+        worker_id=f"worker:composition-audit-{suffix}",
+        now=T0 + timedelta(minutes=2),
+        lease_ttl=timedelta(seconds=30),
+    )
+    assert claim is not None
+    request = DispatchRequest.from_command(claim.command, dumps_command(claim.command))
+    permit = execution.fence_dispatch(
+        claim,
+        request,
+        now=T0 + timedelta(minutes=2),
+    )
+    execution.record_outcome(
+        permit,
+        claim.command.outcome(
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+            normalized_status="confirmed",
+            provider_reference=f"provider:cloudbeds:reservation-composition-{suffix}",
+            evidence=(request.payload_hash,),
+        ),
+        now=T0 + timedelta(minutes=2, seconds=1),
+    )
+
+
+class _AuditGETPort:
+    def __init__(self, actions: list[object]) -> None:
+        self.actions = list(actions)
+        self.calls: list[str] = []
+
+    def get_reservation(self, reservation_id: str) -> object:
+        self.calls.append(reservation_id)
+        if not self.actions:
+            raise AssertionError("unexpected synthetic Cloudbeds audit GET")
+        action = self.actions.pop(0)
+        if isinstance(action, Exception):
+            raise action
+        return action
+
+
+class _StageRunner:
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.calls: list[datetime] = []
+
+    def run_once(self, *, now: datetime) -> object:
+        self.calls.append(now)
+        return self.result
+
+
+def test_reconciliation_projects_one_cloudbeds_get_audit_and_owns_store_cycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _audit_enabled_settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    port = _AuditGETPort([{}])
+    transport_kwargs: list[dict[str, object]] = []
+    opened_stores: list[SQLiteCloudbedsAuditStore] = []
+
+    def build_transport(**kwargs: object) -> _AuditGETPort:
+        transport_kwargs.append(dict(kwargs))
+        return port
+
+    def open_store(path: Path) -> SQLiteCloudbedsAuditStore:
+        store = SQLiteCloudbedsAuditStore(path)
+        opened_stores.append(store)
+        return store
+
+    monkeypatch.setattr(
+        production,
+        "CloudbedsGETAuditTransport",
+        build_transport,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        production,
+        "SQLiteCloudbedsAuditStore",
+        open_store,
+        raising=False,
+    )
+    try:
+        _seed_confirmed_cloudbeds_outcome(container, suffix="one")
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+
+        assert port.calls == []
+        assert opened_stores == []
+
+        result = stage.run_once(now=T0 + timedelta(minutes=3))
+
+        assert port.calls == ["reservation-composition-one"]
+        assert transport_kwargs == [
+            {
+                "api_key": "cloudbeds-secret",
+                "property_id": "property-1",
+                "base_url": "https://api.cloudbeds.com",
+            }
+        ]
+        assert result["cloudbeds_audit"] == {
+            "status": "ok",
+            "projection": {"inserted": 1, "replayed": 0, "ignored": 0},
+            "observation": {"status": "retryable_not_visible", "attempts": 1},
+        }
+        assert len(opened_stores) == 1
+        assert opened_stores[0].path == settings.sqlite_paths["cloudbeds_audit"]
+        assert opened_stores[0]._closed is True
+        assert stage._cloudbeds_audit_transport is port
+        assert all(
+            not hasattr(port, name)
+            for name in ("source_id", "idempotency_key", "post", "post_reservation")
+        )
+    finally:
+        container.close()
+
+
+def test_reconciliation_observes_audit_failure_without_blocking_core_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _audit_enabled_settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    port = _AuditGETPort([RuntimeError("synthetic audit failure")])
+    monkeypatch.setattr(
+        production,
+        "CloudbedsGETAuditTransport",
+        lambda **_: port,
+        raising=False,
+    )
+    try:
+        _seed_confirmed_cloudbeds_outcome(container, suffix="failure")
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+        reservation = _StageRunner({"reservation": "reconciled"})
+        payment = _StageRunner({"payment": "reconciled"})
+        manual_handoff = _StageRunner({"manual_handoff": "projected"})
+        stage._reservation = reservation
+        stage._payment = payment
+        stage._manual_handoff = manual_handoff
+        now = T0 + timedelta(minutes=3)
+
+        result = stage.run_once(now=now)
+
+        assert reservation.calls == [now]
+        assert payment.calls == [now]
+        assert manual_handoff.calls == [now]
+        assert result["reservation"] == {"reservation": "reconciled"}
+        assert result["payment"] == {"payment": "reconciled"}
+        assert result["manual_handoff"] == {"manual_handoff": "projected"}
+        assert result["status"] == "ok"
+        assert result["cloudbeds_audit"] == {
+            "status": "degraded",
+            "projection": {"inserted": 1, "replayed": 0, "ignored": 0},
+            "observation": {"status": "failed"},
+        }
+        assert port.calls == ["reservation-composition-failure"]
+    finally:
+        container.close()
+
+
+def test_reconciliation_audit_is_closed_with_gate_closed_and_queue_catalog_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+
+    def forbidden_transport(**_: object) -> object:
+        raise AssertionError("closed Cloudbeds audit constructed a transport")
+
+    monkeypatch.setattr(
+        production,
+        "CloudbedsGETAuditTransport",
+        forbidden_transport,
+        raising=False,
+    )
+    try:
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+
+        result = stage.run_once(now=T0 + timedelta(minutes=3))
+
+        assert result["cloudbeds_audit"] == {
+            "status": "closed",
+            "projection": {"inserted": 0, "replayed": 0, "ignored": 0},
+            "observation": None,
+        }
+        assert settings.sqlite_paths["cloudbeds_audit"].exists() is False
+        assert tuple(queue.value for queue in WorkerQueue) == (
+            "inbox",
+            "boundary_relay",
+            "reservation",
+            "handoff",
+            "outcome_projector",
+            "payment_initiation",
+            "settlement",
+            "post_payment",
+            "public_delivery",
+            "reconciliation",
+        )
     finally:
         container.close()

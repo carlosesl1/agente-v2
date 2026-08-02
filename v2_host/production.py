@@ -26,6 +26,7 @@ from v2_adapters.payment_instructions import FilePaymentInstructionCatalog
 from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.provider_http import (
     BokunHTTPTransport,
+    CloudbedsGETAuditTransport,
     CloudbedsHTTPTransport,
     FileKnowledgeTransport,
     ManyChatHTTPTransport,
@@ -33,6 +34,11 @@ from v2_adapters.provider_http import (
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.cloudbeds_audit import (
+    CloudbedsAuditProjector,
+    CloudbedsAuditWorker,
+    SQLiteCloudbedsAuditStore,
+)
 from v2_application.completion_projector import CompletionProjector
 from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.outcome_projector import ReservationOutcomeProjector
@@ -145,12 +151,20 @@ class ReconciliationStage:
             raise TypeError("reconciliation requires an exact worker container")
         if container.execution is None or container.followup is None:
             raise ValueError("reconciliation durable owners are unavailable")
+        self._container = container
         self._reservation = Reconciler(container.execution)
         self._payment = PaymentReconciler(store=container.followup)
         if (reads is None) != (settings is None):
             raise ValueError("read probe requires both service and settings")
         self._reads = reads
         self._settings = settings
+        self._cloudbeds_audit_transport = None
+        if settings is not None and settings.cloudbeds_writes_enabled:
+            self._cloudbeds_audit_transport = CloudbedsGETAuditTransport(
+                api_key=settings.cloudbeds_api_key,
+                property_id=settings.cloudbeds_property_id,
+                base_url=settings.cloudbeds_base_url,
+            )
         self._manual_handoff = None
         if settings is not None and settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
             if len(settings.allowed_subscriber_ids) != 1:
@@ -209,6 +223,61 @@ class ReconciliationStage:
         self._probe_healthy = True
         return {"status": "fresh_healthy"}
 
+    def _run_cloudbeds_audit(self, *, now: datetime) -> dict[str, object]:
+        empty_projection = {"inserted": 0, "replayed": 0, "ignored": 0}
+        if (
+            self._cloudbeds_audit_transport is None
+            or self._settings is None
+            or self._container.execution is None
+        ):
+            return {
+                "status": "closed",
+                "projection": empty_projection,
+                "observation": None,
+            }
+        store = SQLiteCloudbedsAuditStore(
+            self._settings.sqlite_paths["cloudbeds_audit"]
+        )
+        projection_payload = empty_projection
+        try:
+            projection = CloudbedsAuditProjector(
+                execution=self._container.execution,
+                audit_store=store,
+                property_id=self._settings.cloudbeds_property_id,
+                max_attempts=3,
+            ).run_once()
+            projection_payload = {
+                "inserted": projection.inserted,
+                "replayed": projection.replayed,
+                "ignored": projection.ignored,
+            }
+            observation = CloudbedsAuditWorker(
+                store=store,
+                port=self._cloudbeds_audit_transport,
+                worker_id="worker:cloudbeds-audit",
+                lease_ttl=timedelta(seconds=30),
+            ).run_once(now=now)
+        except Exception:
+            return {
+                "status": "degraded",
+                "projection": projection_payload,
+                "observation": {"status": "failed"},
+            }
+        finally:
+            store.close()
+        return {
+            "status": "ok",
+            "projection": projection_payload,
+            "observation": (
+                None
+                if observation is None
+                else {
+                    "status": observation.status.value,
+                    "attempts": observation.attempts,
+                }
+            ),
+        }
+
     def run_once(self, *, now: datetime) -> dict[str, object]:
         reservation = self._reservation.run_once(now=now)
         manual_handoff = (
@@ -222,6 +291,7 @@ class ReconciliationStage:
             "reservation": reservation,
             "manual_handoff": manual_handoff,
             "payment": self._payment.run_once(now=now),
+            "cloudbeds_audit": self._run_cloudbeds_audit(now=now),
         }
 
 
