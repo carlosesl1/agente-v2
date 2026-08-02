@@ -21,8 +21,8 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 |---|---|---|
 | 1. Autoridade, spec e plano | `DONE` | `1329eeec5d5afe7729756d61ff181febaa99ec6d` |
 | 2. Owner SQLite privado e canonicalização | `DONE` | `0b7ac7e0d9d51a33581988852d631d1fd05b656c` |
-| 3. Resolver parent-owned de cliente efetivo | `NEXT` | — |
-| 4. Protocolo collection-only e privacidade de artifacts | `PENDING` | — |
+| 3. Resolver parent-owned de cliente efetivo | `DONE` | `2e3fb81559268761b423055bc991b933d8797ee3` |
+| 4. Protocolo collection-only e privacidade de artifacts | `NEXT` | — |
 | 5. Composição/runtime do owner separado | `PENDING` | — |
 | 6. E2E Cloudbeds fake, replay e regressões | `PENDING` | — |
 | 7. Qualificação, revisão, push e CI exatos | `PENDING` | — |
@@ -35,7 +35,7 @@ Evidência Task 2:
 - Ruff, compileall e `git diff --check`: verdes;
 - zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
 
-- NEXT: escrever REDs do resolver efetivo para fallback, conflito, binding futuro/expirado e identidade split-origin; somente depois alterar o reducer.
+- NEXT: escrever REDs do executor para persistir/retirar fatos privados, impedir resumo/comando no turno de coleta (inclusive replay) e provar artifacts/wire sem valores; somente depois alterar o executor/model adapter.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
