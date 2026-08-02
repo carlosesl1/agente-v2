@@ -35,6 +35,7 @@ from v2_contracts.providers import (
     ProviderDispatchPermit,
     ProviderExecutionResult,
     ProviderWriteAuthorization,
+    cloudbeds_outcome_reference,
 )
 
 
@@ -482,7 +483,7 @@ class V2ReservationExecutionAdapter:
         if type(result) is not ProviderExecutionResult:
             raise TypeError("provider port returned a non-canonical result")
         if self.provider == "cloudbeds" and result.provider_reference is not None:
-            provider_reference = f"provider:cloudbeds:{result.provider_reference}"
+            provider_reference = cloudbeds_outcome_reference(result.provider_reference)
         elif result.provider_reference_fingerprint is not None:
             provider_reference = (
                 f"provider:{self.provider}:"

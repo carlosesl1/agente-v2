@@ -43,6 +43,23 @@ class Phase5DomainOutcomeTests(unittest.TestCase):
         self.assertEqual(loads_outcome(raw), outcome)
         self.assertEqual(dumps_outcome(loads_outcome(raw)), raw)
 
+    def test_outcome_repr_hides_reference_without_changing_wire_roundtrip(self) -> None:
+        provider_reference = "provider:cloudbeds:reservation-synthetic-123"
+        outcome = ExecutionOutcome(
+            command_id="command:phase5:confirmed-private-reference",
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+            normalized_status="confirmed",
+            provider_reference=provider_reference,
+            evidence=("e" * 64,),
+        )
+
+        raw = dumps_outcome(outcome)
+
+        self.assertNotIn(provider_reference, repr(outcome))
+        self.assertIn(provider_reference, raw)
+        self.assertEqual(loads_outcome(raw), outcome)
+        self.assertEqual(dumps_outcome(loads_outcome(raw)), raw)
+
     def test_outcome_loader_rejects_duplicate_keys_bool_and_unknown_fields(self) -> None:
         valid = json.loads(
             dumps_outcome(

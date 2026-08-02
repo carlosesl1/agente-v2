@@ -11,6 +11,7 @@ from v2_contracts.providers import (
     ProviderCertainty,
     ProviderDispatchPermit,
     ProviderExecutionResult,
+    canonical_cloudbeds_reference,
 )
 
 
@@ -105,9 +106,20 @@ def reservation_result(
     status = response.get("status")
     if status == "confirmed":
         reference = response.get(reference_field)
-        if type(reference) is not str or not reference.strip():
+        if (
+            type(reference) is not str
+            or not reference
+            or reference != reference.strip()
+        ):
             raise ProviderReadError("confirmed provider response lacks its reference")
-        canonical_reference = reference.strip()
+        canonical_reference = reference
+        if provider == "cloudbeds":
+            try:
+                canonical_reference = canonical_cloudbeds_reference(reference)
+            except ValueError as exc:
+                raise ProviderReadError(
+                    "confirmed provider response has a noncanonical reference"
+                ) from exc
         return ProviderExecutionResult(
             ProviderCertainty.EFFECT_CONFIRMED,
             "confirmed",

@@ -11,6 +11,10 @@ from enum import Enum
 from typing import Any, Final
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_CLOUDBEDS_RAW_REFERENCE_RE: Final = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,108}$"
+)
+_CLOUDBEDS_OUTCOME_REFERENCE_PREFIX: Final = "provider:cloudbeds:"
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _LOCALE_RE: Final = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 _PRODUCT_ID_RE: Final = re.compile(r"^product:[a-z0-9][a-z0-9._-]{0,127}$")
@@ -34,6 +38,23 @@ def _text(value: object, name: str, *, identifier: bool = False) -> str:
     if identifier and _ID_RE.fullmatch(value) is None:
         raise InvalidReadRequest(f"{name} is not a canonical identifier")
     return value
+
+
+def canonical_cloudbeds_reference(value: object) -> str:
+    """Return an exact raw Cloudbeds reference that fits the private outcome ID."""
+
+    if (
+        type(value) is not str
+        or _CLOUDBEDS_RAW_REFERENCE_RE.fullmatch(value) is None
+    ):
+        raise ValueError("provider_reference must be a canonical Cloudbeds reference")
+    return value
+
+
+def cloudbeds_outcome_reference(value: object) -> str:
+    """Prefix a validated raw Cloudbeds reference without changing its bytes."""
+
+    return _CLOUDBEDS_OUTCOME_REFERENCE_PREFIX + canonical_cloudbeds_reference(value)
 
 
 def _utc(value: object, name: str) -> datetime:
@@ -365,11 +386,7 @@ class ProviderExecutionResult:
         ):
             raise ValueError("provider_reference_fingerprint must be a SHA-256 or None")
         if self.provider_reference is not None:
-            reference = _text(
-                self.provider_reference,
-                "provider_reference",
-                identifier=True,
-            )
+            reference = canonical_cloudbeds_reference(self.provider_reference)
             if self.certainty is not ProviderCertainty.EFFECT_CONFIRMED:
                 raise ValueError(
                     "only effect_confirmed may carry a provider_reference"
@@ -399,4 +416,6 @@ __all__ = [
     "ReadKind",
     "ReadObservation",
     "ReadRequest",
+    "canonical_cloudbeds_reference",
+    "cloudbeds_outcome_reference",
 ]

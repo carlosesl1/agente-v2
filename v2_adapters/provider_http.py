@@ -25,7 +25,11 @@ import yaml
 
 from v2_adapters._provider_common import binding_hash
 from v2_adapters.manychat import ManyChatTransportResponse, ManyChatTransportNotCalled
-from v2_contracts.providers import ReadKind, ReadRequest
+from v2_contracts.providers import (
+    ReadKind,
+    ReadRequest,
+    canonical_cloudbeds_reference,
+)
 
 
 class ProviderHTTPError(RuntimeError):
@@ -238,8 +242,9 @@ def _cloudbeds_submit_evidence(value: object) -> tuple[str | None, bool]:
                 explicit_failure = True
             for key, nested in node.items():
                 if key in _CLOUDBEDS_RESERVATION_ID_FIELDS:
-                    reference = _text(nested)
-                    if reference is None:
+                    try:
+                        reference = canonical_cloudbeds_reference(nested)
+                    except ValueError:
                         invalid_id_claim = True
                     else:
                         reservation_ids.add(reference)

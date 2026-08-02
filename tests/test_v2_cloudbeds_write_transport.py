@@ -316,6 +316,50 @@ def test_cloudbeds_bad_submit_evidence_is_unknown_without_readback_or_retry(
     assert sum(request.method == "POST" for request in seen) == 1
 
 
+@pytest.mark.parametrize(
+    "raw_reference",
+    (
+        " reservation-123",
+        "reservation-123 ",
+        123,
+        123.5,
+        "reservation/123",
+        "x" * 110,
+    ),
+    ids=(
+        "leading-space",
+        "trailing-space",
+        "integer",
+        "float",
+        "slash",
+        "too-long",
+    ),
+)
+def test_cloudbeds_submit_rejects_noncanonical_reservation_reference(
+    raw_reference: object,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, request=request, json=_availability())
+        return httpx.Response(
+            200,
+            request=request,
+            json={"success": True, "reservationID": raw_reference},
+        )
+
+    with pytest.raises(ProviderHTTPError, match="ambiguous"):
+        _transport(handler)(
+            "reserve_lodging",
+            _dispatch_payload(),
+            idempotency_key="idem:cloudbeds-noncanonical-reference",
+        )
+
+    assert [request.method for request in seen] == ["GET", "POST"]
+
+
 def test_cloudbeds_invalid_json_submit_is_unknown_without_retry() -> None:
     seen: list[httpx.Request] = []
 

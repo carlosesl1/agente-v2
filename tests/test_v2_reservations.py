@@ -13,6 +13,7 @@ from reservation_domain import (
     CustomerFacts,
     EconomicTerms,
     ExecutionCertainty,
+    ExecutionOutcome,
     ManualReviewState,
     Money,
     PassengerFacts,
@@ -27,6 +28,7 @@ from reservation_domain.signature import command_identity, subject_signature
 from reservation_execution import DispatchPermit, Lease, PreparationFailure
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from tests.phase5_helpers import T0, _lookup, persist_script, workflow_events
+from v2_adapters._provider_common import ProviderReadError
 from v2_adapters.bokun import BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReservationPort
 from v2_application.completion import PublicOutboxStore
@@ -155,8 +157,9 @@ def test_provider_execution_result_accepts_matching_canonical_raw_reference() ->
     (
         " reservation-synthetic-123",
         "reservation synthetic 123",
+        "reservation/synthetic/123",
         "reservation-synthetic-123\n",
-        "x" * 257,
+        "x" * 110,
     ),
 )
 def test_provider_execution_result_rejects_noncanonical_raw_reference(
@@ -500,6 +503,7 @@ def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
         assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
         assert outcome.provider_reference == f"provider:cloudbeds:{raw_reference}"
         assert all(raw_reference not in item for item in outcome.evidence)
+        assert raw_reference not in repr(outcome)
         assert store._connection.execute(
             "SELECT dispatch_slots_consumed,status FROM execution_ledger "
             "WHERE command_id=?",
@@ -1135,6 +1139,82 @@ def test_model_supplied_provider_payload_is_rejected_before_provider() -> None:
     assert port.calls == []
 
 
+def _provider_port_permit(
+    *,
+    provider: str,
+    operation: str,
+) -> ProviderDispatchPermit:
+    payload = json.dumps(
+        {
+            "command_id": "cmd:v2-provider-port-001",
+            "operation": operation,
+            "schema": "v2-reservation-dispatch-v1",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return ProviderDispatchPermit(
+        provider=provider,
+        operation=operation,
+        command_id="cmd:v2-provider-port-001",
+        idempotency_key="idem:v2-provider-port-001",
+        request_hash="c" * 64,
+        payload_hash=hashlib.sha256(payload.encode()).hexdigest(),
+        canonical_payload=payload,
+        fencing_token=1,
+        authorization_id=f"authorization:{provider}:task3-fix",
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_reference",
+    (
+        " reservation-123",
+        "reservation-123 ",
+        123,
+        "reservation/123",
+        "x" * 110,
+    ),
+    ids=("leading-space", "trailing-space", "integer", "slash", "too-long"),
+)
+def test_cloudbeds_port_rejects_noncanonical_raw_reference_before_outcome(
+    raw_reference: object,
+) -> None:
+    permit = _provider_port_permit(
+        provider="cloudbeds",
+        operation="reserve_lodging",
+    )
+
+    def transport(selected_operation, payload, *, idempotency_key):
+        return {"status": "confirmed", "reservation_id": raw_reference}
+
+    with pytest.raises(ProviderReadError, match="reference"):
+        CloudbedsReservationPort(transport).execute(permit)
+
+
+def test_cloudbeds_maximum_raw_reference_fits_execution_outcome() -> None:
+    raw_reference = "x" * 109
+    permit = _provider_port_permit(
+        provider="cloudbeds",
+        operation="reserve_lodging",
+    )
+
+    def transport(selected_operation, payload, *, idempotency_key):
+        return {"status": "confirmed", "reservation_id": raw_reference}
+
+    result = CloudbedsReservationPort(transport).execute(permit)
+    outcome = ExecutionOutcome(
+        command_id=permit.command_id,
+        certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        normalized_status=result.normalized_status,
+        provider_reference=f"provider:cloudbeds:{result.provider_reference}",
+        evidence=result.evidence,
+    )
+
+    assert result.provider_reference == raw_reference
+    assert outcome.provider_reference == f"provider:cloudbeds:{raw_reference}"
+
+
 @pytest.mark.parametrize(
     ("port_type", "provider", "operation", "reference_field", "expected_raw"),
     (
@@ -1162,25 +1242,9 @@ def test_specific_provider_ports_expose_raw_reference_only_for_cloudbeds(
         calls.append((selected_operation, payload, idempotency_key))
         return {"status": "confirmed", reference_field: raw_reference}
 
-    payload = json.dumps(
-        {
-            "command_id": "cmd:v2-provider-port-001",
-            "operation": operation,
-            "schema": "v2-reservation-dispatch-v1",
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    permit = ProviderDispatchPermit(
+    permit = _provider_port_permit(
         provider=provider,
         operation=operation,
-        command_id="cmd:v2-provider-port-001",
-        idempotency_key="idem:v2-provider-port-001",
-        request_hash="c" * 64,
-        payload_hash=hashlib.sha256(payload.encode()).hexdigest(),
-        canonical_payload=payload,
-        fencing_token=1,
-        authorization_id=f"authorization:{provider}:task4",
     )
 
     result = port_type(transport).execute(permit)
@@ -1192,4 +1256,6 @@ def test_specific_provider_ports_expose_raw_reference_only_for_cloudbeds(
     assert result.provider_reference == (raw_reference if expected_raw else None)
     assert raw_reference not in repr(result.evidence)
     assert raw_reference not in repr(result)
-    assert calls == [(operation, json.loads(payload), permit.idempotency_key)]
+    assert calls == [
+        (operation, json.loads(permit.canonical_payload), permit.idempotency_key)
+    ]

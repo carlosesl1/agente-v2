@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -566,7 +566,7 @@ class ExecutionOutcome:
     command_id: str
     certainty: ExecutionCertainty
     normalized_status: str
-    provider_reference: str | None = None
+    provider_reference: str | None = field(default=None, repr=False)
     evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
