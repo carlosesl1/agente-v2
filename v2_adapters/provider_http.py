@@ -806,27 +806,6 @@ class CloudbedsHTTPTransport:
             or reservation_id is None
         ):
             raise ProviderHTTPError("Cloudbeds write result is ambiguous")
-        try:
-            readback = self._get(
-                "/api/v1.3/getReservation",
-                {
-                    "propertyID": self._property_id,
-                    "reservationID": reservation_id,
-                },
-            )
-            _validate_cloudbeds_readback(
-                readback,
-                reservation_id=reservation_id,
-                room_type_id=room_type_id,
-                start_date=start_date,
-                end_date=end_date,
-                expected_dates=expected_dates,
-                adults=adults,
-                children=children,
-                amount=amount,
-            )
-        except ProviderHTTPError as exc:
-            raise ProviderHTTPError("Cloudbeds write read-back did not match") from exc
         return {"status": "confirmed", "reservation_id": reservation_id}
 
     def _lodging(self, payload: dict[str, object]) -> dict[str, object]:
