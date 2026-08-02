@@ -23,8 +23,8 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 | 2. Owner SQLite privado e canonicalização | `DONE` | `0b7ac7e0d9d51a33581988852d631d1fd05b656c` |
 | 3. Resolver parent-owned de cliente efetivo | `DONE` | `2e3fb81559268761b423055bc991b933d8797ee3` |
 | 4. Protocolo collection-only e privacidade de artifacts | `DONE` | `f08a0af949464ff9426056122ab002b3cc6e0fe5` |
-| 5. Wiring/settings/close do store privado | `NEXT` | — |
-| 6. E2E Cloudbeds fake, replay e regressões | `PENDING` | — |
+| 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
+| 6. E2E Cloudbeds fake, replay e regressões | `NEXT` | — |
 | 7. Qualificação, revisão, push e CI exatos | `PENDING` | — |
 
 Evidência Task 2:
@@ -35,7 +35,7 @@ Evidência Task 2:
 - Ruff, compileall e `git diff --check`: verdes;
 - zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
 
-- NEXT: escrever REDs de settings/composition provando caminho privado absoluto, distinto por path/inode dos stores boundary/execution/audit, owner explícito no executor e fechamento do handle; somente depois alterar wiring de produção.
+- NEXT: escrever RED E2E fake para coleta natural → turno posterior de resumo → confirmação natural → exatamente um comando/dispatch/POST, payload Cloudbeds split-origin exato e replay/restart; então ampliar regressões de telefone/PII/Cloudbeds/Bókun.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
