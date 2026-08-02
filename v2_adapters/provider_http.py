@@ -545,6 +545,63 @@ def _validate_cloudbeds_readback(
         raise ProviderHTTPError(error)
 
 
+class CloudbedsGETAuditTransport:
+    """Expose only the authenticated Cloudbeds reservation audit read."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        property_id: str,
+        base_url: str = "https://api.cloudbeds.com",
+        timeout_seconds: float = 10.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        if type(api_key) is not str or not api_key:
+            raise ValueError("Cloudbeds audit API key is required")
+        if (
+            type(property_id) is not str
+            or not property_id
+            or property_id != property_id.strip()
+        ):
+            raise ValueError("Cloudbeds audit property ID is required")
+        if type(base_url) is not str or not base_url.startswith("https://"):
+            raise ValueError("Cloudbeds audit base URL must use HTTPS")
+        if type(timeout_seconds) not in (int, float) or timeout_seconds <= 0:
+            raise ValueError("Cloudbeds audit timeout must be positive")
+        self._api_key = api_key
+        self._property_id = property_id
+        self._base_url = re.sub(
+            r"/api/v\d+(?:\.\d+)?/?$", "", base_url.rstrip("/")
+        )
+        self._timeout = float(timeout_seconds)
+        self._client = client or httpx.Client()
+
+    def __repr__(self) -> str:
+        return "CloudbedsGETAuditTransport(auth=bearer)"
+
+    def get_reservation(self, reservation_id: str) -> object:
+        try:
+            canonical = canonical_cloudbeds_reference(reservation_id)
+        except ValueError as exc:
+            raise ProviderHTTPError(
+                "Cloudbeds audit reservation ID is invalid"
+            ) from exc
+        try:
+            response = self._client.get(
+                self._base_url + "/api/v1.3/getReservation",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                params={
+                    "propertyID": self._property_id,
+                    "reservationID": canonical,
+                },
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise ProviderHTTPError("Cloudbeds audit HTTP request failed") from exc
+        return _json_response(response, provider="Cloudbeds")
+
+
 class CloudbedsHTTPTransport:
     """Call Cloudbeds v1.3/v1.2 read endpoints and return the closed V2 DTO."""
 
