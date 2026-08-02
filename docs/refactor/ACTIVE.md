@@ -22,8 +22,8 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 | 1. Autoridade, spec e plano | `DONE` | `1329eeec5d5afe7729756d61ff181febaa99ec6d` |
 | 2. Owner SQLite privado e canonicalização | `DONE` | `0b7ac7e0d9d51a33581988852d631d1fd05b656c` |
 | 3. Resolver parent-owned de cliente efetivo | `DONE` | `2e3fb81559268761b423055bc991b933d8797ee3` |
-| 4. Protocolo collection-only e privacidade de artifacts | `NEXT` | — |
-| 5. Composição/runtime do owner separado | `PENDING` | — |
+| 4. Protocolo collection-only e privacidade de artifacts | `DONE` | `f08a0af949464ff9426056122ab002b3cc6e0fe5` |
+| 5. Wiring/settings/close do store privado | `NEXT` | — |
 | 6. E2E Cloudbeds fake, replay e regressões | `PENDING` | — |
 | 7. Qualificação, revisão, push e CI exatos | `PENDING` | — |
 
@@ -35,7 +35,7 @@ Evidência Task 2:
 - Ruff, compileall e `git diff --check`: verdes;
 - zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
 
-- NEXT: escrever REDs do executor para persistir/retirar fatos privados, impedir resumo/comando no turno de coleta (inclusive replay) e provar artifacts/wire sem valores; somente depois alterar o executor/model adapter.
+- NEXT: escrever REDs de settings/composition provando caminho privado absoluto, distinto por path/inode dos stores boundary/execution/audit, owner explícito no executor e fechamento do handle; somente depois alterar wiring de produção.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
