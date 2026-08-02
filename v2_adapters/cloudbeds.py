@@ -219,6 +219,7 @@ class CloudbedsReservationPort:
             operation="reserve_lodging",
             reference_field="reservation_id",
             transport=self._transport,
+            persist_provider_reference=True,
         )
 
 

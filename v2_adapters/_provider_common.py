@@ -84,9 +84,12 @@ def reservation_result(
     operation: str,
     reference_field: str,
     transport,
+    persist_provider_reference: bool = False,
 ) -> ProviderExecutionResult:
     if type(permit) is not ProviderDispatchPermit:
         raise TypeError("permit must be an exact ProviderDispatchPermit")
+    if type(persist_provider_reference) is not bool:
+        raise TypeError("persist_provider_reference must be an exact bool")
     if permit.provider != provider or permit.operation != operation:
         raise ProviderReadError("provider reservation permit mismatch")
     payload = json.loads(permit.canonical_payload)
@@ -104,11 +107,15 @@ def reservation_result(
         reference = response.get(reference_field)
         if type(reference) is not str or not reference.strip():
             raise ProviderReadError("confirmed provider response lacks its reference")
+        canonical_reference = reference.strip()
         return ProviderExecutionResult(
             ProviderCertainty.EFFECT_CONFIRMED,
             "confirmed",
-            hashlib.sha256(reference.strip().encode("utf-8")).hexdigest(),
+            hashlib.sha256(canonical_reference.encode("utf-8")).hexdigest(),
             (evidence,),
+            provider_reference=(
+                canonical_reference if persist_provider_reference else None
+            ),
         )
     if status in ("rejected", "no_effect"):
         return ProviderExecutionResult(

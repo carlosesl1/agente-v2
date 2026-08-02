@@ -29,6 +29,9 @@ from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from tests.phase5_helpers import T0, _lookup, persist_script, workflow_events
 from v2_adapters.bokun import BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReservationPort
+from v2_application.completion import PublicOutboxStore
+from v2_application.completion_projector import CompletionProjector
+from v2_application.payments import SQLitePaymentInitiationStore
 from v2_application.reads import PrivateOfferBindingResolver
 from v2_application.reservations import (
     DispatchRejected,
@@ -43,6 +46,7 @@ from v2_application.relay_worker import (
 from v2_application.turn_executor import _execution_commands
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
 from v2_contracts.private_offers import PrivateOfferBinding
+from v2_contracts.payments import BusinessUnit
 from v2_contracts.providers import (
     ProviderCertainty,
     ProviderDispatchPermit,
@@ -128,6 +132,80 @@ def _result(certainty: ProviderCertainty) -> ProviderExecutionResult:
         ),
         evidence=("b" * 64,),
     )
+
+
+def test_provider_execution_result_accepts_matching_canonical_raw_reference() -> None:
+    raw_reference = "reservation-synthetic-123"
+    fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
+
+    result = ProviderExecutionResult(
+        certainty=ProviderCertainty.EFFECT_CONFIRMED,
+        normalized_status="confirmed",
+        provider_reference_fingerprint=fingerprint,
+        evidence=("b" * 64,),
+        provider_reference=raw_reference,
+    )
+
+    assert result.provider_reference == raw_reference
+    assert raw_reference not in repr(result)
+
+
+@pytest.mark.parametrize(
+    "raw_reference",
+    (
+        " reservation-synthetic-123",
+        "reservation synthetic 123",
+        "reservation-synthetic-123\n",
+        "x" * 257,
+    ),
+)
+def test_provider_execution_result_rejects_noncanonical_raw_reference(
+    raw_reference: str,
+) -> None:
+    fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
+
+    with pytest.raises(ValueError, match="provider_reference"):
+        ProviderExecutionResult(
+            certainty=ProviderCertainty.EFFECT_CONFIRMED,
+            normalized_status="confirmed",
+            provider_reference_fingerprint=fingerprint,
+            evidence=("b" * 64,),
+            provider_reference=raw_reference,
+        )
+
+
+def test_provider_execution_result_rejects_raw_reference_fingerprint_mismatch() -> None:
+    with pytest.raises(ValueError, match="fingerprint"):
+        ProviderExecutionResult(
+            certainty=ProviderCertainty.EFFECT_CONFIRMED,
+            normalized_status="confirmed",
+            provider_reference_fingerprint="a" * 64,
+            evidence=("b" * 64,),
+            provider_reference="reservation-synthetic-123",
+        )
+
+
+@pytest.mark.parametrize(
+    "certainty",
+    (
+        ProviderCertainty.NOT_CALLED,
+        ProviderCertainty.CALLED_NO_EFFECT,
+        ProviderCertainty.CALLED_UNKNOWN,
+    ),
+)
+def test_provider_execution_result_rejects_raw_reference_without_confirmed_effect(
+    certainty: ProviderCertainty,
+) -> None:
+    raw_reference = "reservation-synthetic-123"
+
+    with pytest.raises(ValueError, match="only effect_confirmed"):
+        ProviderExecutionResult(
+            certainty=certainty,
+            normalized_status="not_confirmed",
+            provider_reference_fingerprint=None,
+            evidence=("b" * 64,),
+            provider_reference=raw_reference,
+        )
 
 
 def _worker(
@@ -368,6 +446,13 @@ def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
     source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
     raw_reference = "reservation-123"
     calls: list[tuple[str, dict[str, object], str]] = []
+    payments = SQLitePaymentInitiationStore(
+        (tmp_path / "cloudbeds-completion-payments.sqlite3").resolve(),
+        result_encryption_key=b"c" * 32,
+    )
+    public = PublicOutboxStore(
+        (tmp_path / "cloudbeds-completion-public.sqlite3").resolve()
+    )
 
     def transport(operation, payload, *, idempotency_key):
         calls.append((operation, payload, idempotency_key))
@@ -413,17 +498,34 @@ def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
         assert isinstance(first.transition.state, SucceededState)
         outcome = first.transition.state.outcome
         assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
-        fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
-        assert outcome.provider_reference == (
-            f"provider:cloudbeds:{fingerprint[:32]}"
-        )
-        assert raw_reference not in repr(outcome)
+        assert outcome.provider_reference == f"provider:cloudbeds:{raw_reference}"
+        assert all(raw_reference not in item for item in outcome.evidence)
         assert store._connection.execute(
             "SELECT dispatch_slots_consumed,status FROM execution_ledger "
             "WHERE command_id=?",
             (command.command_id,),
         ).fetchone() == (1, "outcome_recorded")
+
+        completion = CompletionProjector(
+            execution=store,
+            payment_store=payments,
+            public_store=public,
+            subscriber_id="1000000001",
+            account_profiles={
+                BusinessUnit.HOSTEL: "stripe-account:hostel:test",
+                BusinessUnit.AGENCY: "stripe-account:agency:test",
+            },
+        ).run_once(now=NOW + timedelta(seconds=3))
+        assert completion.inserted == 1
+        public_text = public._connection.execute(
+            "SELECT text FROM public_outbox"
+        ).fetchone()[0]
+        assert public_text == "Sua hospedagem foi confirmada."
+        assert raw_reference not in public_text
+        assert outcome.provider_reference not in public_text
     finally:
+        public.close()
+        payments.close()
         store.close()
 
 
@@ -1034,17 +1136,24 @@ def test_model_supplied_provider_payload_is_rejected_before_provider() -> None:
 
 
 @pytest.mark.parametrize(
-    ("port_type", "provider", "operation", "reference_field"),
+    ("port_type", "provider", "operation", "reference_field", "expected_raw"),
     (
-        (CloudbedsReservationPort, "cloudbeds", "reserve_lodging", "reservation_id"),
-        (BokunReservationPort, "bokun", "book_activity", "booking_id"),
+        (
+            CloudbedsReservationPort,
+            "cloudbeds",
+            "reserve_lodging",
+            "reservation_id",
+            True,
+        ),
+        (BokunReservationPort, "bokun", "book_activity", "booking_id", False),
     ),
 )
-def test_specific_provider_ports_return_only_reference_fingerprint(
+def test_specific_provider_ports_expose_raw_reference_only_for_cloudbeds(
     port_type,
     provider: str,
     operation: str,
     reference_field: str,
+    expected_raw: bool,
 ) -> None:
     raw_reference = f"raw-{provider}-reference-001"
     calls = []
@@ -1080,5 +1189,7 @@ def test_specific_provider_ports_return_only_reference_fingerprint(
     assert result.provider_reference_fingerprint == hashlib.sha256(
         raw_reference.encode()
     ).hexdigest()
+    assert result.provider_reference == (raw_reference if expected_raw else None)
+    assert raw_reference not in repr(result.evidence)
     assert raw_reference not in repr(result)
     assert calls == [(operation, json.loads(payload), permit.idempotency_key)]

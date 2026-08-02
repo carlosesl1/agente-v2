@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Final
@@ -353,6 +353,7 @@ class ProviderExecutionResult:
     normalized_status: str
     provider_reference_fingerprint: str | None
     evidence: tuple[str, ...]
+    provider_reference: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.certainty) is not ProviderCertainty:
@@ -363,6 +364,19 @@ class ProviderExecutionResult:
             or _SHA256_RE.fullmatch(self.provider_reference_fingerprint) is None
         ):
             raise ValueError("provider_reference_fingerprint must be a SHA-256 or None")
+        if self.provider_reference is not None:
+            reference = _text(
+                self.provider_reference,
+                "provider_reference",
+                identifier=True,
+            )
+            if self.certainty is not ProviderCertainty.EFFECT_CONFIRMED:
+                raise ValueError(
+                    "only effect_confirmed may carry a provider_reference"
+                )
+            expected_fingerprint = hashlib.sha256(reference.encode("utf-8")).hexdigest()
+            if self.provider_reference_fingerprint != expected_fingerprint:
+                raise ValueError("provider_reference fingerprint mismatch")
         if type(self.evidence) is not tuple or any(
             type(item) is not str or _SHA256_RE.fullmatch(item) is None
             for item in self.evidence

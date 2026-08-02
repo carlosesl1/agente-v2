@@ -481,11 +481,15 @@ class V2ReservationExecutionAdapter:
         result = self._port.execute(provider_permit)
         if type(result) is not ProviderExecutionResult:
             raise TypeError("provider port returned a non-canonical result")
-        provider_reference = (
-            f"provider:{self.provider}:{result.provider_reference_fingerprint[:32]}"
-            if result.provider_reference_fingerprint is not None
-            else None
-        )
+        if self.provider == "cloudbeds" and result.provider_reference is not None:
+            provider_reference = f"provider:cloudbeds:{result.provider_reference}"
+        elif result.provider_reference_fingerprint is not None:
+            provider_reference = (
+                f"provider:{self.provider}:"
+                f"{result.provider_reference_fingerprint[:32]}"
+            )
+        else:
+            provider_reference = None
         return ExecutionOutcome(
             command_id=request.command_id,
             certainty=_CERTAINTY[result.certainty],
