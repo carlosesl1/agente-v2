@@ -54,6 +54,7 @@ def _batch(*, suffix: str, text: str) -> InboundBatch:
                 "collect": "3",
                 "summary": "4",
                 "confirm": "5",
+                "correct": "6",
             }[suffix]
             * 64
         ),
@@ -286,5 +287,133 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         if submit_client is not None:
             submit_client.close()
         execution.close()
+        private_store.close()
+        boundary.close()
+
+
+def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
+    tmp_path: Path,
+) -> None:
+    collect_batch = _batch(
+        suffix="collect",
+        text=(
+            "Meu nome completo é Pessoa Original Silva, "
+            "meu e-mail é original.person@example.invalid e sou do Brasil."
+        ),
+    )
+    summary_batch = _batch(
+        suffix="summary",
+        text="Quero a suíte de 10 a 12 de agosto para dois adultos.",
+    )
+    correction_batch = _batch(
+        suffix="correct",
+        text="Nome completo: Mononym",
+    )
+    authorities = {
+        collect_batch.batch_id: _authority(collect_batch, "3"),
+        summary_batch.batch_id: _authority(summary_batch, "4"),
+        correction_batch.batch_id: _authority(correction_batch, "6"),
+    }
+    read_request = ReadRequest(
+        request_id="read:split-origin-correction-summary",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    summary_facts = (
+        ModelFact("language", "pt-BR"),
+        ModelFact("service", "hostel"),
+        ModelFact("start_date", date(2026, 8, 10)),
+        ModelFact("end_date", date(2026, 8, 12)),
+        ModelFact("adults", 2),
+        ModelFact("children", 0),
+        ModelFact("payment_method", "stripe"),
+    )
+    proposals = [
+        ModelProposal(
+            source_event_id=collect_batch.batch_id,
+            intent="inform",
+            reply_chunks=("Dados recebidos.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        ),
+        ModelProposal(
+            source_event_id=summary_batch.batch_id,
+            intent="inform",
+            reply_chunks=("Vou consultar.",),
+            facts=(),
+            read_requests=(read_request,),
+            effect_proposals=(),
+        ),
+        ModelProposal(
+            source_event_id=summary_batch.batch_id,
+            intent="select",
+            reply_chunks=("Vou preparar o resumo.",),
+            facts=summary_facts,
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_id="offer:" + "7" * 64,
+        ),
+        ModelProposal(
+            source_event_id=correction_batch.batch_id,
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+            confirmed_action_kinds=(CriticalActionKind.RESERVE_LODGING,),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        ),
+    ]
+
+    boundary = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer-correction.sqlite3"
+    )
+    model = FakeAuditedModel(boundary, proposals)
+    read_port = FakeLodgingReadPort(boundary)
+    for authority in authorities.values():
+        _install_public_authority(boundary, authority)
+    executor = V2TurnExecutor(
+        store=boundary,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=PhoneOnlyManyChatContact(boundary),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(authorities),
+        clock=SequenceClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        executor.execute(collect_batch)
+        summary = executor.execute(summary_batch)
+        assert "Só para confirmar" in summary.reply_chunks[0]
+
+        correction = executor.execute(correction_batch)
+        current = boundary.load_state(correction_batch.lead_id)
+
+        assert correction.receipt.command_rows == ()
+        assert correction.receipt.relay_rows == ()
+        assert type(current.state.workflow).__name__ == "AwaitingAdjustmentState"
+        assert (
+            executor._reducer.pending_action(
+                current.state.workflow,
+                locale="pt-BR",
+            )
+            is None
+        )
+        assert "Mononym" not in model.calls[-1].message
+        assert "nome completo" in " ".join(correction.reply_chunks).casefold()
+        assert private_store.load(correction_batch.lead_id).full_name == (
+            "Pessoa Original Silva"
+        )
+    finally:
         private_store.close()
         boundary.close()

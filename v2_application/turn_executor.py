@@ -1094,16 +1094,20 @@ def _collection_only_proposal(
     public_facts: tuple[ModelFact, ...],
     locale: str,
     invalid_fact_names: tuple[str, ...] = (),
+    revoke_pending: bool = False,
 ) -> ModelProposal:
+    if type(revoke_pending) is not bool:
+        raise TypeError("revoke_pending must be exact bool")
     return ModelProposal(
         source_event_id=proposal.source_event_id,
-        intent="inform",
+        intent="adjust" if revoke_pending else "inform",
         reply_chunks=(
             _collection_reply(locale, invalid_fact_names=invalid_fact_names),
         ),
         facts=public_facts,
         read_requests=(),
         effect_proposals=(),
+        pending_disposition="revoke" if revoke_pending else None,
         passengers=(),
     )
 
@@ -1626,6 +1630,7 @@ class V2TurnExecutor:
                 public_facts=first_public_facts,
                 locale=projection.locale,
                 invalid_fact_names=collection_invalid_fact_names,
+                revoke_pending=pending_action is not None,
             )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
@@ -1720,6 +1725,7 @@ class V2TurnExecutor:
                     public_facts=review_public_facts,
                     locale=projection.locale,
                     invalid_fact_names=review_invalid_private_facts,
+                    revoke_pending=pending_action is not None,
                 )
             elif (
                 selection_review
@@ -1921,6 +1927,7 @@ class V2TurnExecutor:
                     public_facts=second_public_facts,
                     locale=projection.locale,
                     invalid_fact_names=second_invalid_private_facts,
+                    revoke_pending=pending_action is not None,
                 )
                 second_audited = AuditedModelTurn.from_frames(
                     proposal=proposal,
