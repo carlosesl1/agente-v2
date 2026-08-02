@@ -1771,6 +1771,12 @@ class V2TurnExecutor:
         else:
             read_requests = first_proposal.read_requests
             derived_confirmation_reads = False
+        if not effective_profile_complete and (
+            first_proposal.intent in {"select", "confirm"}
+            or first_proposal.selection_requested
+        ):
+            read_requests = ()
+            derived_confirmation_reads = False
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
             raise TurnExecutionError("model proposed duplicate reads")
@@ -2213,7 +2219,9 @@ class V2TurnExecutor:
             raise TypeError("private customer owner must return an exact snapshot")
         if commit_private_facts.content_hash != private_facts.content_hash:
             raise TurnExecutionError("private customer facts changed before commit")
-        if not (profile.observed_at <= commit_now < profile.expires_at):
+        if command_rows and not (
+            profile.observed_at <= commit_now < profile.expires_at
+        ):
             raise TurnExecutionError("private profile expired before commit")
         for observation in v2_observations:
             self._reads.accept(observation, now=commit_now)

@@ -517,6 +517,39 @@ class PhoneOnlyManyChatContact:
         )
 
 
+class UnusableManyChatPhone:
+    def __init__(self, store: SQLiteBoundaryStore, mode: str) -> None:
+        self.store = store
+        self.mode = mode
+
+    def read(self, lead_id: str, *, now: datetime) -> PrivateCustomerBinding:
+        assert self.store._connection.in_transaction is False
+        observed_at = now
+        expires_at = now + timedelta(minutes=5)
+        phone = None
+        if self.mode == "future":
+            observed_at = now + timedelta(minutes=1)
+            expires_at = now + timedelta(minutes=6)
+            phone = "".join(("+1", "202", "555", "0198"))
+        elif self.mode == "expired":
+            observed_at = now - timedelta(minutes=6)
+            expires_at = now
+            phone = "".join(("+1", "202", "555", "0198"))
+        elif self.mode != "missing":
+            raise AssertionError("unknown unusable phone mode")
+        return PrivateCustomerBinding(
+            binding_id=f"profile-binding:unusable-phone:{self.mode}",
+            content_hash="9" * 64,
+            full_name=None,
+            email=None,
+            phone_e164=phone,
+            country_code=None,
+            observed_at=observed_at,
+            expires_at=expires_at,
+            complete=False,
+        )
+
+
 class RecordingPublicDelivery:
     def __init__(self, *, uncertain: bool = False) -> None:
         self.uncertain = uncertain
@@ -1386,6 +1419,71 @@ def test_private_profile_collection_is_durable_collection_only_and_publicly_reda
             assert private_value not in public_bytes
         assert '"country_code"' not in projection.to_canonical_bytes().decode()
         assert '"country_code"' not in artifact_json
+    finally:
+        private_store.close()
+        store.close()
+
+
+@pytest.mark.parametrize("phone_mode", ("missing", "future", "expired"))
+def test_unusable_manychat_phone_blocks_provider_reads_and_commands(
+    tmp_path,
+    phone_mode: str,
+) -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / f"unusable-phone-{phone_mode}.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=BATCH.lead_id,
+        source_turn_id=f"batch:profile-before-unusable-phone:{phone_mode}",
+        source_event_hash="d" * 64,
+        facts=(
+            ModelFact("full_name", "Pessoa Phone Silva"),
+            ModelFact("email", "phone.person@example.invalid"),
+            ModelFact("country_code", "BR"),
+        ),
+        persisted_at=NOW - timedelta(minutes=1),
+    )
+    request = ReadRequest(
+        request_id=f"read:unusable-phone:{phone_mode}",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    proposal = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(),
+        read_requests=(request,),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    model = FakeAuditedModel(store, [proposal])
+    read_port = FakeLodgingReadPort(store)
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=UnusableManyChatPhone(store, phone_mode),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert read_port.calls == []
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert "telefone" not in " ".join(result.reply_chunks).casefold()
     finally:
         private_store.close()
         store.close()
