@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 import importlib
 import inspect
+import logging
 from pathlib import Path
 from types import ModuleType
 from urllib.parse import parse_qs
@@ -509,6 +510,36 @@ def test_audit_get_redacts_private_reservation_id_from_http_logs(
     )
     try:
         transport.get_reservation(RESERVATION_ID)
+    finally:
+        client.close()
+
+    assert RESERVATION_ID not in caplog.text
+
+
+def test_non_2xx_audit_exception_traceback_never_contains_private_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request, json={"success": False})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider_api = _provider_http_api()
+    transport = provider_api.CloudbedsGETAuditTransport(
+        api_key="synthetic-cloudbeds-secret",
+        property_id=PROPERTY_ID,
+        base_url="https://api.cloudbeds.invalid",
+        client=client,
+    )
+    try:
+        try:
+            transport.get_reservation(RESERVATION_ID)
+        except provider_api.ProviderHTTPError as exc:
+            assert exc.__cause__ is None
+            logging.getLogger("cloudbeds-audit-witness").exception("audit failed")
+        else:
+            pytest.fail("non-2xx audit request must fail")
     finally:
         client.close()
 

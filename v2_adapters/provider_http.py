@@ -655,8 +655,12 @@ class CloudbedsGETAuditTransport:
                 timeout=self._timeout,
                 follow_redirects=False,
             )
-        except httpx.HTTPError as exc:
-            raise ProviderHTTPError("Cloudbeds audit HTTP request failed") from exc
+        except httpx.HTTPError:
+            raise ProviderHTTPError("Cloudbeds audit HTTP request failed") from None
+        if not 200 <= response.status_code < 300:
+            raise ProviderHTTPError(
+                f"Cloudbeds audit HTTP response failed status={response.status_code}"
+            )
         return _json_response(response, provider="Cloudbeds")
 
 
