@@ -106,13 +106,8 @@ def reservation_result(
     status = response.get("status")
     if status == "confirmed":
         reference = response.get(reference_field)
-        if (
-            type(reference) is not str
-            or not reference
-            or reference != reference.strip()
-        ):
+        if type(reference) is not str or not reference:
             raise ProviderReadError("confirmed provider response lacks its reference")
-        canonical_reference = reference
         if provider == "cloudbeds":
             try:
                 canonical_reference = canonical_cloudbeds_reference(reference)
@@ -120,6 +115,12 @@ def reservation_result(
                 raise ProviderReadError(
                     "confirmed provider response has a noncanonical reference"
                 ) from exc
+        else:
+            canonical_reference = reference.strip()
+            if not canonical_reference:
+                raise ProviderReadError(
+                    "confirmed provider response lacks its reference"
+                )
         return ProviderExecutionResult(
             ProviderCertainty.EFFECT_CONFIRMED,
             "confirmed",

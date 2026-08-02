@@ -1215,6 +1215,25 @@ def test_cloudbeds_maximum_raw_reference_fits_execution_outcome() -> None:
     assert outcome.provider_reference == f"provider:cloudbeds:{raw_reference}"
 
 
+def test_bokun_port_normalizes_confirmed_booking_reference_like_base() -> None:
+    permit = _provider_port_permit(
+        provider="bokun",
+        operation="book_activity",
+    )
+
+    def transport(selected_operation, payload, *, idempotency_key):
+        return {"status": "confirmed", "booking_id": " booking-123 "}
+
+    result = BokunReservationPort(transport).execute(permit)
+
+    assert result.certainty is ProviderCertainty.EFFECT_CONFIRMED
+    assert result.normalized_status == "confirmed"
+    assert result.provider_reference is None
+    assert result.provider_reference_fingerprint == hashlib.sha256(
+        b"booking-123"
+    ).hexdigest()
+
+
 @pytest.mark.parametrize(
     ("port_type", "provider", "operation", "reference_field", "expected_raw"),
     (
