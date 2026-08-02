@@ -2,14 +2,14 @@
 
 ## Autoridade
 
-- Estado: `BOKUN_BOOKING_ID_CONFIRMATION_CANDIDATE`
+- Estado: `SPLIT_ORIGIN_RESERVATION_PROFILE_TDD`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-07-31-bokun-submit-id-confirmation-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-07-31-bokun-booking-id-confirmation.md`
-- Base funcional anterior ao reparo: `16d4d90e45c2ceb6bba12565f1862e092bcb9c56`
-- Commit da especificação: `01336c0c4ad420404c465382c78f4959eedfdba9`
-- Rollout: `LOCAL_QUALIFIED_REVIEW_PENDING`
+- Especificação ativa: `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-08-02-split-origin-reservation-profile-authority.md`
+- Base funcional do reparo: `1219ff2c12efa989f44f5caa7364363011ea281d`
+- Autoridade: solicitação explícita de Carlos em 2026-08-02 para substituir a exclusividade ManyChat de nome/e-mail por fallback conversacional privado, preservando telefone autenticado
+- Rollout: `LOCAL_FAKE_ONLY_IMPLEMENTATION`
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 

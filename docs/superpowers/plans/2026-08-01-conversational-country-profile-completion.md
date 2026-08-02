@@ -1,5 +1,7 @@
 # Conversational Country Profile Completion Implementation Plan
 
+> **SUPERSEDED ON 2026-08-02:** The rule below that kept `full_name` and `email` exclusively in ManyChat has been deliberately replaced by `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md` and its active plan. This file remains historical evidence for the country-only repair and is not executable authority.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Permitir que `country_code` informado na conversa complete o perfil para reserva, mantendo nome, e-mail e telefone obrigatoriamente autenticados pelo binding ManyChat fresco.
