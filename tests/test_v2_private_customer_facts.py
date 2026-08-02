@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from v2_application.private_customer_facts import (
+    PrivateCustomerFactIdentityConflict,
+    PrivateCustomerFactValidationError,
+    SQLitePrivateCustomerFactStore,
+    canonical_country_code,
+    canonical_email,
+    canonical_full_name,
+)
+from v2_contracts.model import ModelFact
+
+
+NOW = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+LEAD_ID = "manychat:synthetic-profile-001"
+TURN_ID = "batch:private-profile-001"
+EVENT_HASH = "a" * 64
+NAME = "Pessoa Sintética Silva"
+EMAIL = "synthetic.profile@example.invalid"
+COUNTRY = "BR"
+
+
+def _facts(
+    *,
+    name: str = NAME,
+    email: str = EMAIL,
+    country: str = COUNTRY,
+) -> tuple[ModelFact, ...]:
+    return (
+        ModelFact("full_name", name),
+        ModelFact("email", email),
+        ModelFact("country_code", country),
+    )
+
+
+def test_private_customer_canonicalizers_are_strict_and_do_not_invent_values() -> None:
+    assert canonical_full_name("  Pessoa   Sintética  Silva  ") == NAME
+    assert canonical_email(" Synthetic.Profile@Example.Invalid ") == EMAIL
+    assert canonical_country_code(" br ") == COUNTRY
+
+    for invalid in ("Pessoa", "", "Pessoa\x00 Silva", "X" * 201 + " Y"):
+        with pytest.raises(PrivateCustomerFactValidationError, match="full name"):
+            canonical_full_name(invalid)
+    for invalid in ("missing-at.invalid", "@example.invalid", "a@", "a b@example.invalid"):
+        with pytest.raises(PrivateCustomerFactValidationError, match="email"):
+            canonical_email(invalid)
+    for invalid in ("BRA", "1R", ""):
+        with pytest.raises(PrivateCustomerFactValidationError, match="country"):
+            canonical_country_code(invalid)
+
+
+def test_private_store_round_trip_is_exact_private_and_presence_only(tmp_path: Path) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    try:
+        written = store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        loaded = store.load(LEAD_ID)
+
+        assert written.snapshot == loaded
+        assert loaded.full_name == NAME
+        assert loaded.email == EMAIL
+        assert loaded.country_code == COUNTRY
+        assert loaded.present_fact_names == ("full_name", "email", "country_code")
+        assert loaded.source_turn_for("full_name") == TURN_ID
+        assert loaded.source_turn_for("email") == TURN_ID
+        assert loaded.source_turn_for("country_code") == TURN_ID
+        assert written.supplied_in_turn == ("full_name", "email", "country_code")
+        assert written.changed_in_turn == ("full_name", "email", "country_code")
+        assert written.replayed is False
+        assert len(loaded.content_hash) == 64
+
+        for private_value in (NAME, EMAIL, COUNTRY):
+            assert private_value not in repr(loaded)
+            assert private_value not in repr(written)
+            assert private_value not in str(loaded.public_presence())
+    finally:
+        store.close()
+
+
+def test_same_turn_is_idempotent_and_crash_retry_remains_collection_only(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "private-customer.sqlite3"
+    first = SQLitePrivateCustomerFactStore(path)
+    try:
+        original = first.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+    finally:
+        first.close()
+
+    restarted = SQLitePrivateCustomerFactStore(path)
+    try:
+        replay = restarted.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW + timedelta(seconds=5),
+        )
+        assert replay.snapshot == original.snapshot
+        assert replay.supplied_in_turn == ("full_name", "email", "country_code")
+        assert replay.changed_in_turn == ()
+        assert replay.replayed is True
+        assert restarted.turn_supplied_fact_names(LEAD_ID, TURN_ID) == (
+            "full_name",
+            "email",
+            "country_code",
+        )
+    finally:
+        restarted.close()
+
+
+def test_same_turn_divergence_fails_without_echoing_private_values(tmp_path: Path) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        divergent_name = "Outra Pessoa Sintética"
+        with pytest.raises(PrivateCustomerFactIdentityConflict) as payload_error:
+            store.persist_turn(
+                lead_id=LEAD_ID,
+                source_turn_id=TURN_ID,
+                source_event_hash=EVENT_HASH,
+                facts=_facts(name=divergent_name),
+                persisted_at=NOW,
+            )
+        with pytest.raises(PrivateCustomerFactIdentityConflict) as event_error:
+            store.persist_turn(
+                lead_id=LEAD_ID,
+                source_turn_id=TURN_ID,
+                source_event_hash="b" * 64,
+                facts=_facts(),
+                persisted_at=NOW,
+            )
+        rendered = repr((payload_error.value, event_error.value))
+        assert NAME not in rendered
+        assert divergent_name not in rendered
+        assert EMAIL not in rendered
+    finally:
+        store.close()
+
+
+def test_store_rejects_phone_and_non_profile_facts_without_persisting(
+    tmp_path: Path,
+) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    try:
+        for fact in (
+            ModelFact("phone_e164", "+12025550123"),
+            ModelFact("service", "hostel"),
+        ):
+            with pytest.raises(PrivateCustomerFactValidationError, match="catalog"):
+                store.persist_turn(
+                    lead_id=LEAD_ID,
+                    source_turn_id=TURN_ID,
+                    source_event_hash=EVENT_HASH,
+                    facts=(fact,),
+                    persisted_at=NOW,
+                )
+        assert store.load(LEAD_ID).present_fact_names == ()
+    finally:
+        store.close()
+
+
+def test_later_turn_updates_one_field_without_losing_other_values(tmp_path: Path) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        next_turn = "batch:private-profile-002"
+        result = store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=next_turn,
+            source_event_hash="c" * 64,
+            facts=(ModelFact("email", "corrected@example.invalid"),),
+            persisted_at=NOW + timedelta(minutes=1),
+        )
+
+        assert result.snapshot.full_name == NAME
+        assert result.snapshot.email == "corrected@example.invalid"
+        assert result.snapshot.country_code == COUNTRY
+        assert result.snapshot.source_turn_for("email") == next_turn
+        assert result.supplied_in_turn == ("email",)
+        assert result.changed_in_turn == ("email",)
+    finally:
+        store.close()
