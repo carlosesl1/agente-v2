@@ -127,6 +127,10 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         message="Quero reservar.",
         locale="pt-BR",
         state_version=0,
+        private_customer_fact_names=(
+            "full_name",
+            "phone_e164",
+        ),
         private_profile_complete=True,
     )
 
@@ -134,6 +138,11 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     user = json.loads(envelope["messages"][0][1])
 
     assert user["private_profile_complete"] is True
+    assert user["private_customer_fact_names"] == ["full_name", "phone_e164"]
+    assert "presence-only" in envelope["system_prompt"]
+    assert "Never request or accept a conversational phone number" in envelope[
+        "system_prompt"
+    ]
     assert user["handoff_active"] is False
     assert user["confirmation_review_required"] is False
     assert user["selection_review_required"] is False

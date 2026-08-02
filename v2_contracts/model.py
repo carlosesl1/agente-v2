@@ -85,7 +85,7 @@ def _closed_dict(value: object, name: str) -> dict[str, object]:
     return decoded
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class ModelFact:
     name: str
     value: str | int | date
@@ -148,7 +148,7 @@ class EffectProposal:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class ModelRequest:
     request_id: str
     lead_id: str
@@ -262,7 +262,7 @@ class ModelRequest:
             raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class ModelProposal:
     source_event_id: str
     intent: str

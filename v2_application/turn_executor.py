@@ -65,6 +65,17 @@ from v2_application.passengers import (
     projection_manifest_party,
     projection_manifest_status,
 )
+from v2_application.private_customer_collection import (
+    PrivateCustomerCollection,
+    collect_private_customer_facts,
+)
+from v2_application.private_customer_facts import (
+    PrivateCustomerFactSnapshot,
+    PrivateCustomerFactWriteResult,
+    canonical_country_code,
+    canonical_email,
+    canonical_full_name,
+)
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import (
     build_handoff_relay_bundle,
@@ -933,9 +944,162 @@ def _state_model_facts(
 
 def _private_customer_fact_names(
     projection: ConversationProjection,
+    *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
+    profile: PrivateCustomerBinding | None = None,
 ) -> tuple[str, ...]:
     present = {item.name for item in projection.facts}
+    if private_facts is not None:
+        if type(private_facts) is not PrivateCustomerFactSnapshot:
+            raise TypeError("private_facts must be exact or None")
+        present.update(private_facts.present_fact_names)
+    if profile is not None:
+        if type(profile) is not PrivateCustomerBinding:
+            raise TypeError("profile must be exact or None")
+        present.update(
+            name
+            for name, value in (
+                ("full_name", profile.full_name),
+                ("email", profile.email),
+                ("phone_e164", profile.phone_e164),
+                ("country_code", profile.country_code),
+            )
+            if value is not None
+        )
     return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
+
+
+def _expected_private_customer_fact_names(
+    profile: PrivateCustomerBinding,
+    private_facts: PrivateCustomerFactSnapshot,
+) -> tuple[str, ...]:
+    full_name_missing = (
+        private_facts.full_name is None
+        and (profile.full_name is None or len(profile.full_name.split()) < 2)
+    )
+    email_missing = private_facts.email is None and profile.email is None
+    country_missing = (
+        private_facts.country_code is None and profile.country_code is None
+    )
+    return tuple(
+        name
+        for name, missing in (
+            ("full_name", full_name_missing),
+            ("email", email_missing),
+            ("country_code", country_missing),
+        )
+        if missing
+    )
+
+
+_PRIVATE_CONVERSATION_FALLBACK_NAMES: Final = frozenset(
+    ("full_name", "email", "country_code")
+)
+
+
+def _partition_private_customer_facts(
+    proposal: ModelProposal,
+) -> tuple[
+    tuple[ModelFact, ...],
+    tuple[ModelFact, ...],
+    tuple[str, ...],
+    bool,
+]:
+    private: list[ModelFact] = []
+    public: list[ModelFact] = []
+    invalid: set[str] = set()
+    phone_proposed = False
+    canonicalizers = {
+        "full_name": canonical_full_name,
+        "email": canonical_email,
+        "country_code": canonical_country_code,
+    }
+    for fact in proposal.facts:
+        if fact.name == "phone_e164":
+            phone_proposed = True
+            continue
+        if fact.name in _PRIVATE_CONVERSATION_FALLBACK_NAMES:
+            try:
+                value = canonicalizers[fact.name](fact.value)
+            except (TypeError, ValueError):
+                invalid.add(fact.name)
+                continue
+            private.append(ModelFact(fact.name, value))
+        else:
+            public.append(fact)
+    invalid_names = tuple(
+        name
+        for name in ("full_name", "email", "country_code")
+        if name in invalid
+    )
+    return tuple(private), tuple(public), invalid_names, phone_proposed
+
+
+def _collection_reply(
+    locale: str,
+    *,
+    invalid_fact_names: tuple[str, ...] = (),
+) -> str:
+    if invalid_fact_names:
+        labels_pt = {
+            "full_name": "nome completo",
+            "email": "e-mail válido",
+            "country_code": "país",
+        }
+        labels_en = {
+            "full_name": "full name",
+            "email": "valid email",
+            "country_code": "country",
+        }
+        labels = labels_en if locale.startswith("en") else labels_pt
+        requested = ", ".join(labels[name] for name in invalid_fact_names)
+        if locale.startswith("en"):
+            return f"Please send your {requested} again so I can continue."
+        return f"Por favor, envie novamente {requested} para eu continuar."
+    if locale.startswith("en"):
+        return "Thank you. I saved those details so we can continue the reservation."
+    return "Obrigado. Guardei esses dados para continuar a reserva."
+
+
+def _collection_only_proposal(
+    proposal: ModelProposal,
+    *,
+    public_facts: tuple[ModelFact, ...],
+    locale: str,
+    invalid_fact_names: tuple[str, ...] = (),
+) -> ModelProposal:
+    return ModelProposal(
+        source_event_id=proposal.source_event_id,
+        intent="inform",
+        reply_chunks=(
+            _collection_reply(locale, invalid_fact_names=invalid_fact_names),
+        ),
+        facts=public_facts,
+        read_requests=(),
+        effect_proposals=(),
+        passengers=(),
+    )
+
+
+def _persist_private_collection(
+    owner: object,
+    *,
+    lead_id: str,
+    source_turn_id: str,
+    source_event_hash: str,
+    facts: tuple[ModelFact, ...],
+    persisted_at: datetime,
+) -> PrivateCustomerFactSnapshot:
+    result = owner.persist_turn(
+        lead_id=lead_id,
+        source_turn_id=source_turn_id,
+        source_event_hash=source_event_hash,
+        facts=facts,
+        persisted_at=persisted_at,
+    )
+    if type(result) is not PrivateCustomerFactWriteResult:
+        raise TypeError("private customer owner returned an invalid write")
+    return result.snapshot
 
 
 def _activity_party_for_manifest(
@@ -1197,6 +1361,7 @@ class V2TurnExecutor:
         model: AuditedModelPort,
         reads: V2ReadService,
         profile: object,
+        private_customer_facts: object,
         reducer: V2ConversationReducer,
         public_authority: object,
         clock: object,
@@ -1214,6 +1379,9 @@ class V2TurnExecutor:
         for owner, method, name in required:
             if not callable(getattr(owner, method, None)):
                 raise TypeError(f"{name} must expose {method}")
+        for method in ("load", "persist_turn", "turn_supplied_fact_names"):
+            if not callable(getattr(private_customer_facts, method, None)):
+                raise TypeError(f"private_customer_facts must expose {method}")
         if type(reads) is not V2ReadService:
             raise TypeError("reads must be an exact V2ReadService")
         if type(reducer) is not V2ConversationReducer:
@@ -1228,6 +1396,7 @@ class V2TurnExecutor:
         self._model = model
         self._reads = reads
         self._profile = profile
+        self._private_customer_facts = private_customer_facts
         self._reducer = reducer
         self._public_authority = public_authority
         self._clock = clock
@@ -1311,6 +1480,39 @@ class V2TurnExecutor:
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile port must return exact PrivateCustomerBinding")
+        private_facts = self._private_customer_facts.load(batch.lead_id)
+        if type(private_facts) is not PrivateCustomerFactSnapshot:
+            raise TypeError("private customer owner must return an exact snapshot")
+        collection_turn_fact_names = (
+            self._private_customer_facts.turn_supplied_fact_names(
+                batch.lead_id,
+                batch.batch_id,
+            )
+        )
+        private_collection = collect_private_customer_facts(
+            batch.combined_text,
+            expected_fact_names=_expected_private_customer_fact_names(
+                profile,
+                private_facts,
+            ),
+        )
+        if type(private_collection) is not PrivateCustomerCollection:
+            raise TypeError("private customer collector returned an invalid result")
+        if private_collection.facts:
+            private_facts = _persist_private_collection(
+                self._private_customer_facts,
+                lead_id=batch.lead_id,
+                source_turn_id=batch.batch_id,
+                source_event_hash=event_hash,
+                facts=private_collection.facts,
+                persisted_at=now,
+            )
+            collection_turn_fact_names = tuple(
+                item.name for item in private_collection.facts
+            )
+        collection_only = bool(
+            collection_turn_fact_names or private_collection.invalid_fact_names
+        )
         explicit_customer_facts = (
             *_extract_explicit_commercial_facts(batch.combined_text),
             *_extract_explicit_customer_facts(batch.combined_text),
@@ -1319,6 +1521,7 @@ class V2TurnExecutor:
             profile,
             projection,
             now,
+            private_facts=private_facts,
         )
         pending_action = (
             None
@@ -1332,11 +1535,15 @@ class V2TurnExecutor:
             request_id=_opaque("model-request", batch.batch_id, current.version, 1),
             lead_id=batch.lead_id,
             source_event_id=batch.batch_id,
-            message=batch.combined_text,
+            message=private_collection.sanitized_message,
             locale=projection.locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
-            private_customer_fact_names=_private_customer_fact_names(projection),
+            private_customer_fact_names=_private_customer_fact_names(
+                projection,
+                private_facts=private_facts,
+                profile=profile,
+            ),
             passenger_manifest_status=_passenger_status(projection),
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
@@ -1352,6 +1559,51 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        (
+            first_private_facts,
+            first_public_facts,
+            first_invalid_private_facts,
+            first_phone_proposed,
+        ) = _partition_private_customer_facts(first_proposal)
+        if first_private_facts and not collection_only:
+            private_facts = _persist_private_collection(
+                self._private_customer_facts,
+                lead_id=batch.lead_id,
+                source_turn_id=batch.batch_id,
+                source_event_hash=event_hash,
+                facts=first_private_facts,
+                persisted_at=now,
+            )
+            effective_profile_complete = reservation_profile_ready(
+                profile,
+                projection,
+                now,
+                private_facts=private_facts,
+            )
+        if (
+            first_private_facts
+            or first_invalid_private_facts
+            or first_phone_proposed
+        ):
+            collection_only = True
+        collection_invalid_fact_names = tuple(
+            name
+            for name in ("full_name", "email", "country_code")
+            if name in private_collection.invalid_fact_names
+            or name in first_invalid_private_facts
+        )
+        if collection_only:
+            first_proposal = _collection_only_proposal(
+                first_proposal,
+                public_facts=first_public_facts,
+                locale=projection.locale,
+                invalid_fact_names=collection_invalid_fact_names,
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
+            )
         first_frame_hash = _frame_commitments(first_audited)[-1].canonical_hash()
         projection = _merge_passenger_updates(
             projection,
@@ -1359,7 +1611,8 @@ class V2TurnExecutor:
             frame_commitment_hash=first_frame_hash,
         )
         selection_review = (
-            current.state.handoff is None
+            not collection_only
+            and current.state.handoff is None
             and pending_action is None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
@@ -1374,7 +1627,8 @@ class V2TurnExecutor:
             )
         )
         confirmation_review = (
-            pending_action is not None
+            not collection_only
+            and pending_action is not None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
         )
@@ -1406,7 +1660,40 @@ class V2TurnExecutor:
             )
             if review_proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("semantic review source event diverged")
+            (
+                review_private_facts,
+                review_public_facts,
+                review_invalid_private_facts,
+                review_phone_proposed,
+            ) = _partition_private_customer_facts(review_proposal)
             if (
+                review_private_facts
+                or review_invalid_private_facts
+                or review_phone_proposed
+            ):
+                if review_private_facts:
+                    private_facts = _persist_private_collection(
+                        self._private_customer_facts,
+                        lead_id=batch.lead_id,
+                        source_turn_id=batch.batch_id,
+                        source_event_hash=event_hash,
+                        facts=review_private_facts,
+                        persisted_at=now,
+                    )
+                    effective_profile_complete = reservation_profile_ready(
+                        profile,
+                        projection,
+                        now,
+                        private_facts=private_facts,
+                    )
+                collection_only = True
+                first_proposal = _collection_only_proposal(
+                    review_proposal,
+                    public_facts=review_public_facts,
+                    locale=projection.locale,
+                    invalid_fact_names=review_invalid_private_facts,
+                )
+            elif (
                 selection_review
                 and review_proposal.selection_requested
                 or confirmation_review
@@ -1426,7 +1713,8 @@ class V2TurnExecutor:
                 ephemeral_session_id=review_audited.closure.ephemeral_session_id,
             )
         if (
-            selection_review
+            not collection_only
+            and selection_review
             and not first_proposal.selection_requested
             and _explicit_summary_preparation_requested(batch.combined_text)
         ):
@@ -1538,12 +1826,16 @@ class V2TurnExecutor:
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
                 source_event_id=batch.batch_id,
-                message=batch.combined_text,
+                message=private_collection.sanitized_message,
                 locale=projection.locale,
                 state_version=current.version,
                 observations=v2_observations,
                 state_facts=_state_model_facts(projection),
-                private_customer_fact_names=_private_customer_fact_names(projection),
+                private_customer_fact_names=_private_customer_fact_names(
+                projection,
+                private_facts=private_facts,
+                profile=profile,
+            ),
                 passenger_manifest_status=_passenger_status(
                     projection,
                     first_proposal,
@@ -1562,6 +1854,44 @@ class V2TurnExecutor:
             )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
+            (
+                second_private_facts,
+                second_public_facts,
+                second_invalid_private_facts,
+                second_phone_proposed,
+            ) = _partition_private_customer_facts(proposal)
+            if (
+                second_private_facts
+                or second_invalid_private_facts
+                or second_phone_proposed
+            ):
+                if second_private_facts:
+                    private_facts = _persist_private_collection(
+                        self._private_customer_facts,
+                        lead_id=batch.lead_id,
+                        source_turn_id=batch.batch_id,
+                        source_event_hash=event_hash,
+                        facts=second_private_facts,
+                        persisted_at=now,
+                    )
+                    effective_profile_complete = reservation_profile_ready(
+                        profile,
+                        projection,
+                        now,
+                        private_facts=private_facts,
+                    )
+                collection_only = True
+                proposal = _collection_only_proposal(
+                    proposal,
+                    public_facts=second_public_facts,
+                    locale=projection.locale,
+                    invalid_fact_names=second_invalid_private_facts,
+                )
+                second_audited = AuditedModelTurn.from_frames(
+                    proposal=proposal,
+                    frames=second_audited.frames,
+                    ephemeral_session_id=second_audited.closure.ephemeral_session_id,
+                )
             second_frame_hash = _frame_commitments(second_audited)[-1].canonical_hash()
             projection = _merge_passenger_updates(
                 projection,
@@ -1582,30 +1912,31 @@ class V2TurnExecutor:
             )
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
-            proposal = _repair_requested_activity_selection(
-                first_proposal,
-                proposal,
-                state_facts=_state_model_facts(projection),
-                observations=v2_observations,
-                private_profile_complete=effective_profile_complete,
-                passenger_manifest_complete=_passenger_manifest_complete(
-                    projection,
-                    proposal,
-                ),
-            )
-            if derived_confirmation_reads and (
-                proposal.intent != "confirm"
-                or proposal.confirmed_summary_version
-                != first_proposal.confirmed_summary_version
-                or proposal.confirmed_action_kinds
-                != first_proposal.confirmed_action_kinds
-                or proposal.approval_basis is not first_proposal.approval_basis
-            ):
-                proposal = replace(
+            if not collection_only:
+                proposal = _repair_requested_activity_selection(
                     first_proposal,
-                    reply_chunks=proposal.reply_chunks,
-                    read_requests=(),
+                    proposal,
+                    state_facts=_state_model_facts(projection),
+                    observations=v2_observations,
+                    private_profile_complete=effective_profile_complete,
+                    passenger_manifest_complete=_passenger_manifest_complete(
+                        projection,
+                        proposal,
+                    ),
                 )
+                if derived_confirmation_reads and (
+                    proposal.intent != "confirm"
+                    or proposal.confirmed_summary_version
+                    != first_proposal.confirmed_summary_version
+                    or proposal.confirmed_action_kinds
+                    != first_proposal.confirmed_action_kinds
+                    or proposal.approval_basis is not first_proposal.approval_basis
+                ):
+                    proposal = replace(
+                        first_proposal,
+                        reply_chunks=proposal.reply_chunks,
+                        read_requests=(),
+                    )
             audited = AuditedModelTurn.combine((first_audited, second_audited))
         else:
             audited = first_audited
@@ -1621,6 +1952,12 @@ class V2TurnExecutor:
             raise TurnExecutionError("decision clock is not monotonic UTC")
         if decision_now > now + self._turn_timeout:
             raise TurnExecutionError("turn deadline expired before decision")
+        decision_private_facts = self._private_customer_facts.load(batch.lead_id)
+        if type(decision_private_facts) is not PrivateCustomerFactSnapshot:
+            raise TypeError("private customer owner must return an exact snapshot")
+        if decision_private_facts.content_hash != private_facts.content_hash:
+            raise TurnExecutionError("private customer facts changed during turn")
+        private_facts = decision_private_facts
 
         frames = _frame_commitments(audited)
         final_frame_hash = frames[-1].canonical_hash()
@@ -1649,6 +1986,7 @@ class V2TurnExecutor:
             projection=projection,
             proposal=proposal,
             profile=profile,
+            private_facts=private_facts,
             reads=v2_observations,
             fact_commitment_hash=fact_commitment_hash,
             now=decision_now,
@@ -1870,6 +2208,11 @@ class V2TurnExecutor:
             )
         ):
             raise TurnExecutionError("critical approval scope changed before commit")
+        commit_private_facts = self._private_customer_facts.load(batch.lead_id)
+        if type(commit_private_facts) is not PrivateCustomerFactSnapshot:
+            raise TypeError("private customer owner must return an exact snapshot")
+        if commit_private_facts.content_hash != private_facts.content_hash:
+            raise TurnExecutionError("private customer facts changed before commit")
         if not (profile.observed_at <= commit_now < profile.expires_at):
             raise TurnExecutionError("private profile expired before commit")
         for observation in v2_observations:

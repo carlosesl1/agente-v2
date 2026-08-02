@@ -120,6 +120,23 @@ ou diante de dúvida, pergunta, recusa ou mudança material, não use intent=con
 """.strip()
 
 
+_PRIVATE_PROFILE_SYSTEM_SUFFIX: Final = """
+PRIVATE RESERVATION PROFILE PROTOCOL:
+- private_customer_fact_names is a presence-only list. Never ask again for a listed field.
+- Never request or accept a conversational phone number. phone_e164 is valid only when
+  present through the authenticated channel marker; if absent, do not prepare or confirm
+  a reservable summary.
+- When full_name, email, or country_code is missing, ask naturally only for the missing
+  fields. Do not mention schemas, providers, payloads, state, bindings, or technical blocks.
+- Bracketed private-field markers in the current message replace values already captured
+  by the parent. Never echo, reconstruct, guess, or request those values again.
+- A message containing a newly supplied private-field marker is collection-only: acknowledge
+  it naturally, with no read, selection, summary, confirmation, effect, or phone fact.
+- Output facts may name full_name, email, or country_code only when explicitly supplied;
+  never output phone_e164. Never infer country from phone, language, locale, or defaults.
+""".strip()
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -202,7 +219,9 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         }
     return _canonical(
         {
-            "system_prompt": system_prompt,
+            "system_prompt": (
+                system_prompt + "\n\n" + _PRIVATE_PROFILE_SYSTEM_SUFFIX
+            ),
             "messages": [["user", _canonical(user_payload).decode("utf-8")]],
         }
     )

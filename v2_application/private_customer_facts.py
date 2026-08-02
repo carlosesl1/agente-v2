@@ -21,7 +21,20 @@ from v2_contracts.model import ModelFact
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
+_COUNTRY_RE = re.compile(r"[A-Z]{2}")
+_ISO_ALPHA2_CODES = frozenset(
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI "
+    "BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN "
+    "CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK "
+    "FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM "
+    "HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN "
+    "KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK "
+    "ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP "
+    "NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW "
+    "SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF "
+    "TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI "
+    "VN VU WF WS YE YT ZA ZM ZW".split()
+)
 _PRIVATE_FACT_ORDER = ("full_name", "email", "country_code")
 _PRIVATE_FACTS = frozenset(_PRIVATE_FACT_ORDER)
 
@@ -71,7 +84,10 @@ def canonical_email(value: object) -> str:
 
 def canonical_country_code(value: object) -> str:
     normalized = _private_text(value, "country").strip().upper()
-    if _COUNTRY_RE.fullmatch(normalized) is None:
+    if (
+        _COUNTRY_RE.fullmatch(normalized) is None
+        or normalized not in _ISO_ALPHA2_CODES
+    ):
         raise PrivateCustomerFactValidationError("private country is invalid")
     return normalized
 
@@ -293,10 +309,21 @@ class SQLitePrivateCustomerFactStore:
         if not isinstance(path, Path) or not path.is_absolute():
             raise ValueError("private customer store path must be absolute")
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.path = path
+        self.path: Path | None = path
         self._closed = False
+        self._initialize_connection(str(path))
+
+    @classmethod
+    def open_memory(cls) -> "SQLitePrivateCustomerFactStore":
+        store = cls.__new__(cls)
+        store.path = None
+        store._closed = False
+        store._initialize_connection(":memory:")
+        return store
+
+    def _initialize_connection(self, target: str) -> None:
         try:
-            self._connection = sqlite3.connect(path, isolation_level=None)
+            self._connection = sqlite3.connect(target, isolation_level=None)
             self._connection.execute("PRAGMA busy_timeout=5000")
             self._connection.executescript(_SCHEMA)
         except sqlite3.DatabaseError:

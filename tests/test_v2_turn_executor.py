@@ -15,6 +15,7 @@ from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.conversation import V2ConversationReducer
 from v2_application.critical_actions import CriticalActionPolicy
+from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.public_delivery import (
     BoundaryPublicDeliveryWorker,
     BoundaryPublicDisposition,
@@ -495,6 +496,27 @@ class AuthenticatedManyChatContactWithoutCountry:
         )
 
 
+class PhoneOnlyManyChatContact:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+        self.calls = 0
+
+    def read(self, lead_id: str, *, now: datetime) -> PrivateCustomerBinding:
+        assert self.store._connection.in_transaction is False
+        self.calls += 1
+        return PrivateCustomerBinding(
+            binding_id="profile-binding:" + "9" * 64,
+            content_hash="8" * 64,
+            full_name=None,
+            email=None,
+            phone_e164="".join(("+1", "202", "555", "0199")),
+            country_code=None,
+            observed_at=now,
+            expires_at=now + timedelta(minutes=5),
+            complete=False,
+        )
+
+
 class RecordingPublicDelivery:
     def __init__(self, *, uncertain: bool = False) -> None:
         self.uncertain = uncertain
@@ -804,6 +826,7 @@ def _executor(
         model=model,
         reads=reads or V2ReadService({}),
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
         public_authority=FixedAuthority(),
         clock=FixedClock(),
@@ -919,6 +942,7 @@ def _approval_expiry_fixture(
         model=model,
         reads=reads,
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=reducer,
         public_authority=authority,
         clock=FixedClock(),
@@ -931,6 +955,7 @@ def _approval_expiry_fixture(
         model=model,
         reads=reads,
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=reducer,
         public_authority=authority,
         clock=confirmation_clock,
@@ -1017,6 +1042,7 @@ def test_executor_accepts_observation_stamped_after_turn_start() -> None:
         model=model,
         reads=V2ReadService({ReadKind.LODGING: port}),
         profile=FakeProfile(store),
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
         public_authority=MappingAuthority({BATCH.batch_id: AUTHORITY}),
         clock=clock,
@@ -1167,6 +1193,7 @@ def test_atomic_executor_rolls_back_every_child_row_and_allocation_on_fault() ->
         model=model,
         reads=V2ReadService({}),
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
         public_authority=FixedAuthority(),
         clock=FixedClock(),
@@ -1277,6 +1304,298 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         store.close()
 
 
+def test_private_profile_collection_is_durable_collection_only_and_publicly_redacted(
+    tmp_path,
+) -> None:
+    private_name = "Pessoa Privada Silva"
+    private_email = "private.person@example.invalid"
+    private_country = "BR"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer.sqlite3"
+    )
+    proposal = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=(f"Resumo pronto para {private_name} ({private_email}).",),
+        facts=(
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+            ModelFact("full_name", private_name),
+            ModelFact("email", private_email),
+            ModelFact("country_code", private_country),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(BATCH)
+        snapshot = private_store.load(BATCH.lead_id)
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+        artifact_json = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts ORDER BY artifact_index"
+            ).fetchall()
+        )
+
+        assert result.reply_chunks == (
+            "Obrigado. Guardei esses dados para continuar a reserva.",
+        )
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert snapshot.full_name == private_name
+        assert snapshot.email == private_email
+        assert snapshot.country_code == private_country
+        assert projection is not None
+        assert not {
+            "full_name",
+            "email",
+            "phone_e164",
+            "country_code",
+        } & {item.name for item in projection.facts}
+        public_bytes = "\n".join(
+            (
+                repr(result),
+                repr(proposal),
+                projection.to_canonical_bytes().decode(),
+                artifact_json,
+            )
+        )
+        for private_value in (private_name, private_email):
+            assert private_value not in public_bytes
+        assert '"country_code"' not in projection.to_canonical_bytes().decode()
+        assert '"country_code"' not in artifact_json
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_invalid_model_private_facts_are_collection_only_and_request_correction(
+    tmp_path,
+) -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "invalid-model-private.sqlite3"
+    )
+    proposal = replace(
+        _proposal("Resumo pronto."),
+        facts=(
+            ModelFact("full_name", "Mononym"),
+            ModelFact("email", "@example.invalid"),
+            ModelFact("country_code", "ZZ"),
+            ModelFact("phone_e164", "+1" + "202" + "555" + "0177"),
+        ),
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(BATCH)
+        snapshot = private_store.load(BATCH.lead_id)
+
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert result.reply_chunks == (
+            "Por favor, envie novamente nome completo, e-mail válido, país "
+            "para eu continuar.",
+        )
+        assert snapshot.present_fact_names == ()
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_parent_collector_redacts_private_values_before_model_and_persists_first(
+    tmp_path,
+) -> None:
+    private_name = "Pessoa Prompt Silva"
+    private_email = "prompt.person@example.invalid"
+    private_country = "Brasil"
+    message = (
+        f"Meu nome completo é {private_name}, meu e-mail é {private_email} "
+        f"e sou do {private_country}."
+    )
+    event = replace(
+        EVENT,
+        event_id="event:private-prompt-redaction",
+        text=message,
+        payload_hash="5" * 64,
+    )
+    batch = InboundBatch(
+        batch_id="batch:private-prompt-redaction",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(event,),
+        combined_text=message,
+    )
+    authority = replace(
+        AUTHORITY,
+        authorization_id="auth:private-prompt-redaction",
+        allocation_ids=("allocation:private-prompt-redaction",),
+        allocation_manifest_hash="5" * 64,
+    )
+    proposal = ModelProposal(
+        source_event_id=batch.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-prompt-redaction.sqlite3"
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store, authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(batch)
+        snapshot = private_store.load(batch.lead_id)
+
+        assert result.receipt.command_rows == ()
+        assert len(model.calls) == 1
+        assert model.calls[0].private_customer_fact_names == (
+            "full_name",
+            "email",
+            "phone_e164",
+            "country_code",
+        )
+        for private_value in (private_name, private_email, private_country):
+            assert private_value not in model.calls[0].message
+            assert private_value not in repr(model.calls[0])
+        assert snapshot.full_name == private_name
+        assert snapshot.email == private_email
+        assert snapshot.country_code == "BR"
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_private_collection_gate_survives_boundary_crash_and_retry(tmp_path) -> None:
+    private_store_path = tmp_path / "private-customer-replay.sqlite3"
+    private_name = "Pessoa Replay Silva"
+    private_email = "replay.person@example.invalid"
+    private_country = "US"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(private_store_path)
+    first = replace(
+        _proposal("Dados recebidos."),
+        facts=(
+            ModelFact("full_name", private_name),
+            ModelFact("email", private_email),
+            ModelFact("country_code", private_country),
+        ),
+    )
+    retry = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Resumo pronto.",),
+        facts=(
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    model = FakeAuditedModel(store, [first, retry])
+    _install_public_authority(store)
+
+    def build(boundary_store) -> V2TurnExecutor:
+        return V2TurnExecutor(
+            store=boundary_store,
+            model=model,
+            reads=V2ReadService({}),
+            profile=PhoneOnlyManyChatContact(store),
+            private_customer_facts=private_store,
+            reducer=_enabled_reducer(),
+            public_authority=FixedAuthority(),
+            clock=FixedClock(),
+            locale="pt-BR",
+            turn_timeout=timedelta(seconds=30),
+            max_commit_attempts=1,
+        )
+
+    try:
+        with pytest.raises(RuntimeError, match="injected atomic turn failure"):
+            build(FaultingStore(store, "after_public_outbox_insert_0")).execute(BATCH)
+        assert store.load_turn_receipt(BATCH.batch_id) is None
+        assert private_store.turn_supplied_fact_names(
+            BATCH.lead_id, BATCH.batch_id
+        ) == ("full_name", "email", "country_code")
+
+        result = build(store).execute(BATCH)
+
+        assert result.reply_chunks == (
+            "Obrigado. Guardei esses dados para continuar a reserva.",
+        )
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert len(model.calls) == 2
+        assert model.calls[1].private_profile_complete is True
+    finally:
+        private_store.close()
+        store.close()
+
+
 def test_conversation_country_marks_authenticated_manychat_contact_complete_next_turn() -> None:
     store = SQLiteBoundaryStore.open_memory_v8()
     second_event = replace(
@@ -1315,6 +1634,7 @@ def test_conversation_country_marks_authenticated_manychat_contact_complete_next
         model=model,
         reads=V2ReadService({}),
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
         public_authority=MappingAuthority(
             {
@@ -1553,6 +1873,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
             model=model,
             reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
             profile=FakeProfile(store),
+            private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
             reducer=_enabled_reducer(),
             public_authority=MappingAuthority(
                 {confirmation_batch.batch_id: confirmation_authority}
@@ -2142,6 +2463,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         model=model,
         reads=V2ReadService({ReadKind.LODGING: read_port}),
         profile=profile,
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
         public_authority=MappingAuthority(
             {
