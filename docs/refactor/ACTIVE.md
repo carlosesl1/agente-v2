@@ -24,8 +24,8 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 | 3. Resolver parent-owned de cliente efetivo | `DONE` | `2e3fb81559268761b423055bc991b933d8797ee3` |
 | 4. Protocolo collection-only e privacidade de artifacts | `DONE` | `f08a0af949464ff9426056122ab002b3cc6e0fe5` |
 | 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
-| 6. E2E Cloudbeds fake, replay e regressões | `NEXT` | — |
-| 7. Qualificação, revisão, push e CI exatos | `PENDING` | — |
+| 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
+| 7. Qualificação, revisão, push e CI exatos | `NEXT` | — |
 
 Evidência Task 2:
 
@@ -35,7 +35,7 @@ Evidência Task 2:
 - Ruff, compileall e `git diff --check`: verdes;
 - zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
 
-- NEXT: escrever RED E2E fake para coleta natural → turno posterior de resumo → confirmação natural → exatamente um comando/dispatch/POST, payload Cloudbeds split-origin exato e replay/restart; então ampliar regressões de telefone/PII/Cloudbeds/Bókun.
+- NEXT: executar suíte completa limpa e gates oficiais; obter revisão independente read-only no SHA candidato; corrigir findings reproduzíveis; somente então commit de controle final, push e CI `test/image/gate` no SHA exato.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
