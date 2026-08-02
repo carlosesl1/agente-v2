@@ -13,6 +13,30 @@
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
+## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
+
+Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canônicos sejam fallback privado quando o ManyChat não possuir valores válidos, mantendo telefone exclusivamente autenticado pelo binding ManyChat fresco e país ManyChat-first. Valores privados não pertencem à projeção/artifacts públicos; coleta não pode criar resumo/comando no mesmo turno; confirmação posterior revalida cliente efetivo e todos os termos congelados.
+
+| Task | Estado | Commit |
+|---|---|---|
+| 1. Autoridade, spec e plano | `DONE` | `1329eeec5d5afe7729756d61ff181febaa99ec6d` |
+| 2. Owner SQLite privado e canonicalização | `DONE` | `0b7ac7e0d9d51a33581988852d631d1fd05b656c` |
+| 3. Resolver parent-owned de cliente efetivo | `NEXT` | — |
+| 4. Protocolo collection-only e privacidade de artifacts | `PENDING` | — |
+| 5. Composição/runtime do owner separado | `PENDING` | — |
+| 6. E2E Cloudbeds fake, replay e regressões | `PENDING` | — |
+| 7. Qualificação, revisão, push e CI exatos | `PENDING` | — |
+
+Evidência Task 2:
+
+- RED causal: import do owner ausente;
+- GREEN focado: `6 passed`;
+- blast radius de perfil/modelo/coleta: `44 passed`;
+- Ruff, compileall e `git diff --check`: verdes;
+- zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
+
+- NEXT: escrever REDs do resolver efetivo para fallback, conflito, binding futuro/expirado e identidade split-origin; somente depois alterar o reducer.
+
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
 Carlos autorizou em 2026-07-27 a correção de conversa pré-reserva, relógio de consultas, fallback de protocolo, conhecimento comercial e controle operacional, além da preparação de todas as funções sob testes limitados.
