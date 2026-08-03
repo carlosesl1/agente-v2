@@ -2,20 +2,20 @@
 
 ## Autoridade
 
-- Estado: `SAME_TURN_PRIVATE_CONTINUATION_LOCALLY_QUALIFIED`
+- Estado: `MAYA_OWNED_HOLDER_INTERPRETATION_LOCALLY_QUALIFIED`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-08-03-same-turn-private-profile-continuation-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-08-03-same-turn-private-profile-continuation.md`
+- Especificação ativa: `docs/superpowers/specs/2026-08-03-maya-owned-reservation-holder-interpretation-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-08-03-maya-owned-reservation-holder-interpretation.md`
 - Base funcional do reparo: `1219ff2c12efa989f44f5caa7364363011ea281d`
-- Autoridade: solicitação explícita de Carlos em 2026-08-03 para fazer nome/e-mail/país conversacionais válidos prevalecerem sobre ManyChat, preservando telefone exclusivamente autenticado
+- Autoridade: solicitação explícita de Carlos em 2026-08-03 para Maya receber a mensagem original integral, atribuir semanticamente nome/e-mail/país ao titular e preservar telefone exclusivamente autenticado pelo binding ManyChat/WhatsApp
 - Rollout: `LOCAL_FAKE_ONLY_IMPLEMENTATION`
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 
-Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais canônicos prevaleçam sobre valores ManyChat válidos porém divergentes. ManyChat é fallback para esses campos; telefone continua exclusivamente autenticado pelo binding ManyChat fresco. Valores privados não pertencem à projeção/artifacts públicos. Coleta/correção determinística parent-owned persiste antes do modelo e pode continuar até um resumo novo no mesmo turno, mas nunca cria command/relay de reserva; confirmação posterior revalida o cliente efetivo e apenas o material de perfil realmente selecionado.
+Carlos autorizou em 2026-08-03 que Maya receba a mensagem original integral e atribua semanticamente nome completo, e-mail e país ao titular da reserva. O controlador valida, canonicaliza e persiste os fatos estruturados da Maya antes de qualquer read, sem extrator regex nem marcadores; ManyChat é fallback nesses três campos e fonte exclusiva do telefone autenticado. PII permanece fora de projeção, history, artifacts/evidence, logs, exceções e `repr`. Coleta/correção pode produzir resumo no mesmo turno, mas nunca command/relay; confirmação posterior revalida o cliente efetivo e o material selecionado.
 
 | Task | Estado | Commit |
 |---|---|---|
@@ -27,7 +27,8 @@ Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais
 | 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
 | 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
 | 8. Conversa-first para nome/e-mail/país | `DONE — SUPERSEDED BY SAME-TURN CONTINUATION` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
-| 9. Continuar até resumo após coleta/correção privada | `LOCALLY QUALIFIED — REVIEW NEXT` | `232ceea8e7e1af3425cfc1aa8b48e67c114839f4` |
+| 9. Continuar até resumo após coleta/correção privada | `DONE — INPUT PATH SUPERSEDED` | `b110662461dca1ce5d2f15c0d6bfe366b9ce00a2` |
+| 10. Maya interpreta titular a partir da mensagem original | `LOCALLY QUALIFIED — REVIEW NEXT` | `31835d5a2ce06835970dc216a4602336d37ed3ea` |
 
 Evidência Task 2:
 
@@ -85,7 +86,21 @@ Evidência Task 9:
 - `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
 - nenhum POST Cloudbeds/Bókun real, pagamento, entrega/reset ManyChat, deploy ou alteração de reserva real foi executado.
 
-- NEXT: congelar o SHA que contém este ledger e obter parecer independente `CLEAR` sobre esse SHA exato; somente então push e CI remoto `test/image/gate`. Runtime, post budget e rollout permanecem fechados.
+Evidência Task 10:
+
+- spec aprovada pela solicitação numerada: `990eafd80a5f2a768e7a3a2bd7b6ccf2a13ebbc1`; plano TDD: `a51dbb00b158265f3bf4804b59e23d5bc657c3f5`;
+- RED causal no wire: a mensagem original já chegava ao campo `message`, mas o prompt ainda ordenava markers/collection-only e não definia titular versus esposa/terceiro;
+- contrato Maya: `32b619692bbc8b859cfdb713a4457b5cc1418024`; executor/store sem extrator determinístico: `2ee10b598185bbe77166eb5e96146baa9aee050c`; E2E e correção sem confirmação obsoleta: `52e11730f0ce31eef5d75e4b4c6eb65dba6ce395`;
+- `v2_application/private_customer_collection.py` e seus testes foram removidos; scan estático confirma ausência de `collect_private_customer_facts`, `PrivateCustomerCollection` e `sanitized_message` em produção;
+- Maya recebe `combined_text` integral em todas as chamadas; fatos `full_name`, `email` e `country_code` estruturados são canonicalizados/persistidos antes de reads e removidos do proposal público/artifacts; telefone conversacional é descartado como identidade e o draft usa o binding ManyChat autenticado;
+- matriz semântica cobre lead versus esposa/hostel incidental, terceiro explicitamente nomeado titular, ambiguidade com pergunta natural e telefone digitado; executor+adapter `80 passed`; E2E split-origin `9 passed`; regressão proporcional integrada `214 passed`;
+- correção válida pode produzir novo resumo no mesmo turno; correção junto de confirmação exige `adjust/revoke`; zero command/relay no lote da atualização; confirmação posterior, replay e exatamente um POST Cloudbeds simulado permanecem provados;
+- gate oficial clean-env com sete exclusions históricos: `1489 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, `fasttrack-boundaries`, compileall, `git diff --check` e scan do extrator: verdes;
+- `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
+- nenhum push, deploy, POST real, pagamento, entrega/reset ManyChat ou alteração de reserva real foi executado.
+
+- NEXT: congelar o SHA que contém este ledger e obter parecer independente `CLEAR` sobre esse SHA exato; parar antes de push/deploy/WhatsApp real conforme a autoridade atual.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
