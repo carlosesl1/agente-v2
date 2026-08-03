@@ -2,11 +2,11 @@
 
 ## Autoridade
 
-- Estado: `SPLIT_ORIGIN_CONVERSATION_FIRST_CANDIDATE_FROZEN`
+- Estado: `SAME_TURN_PRIVATE_CONTINUATION_LOCALLY_QUALIFIED`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
-- Especificação ativa: `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-08-03-conversation-first-profile-authority.md`
+- Especificação ativa: `docs/superpowers/specs/2026-08-03-same-turn-private-profile-continuation-design.md`
+- Plano ativo: `docs/superpowers/plans/2026-08-03-same-turn-private-profile-continuation.md`
 - Base funcional do reparo: `1219ff2c12efa989f44f5caa7364363011ea281d`
 - Autoridade: solicitação explícita de Carlos em 2026-08-03 para fazer nome/e-mail/país conversacionais válidos prevalecerem sobre ManyChat, preservando telefone exclusivamente autenticado
 - Rollout: `LOCAL_FAKE_ONLY_IMPLEMENTATION`
@@ -15,7 +15,7 @@
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 
-Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais canônicos prevaleçam sobre valores ManyChat válidos porém divergentes. ManyChat é fallback para esses campos; telefone continua exclusivamente autenticado pelo binding ManyChat fresco. Valores privados não pertencem à projeção/artifacts públicos; coleta não pode criar resumo/comando no mesmo turno; confirmação posterior revalida o cliente efetivo e apenas o material de perfil realmente selecionado.
+Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais canônicos prevaleçam sobre valores ManyChat válidos porém divergentes. ManyChat é fallback para esses campos; telefone continua exclusivamente autenticado pelo binding ManyChat fresco. Valores privados não pertencem à projeção/artifacts públicos. Coleta/correção determinística parent-owned persiste antes do modelo e pode continuar até um resumo novo no mesmo turno, mas nunca cria command/relay de reserva; confirmação posterior revalida o cliente efetivo e apenas o material de perfil realmente selecionado.
 
 | Task | Estado | Commit |
 |---|---|---|
@@ -26,7 +26,8 @@ Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais
 | 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
 | 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
 | 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
-| 8. Conversa-first para nome/e-mail/país | `CANDIDATE_FROZEN — REVIEW NEXT` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
+| 8. Conversa-first para nome/e-mail/país | `DONE — SUPERSEDED BY SAME-TURN CONTINUATION` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
+| 9. Continuar até resumo após coleta/correção privada | `LOCALLY QUALIFIED — REVIEW NEXT` | `232ceea8e7e1af3425cfc1aa8b48e67c114839f4` |
 
 Evidência Task 2:
 
@@ -69,7 +70,22 @@ Evidência Task 8:
 - `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
 - nenhum POST Cloudbeds/Bókun real, pagamento, entrega/reset ManyChat, deploy ou alteração de reserva real foi executado.
 
-- NEXT: obter parecer independente `CLEAR` sobre o SHA final que contém este ledger; somente então push e CI remoto `test/image/gate` no mesmo SHA. Runtime, post budget e rollout permanecem fechados.
+Evidência Task 9:
+
+- decisão de produto: remover exclusivamente o turno intermediário após coleta/correção válida de `full_name`, `email` ou `country_code`, mantendo confirmação/comando para lote posterior;
+- spec: `5b1116f0aaad28ab9b3d1814eed0c759d9c5a895`; plano TDD: `c96d0282fdb740a50284c69895bb4d09ea1a5d2d`;
+- RED causal `fe2f903c905ddaf76a24fece6946eb3b3c0acd13`: persistência privada ocorreu, mas o executor respondeu `Obrigado. Guardei esses dados...` e suprimiu read/resumo;
+- GREEN funcional `232ceea8e7e1af3425cfc1aa8b48e67c114839f4`, tree `ffaf90f4dac3ebc0db728057bc0ad03b20bd5b4c`: coleta parent-owned válida segue para read/summary; inválida/model-only permanece collection-only;
+- correção válida substitui o workflow pendente por novo `AwaitingConfirmationState` ligado ao snapshot corrigido; tentativa `confirm` no mesmo lote é rebaixada antes de derived reads e produz zero command/relay;
+- handoff explicitamente solicitado permanece regido pela política existente; replay committed não repete modelo/read;
+- E2E split-origin completo: `9 passed`; executor completo: `57 passed`;
+- regressão proporcional de owner/coleta/perfil/reducer/executor/providers/pagamento: `234 passed`; modelo/settings/composition/host: `74 passed`; total distinto: `308 passed`;
+- gate oficial local com sete exclusions históricos: `1489 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, `fasttrack-boundaries`, compileall e `git diff --check`: verdes;
+- `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
+- nenhum POST Cloudbeds/Bókun real, pagamento, entrega/reset ManyChat, deploy ou alteração de reserva real foi executado.
+
+- NEXT: congelar o SHA que contém este ledger e obter parecer independente `CLEAR` sobre esse SHA exato; somente então push e CI remoto `test/image/gate`. Runtime, post budget e rollout permanecem fechados.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
