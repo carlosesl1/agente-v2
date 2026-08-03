@@ -1605,7 +1605,7 @@ def test_invalid_model_private_facts_are_collection_only_and_request_correction(
         store.close()
 
 
-def test_parent_collector_redacts_private_values_before_model_and_persists_first(
+def test_parent_collector_persists_first_and_continues_to_summary_same_turn(
     tmp_path,
 ) -> None:
     private_name = "Pessoa Prompt Silva"
@@ -1634,7 +1634,23 @@ def test_parent_collector_redacts_private_values_before_model_and_persists_first
         allocation_ids=("allocation:private-prompt-redaction",),
         allocation_manifest_hash="5" * 64,
     )
-    proposal = ModelProposal(
+    read_request = ReadRequest(
+        request_id="read:private-prompt-redaction",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    first = ModelProposal(
+        source_event_id=batch.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar.",),
+        facts=(),
+        read_requests=(read_request,),
+        effect_proposals=(),
+    )
+    selection = ModelProposal(
         source_event_id=batch.batch_id,
         intent="select",
         reply_chunks=("Vou preparar o resumo.",),
@@ -1654,12 +1670,13 @@ def test_parent_collector_redacts_private_values_before_model_and_persists_first
     private_store = SQLitePrivateCustomerFactStore(
         tmp_path / "private-prompt-redaction.sqlite3"
     )
-    model = FakeAuditedModel(store, [proposal])
+    model = FakeAuditedModel(store, [first, selection])
+    read_port = FakeLodgingReadPort(store)
     _install_public_authority(store, authority)
     executor = V2TurnExecutor(
         store=store,
         model=model,
-        reads=V2ReadService({}),
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
         profile=PhoneOnlyManyChatContact(store),
         private_customer_facts=private_store,
         reducer=_enabled_reducer(),
@@ -1673,8 +1690,12 @@ def test_parent_collector_redacts_private_values_before_model_and_persists_first
         result = executor.execute(batch)
         snapshot = private_store.load(batch.lead_id)
 
+        assert "Só para confirmar" in result.reply_chunks[0]
+        assert "Guardei esses dados" not in " ".join(result.reply_chunks)
         assert result.receipt.command_rows == ()
-        assert len(model.calls) == 1
+        assert result.receipt.relay_rows == ()
+        assert read_port.calls == [read_request]
+        assert len(model.calls) == 2
         assert model.calls[0].private_customer_fact_names == (
             "full_name",
             "email",
@@ -1684,6 +1705,8 @@ def test_parent_collector_redacts_private_values_before_model_and_persists_first
         for private_value in (private_name, private_email, private_country):
             assert private_value not in model.calls[0].message
             assert private_value not in repr(model.calls[0])
+            assert private_value not in model.calls[1].message
+            assert private_value not in repr(model.calls[1])
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
