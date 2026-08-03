@@ -6,7 +6,7 @@
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
 - Especificação ativa: `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
-- Plano ativo: `docs/superpowers/plans/2026-08-02-split-origin-reservation-profile-authority.md`
+- Plano ativo: `docs/superpowers/plans/2026-08-03-conversation-first-profile-authority.md`
 - Base funcional do reparo: `1219ff2c12efa989f44f5caa7364363011ea281d`
 - Autoridade: solicitação explícita de Carlos em 2026-08-03 para fazer nome/e-mail/país conversacionais válidos prevalecerem sobre ManyChat, preservando telefone exclusivamente autenticado
 - Rollout: `LOCAL_FAKE_ONLY_IMPLEMENTATION`
