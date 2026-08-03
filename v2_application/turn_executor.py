@@ -56,6 +56,7 @@ from reservation_domain import (
 from reservation_followup import HandoffRequested
 from v2_application.conversation import (
     V2ConversationReducer,
+    effective_customer_material_hash,
     reservation_profile_ready,
 )
 from v2_application.read_bridge import bridge_availability_observation
@@ -943,39 +944,6 @@ def _state_model_facts(
     )
 
 
-def _profile_material_identity(profile: PrivateCustomerBinding) -> tuple[object, ...]:
-    if type(profile) is not PrivateCustomerBinding:
-        raise TypeError("profile must be exact PrivateCustomerBinding")
-    return (
-        profile.binding_id,
-        profile.content_hash,
-        profile.full_name,
-        profile.email,
-        profile.phone_e164,
-        profile.country_code,
-        profile.complete,
-    )
-
-
-def _profile_material_hash(profile: PrivateCustomerBinding) -> str:
-    identity = _profile_material_identity(profile)
-    return _domain_hash(
-        "private-profile-material-v1",
-        _canonical(
-            "private-profile-material",
-            {
-                "binding_id": identity[0],
-                "content_hash": identity[1],
-                "full_name": identity[2],
-                "email": identity[3],
-                "phone_e164": identity[4],
-                "country_code": identity[5],
-                "complete": identity[6],
-            },
-        ),
-    )
-
-
 def _private_customer_fact_names(
     projection: ConversationProjection,
     *,
@@ -1497,16 +1465,33 @@ class V2TurnExecutor:
                         raise TypeError(
                             "profile port must return exact PrivateCustomerBinding"
                         )
-                    if _profile_material_hash(current_profile) != (
-                        prepared.private_profile_material_hash
-                    ):
-                        raise TurnExecutionError("private profile changed before commit")
                     if not (
                         current_profile.observed_at
                         <= profile_now
                         < current_profile.expires_at
                     ):
                         raise TurnExecutionError("private profile expired before commit")
+                    current_projection = (
+                        self._store.load_latest_conversation_projection(batch.lead_id)
+                    )
+                    if current_projection is None:
+                        current_projection = _genesis_projection(self._locale)
+                    current_private_facts = self._private_customer_facts.load(
+                        batch.lead_id
+                    )
+                    if type(current_private_facts) is not PrivateCustomerFactSnapshot:
+                        raise TypeError(
+                            "private customer owner must return an exact snapshot"
+                        )
+                    if effective_customer_material_hash(
+                        current_profile,
+                        current_projection,
+                        profile_now,
+                        private_facts=current_private_facts,
+                    ) != (
+                        prepared.private_profile_material_hash
+                    ):
+                        raise TurnExecutionError("private profile changed before commit")
                 self._store.commit_turn_v8(
                     expected_version=expected_version,
                     fencing_token=fencing_token,
@@ -2061,9 +2046,19 @@ class V2TurnExecutor:
             decision_profile = self._profile.read(batch.lead_id, now=decision_now)
             if type(decision_profile) is not PrivateCustomerBinding:
                 raise TypeError("profile port must return exact PrivateCustomerBinding")
-            if _profile_material_identity(decision_profile) != _profile_material_identity(
-                profile
-            ):
+            initial_profile_material = effective_customer_material_hash(
+                profile,
+                projection,
+                decision_now,
+                private_facts=private_facts,
+            )
+            decision_profile_material = effective_customer_material_hash(
+                decision_profile,
+                projection,
+                decision_now,
+                private_facts=private_facts,
+            )
+            if decision_profile_material != initial_profile_material:
                 raise TurnExecutionError("private profile changed during turn")
             profile = decision_profile
 
@@ -2321,9 +2316,16 @@ class V2TurnExecutor:
             raise TypeError("private customer owner must return an exact snapshot")
         if commit_private_facts.content_hash != private_facts.content_hash:
             raise TurnExecutionError("private customer facts changed before commit")
-        private_profile_material_hash = (
-            _profile_material_hash(profile) if command_rows else None
-        )
+        private_profile_material_hash = None
+        if command_rows:
+            private_profile_material_hash = effective_customer_material_hash(
+                profile,
+                projection,
+                commit_now,
+                private_facts=commit_private_facts,
+            )
+            if private_profile_material_hash is None:
+                raise TurnExecutionError("private profile changed before commit")
         for observation in v2_observations:
             self._reads.accept(observation, now=commit_now)
         if authority.deadline_at <= commit_now:

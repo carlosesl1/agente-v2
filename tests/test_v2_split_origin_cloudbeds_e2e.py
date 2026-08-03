@@ -421,8 +421,35 @@ def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
         boundary.close()
 
 
-def test_manychat_binding_change_after_confirmation_decision_blocks_command_commit(
+@pytest.mark.parametrize(
+    ("mutation_kind", "mutation_timing", "should_block"),
+    (
+        pytest.param("phone", "precommit", True, id="authenticated_phone"),
+        pytest.param(
+            "selected_email",
+            "precommit",
+            True,
+            id="selected_manychat_email",
+        ),
+        pytest.param(
+            "unused_identity",
+            "precommit",
+            False,
+            id="unused_manychat_identity_precommit",
+        ),
+        pytest.param(
+            "unused_identity",
+            "decision",
+            False,
+            id="unused_manychat_identity_decision",
+        ),
+    ),
+)
+def test_manychat_change_after_confirmation_decision_is_source_aware(
     tmp_path: Path,
+    mutation_kind: str,
+    mutation_timing: str,
+    should_block: bool,
 ) -> None:
     summary_batch = _batch(
         suffix="summary",
@@ -499,50 +526,81 @@ def test_manychat_binding_change_after_confirmation_decision_blocks_command_comm
     private_store = SQLitePrivateCustomerFactStore(
         tmp_path / "private-customer-binding-change.sqlite3"
     )
+    private_facts = [
+        ModelFact("full_name", "Pessoa Binding Silva"),
+        ModelFact("country_code", "BR"),
+    ]
+    if mutation_kind != "selected_email":
+        private_facts.append(
+            ModelFact("email", "binding.person@example.invalid")
+        )
     private_store.persist_turn(
         lead_id=summary_batch.lead_id,
         source_turn_id="batch:split-origin-binding-profile",
         source_event_hash="8" * 64,
-        facts=(
-            ModelFact("full_name", "Pessoa Binding Silva"),
-            ModelFact("email", "binding.person@example.invalid"),
-            ModelFact("country_code", "BR"),
-        ),
+        facts=tuple(private_facts),
         persisted_at=NOW - timedelta(minutes=1),
     )
 
-    class MutablePhoneProfile:
+    class MutableManyChatProfile:
         def __init__(self) -> None:
             self.revision = 0
+            self.read_count = 0
+            self.mutate_on_read: int | None = None
 
         def mutate(self) -> None:
             self.revision = 1
 
+        def mutate_before_second_next_read(self) -> None:
+            self.mutate_on_read = self.read_count + 2
+
         def read(self, lead_id: str, *, now) -> PrivateCustomerBinding:
             del lead_id
+            self.read_count += 1
+            if self.read_count == self.mutate_on_read:
+                self.mutate()
             phone = (
                 "".join(("+1", "202", "555", "0199"))
-                if self.revision == 0
+                if self.revision == 0 or mutation_kind != "phone"
                 else "".join(("+1", "202", "555", "0200"))
             )
+            if mutation_kind == "unused_identity" and self.revision == 1:
+                full_name = "Pessoa ManyChat Alterada"
+                email = "manychat.changed@example.invalid"
+                country = "US"
+            else:
+                full_name = None
+                email = (
+                    "manychat.original@example.invalid"
+                    if mutation_kind == "selected_email" and self.revision == 0
+                    else "manychat.changed@example.invalid"
+                    if mutation_kind == "selected_email"
+                    else None
+                )
+                country = None
             return PrivateCustomerBinding(
                 binding_id="profile-binding:" + "9" * 64,
                 content_hash=("8" if self.revision == 0 else "7") * 64,
-                full_name=None,
-                email=None,
+                full_name=full_name,
+                email=email,
                 phone_e164=phone,
-                country_code=None,
+                country_code=country,
                 observed_at=now,
                 expires_at=now + timedelta(minutes=5),
-                complete=False,
+                complete=all(
+                    value is not None for value in (full_name, email, phone, country)
+                ),
             )
 
-    profile = MutablePhoneProfile()
+    profile = MutableManyChatProfile()
     delegate = MappingAuthority(authorities)
 
     class MutatingAuthority:
         def resolve(self, batch, *, chunk_count, now):
-            if batch.batch_id == confirm_batch.batch_id:
+            if (
+                batch.batch_id == confirm_batch.batch_id
+                and mutation_timing == "precommit"
+            ):
                 profile.mutate()
             return delegate.resolve(batch, chunk_count=chunk_count, now=now)
 
@@ -566,16 +624,26 @@ def test_manychat_binding_change_after_confirmation_decision_blocks_command_comm
     try:
         summary = executor.execute(summary_batch)
         assert "Só para confirmar" in summary.reply_chunks[0]
+        if mutation_timing == "decision":
+            profile.mutate_before_second_next_read()
 
-        with pytest.raises(TurnExecutionError, match="profile changed before commit"):
-            executor.execute(confirm_batch)
+        if should_block:
+            with pytest.raises(
+                TurnExecutionError,
+                match="profile changed before commit",
+            ):
+                executor.execute(confirm_batch)
+        else:
+            confirmation = executor.execute(confirm_batch)
+            assert len(confirmation.receipt.command_rows) == 1
+            assert len(confirmation.receipt.relay_rows) == 1
 
         assert boundary._connection.execute(
             "SELECT count(*) FROM boundary_commands"
-        ).fetchone()[0] == 0
+        ).fetchone()[0] == (0 if should_block else 1)
         assert boundary._connection.execute(
             "SELECT count(*) FROM boundary_command_relays"
-        ).fetchone()[0] == 0
+        ).fetchone()[0] == (0 if should_block else 1)
     finally:
         private_store.close()
         boundary.close()
