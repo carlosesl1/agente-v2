@@ -10,6 +10,7 @@ from reservation_boundary import (
     StringSlot,
     TypedFact,
 )
+from v2_application import conversation as conversation_module
 from v2_application.conversation import (
     EffectiveCustomerResolution,
     resolve_effective_customer,
@@ -199,7 +200,9 @@ def test_expired_manychat_identity_fields_do_not_override_private_fallback(
     assert resolution.missing_fields == ("phone_e164",)
 
 
-def test_valid_manychat_and_divergent_private_values_fail_closed(tmp_path: Path) -> None:
+def test_valid_conversation_values_override_divergent_manychat_values(
+    tmp_path: Path,
+) -> None:
     private = _private_snapshot(
         tmp_path,
         ModelFact("full_name", "Outra Pessoa Silva"),
@@ -214,10 +217,86 @@ def test_valid_manychat_and_divergent_private_values_fail_closed(tmp_path: Path)
         private_facts=private,
     )
 
-    assert resolution.ready is False
-    assert resolution.customer is None
+    assert resolution.ready is True
+    assert resolution.customer is not None
     assert resolution.missing_fields == ()
-    assert resolution.conflicting_fields == ("full_name", "email", "country_code")
+    assert resolution.conflicting_fields == ()
+    assert resolution.customer.full_name == "Outra Pessoa Silva"
+    assert resolution.customer.email == "other.person@example.invalid"
+    assert resolution.customer.phone_e164 == PHONE
+    assert resolution.customer.country_code == "US"
+
+
+def test_unused_manychat_identity_fields_do_not_change_effective_material(
+    tmp_path: Path,
+) -> None:
+    private = _private_snapshot(
+        tmp_path,
+        ModelFact("full_name", "Pessoa Conversa Silva"),
+        ModelFact("email", "conversation.person@example.invalid"),
+        ModelFact("country_code", "BR"),
+    )
+    first_profile = _profile(
+        full_name="Pessoa ManyChat Original",
+        email="manychat.original@example.invalid",
+        country="US",
+    )
+    second_profile = replace(
+        first_profile,
+        content_hash="c" * 64,
+        full_name="Pessoa ManyChat Alterada",
+        email="manychat.changed@example.invalid",
+        country_code="CA",
+    )
+    changed_phone = replace(
+        second_profile,
+        content_hash="d" * 64,
+        phone_e164="".join(("+1", "202", "555", "0456")),
+    )
+
+    first = resolve_effective_customer(
+        first_profile,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+    second = resolve_effective_customer(
+        second_profile,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+
+    assert first.ready is True
+    assert second.ready is True
+    assert first.customer is not None
+    assert second.customer is not None
+    assert first.customer.customer_ref == second.customer.customer_ref
+
+    material_hash = getattr(
+        conversation_module,
+        "effective_customer_material_hash",
+    )
+    first_hash = material_hash(
+        first_profile,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+    second_hash = material_hash(
+        second_profile,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+    changed_phone_hash = material_hash(
+        changed_phone,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+    assert first_hash == second_hash
+    assert changed_phone_hash != first_hash
 
 
 def test_missing_future_or_expired_authenticated_phone_never_resolves(

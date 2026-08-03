@@ -364,29 +364,54 @@ def _canonical_optional(
         return None, True
 
 
-def _fallback_field(
+def _conversation_first_field(
     manychat_value: str | None,
-    private_value: str | None,
+    conversational_value: str | None,
     *,
     canonicalizer,
-    compare_casefold: bool = False,
-    invalid_authoritative_is_missing: bool = False,
 ) -> tuple[str | None, bool]:
-    authoritative, invalid_authoritative = _canonical_optional(
-        manychat_value,
+    conversational, invalid_conversational = _canonical_optional(
+        conversational_value,
         canonicalizer,
     )
-    fallback, invalid_fallback = _canonical_optional(private_value, canonicalizer)
-    if invalid_fallback or (
-        invalid_authoritative and not invalid_authoritative_is_missing
-    ):
+    if invalid_conversational:
         return None, True
-    if authoritative is not None and fallback is not None:
-        left = authoritative.casefold() if compare_casefold else authoritative
-        right = fallback.casefold() if compare_casefold else fallback
-        if left != right:
-            return None, True
-    return authoritative or fallback, False
+    if conversational is not None:
+        return conversational, False
+    manychat, _invalid_manychat = _canonical_optional(manychat_value, canonicalizer)
+    return manychat, False
+
+
+def _effective_customer_material_hash_from_values(
+    profile: PrivateCustomerBinding,
+    *,
+    full_name: str,
+    email: str,
+    phone_e164: str,
+    country_code: str,
+    full_name_source: str,
+    email_source: str,
+    country_code_source: str,
+    private_snapshot_hash: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "binding_id": profile.binding_id,
+            "country_code": country_code,
+            "country_code_source": country_code_source,
+            "email": email,
+            "email_source": email_source,
+            "full_name": full_name,
+            "full_name_source": full_name_source,
+            "phone_e164": phone_e164,
+            "private_snapshot_hash": private_snapshot_hash,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(b"v2-effective-customer-material-v1\0" + payload).hexdigest()
 
 
 def resolve_effective_customer(
@@ -418,24 +443,20 @@ def resolve_effective_customer(
     )
 
     profile_fresh = profile.observed_at <= instant < profile.expires_at
-    full_name, name_conflict = _fallback_field(
+    full_name, name_conflict = _conversation_first_field(
         profile.full_name if profile_fresh else None,
         private_name,
         canonicalizer=canonical_full_name,
-        compare_casefold=True,
-        invalid_authoritative_is_missing=True,
     )
-    email, email_conflict = _fallback_field(
+    email, email_conflict = _conversation_first_field(
         profile.email if profile_fresh else None,
         private_email,
         canonicalizer=canonical_email,
-        invalid_authoritative_is_missing=True,
     )
-    country, country_conflict = _fallback_field(
+    country, country_conflict = _conversation_first_field(
         profile.country_code if profile_fresh else None,
         private_country,
         canonicalizer=canonical_country_code,
-        invalid_authoritative_is_missing=True,
     )
     phone = profile.phone_e164 if profile_fresh else None
 
@@ -465,22 +486,28 @@ def resolve_effective_customer(
     assert email is not None
     assert phone is not None
     assert country is not None
-    split_origin_used = private_facts is not None or (
-        profile.country_code is None and legacy_country is not None
+    split_origin_used = any(
+        value is not None for value in (private_name, private_email, private_country)
     )
     if split_origin_used:
         snapshot_hash = _private_snapshot_hash(
             private_facts,
             legacy_country=legacy_country,
         )
-        customer_ref = "effective-customer:" + hashlib.sha256(
-            b"v2-effective-reservation-customer-v1\0"
-            + profile.binding_id.encode("utf-8")
-            + b"\0"
-            + profile.content_hash.encode("ascii")
-            + b"\0"
-            + snapshot_hash.encode("ascii")
-        ).hexdigest()
+        material_hash = _effective_customer_material_hash_from_values(
+            profile,
+            full_name=full_name,
+            email=email,
+            phone_e164=phone,
+            country_code=country,
+            full_name_source=("conversation" if private_name is not None else "manychat"),
+            email_source=("conversation" if private_email is not None else "manychat"),
+            country_code_source=(
+                "conversation" if private_country is not None else "manychat"
+            ),
+            private_snapshot_hash=snapshot_hash,
+        )
+        customer_ref = "effective-customer:" + material_hash
     else:
         customer_ref = profile.binding_id
     passengers = ()
@@ -502,6 +529,51 @@ def resolve_effective_customer(
     except (TypeError, ValueError):
         return EffectiveCustomerResolution(None, (), ("full_name",))
     return EffectiveCustomerResolution(customer, (), ())
+
+
+def effective_customer_material_hash(
+    profile: PrivateCustomerBinding,
+    projection: ConversationProjection,
+    now: datetime,
+    *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
+) -> str | None:
+    resolution = resolve_effective_customer(
+        profile,
+        projection,
+        now,
+        private_facts=private_facts,
+    )
+    customer = resolution.customer
+    if customer is None:
+        return None
+    facts = _projection_values(projection)
+    legacy_country = facts.get("country_code")
+    if type(legacy_country) is not str:
+        legacy_country = None
+    private_name = private_facts.full_name if private_facts is not None else None
+    private_email = private_facts.email if private_facts is not None else None
+    private_country = (
+        private_facts.country_code
+        if private_facts is not None and private_facts.country_code is not None
+        else legacy_country
+    )
+    return _effective_customer_material_hash_from_values(
+        profile,
+        full_name=customer.full_name,
+        email=customer.email,
+        phone_e164=customer.phone_e164,
+        country_code=customer.country_code,
+        full_name_source=("conversation" if private_name is not None else "manychat"),
+        email_source=("conversation" if private_email is not None else "manychat"),
+        country_code_source=(
+            "conversation" if private_country is not None else "manychat"
+        ),
+        private_snapshot_hash=_private_snapshot_hash(
+            private_facts,
+            legacy_country=legacy_country,
+        ),
+    )
 
 
 def _customer(
@@ -2107,8 +2179,11 @@ class V2ConversationReducer:
 __all__ = [
     "ConversationReductionError",
     "ConversationReply",
+    "EffectiveCustomerResolution",
     "PackageCommandCoordinator",
     "V2ConversationDecision",
     "V2ConversationReducer",
+    "effective_customer_material_hash",
+    "resolve_effective_customer",
     "typed_facts_from_proposal",
 ]
