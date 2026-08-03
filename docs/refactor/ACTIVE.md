@@ -2,7 +2,7 @@
 
 ## Autoridade
 
-- Estado: `SPLIT_ORIGIN_RESERVATION_PROFILE_TDD`
+- Estado: `SPLIT_ORIGIN_CONVERSATION_FIRST_CANDIDATE_FROZEN`
 - Branch obrigatória: `maya-v2-operational-readiness`
 - Worktree obrigatória: `/home/ubuntu/agente-v2/.worktrees/phase8-shadow-canary-rollout`
 - Especificação ativa: `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
@@ -26,7 +26,7 @@ Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais
 | 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
 | 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
 | 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
-| 8. Conversa-first para nome/e-mail/país | `NEXT — DESIGN APPROVED` | — |
+| 8. Conversa-first para nome/e-mail/país | `CANDIDATE_FROZEN — REVIEW NEXT` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
 
 Evidência Task 2:
 
@@ -52,7 +52,24 @@ Evidência da candidata de qualificação `314376d4a946dcc8523015bf1da1d8aed1699
 - Ruff, `fasttrack-boundaries`, compileall e `git diff --check`: verdes;
 - nenhum POST Cloudbeds/Bókun, pagamento, entrega ManyChat, deploy ou alteração de reserva real foi executado.
 
-- NEXT: executar Task 8 em RED/GREEN, provar precedência conversacional e reautenticação source-aware; depois repetir gate/revisão antes de qualquer push. Runtime, post budget e rollout permanecem fechados.
+Evidência Task 8:
+
+- autoridade corrigida e aprovada por Carlos: nome/e-mail/país conversacionais válidos vencem ManyChat divergente; telefone permanece ManyChat-only;
+- spec/ledger de autoridade: `f33f52b`; plano executável: `506d2f3`;
+- RED do resolver: os dois witnesses falharam causalmente porque a política antiga retornava conflito/not-ready;
+- GREEN do resolver/source-aware identity: `2 passed`; arquivo completo: `10 passed`;
+- commit funcional do resolver: `2c89e013a4ec27d168483ee90f978c9811e93c60`;
+- RED do fence pré-commit: troca de telefone autenticado e e-mail ManyChat selecionado continuaram bloqueando, enquanto mutação apenas de nome/e-mail/país ManyChat não utilizados falhou causalmente no hash bruto antigo;
+- GREEN dos fences: mutações ManyChat não utilizadas são aceitas tanto entre leitura/decisão quanto imediatamente antes do commit; troca de telefone ou de campo ManyChat efetivamente selecionado segue bloqueada com zero command/relay;
+- commit funcional de reautenticação source-aware: `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9`;
+- E2E split-origin completo: `6 passed`;
+- regressão proporcional de perfil, coleta, SQLite privado, reducer, executor, Cloudbeds, Bókun e pagamento: `264 passed`;
+- gate oficial local com os sete exclusions históricos autenticados no workflow: `1486 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, `fasttrack-boundaries`, compileall e `git diff --check`: verdes;
+- `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
+- nenhum POST Cloudbeds/Bókun real, pagamento, entrega/reset ManyChat, deploy ou alteração de reserva real foi executado.
+
+- NEXT: obter parecer independente `CLEAR` sobre o SHA final que contém este ledger; somente então push e CI remoto `test/image/gate` no mesmo SHA. Runtime, post budget e rollout permanecem fechados.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 
