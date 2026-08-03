@@ -202,6 +202,7 @@ class _PreparedTurn:
     internal_jobs: tuple[InternalOutboxWrite, ...]
     public_rows: tuple[PublicOutboxWrite, ...]
     reply_chunks: tuple[str, ...]
+    private_profile_material_hash: str | None
 
 
 def _canonical(schema: str, data: object) -> bytes:
@@ -942,6 +943,39 @@ def _state_model_facts(
     )
 
 
+def _profile_material_identity(profile: PrivateCustomerBinding) -> tuple[object, ...]:
+    if type(profile) is not PrivateCustomerBinding:
+        raise TypeError("profile must be exact PrivateCustomerBinding")
+    return (
+        profile.binding_id,
+        profile.content_hash,
+        profile.full_name,
+        profile.email,
+        profile.phone_e164,
+        profile.country_code,
+        profile.complete,
+    )
+
+
+def _profile_material_hash(profile: PrivateCustomerBinding) -> str:
+    identity = _profile_material_identity(profile)
+    return _domain_hash(
+        "private-profile-material-v1",
+        _canonical(
+            "private-profile-material",
+            {
+                "binding_id": identity[0],
+                "content_hash": identity[1],
+                "full_name": identity[2],
+                "email": identity[3],
+                "phone_e164": identity[4],
+                "country_code": identity[5],
+                "complete": identity[6],
+            },
+        ),
+    )
+
+
 def _private_customer_fact_names(
     projection: ConversationProjection,
     *,
@@ -949,7 +983,11 @@ def _private_customer_fact_names(
     profile: PrivateCustomerBinding | None = None,
     now: datetime | None = None,
 ) -> tuple[str, ...]:
-    present = {item.name for item in projection.facts}
+    present = {
+        item.name
+        for item in projection.facts
+        if item.name not in {"full_name", "email", "phone_e164", "country_code"}
+    }
     if private_facts is not None:
         if type(private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private_facts must be exact or None")
@@ -963,23 +1001,21 @@ def _private_customer_fact_names(
             or now.utcoffset() != timedelta(0)
         ):
             raise TypeError("profile presence markers require exact UTC now")
-        for name, value, canonicalizer in (
-            ("full_name", profile.full_name, canonical_full_name),
-            ("email", profile.email, canonical_email),
-            ("country_code", profile.country_code, canonical_country_code),
-        ):
-            if value is None:
-                continue
-            try:
-                canonicalizer(value)
-            except (TypeError, ValueError):
-                continue
-            present.add(name)
-        if (
-            profile.phone_e164 is not None
-            and profile.observed_at <= now < profile.expires_at
-        ):
-            present.add("phone_e164")
+        if profile.observed_at <= now < profile.expires_at:
+            for name, value, canonicalizer in (
+                ("full_name", profile.full_name, canonical_full_name),
+                ("email", profile.email, canonical_email),
+                ("country_code", profile.country_code, canonical_country_code),
+            ):
+                if value is None:
+                    continue
+                try:
+                    canonicalizer(value)
+                except (TypeError, ValueError):
+                    continue
+                present.add(name)
+            if profile.phone_e164 is not None:
+                present.add("phone_e164")
     return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
 
 
@@ -1454,6 +1490,23 @@ class V2TurnExecutor:
                     sources=sources,
                     event_hash=event_hash,
                 )
+                if prepared.private_profile_material_hash is not None:
+                    profile_now = self._clock.now()
+                    current_profile = self._profile.read(batch.lead_id, now=profile_now)
+                    if type(current_profile) is not PrivateCustomerBinding:
+                        raise TypeError(
+                            "profile port must return exact PrivateCustomerBinding"
+                        )
+                    if _profile_material_hash(current_profile) != (
+                        prepared.private_profile_material_hash
+                    ):
+                        raise TurnExecutionError("private profile changed before commit")
+                    if not (
+                        current_profile.observed_at
+                        <= profile_now
+                        < current_profile.expires_at
+                    ):
+                        raise TurnExecutionError("private profile expired before commit")
                 self._store.commit_turn_v8(
                     expected_version=expected_version,
                     fencing_token=fencing_token,
@@ -1805,11 +1858,10 @@ class V2TurnExecutor:
         else:
             read_requests = first_proposal.read_requests
             derived_confirmation_reads = False
-        if not effective_profile_complete and (
-            first_proposal.intent in {"select", "confirm"}
-            or first_proposal.selection_requested
-        ):
-            read_requests = ()
+        if not effective_profile_complete and read_requests:
+            read_requests = tuple(
+                item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
+            )
             derived_confirmation_reads = False
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
@@ -2000,6 +2052,20 @@ class V2TurnExecutor:
         if decision_private_facts.content_hash != private_facts.content_hash:
             raise TurnExecutionError("private customer facts changed during turn")
         private_facts = decision_private_facts
+        profile_sensitive = (
+            proposal.intent in {"select", "confirm"}
+            or proposal.selection_requested
+            or pending_action is not None
+        )
+        if profile_sensitive:
+            decision_profile = self._profile.read(batch.lead_id, now=decision_now)
+            if type(decision_profile) is not PrivateCustomerBinding:
+                raise TypeError("profile port must return exact PrivateCustomerBinding")
+            if _profile_material_identity(decision_profile) != _profile_material_identity(
+                profile
+            ):
+                raise TurnExecutionError("private profile changed during turn")
+            profile = decision_profile
 
         frames = _frame_commitments(audited)
         final_frame_hash = frames[-1].canonical_hash()
@@ -2255,10 +2321,9 @@ class V2TurnExecutor:
             raise TypeError("private customer owner must return an exact snapshot")
         if commit_private_facts.content_hash != private_facts.content_hash:
             raise TurnExecutionError("private customer facts changed before commit")
-        if command_rows and not (
-            profile.observed_at <= commit_now < profile.expires_at
-        ):
-            raise TurnExecutionError("private profile expired before commit")
+        private_profile_material_hash = (
+            _profile_material_hash(profile) if command_rows else None
+        )
         for observation in v2_observations:
             self._reads.accept(observation, now=commit_now)
         if authority.deadline_at <= commit_now:
@@ -2324,6 +2389,7 @@ class V2TurnExecutor:
                 internal_jobs=internal_jobs,
                 public_rows=public_rows,
                 reply_chunks=decision.public_reply.chunks,
+                private_profile_material_hash=private_profile_material_hash,
             ),
             current.version,
             fencing_token,

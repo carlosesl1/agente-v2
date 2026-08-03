@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
+import os
+from pathlib import Path
+import stat
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
@@ -22,6 +25,36 @@ from v2_host.settings import RuntimeMode, V2Settings
 class V2Role(str, Enum):
     API = "api"
     WORKER = "worker"
+
+
+def _authenticate_sqlite_owner_files(paths: dict[str, Path]) -> None:
+    identities: dict[tuple[int, int], str] = {}
+    descriptors: list[tuple[Path, int, tuple[int, int]]] = []
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        for name, path in paths.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(path, flags, 0o600)
+            info = os.fstat(descriptor)
+            identity = (info.st_dev, info.st_ino)
+            descriptors.append((path, descriptor, identity))
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or identity in identities
+            ):
+                raise RuntimeError("sqlite owner paths must be physically distinct")
+            identities[identity] = name
+        for path, _descriptor, identity in descriptors:
+            current = path.stat()
+            if (current.st_dev, current.st_ino) != identity or current.st_nlink != 1:
+                raise RuntimeError("sqlite owner paths must be physically distinct")
+    except OSError:
+        raise RuntimeError("sqlite owner paths cannot be authenticated") from None
+    finally:
+        for _path, descriptor, _identity in descriptors:
+            os.close(descriptor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +120,20 @@ class V2Container:
         if type(role) is not V2Role:
             raise TypeError("role must be exact V2Role")
         paths = settings.sqlite_paths
+        owned_names = (
+            ("inbox",)
+            if role is V2Role.API
+            else (
+                "inbox",
+                "boundary",
+                "execution",
+                "followup",
+                "payment_initiation",
+                "public_outbox",
+                "private_customer",
+            )
+        )
+        _authenticate_sqlite_owner_files({name: paths[name] for name in owned_names})
         opened: list[object] = []
         try:
             inbox = SQLiteInbox(paths["inbox"])

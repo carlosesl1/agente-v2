@@ -1489,6 +1489,75 @@ def test_unusable_manychat_phone_blocks_provider_reads_and_commands(
         store.close()
 
 
+def test_unusable_manychat_phone_blocks_two_stage_selection_probe(tmp_path) -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "unusable-phone-two-stage.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=BATCH.lead_id,
+        source_turn_id="batch:profile-before-two-stage-selection",
+        source_event_hash="7" * 64,
+        facts=(
+            ModelFact("full_name", "Pessoa Phone Silva"),
+            ModelFact("email", "phone.person@example.invalid"),
+            ModelFact("country_code", "BR"),
+        ),
+        persisted_at=NOW - timedelta(minutes=1),
+    )
+    request = ReadRequest(
+        request_id="read:unusable-phone:two-stage",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar.",),
+        facts=(),
+        read_requests=(request,),
+        effect_proposals=(),
+    )
+    second = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    model = FakeAuditedModel(store, [first, second])
+    read_port = FakeLodgingReadPort(store)
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=UnusableManyChatPhone(store, "missing"),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert read_port.calls == []
+        assert len(model.calls) == 1
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        private_store.close()
+        store.close()
+
+
 def test_invalid_model_private_facts_are_collection_only_and_request_correction(
     tmp_path,
 ) -> None:

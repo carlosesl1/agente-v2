@@ -124,8 +124,6 @@ def test_executor_exposes_only_private_fact_presence() -> None:
 
     assert _state_model_facts(projection) == (ModelFact("service", "agency"),)
     assert _private_customer_fact_names(projection) == (
-        "full_name",
-        "email",
         "birth_date",
         "gender",
     )
@@ -170,6 +168,36 @@ def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields()
             reservation_execution_projection=None,
         ),
         profile=expired,
+        now=NOW,
+    ) == ()
+
+    valid_but_expired = PrivateCustomerBinding(
+        binding_id="profile-binding:expired-presence-markers",
+        content_hash="e" * 64,
+        full_name="Pessoa Marcador Silva",
+        email="marker.person@example.invalid",
+        phone_e164="".join(("+1", "202", "555", "0197")),
+        country_code="BR",
+        observed_at=NOW - timedelta(minutes=6),
+        expires_at=NOW,
+        complete=True,
+    )
+    legacy_projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(
+            TypedFact(
+                "phone_e164",
+                StringSlot("".join(("+1", "202", "555", "0188"))),
+                "9" * 64,
+            ),
+        ),
+        reservation_execution_projection=None,
+    )
+    assert _private_customer_fact_names(
+        legacy_projection,
+        profile=valid_but_expired,
         now=NOW,
     ) == ()
 

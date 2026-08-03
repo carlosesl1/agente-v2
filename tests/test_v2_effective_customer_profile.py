@@ -144,6 +144,61 @@ def test_missing_manychat_email_uses_private_email_fallback(tmp_path: Path) -> N
     assert resolution.customer.email == EMAIL
 
 
+def test_semantically_invalid_manychat_fields_use_valid_private_fallback(
+    tmp_path: Path,
+) -> None:
+    private = _private_snapshot(
+        tmp_path,
+        ModelFact("full_name", NAME),
+        ModelFact("email", EMAIL),
+        ModelFact("country_code", COUNTRY),
+    )
+
+    resolution = resolve_effective_customer(
+        _profile(full_name="Mononym", email="@example.invalid", country="ZZ"),
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+
+    assert resolution.ready is True
+    assert resolution.customer is not None
+    assert resolution.customer.full_name == NAME
+    assert resolution.customer.email == EMAIL
+    assert resolution.customer.country_code == COUNTRY
+
+
+def test_expired_manychat_identity_fields_do_not_override_private_fallback(
+    tmp_path: Path,
+) -> None:
+    private = _private_snapshot(
+        tmp_path,
+        ModelFact("full_name", NAME),
+        ModelFact("email", EMAIL),
+        ModelFact("country_code", COUNTRY),
+    )
+    expired = replace(
+        _profile(
+            full_name="Outra Pessoa Silva",
+            email="other.person@example.invalid",
+            country="US",
+        ),
+        observed_at=NOW - timedelta(minutes=6),
+        expires_at=NOW,
+    )
+
+    resolution = resolve_effective_customer(
+        expired,
+        _projection(),
+        NOW,
+        private_facts=private,
+    )
+
+    assert resolution.ready is False
+    assert resolution.conflicting_fields == ()
+    assert resolution.missing_fields == ("phone_e164",)
+
+
 def test_valid_manychat_and_divergent_private_values_fail_closed(tmp_path: Path) -> None:
     private = _private_snapshot(
         tmp_path,

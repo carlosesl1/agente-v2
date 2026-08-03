@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 
 from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
@@ -33,7 +34,7 @@ from tests.test_v2_turn_executor import (
 from v2_adapters.provider_http import CloudbedsHTTPTransport
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.reads import V2ReadService
-from v2_application.turn_executor import V2TurnExecutor
+from v2_application.turn_executor import TurnExecutionError, V2TurnExecutor
 from v2_application.workers import V2WorkerDisposition
 from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import (
@@ -41,6 +42,7 @@ from v2_contracts.critical_actions import (
     CriticalActionKind,
 )
 from v2_contracts.model import ModelFact, ModelProposal
+from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -414,6 +416,166 @@ def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
         assert private_store.load(correction_batch.lead_id).full_name == (
             "Pessoa Original Silva"
         )
+    finally:
+        private_store.close()
+        boundary.close()
+
+
+def test_manychat_binding_change_after_confirmation_decision_blocks_command_commit(
+    tmp_path: Path,
+) -> None:
+    summary_batch = _batch(
+        suffix="summary",
+        text="Quero a suíte de 10 a 12 de agosto para dois adultos.",
+    )
+    confirm_batch = _batch(
+        suffix="confirm",
+        text="Sim, pode reservar exatamente esse resumo.",
+    )
+    authorities = {
+        summary_batch.batch_id: _authority(summary_batch, "4"),
+        confirm_batch.batch_id: _authority(confirm_batch, "5"),
+    }
+    read_request = ReadRequest(
+        request_id="read:split-origin-binding-change",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    summary_facts = (
+        ModelFact("language", "pt-BR"),
+        ModelFact("service", "hostel"),
+        ModelFact("start_date", date(2026, 8, 10)),
+        ModelFact("end_date", date(2026, 8, 12)),
+        ModelFact("adults", 2),
+        ModelFact("children", 0),
+        ModelFact("payment_method", "stripe"),
+    )
+    proposals = [
+        ModelProposal(
+            source_event_id=summary_batch.batch_id,
+            intent="inform",
+            reply_chunks=("Vou consultar.",),
+            facts=(),
+            read_requests=(read_request,),
+            effect_proposals=(),
+        ),
+        ModelProposal(
+            source_event_id=summary_batch.batch_id,
+            intent="select",
+            reply_chunks=("Vou preparar o resumo.",),
+            facts=summary_facts,
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_id="offer:" + "7" * 64,
+        ),
+        ModelProposal(
+            source_event_id=confirm_batch.batch_id,
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+            confirmed_action_kinds=(CriticalActionKind.RESERVE_LODGING,),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        ),
+        ModelProposal(
+            source_event_id=confirm_batch.batch_id,
+            intent="confirm",
+            reply_chunks=("Confirmado.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+            confirmed_summary_version=1,
+            confirmed_action_kinds=(CriticalActionKind.RESERVE_LODGING,),
+            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+        ),
+    ]
+
+    boundary = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer-binding-change.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=summary_batch.lead_id,
+        source_turn_id="batch:split-origin-binding-profile",
+        source_event_hash="8" * 64,
+        facts=(
+            ModelFact("full_name", "Pessoa Binding Silva"),
+            ModelFact("email", "binding.person@example.invalid"),
+            ModelFact("country_code", "BR"),
+        ),
+        persisted_at=NOW - timedelta(minutes=1),
+    )
+
+    class MutablePhoneProfile:
+        def __init__(self) -> None:
+            self.revision = 0
+
+        def mutate(self) -> None:
+            self.revision = 1
+
+        def read(self, lead_id: str, *, now) -> PrivateCustomerBinding:
+            del lead_id
+            phone = (
+                "".join(("+1", "202", "555", "0199"))
+                if self.revision == 0
+                else "".join(("+1", "202", "555", "0200"))
+            )
+            return PrivateCustomerBinding(
+                binding_id="profile-binding:" + "9" * 64,
+                content_hash=("8" if self.revision == 0 else "7") * 64,
+                full_name=None,
+                email=None,
+                phone_e164=phone,
+                country_code=None,
+                observed_at=now,
+                expires_at=now + timedelta(minutes=5),
+                complete=False,
+            )
+
+    profile = MutablePhoneProfile()
+    delegate = MappingAuthority(authorities)
+
+    class MutatingAuthority:
+        def resolve(self, batch, *, chunk_count, now):
+            if batch.batch_id == confirm_batch.batch_id:
+                profile.mutate()
+            return delegate.resolve(batch, chunk_count=chunk_count, now=now)
+
+    model = FakeAuditedModel(boundary, proposals)
+    read_port = FakeLodgingReadPort(boundary)
+    for authority in authorities.values():
+        _install_public_authority(boundary, authority)
+    executor = V2TurnExecutor(
+        store=boundary,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=profile,
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MutatingAuthority(),
+        clock=SequenceClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        summary = executor.execute(summary_batch)
+        assert "Só para confirmar" in summary.reply_chunks[0]
+
+        with pytest.raises(TurnExecutionError, match="profile changed before commit"):
+            executor.execute(confirm_batch)
+
+        assert boundary._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone()[0] == 0
+        assert boundary._connection.execute(
+            "SELECT count(*) FROM boundary_command_relays"
+        ).fetchone()[0] == 0
     finally:
         private_store.close()
         boundary.close()

@@ -417,24 +417,26 @@ def resolve_effective_customer(
         else legacy_country
     )
 
+    profile_fresh = profile.observed_at <= instant < profile.expires_at
     full_name, name_conflict = _fallback_field(
-        profile.full_name,
+        profile.full_name if profile_fresh else None,
         private_name,
         canonicalizer=canonical_full_name,
         compare_casefold=True,
         invalid_authoritative_is_missing=True,
     )
     email, email_conflict = _fallback_field(
-        profile.email,
+        profile.email if profile_fresh else None,
         private_email,
         canonicalizer=canonical_email,
+        invalid_authoritative_is_missing=True,
     )
     country, country_conflict = _fallback_field(
-        profile.country_code,
+        profile.country_code if profile_fresh else None,
         private_country,
         canonicalizer=canonical_country_code,
+        invalid_authoritative_is_missing=True,
     )
-    profile_fresh = profile.observed_at <= instant < profile.expires_at
     phone = profile.phone_e164 if profile_fresh else None
 
     conflicts = tuple(

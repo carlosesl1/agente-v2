@@ -878,9 +878,11 @@ def test_reconciliation_records_transport_failure_as_bounded_retry_without_block
         container.close()
 
 
+@pytest.mark.parametrize("owner_name", ("execution", "boundary", "private_customer"))
 def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    owner_name: str,
 ) -> None:
     settings = _audit_enabled_settings(tmp_path)
     container = V2Container.open(settings=settings, role=V2Role.WORKER)
@@ -892,13 +894,14 @@ def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
         raising=False,
     )
     try:
-        execution = container.execution
-        assert execution is not None
+        owner = getattr(container, owner_name)
+        assert owner is not None
         audit_path = settings.sqlite_paths["cloudbeds_audit"]
-        audit_path.hardlink_to(execution.path)
+        owner_path = settings.sqlite_paths[owner_name]
+        audit_path.hardlink_to(owner_path)
         tables_before = {
             row[0]
-            for row in execution._connection.execute(
+            for row in owner._connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -911,14 +914,14 @@ def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
         result = stage.run_once(now=T0 + timedelta(minutes=3))
         tables_after = {
             row[0]
-            for row in execution._connection.execute(
+            for row in owner._connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
 
         assert result["cloudbeds_audit"]["status"] == "degraded"
         assert port.calls == []
-        assert execution.path.samefile(audit_path)
+        assert owner_path.samefile(audit_path)
         assert tables_after == tables_before
         assert "cloudbeds_audit_tasks" not in tables_after
     finally:

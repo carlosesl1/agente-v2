@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -207,5 +208,49 @@ def test_later_turn_updates_one_field_without_losing_other_values(tmp_path: Path
         assert result.snapshot.source_turn_for("email") == next_turn
         assert result.supplied_in_turn == ("email",)
         assert result.changed_in_turn == ("email",)
+    finally:
+        store.close()
+
+
+def test_store_rejects_incompatible_existing_schema_during_open(tmp_path: Path) -> None:
+    path = tmp_path / "private-customer-malformed.sqlite3"
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "CREATE TABLE private_customer_facts (lead_id TEXT PRIMARY KEY)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        SQLitePrivateCustomerFactStore(path)
+
+
+def test_store_load_rejects_tampered_value_and_unbacked_source(tmp_path: Path) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer-tamper.sqlite3")
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        store._connection.execute(
+            "UPDATE private_customer_facts SET private_value=? "
+            "WHERE lead_id=? AND fact_name='email'",
+            ("tampered@example.invalid", LEAD_ID),
+        )
+        with pytest.raises(RuntimeError, match="store row is invalid"):
+            store.load(LEAD_ID)
+
+        store._connection.execute(
+            "UPDATE private_customer_facts SET private_value=?,source_turn_id=? "
+            "WHERE lead_id=? AND fact_name='email'",
+            (EMAIL, "batch:unbacked", LEAD_ID),
+        )
+        with pytest.raises(RuntimeError, match="store row is invalid"):
+            store.load(LEAD_ID)
     finally:
         store.close()

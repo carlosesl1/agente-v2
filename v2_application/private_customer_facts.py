@@ -301,6 +301,62 @@ CREATE TABLE IF NOT EXISTS private_customer_facts (
 ) STRICT;
 """
 
+_EXPECTED_SCHEMA = {
+    "private_customer_fact_turns": (
+        ("lead_id", "TEXT", 1, 1),
+        ("source_turn_id", "TEXT", 1, 2),
+        ("source_event_hash", "TEXT", 1, 0),
+        ("fact_names_json", "TEXT", 1, 0),
+        ("private_content_hash", "TEXT", 1, 0),
+        ("persisted_at", "TEXT", 1, 0),
+    ),
+    "private_customer_facts": (
+        ("lead_id", "TEXT", 1, 1),
+        ("fact_name", "TEXT", 1, 2),
+        ("private_value", "TEXT", 1, 0),
+        ("value_hash", "TEXT", 1, 0),
+        ("source_turn_id", "TEXT", 1, 0),
+        ("source_event_hash", "TEXT", 1, 0),
+        ("revision", "INTEGER", 1, 0),
+        ("persisted_at", "TEXT", 1, 0),
+    ),
+}
+
+
+def _validate_schema(connection: sqlite3.Connection) -> None:
+    table_rows = {
+        row[1]: row
+        for row in connection.execute("PRAGMA table_list").fetchall()
+        if row[1] in _EXPECTED_SCHEMA
+    }
+    if set(table_rows) != set(_EXPECTED_SCHEMA):
+        raise RuntimeError("private customer schema is incompatible")
+    for table, expected in _EXPECTED_SCHEMA.items():
+        table_row = table_rows[table]
+        if table_row[2] != "table" or table_row[5] != 1:
+            raise RuntimeError("private customer schema is incompatible")
+        actual = tuple(
+            (row[1], row[2], row[3], row[5])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        )
+        if actual != expected:
+            raise RuntimeError("private customer schema is incompatible")
+
+
+def _journal_fact_names(value: object) -> tuple[str, ...]:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        raise RuntimeError("private customer turn journal is invalid") from None
+    if (
+        type(decoded) is not list
+        or any(type(item) is not str or item not in _PRIVATE_FACTS for item in decoded)
+        or tuple(name for name in _PRIVATE_FACT_ORDER if name in decoded)
+        != tuple(decoded)
+    ):
+        raise RuntimeError("private customer turn journal is invalid")
+    return tuple(decoded)
+
 
 class SQLitePrivateCustomerFactStore:
     """Physically separate, private, idempotent owner for fallback customer facts."""
@@ -322,12 +378,27 @@ class SQLitePrivateCustomerFactStore:
         return store
 
     def _initialize_connection(self, target: str) -> None:
+        connection: sqlite3.Connection | None = None
         try:
-            self._connection = sqlite3.connect(target, isolation_level=None)
-            self._connection.execute("PRAGMA busy_timeout=5000")
-            self._connection.executescript(_SCHEMA)
-        except sqlite3.DatabaseError:
+            connection = sqlite3.connect(target, isolation_level=None)
+            connection.execute("PRAGMA busy_timeout=5000")
+            existing = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+                if row[0] in _EXPECTED_SCHEMA
+            }
+            if existing:
+                _validate_schema(connection)
+            connection.executescript(_SCHEMA)
+            _validate_schema(connection)
+        except (sqlite3.DatabaseError, RuntimeError):
+            if connection is not None:
+                connection.close()
+            self._closed = True
             raise RuntimeError("private customer store initialization failed") from None
+        self._connection = connection
 
     def _require_open(self) -> None:
         if self._closed:
@@ -338,27 +409,65 @@ class SQLitePrivateCustomerFactStore:
         canonical_lead = _identifier(lead_id, "lead_id")
         try:
             rows = self._connection.execute(
-                "SELECT fact_name,private_value,source_turn_id "
-                "FROM private_customer_facts WHERE lead_id=? ORDER BY "
-                "CASE fact_name WHEN 'full_name' THEN 1 WHEN 'email' THEN 2 ELSE 3 END",
+                "SELECT f.fact_name,f.private_value,f.value_hash,f.source_turn_id,"
+                "f.source_event_hash,f.revision,f.persisted_at,t.source_event_hash,"
+                "t.fact_names_json,t.private_content_hash,t.persisted_at "
+                "FROM private_customer_facts AS f "
+                "LEFT JOIN private_customer_fact_turns AS t "
+                "ON t.lead_id=f.lead_id AND t.source_turn_id=f.source_turn_id "
+                "WHERE f.lead_id=? ORDER BY "
+                "CASE f.fact_name WHEN 'full_name' THEN 1 WHEN 'email' THEN 2 ELSE 3 END",
                 (canonical_lead,),
             ).fetchall()
         except sqlite3.DatabaseError:
             raise RuntimeError("private customer store read failed") from None
         values: dict[str, str] = {}
         sources: list[tuple[str, str]] = []
-        for name, value, source_turn_id in rows:
+        canonicalizers = {
+            "full_name": canonical_full_name,
+            "email": canonical_email,
+            "country_code": canonical_country_code,
+        }
+        for row in rows:
+            (
+                name,
+                value,
+                value_hash,
+                source_turn_id,
+                source_event_hash,
+                revision,
+                persisted_at,
+                journal_event_hash,
+                journal_names_json,
+                journal_content_hash,
+                journal_persisted_at,
+            ) = row
             if name not in _PRIVATE_FACTS or name in values:
                 raise RuntimeError("private customer store row identity is invalid")
-            canonicalizers = {
-                "full_name": canonical_full_name,
-                "email": canonical_email,
-                "country_code": canonical_country_code,
-            }
-            canonical = canonicalizers[name](value)
-            if canonical != value:
-                raise RuntimeError("private customer store row is noncanonical")
-            _identifier(source_turn_id, "source_turn_id")
+            try:
+                canonical = canonicalizers[name](value)
+                _identifier(source_turn_id, "source_turn_id")
+                _hash(source_event_hash, "source_event_hash")
+                _hash(value_hash, "value_hash")
+                _hash(journal_content_hash, "private_content_hash")
+                _utc(datetime.fromisoformat(persisted_at), "persisted_at")
+                _utc(datetime.fromisoformat(journal_persisted_at), "persisted_at")
+                journal_names = _journal_fact_names(journal_names_json)
+            except (PrivateCustomerFactValidationError, RuntimeError, TypeError, ValueError):
+                raise RuntimeError("private customer store row is invalid") from None
+            expected_value_hash = _domain_hash(
+                b"v2-private-customer-fact-value-v1",
+                value.encode("utf-8"),
+            )
+            if (
+                canonical != value
+                or value_hash != expected_value_hash
+                or journal_event_hash != source_event_hash
+                or name not in journal_names
+                or type(revision) is not int
+                or revision < 1
+            ):
+                raise RuntimeError("private customer store row is invalid")
             values[name] = value
             sources.append((name, source_turn_id))
         return PrivateCustomerFactSnapshot(

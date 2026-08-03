@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 import pytest
@@ -93,6 +94,27 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
         container.close()
 
     container.close()
+
+
+def test_container_rejects_hardlink_installed_after_settings_validation(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    boundary_path = settings.sqlite_paths["boundary"]
+    private_path = settings.sqlite_paths["private_customer"]
+    boundary_path.write_bytes(b"")
+    private_path.hardlink_to(boundary_path)
+
+    with pytest.raises(RuntimeError, match="physically distinct"):
+        V2Container.open(settings=settings, role=V2Role.WORKER)
+
+    connection = sqlite3.connect(boundary_path)
+    try:
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall() == []
+    finally:
+        connection.close()
 
 
 def test_api_role_exposes_health_and_readiness_without_opening_gates(

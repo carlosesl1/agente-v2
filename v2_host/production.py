@@ -236,16 +236,24 @@ class ReconciliationStage:
                 "observation": None,
             }
         audit_path = self._settings.sqlite_paths["cloudbeds_audit"]
-        execution_path = self._container.execution.path
+        owner_paths = tuple(
+            path
+            for name, path in self._settings.sqlite_paths.items()
+            if name != "cloudbeds_audit" and path.exists()
+        )
         if audit_path.exists():
             try:
-                if audit_path.samefile(execution_path):
-                    return {
-                        "status": "degraded",
-                        "projection": empty_projection,
-                        "observation": {"status": "failed"},
-                    }
+                audit_info = audit_path.stat()
+                aliased = audit_info.st_nlink != 1 or any(
+                    audit_path.samefile(owner_path) for owner_path in owner_paths
+                )
             except OSError:
+                return {
+                    "status": "degraded",
+                    "projection": empty_projection,
+                    "observation": {"status": "failed"},
+                }
+            if aliased:
                 return {
                     "status": "degraded",
                     "projection": empty_projection,
