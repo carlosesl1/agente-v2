@@ -321,3 +321,40 @@ def test_store_load_rejects_value_rehashed_without_matching_turn_journal(
         assert EMAIL not in repr(error.value)
     finally:
         store.close()
+
+
+def test_turn_presence_rejects_tampered_no_change_journal(tmp_path: Path) -> None:
+    store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer-no-change-journal.sqlite3"
+    )
+    second_turn = "batch:private-profile-002"
+    second_event_hash = "b" * 64
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        repeated = store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=second_turn,
+            source_event_hash=second_event_hash,
+            facts=(ModelFact("email", EMAIL),),
+            persisted_at=NOW + timedelta(seconds=1),
+        )
+        assert repeated.changed_in_turn == ()
+        assert store.turn_supplied_fact_names(LEAD_ID, second_turn) == ("email",)
+
+        store._connection.execute(
+            "UPDATE private_customer_fact_turns SET fact_names_json='[]' "
+            "WHERE lead_id=? AND source_turn_id=?",
+            (LEAD_ID, second_turn),
+        )
+        with pytest.raises(RuntimeError, match="turn journal is invalid") as error:
+            store.turn_supplied_fact_names(LEAD_ID, second_turn)
+        assert NAME not in repr(error.value)
+        assert EMAIL not in repr(error.value)
+    finally:
+        store.close()

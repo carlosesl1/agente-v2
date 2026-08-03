@@ -418,10 +418,6 @@ def _journal_fact_material(value: object) -> tuple[tuple[str, str], ...]:
     return material
 
 
-def _journal_fact_names(value: object) -> tuple[str, ...]:
-    return tuple(item[0] for item in _journal_fact_material(value))
-
-
 def _turn_content_hash(
     *,
     lead_id: str,
@@ -694,7 +690,8 @@ class SQLitePrivateCustomerFactStore:
         canonical_turn = _identifier(source_turn_id, "source_turn_id")
         try:
             row = self._connection.execute(
-                "SELECT fact_names_json FROM private_customer_fact_turns "
+                "SELECT source_event_hash,fact_names_json,private_content_hash,"
+                "persisted_at FROM private_customer_fact_turns "
                 "WHERE lead_id=? AND source_turn_id=?",
                 (canonical_lead, canonical_turn),
             ).fetchone()
@@ -702,7 +699,23 @@ class SQLitePrivateCustomerFactStore:
             raise RuntimeError("private customer store read failed") from None
         if row is None:
             return ()
-        return _journal_fact_names(row[0])
+        try:
+            source_event_hash, material_json, content_hash, persisted_at = row
+            _hash(source_event_hash, "source_event_hash")
+            _hash(content_hash, "private_content_hash")
+            _utc(datetime.fromisoformat(persisted_at), "persisted_at")
+            material = _journal_fact_material(material_json)
+            expected_content_hash = _turn_content_hash(
+                lead_id=canonical_lead,
+                source_turn_id=canonical_turn,
+                source_event_hash=source_event_hash,
+                fact_material=material,
+            )
+        except (PrivateCustomerFactValidationError, RuntimeError, TypeError, ValueError):
+            raise RuntimeError("private customer turn journal is invalid") from None
+        if content_hash != expected_content_hash:
+            raise RuntimeError("private customer turn journal is invalid")
+        return tuple(item[0] for item in material)
 
     def close(self) -> None:
         if self._closed:
