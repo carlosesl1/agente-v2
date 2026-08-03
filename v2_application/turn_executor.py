@@ -1863,6 +1863,8 @@ class V2TurnExecutor:
                 )
                 read_floor = observed_now
             v2_observations = tuple(accepted_observations)
+        if not read_requests and first_proposal.read_requests:
+            first_proposal = replace(first_proposal, read_requests=())
         if read_requests:
             followup = ModelRequest(
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),

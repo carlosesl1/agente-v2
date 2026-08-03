@@ -1455,6 +1455,72 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
         store.close()
 
 
+def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts(
+    tmp_path,
+) -> None:
+    private_name = "Pessoa Parcial Silva"
+    read_request = ReadRequest(
+        request_id="read:filtered-private-echo",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    proposal = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(f"Vou consultar a hospedagem para {private_name}.",),
+        facts=(ModelFact("full_name", private_name),),
+        read_requests=(read_request,),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "filtered-private-echo.sqlite3"
+    )
+    model = FakeAuditedModel(store, [proposal])
+    read_port = FakeLodgingReadPort(store)
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(BATCH)
+        snapshot = private_store.load(BATCH.lead_id)
+        artifact_json = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts "
+                "ORDER BY artifact_index"
+            ).fetchall()
+        )
+
+        assert snapshot.full_name == private_name
+        assert read_port.calls == []
+        assert len(model.calls) == 1
+        assert result.reply_chunks == (
+            "Obrigado. Guardei esses dados para continuar a reserva.",
+        )
+        assert private_name not in "\n".join(result.reply_chunks)
+        assert private_name not in artifact_json
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        private_store.close()
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("case_id", "message", "maya_facts", "expected", "reply"),
     (
