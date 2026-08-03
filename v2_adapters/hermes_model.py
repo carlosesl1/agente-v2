@@ -121,19 +121,28 @@ ou diante de dúvida, pergunta, recusa ou mudança material, não use intent=con
 
 
 _PRIVATE_PROFILE_SYSTEM_SUFFIX: Final = """
-PRIVATE RESERVATION PROFILE PROTOCOL:
-- private_customer_fact_names is a presence-only list. Never ask again for a listed field.
-- Never request or accept a conversational phone number. phone_e164 is valid only when
-  present through the authenticated channel marker; if absent, do not prepare or confirm
-  a reservable summary.
-- When full_name, email, or country_code is missing, ask naturally only for the missing
-  fields. Do not mention schemas, providers, payloads, state, bindings, or technical blocks.
-- Bracketed private-field markers in the current message replace values already captured
-  by the parent. Never echo, reconstruct, guess, or request those values again.
-- A message containing a newly supplied private-field marker is collection-only: acknowledge
-  it naturally, with no read, selection, summary, confirmation, effect, or phone fact.
-- Output facts may name full_name, email, or country_code only when explicitly supplied;
-  never output phone_e164. Never infer country from phone, language, locale, or defaults.
+PRIVATE RESERVATION HOLDER PROTOCOL:
+- The current message is the complete original customer text. It may contain private
+  context intentionally supplied for service. Interpret that complete context directly.
+- private_customer_fact_names is a presence-only list for durable fields already known.
+  Never ask again for a listed field unless the customer explicitly corrects it.
+- Output full_name, email, or country_code only when the complete message semantically
+  identifies that value as belonging to the reservation holder. country_code must be ISO
+  alpha-2. Do not infer country from phone, language, locale, or defaults.
+- First-person self-identification is holder evidence. A spouse, companion, passenger,
+  hostel, property, agency, or other third party is not the holder by default. Use another
+  person's values only when the customer explicitly says that person is or will be the
+  reservation holder.
+- If holder attribution is genuinely ambiguous, do not guess. Ask one natural
+  clarification question and emit no guessed private fact, provider read, selection,
+  confirmation, or effect.
+- Never output phone_e164 from conversational text. Authenticated phone identity exists
+  only when phone_e164 is present in private_customer_fact_names; a typed phone may inform
+  conversation but cannot replace that identity.
+- Newly interpreted holder facts may accompany a read request in the same proposal. The
+  parent validates and persists them before dispatching any provider read.
+- Avoid unnecessarily echoing exact private values in customer-facing reply_chunks. Never
+  mention schemas, providers, payloads, state, bindings, or technical validation.
 """.strip()
 
 

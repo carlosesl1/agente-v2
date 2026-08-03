@@ -140,7 +140,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     assert user["private_profile_complete"] is True
     assert user["private_customer_fact_names"] == ["full_name", "phone_e164"]
     assert "presence-only" in envelope["system_prompt"]
-    assert "Never request or accept a conversational phone number" in envelope[
+    assert "Never output phone_e164 from conversational text" in envelope[
         "system_prompt"
     ]
     assert user["handoff_active"] is False
@@ -155,6 +155,45 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         "content_hash",
     ):
         assert forbidden not in serialized
+
+
+def test_original_private_context_reaches_maya_with_holder_semantics() -> None:
+    lead_name = "Ana Titular Silva"
+    lead_email = "ana.titular@example.invalid"
+    spouse_name = "Beatriz Acompanhante Souza"
+    spouse_email = "beatriz.acompanhante@example.invalid"
+    typed_phone = "+1" + "202" + "555" + "0168"
+    original_message = (
+        f"Eu sou {lead_name}, meu e-mail é {lead_email} e sou do Brasil. "
+        f"Minha esposa {spouse_name} usa {spouse_email}. "
+        f"Meu telefone digitado é {typed_phone}."
+    )
+    request = ModelRequest(
+        request_id="request:original-holder-context",
+        lead_id="manychat:original-holder-context",
+        source_event_id="batch:original-holder-context",
+        message=original_message,
+        locale="pt-BR",
+        state_version=0,
+        private_customer_fact_names=("phone_e164",),
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    user = json.loads(envelope["messages"][0][1])
+    prompt = envelope["system_prompt"].casefold()
+
+    assert user["message"] == original_message
+    assert "[private" not in user["message"]
+    assert lead_email in user["message"]
+    assert spouse_email in user["message"]
+    assert typed_phone in user["message"]
+    assert "reservation holder" in prompt
+    assert "spouse" in prompt
+    assert "third party" in prompt
+    assert "explicitly" in prompt
+    assert "phone_e164" in prompt
+    assert "do not guess" in prompt
+    assert "bracketed private-field markers" not in prompt
 
 
 def test_refresh_revocation_outcome_is_a_closed_non_private_request_marker() -> None:
