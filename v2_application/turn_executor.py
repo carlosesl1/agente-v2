@@ -66,10 +66,6 @@ from v2_application.passengers import (
     projection_manifest_party,
     projection_manifest_status,
 )
-from v2_application.private_customer_collection import (
-    PrivateCustomerCollection,
-    collect_private_customer_facts,
-)
 from v2_application.private_customer_facts import (
     PrivateCustomerFactSnapshot,
     PrivateCustomerFactWriteResult,
@@ -987,42 +983,6 @@ def _private_customer_fact_names(
     return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
 
 
-def _expected_private_customer_fact_names(
-    profile: PrivateCustomerBinding,
-    private_facts: PrivateCustomerFactSnapshot,
-) -> tuple[str, ...]:
-    def valid(value: str | None, canonicalizer) -> bool:
-        if value is None:
-            return False
-        try:
-            canonicalizer(value)
-        except (TypeError, ValueError):
-            return False
-        return True
-
-    full_name_missing = private_facts.full_name is None and not valid(
-        profile.full_name,
-        canonical_full_name,
-    )
-    email_missing = private_facts.email is None and not valid(
-        profile.email,
-        canonical_email,
-    )
-    country_missing = private_facts.country_code is None and not valid(
-        profile.country_code,
-        canonical_country_code,
-    )
-    return tuple(
-        name
-        for name, missing in (
-            ("full_name", full_name_missing),
-            ("email", email_missing),
-            ("country_code", country_missing),
-        )
-        if missing
-    )
-
-
 _PRIVATE_CONVERSATION_FALLBACK_NAMES: Final = frozenset(
     ("full_name", "email", "country_code")
 )
@@ -1583,36 +1543,8 @@ class V2TurnExecutor:
                 batch.batch_id,
             )
         )
-        missing_fact_names = _expected_private_customer_fact_names(
-            profile,
-            private_facts,
-        )
-        expected_fact_names = tuple(
-            name
-            for name in ("full_name", "email", "country_code")
-            if name in {*missing_fact_names, *journal_fact_names}
-        )
-        private_collection = collect_private_customer_facts(
-            batch.combined_text,
-            expected_fact_names=expected_fact_names,
-        )
-        if type(private_collection) is not PrivateCustomerCollection:
-            raise TypeError("private customer collector returned an invalid result")
-        parent_private_update_turn = bool(private_collection.facts)
-        if private_collection.facts:
-            private_facts = _persist_private_collection(
-                self._private_customer_facts,
-                lead_id=batch.lead_id,
-                source_turn_id=batch.batch_id,
-                source_event_hash=event_hash,
-                facts=private_collection.facts,
-                persisted_at=now,
-            )
-        collection_only = bool(
-            private_collection.invalid_fact_names
-            or journal_fact_names
-            and not parent_private_update_turn
-        )
+        private_update_turn = bool(journal_fact_names)
+        collection_only = False
         explicit_customer_facts = (
             *_extract_explicit_commercial_facts(batch.combined_text),
             *_extract_explicit_customer_facts(batch.combined_text),
@@ -1635,7 +1567,7 @@ class V2TurnExecutor:
             request_id=_opaque("model-request", batch.batch_id, current.version, 1),
             lead_id=batch.lead_id,
             source_event_id=batch.batch_id,
-            message=private_collection.sanitized_message,
+            message=batch.combined_text,
             locale=projection.locale,
             state_version=current.version,
             state_facts=_state_model_facts(projection),
@@ -1664,9 +1596,9 @@ class V2TurnExecutor:
             first_private_facts,
             first_public_facts,
             first_invalid_private_facts,
-            first_phone_proposed,
+            _first_phone_proposed,
         ) = _partition_private_customer_facts(first_proposal)
-        if first_private_facts and not collection_only:
+        if first_private_facts:
             private_facts = _persist_private_collection(
                 self._private_customer_facts,
                 lead_id=batch.lead_id,
@@ -1675,37 +1607,28 @@ class V2TurnExecutor:
                 facts=first_private_facts,
                 persisted_at=now,
             )
+            private_update_turn = True
             effective_profile_complete = reservation_profile_ready(
                 profile,
                 projection,
                 now,
                 private_facts=private_facts,
             )
-        if (
-            first_private_facts
-            or first_invalid_private_facts
-            or first_phone_proposed
-        ):
-            collection_only = True
-        collection_invalid_fact_names = tuple(
-            name
-            for name in ("full_name", "email", "country_code")
-            if name in private_collection.invalid_fact_names
-            or name in first_invalid_private_facts
-        )
+        collection_only = bool(first_invalid_private_facts)
+        first_proposal = replace(first_proposal, facts=first_public_facts)
         if collection_only:
             first_proposal = _collection_only_proposal(
                 first_proposal,
                 public_facts=first_public_facts,
                 locale=projection.locale,
-                invalid_fact_names=collection_invalid_fact_names,
+                invalid_fact_names=first_invalid_private_facts,
                 revoke_pending=pending_action is not None,
             )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
+        first_audited = AuditedModelTurn.from_frames(
+            proposal=first_proposal,
+            frames=first_audited.frames,
+            ephemeral_session_id=first_audited.closure.ephemeral_session_id,
+        )
         first_frame_hash = _frame_commitments(first_audited)[-1].canonical_hash()
         projection = _merge_passenger_updates(
             projection,
@@ -1748,6 +1671,13 @@ class V2TurnExecutor:
                 ),
                 confirmation_review_required=confirmation_review,
                 selection_review_required=selection_review,
+                private_customer_fact_names=_private_customer_fact_names(
+                    projection,
+                    private_facts=private_facts,
+                    profile=profile,
+                    now=now,
+                ),
+                private_profile_complete=effective_profile_complete,
                 passenger_manifest_status=_passenger_status(
                     projection,
                     first_proposal,
@@ -1766,28 +1696,26 @@ class V2TurnExecutor:
                 review_private_facts,
                 review_public_facts,
                 review_invalid_private_facts,
-                review_phone_proposed,
+                _review_phone_proposed,
             ) = _partition_private_customer_facts(review_proposal)
-            if (
-                review_private_facts
-                or review_invalid_private_facts
-                or review_phone_proposed
-            ):
-                if review_private_facts:
-                    private_facts = _persist_private_collection(
-                        self._private_customer_facts,
-                        lead_id=batch.lead_id,
-                        source_turn_id=batch.batch_id,
-                        source_event_hash=event_hash,
-                        facts=review_private_facts,
-                        persisted_at=now,
-                    )
-                    effective_profile_complete = reservation_profile_ready(
-                        profile,
-                        projection,
-                        now,
-                        private_facts=private_facts,
-                    )
+            if review_private_facts:
+                private_facts = _persist_private_collection(
+                    self._private_customer_facts,
+                    lead_id=batch.lead_id,
+                    source_turn_id=batch.batch_id,
+                    source_event_hash=event_hash,
+                    facts=review_private_facts,
+                    persisted_at=now,
+                )
+                private_update_turn = True
+                effective_profile_complete = reservation_profile_ready(
+                    profile,
+                    projection,
+                    now,
+                    private_facts=private_facts,
+                )
+            review_proposal = replace(review_proposal, facts=review_public_facts)
+            if review_invalid_private_facts:
                 collection_only = True
                 first_proposal = _collection_only_proposal(
                     review_proposal,
@@ -1810,6 +1738,11 @@ class V2TurnExecutor:
                     review_proposal,
                     frame_commitment_hash=review_frame_hash,
                 )
+            review_audited = AuditedModelTurn.from_frames(
+                proposal=review_proposal,
+                frames=review_audited.frames,
+                ephemeral_session_id=review_audited.closure.ephemeral_session_id,
+            )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
                 frames=(*first_audited.frames, *review_audited.frames),
@@ -1835,7 +1768,7 @@ class V2TurnExecutor:
                 frames=first_audited.frames,
                 ephemeral_session_id=first_audited.closure.ephemeral_session_id,
             )
-        if parent_private_update_turn and not collection_only:
+        if private_update_turn and not collection_only:
             first_proposal = _private_update_no_command_proposal(
                 first_proposal,
                 pending_action=pending_action,
@@ -1940,7 +1873,7 @@ class V2TurnExecutor:
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
                 source_event_id=batch.batch_id,
-                message=private_collection.sanitized_message,
+                message=batch.combined_text,
                 locale=projection.locale,
                 state_version=current.version,
                 observations=v2_observations,
@@ -1973,28 +1906,26 @@ class V2TurnExecutor:
                 second_private_facts,
                 second_public_facts,
                 second_invalid_private_facts,
-                second_phone_proposed,
+                _second_phone_proposed,
             ) = _partition_private_customer_facts(proposal)
-            if (
-                second_private_facts
-                or second_invalid_private_facts
-                or second_phone_proposed
-            ):
-                if second_private_facts:
-                    private_facts = _persist_private_collection(
-                        self._private_customer_facts,
-                        lead_id=batch.lead_id,
-                        source_turn_id=batch.batch_id,
-                        source_event_hash=event_hash,
-                        facts=second_private_facts,
-                        persisted_at=now,
-                    )
-                    effective_profile_complete = reservation_profile_ready(
-                        profile,
-                        projection,
-                        now,
-                        private_facts=private_facts,
-                    )
+            if second_private_facts:
+                private_facts = _persist_private_collection(
+                    self._private_customer_facts,
+                    lead_id=batch.lead_id,
+                    source_turn_id=batch.batch_id,
+                    source_event_hash=event_hash,
+                    facts=second_private_facts,
+                    persisted_at=now,
+                )
+                private_update_turn = True
+                effective_profile_complete = reservation_profile_ready(
+                    profile,
+                    projection,
+                    now,
+                    private_facts=private_facts,
+                )
+            proposal = replace(proposal, facts=second_public_facts)
+            if second_invalid_private_facts:
                 collection_only = True
                 proposal = _collection_only_proposal(
                     proposal,
@@ -2003,11 +1934,11 @@ class V2TurnExecutor:
                     invalid_fact_names=second_invalid_private_facts,
                     revoke_pending=pending_action is not None,
                 )
-                second_audited = AuditedModelTurn.from_frames(
-                    proposal=proposal,
-                    frames=second_audited.frames,
-                    ephemeral_session_id=second_audited.closure.ephemeral_session_id,
-                )
+            second_audited = AuditedModelTurn.from_frames(
+                proposal=proposal,
+                frames=second_audited.frames,
+                ephemeral_session_id=second_audited.closure.ephemeral_session_id,
+            )
             second_frame_hash = _frame_commitments(second_audited)[-1].canonical_hash()
             projection = _merge_passenger_updates(
                 projection,
@@ -2058,7 +1989,7 @@ class V2TurnExecutor:
             audited = first_audited
             proposal = first_proposal
 
-        if parent_private_update_turn and not collection_only:
+        if private_update_turn and not collection_only:
             proposal = _private_update_no_command_proposal(
                 proposal,
                 pending_action=pending_action,
@@ -2155,7 +2086,7 @@ class V2TurnExecutor:
             raise TurnExecutionError("reducer did not advance state exactly once")
         facts = decision.projection.facts
         execution_commands = _execution_commands(decision.commands)
-        if parent_private_update_turn and execution_commands:
+        if private_update_turn and execution_commands:
             raise TurnExecutionError(
                 "private customer update cannot authorize a reservation command"
             )
@@ -2332,7 +2263,7 @@ class V2TurnExecutor:
         )
         command_rows = _command_rows(execution_commands)
         command_relays = _command_relays(batch.batch_id, execution_commands)
-        if parent_private_update_turn and (command_rows or command_relays):
+        if private_update_turn and (command_rows or command_relays):
             raise TurnExecutionError(
                 "private customer update cannot persist reservation effects"
             )

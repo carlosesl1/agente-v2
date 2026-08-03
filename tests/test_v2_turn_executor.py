@@ -13,6 +13,7 @@ from reservation_boundary.sqlite_store import ConcurrencyConflict, SQLiteBoundar
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
+from reservation_domain import AwaitingConfirmationState
 from v2_application.conversation import V2ConversationReducer
 from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
@@ -1337,7 +1338,7 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         store.close()
 
 
-def test_private_profile_collection_is_durable_collection_only_and_publicly_redacted(
+def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
     tmp_path,
 ) -> None:
     private_name = "Pessoa Privada Silva"
@@ -1349,22 +1350,15 @@ def test_private_profile_collection_is_durable_collection_only_and_publicly_reda
     )
     proposal = ModelProposal(
         source_event_id=BATCH.batch_id,
-        intent="select",
-        reply_chunks=(f"Resumo pronto para {private_name} ({private_email}).",),
+        intent="inform",
+        reply_chunks=("Dados do titular recebidos.",),
         facts=(
-            ModelFact("service", "hostel"),
-            ModelFact("start_date", date(2026, 8, 10)),
-            ModelFact("end_date", date(2026, 8, 12)),
-            ModelFact("adults", 2),
-            ModelFact("children", 0),
-            ModelFact("payment_method", "stripe"),
             ModelFact("full_name", private_name),
             ModelFact("email", private_email),
             ModelFact("country_code", private_country),
         ),
         read_requests=(),
         effect_proposals=(),
-        target_offer_id="offer:" + "7" * 64,
     )
     model = FakeAuditedModel(store, [proposal])
     _install_public_authority(store)
@@ -1392,9 +1386,7 @@ def test_private_profile_collection_is_durable_collection_only_and_publicly_reda
             ).fetchall()
         )
 
-        assert result.reply_chunks == (
-            "Obrigado. Guardei esses dados para continuar a reserva.",
-        )
+        assert result.reply_chunks == ("Dados do titular recebidos.",)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert snapshot.full_name == private_name
@@ -1419,6 +1411,120 @@ def test_private_profile_collection_is_durable_collection_only_and_publicly_reda
             assert private_value not in public_bytes
         assert '"country_code"' not in projection.to_canonical_bytes().decode()
         assert '"country_code"' not in artifact_json
+    finally:
+        private_store.close()
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("case_id", "message", "maya_facts", "expected", "reply"),
+    (
+        (
+            "lead-not-wife-or-hostel",
+            "Eu sou Ana Titular Silva, ana.titular@example.invalid, do Brasil. "
+            "Minha esposa Beatriz Acompanhante Souza usa "
+            "beatriz.acompanhante@example.invalid e o Hostel Terceiro usa "
+            "reservas.hostel@example.invalid.",
+            (
+                ModelFact("full_name", "Ana Titular Silva"),
+                ModelFact("email", "ana.titular@example.invalid"),
+                ModelFact("country_code", "BR"),
+            ),
+            ("Ana Titular Silva", "ana.titular@example.invalid", "BR"),
+            "Entendi quem será a titular.",
+        ),
+        (
+            "explicit-wife-holder",
+            "Eu sou Carlos Pagante Silva, mas minha esposa Beatriz Titular Souza "
+            "será a titular da reserva; o e-mail dela é "
+            "beatriz.titular@example.invalid e ela é da Argentina.",
+            (
+                ModelFact("full_name", "Beatriz Titular Souza"),
+                ModelFact("email", "beatriz.titular@example.invalid"),
+                ModelFact("country_code", "AR"),
+            ),
+            ("Beatriz Titular Souza", "beatriz.titular@example.invalid", "AR"),
+            "Perfeito, registrei a titular indicada.",
+        ),
+        (
+            "ambiguous-holder",
+            "A reserva é para Ana Silva e Beatriz Souza. Pode usar "
+            "ana@example.invalid ou beatriz@example.invalid; ainda não sei quem "
+            "ficará como titular.",
+            (),
+            (None, None, None),
+            "Quem ficará como titular da reserva?",
+        ),
+    ),
+)
+def test_maya_semantics_assign_holder_without_parent_regex(
+    tmp_path,
+    case_id: str,
+    message: str,
+    maya_facts: tuple[ModelFact, ...],
+    expected: tuple[str | None, str | None, str | None],
+    reply: str,
+) -> None:
+    event = replace(
+        EVENT,
+        event_id=f"event:semantic-holder:{case_id}",
+        text=message,
+        payload_hash="a" * 64,
+    )
+    batch = InboundBatch(
+        batch_id=f"batch:semantic-holder:{case_id}",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(event,),
+        combined_text=message,
+    )
+    authority = replace(
+        AUTHORITY,
+        authorization_id=f"auth:semantic-holder:{case_id}",
+        allocation_ids=(f"allocation:semantic-holder:{case_id}",),
+        allocation_manifest_hash="a" * 64,
+    )
+    proposal = ModelProposal(
+        source_event_id=batch.batch_id,
+        intent="inform",
+        reply_chunks=(reply,),
+        facts=maya_facts,
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / f"semantic-holder-{case_id}.sqlite3"
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store, authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(batch)
+        snapshot = private_store.load(batch.lead_id)
+        projection = store.load_latest_conversation_projection(batch.lead_id)
+
+        assert model.calls[0].message == message
+        assert (snapshot.full_name, snapshot.email, snapshot.country_code) == expected
+        assert result.reply_chunks == (reply,)
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert projection is not None
+        assert not {"full_name", "email", "country_code", "phone_e164"} & {
+            fact.name for fact in projection.facts
+        }
     finally:
         private_store.close()
         store.close()
@@ -1605,15 +1711,16 @@ def test_invalid_model_private_facts_are_collection_only_and_request_correction(
         store.close()
 
 
-def test_parent_collector_persists_first_and_continues_to_summary_same_turn(
+def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn(
     tmp_path,
 ) -> None:
     private_name = "Pessoa Prompt Silva"
     private_email = "prompt.person@example.invalid"
     private_country = "Brasil"
+    typed_phone = "+1" + "202" + "555" + "0101"
     message = (
         f"Meu nome completo é {private_name}, meu e-mail é {private_email} "
-        f"e sou do {private_country}."
+        f"e sou do {private_country}. Meu telefone é {typed_phone}."
     )
     event = replace(
         EVENT,
@@ -1646,7 +1753,12 @@ def test_parent_collector_persists_first_and_continues_to_summary_same_turn(
         source_event_id=batch.batch_id,
         intent="inform",
         reply_chunks=("Vou consultar.",),
-        facts=(),
+        facts=(
+            ModelFact("full_name", private_name),
+            ModelFact("email", private_email),
+            ModelFact("country_code", "BR"),
+            ModelFact("phone_e164", typed_phone),
+        ),
         read_requests=(read_request,),
         effect_proposals=(),
     )
@@ -1689,6 +1801,7 @@ def test_parent_collector_persists_first_and_continues_to_summary_same_turn(
     try:
         result = executor.execute(batch)
         snapshot = private_store.load(batch.lead_id)
+        state = store.load_state(batch.lead_id).state
 
         assert "Só para confirmar" in result.reply_chunks[0]
         assert "Guardei esses dados" not in " ".join(result.reply_chunks)
@@ -1696,26 +1809,33 @@ def test_parent_collector_persists_first_and_continues_to_summary_same_turn(
         assert result.receipt.relay_rows == ()
         assert read_port.calls == [read_request]
         assert len(model.calls) == 2
-        assert model.calls[0].private_customer_fact_names == (
+        assert model.calls[0].private_customer_fact_names == ("phone_e164",)
+        assert model.calls[1].private_customer_fact_names == (
             "full_name",
             "email",
             "phone_e164",
             "country_code",
         )
+        assert model.calls[0].message == message
+        assert model.calls[1].message == message
         for private_value in (private_name, private_email, private_country):
-            assert private_value not in model.calls[0].message
             assert private_value not in repr(model.calls[0])
-            assert private_value not in model.calls[1].message
             assert private_value not in repr(model.calls[1])
+            assert private_value not in repr(snapshot)
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
+        assert type(state.workflow) is AwaitingConfirmationState
+        assert state.workflow.draft.customer.phone_e164 == "+12025550199"
+        assert state.workflow.draft.customer.phone_e164 != typed_phone
     finally:
         private_store.close()
         store.close()
 
 
-def test_private_collection_gate_survives_boundary_crash_and_retry(tmp_path) -> None:
+def test_private_update_journal_survives_crash_without_becoming_progress_gate(
+    tmp_path,
+) -> None:
     private_store_path = tmp_path / "private-customer-replay.sqlite3"
     private_name = "Pessoa Replay Silva"
     private_email = "replay.person@example.invalid"
@@ -1730,22 +1850,7 @@ def test_private_collection_gate_survives_boundary_crash_and_retry(tmp_path) -> 
             ModelFact("country_code", private_country),
         ),
     )
-    retry = ModelProposal(
-        source_event_id=BATCH.batch_id,
-        intent="select",
-        reply_chunks=("Resumo pronto.",),
-        facts=(
-            ModelFact("service", "hostel"),
-            ModelFact("start_date", date(2026, 8, 10)),
-            ModelFact("end_date", date(2026, 8, 12)),
-            ModelFact("adults", 2),
-            ModelFact("children", 0),
-            ModelFact("payment_method", "stripe"),
-        ),
-        read_requests=(),
-        effect_proposals=(),
-        target_offer_id="offer:" + "7" * 64,
-    )
+    retry = _proposal("Continuação autenticada.")
     model = FakeAuditedModel(store, [first, retry])
     _install_public_authority(store)
 
@@ -1774,9 +1879,7 @@ def test_private_collection_gate_survives_boundary_crash_and_retry(tmp_path) -> 
 
         result = build(store).execute(BATCH)
 
-        assert result.reply_chunks == (
-            "Obrigado. Guardei esses dados para continuar a reserva.",
-        )
+        assert result.reply_chunks == ("Continuação autenticada.",)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(model.calls) == 2
