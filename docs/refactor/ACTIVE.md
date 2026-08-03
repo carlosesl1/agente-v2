@@ -28,7 +28,7 @@ Carlos autorizou em 2026-08-03 que Maya receba a mensagem original integral e at
 | 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
 | 8. Conversa-first para nome/e-mail/país | `DONE — SUPERSEDED BY SAME-TURN CONTINUATION` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
 | 9. Continuar até resumo após coleta/correção privada | `DONE — INPUT PATH SUPERSEDED` | `b110662461dca1ce5d2f15c0d6bfe366b9ce00a2` |
-| 10. Maya interpreta titular a partir da mensagem original | `LOCALLY QUALIFIED — REVIEW NEXT` | `ffa0cad6ef902fb0372d8fe1f83b8def7518a9ea` |
+| 10. Maya interpreta titular a partir da mensagem original | `LOCALLY QUALIFIED — REVIEW NEXT` | `a07d638d0cea7962efabd1d9ffb68a1660645170` |
 
 Evidência Task 2:
 
@@ -98,7 +98,10 @@ Evidência Task 10:
 - os três revisores finais da candidata anterior expiraram sem veredito; seus transcripts não foram tratados como aprovação e produziram três witnesses reproduzidos em RED: `adjust+preserve` conservava resumo obsoleto, reply model-owned podia ecoar PII em artifacts e regex legado ainda promovia DOB/gênero do texto bruto;
 - hardening funcional `ffa0cad6ef902fb0372d8fe1f83b8def7518a9ea`, tree `c0dffa1ceac81d839c01312a08a882ef6b61dcdb`: toda atualização privada pendente revoga o resumo salvo quando chega a novo `select`; coleta/correção/handoff aceitos usam resposta parent-owned; DOB/gênero não são criados pelo parent;
 - novos `kernel_decision` artifacts persistem somente commitment de state/version/command hashes; commit e semantic scan autenticam o conteúdo contra rows reais e continuam aceitando artifacts históricos com decisão completa;
-- regressão proporcional ampla: `543 passed, 39 subtests passed`; gate oficial clean-env com as sete exclusions históricas do workflow: `1486 passed, 7 deselected, 2940 subtests passed`;
+- a revisão final `deleg_f88def25` ficou `CLEAR` para correção/no-effect e para o commitment do kernel, mas bloqueou a candidata `5c26bfdba5ae0aceb3e90fddb32e255ad7d0e44b`: com perfil ainda parcial, Maya podia aceitar `full_name`, ecoá-lo no reply e propor um provider read que o controlador filtrava para zero; o `read_requests` obsoleto ainda preservava o eco no reply público e nos artifacts;
+- o witness foi reproduzido em RED e corrigido no chokepoint funcional `a07d638d0cea7962efabd1d9ffb68a1660645170`, tree `ffaa44497702807e3180f7693f86e835847099a5`: a proposta é normalizada para o conjunto efetivo de reads antes da seleção final; fato privado permanece no owner, provider calls ficam em zero e reply/artifacts usam texto parent-owned sem o valor;
+- regressão final focada de executor/adapter/E2E/artifact graph: `93 passed, 11 subtests passed`;
+- regressão proporcional ampla: `543 passed, 39 subtests passed`; gate oficial clean-env da candidata corrigida com as sete exclusions históricas do workflow: `1487 passed, 7 deselected, 2940 subtests passed`;
 - Ruff, `fasttrack-boundaries`, compileall, `git diff --check` e scan do extrator: verdes;
 - `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
 - nenhum push, deploy, POST real, pagamento, entrega/reset ManyChat ou alteração de reserva real foi executado.
