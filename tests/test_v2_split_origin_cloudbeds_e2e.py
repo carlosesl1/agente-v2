@@ -129,7 +129,11 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
             source_event_id=collect_batch.batch_id,
             intent="inform",
             reply_chunks=("Vou consultar.",),
-            facts=(),
+            facts=(
+                ModelFact("full_name", private_name),
+                ModelFact("email", private_email),
+                ModelFact("country_code", "BR"),
+            ),
             read_requests=(read_request,),
             effect_proposals=(),
         ),
@@ -201,9 +205,11 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
+        assert model.calls[0].message == collect_batch.combined_text
+        assert model.calls[1].message == collect_batch.combined_text
         for private_value in (private_name, private_email, private_country_name):
-            assert private_value not in model.calls[0].message
-            assert private_value not in model.calls[1].message
+            assert private_value not in repr(model.calls[0])
+            assert private_value not in repr(model.calls[1])
         calls_after_summary = tuple(model.calls)
         reads_after_summary = tuple(read_port.calls)
         replayed_summary = executor.execute(collect_batch)
@@ -338,7 +344,11 @@ def test_valid_private_correction_replaces_summary_in_same_turn(
             source_event_id=collect_batch.batch_id,
             intent="inform",
             reply_chunks=("Vou consultar.",),
-            facts=(),
+            facts=(
+                ModelFact("full_name", original_name),
+                ModelFact("email", private_email),
+                ModelFact("country_code", "BR"),
+            ),
             read_requests=(initial_read,),
             effect_proposals=(),
         ),
@@ -355,7 +365,7 @@ def test_valid_private_correction_replaces_summary_in_same_turn(
             source_event_id=correction_batch.batch_id,
             intent="inform",
             reply_chunks=("Vou atualizar.",),
-            facts=(),
+            facts=(ModelFact("full_name", corrected_name),),
             read_requests=(correction_read,),
             effect_proposals=(),
         ),
@@ -489,12 +499,22 @@ def test_private_correction_after_summary_cannot_confirm_stale_summary(
         ModelFact("children", 0),
         ModelFact("payment_method", "stripe"),
     )
+    correction_value = correction_text.split(":", 1)[1].strip()
+    correction_reply = (
+        "Qual é o nome completo do titular?"
+        if expected_reply_fragment == "nome completo"
+        else "Os dados mudaram; vou gerar um novo resumo."
+    )
     proposals = [
         ModelProposal(
             source_event_id=collect_batch.batch_id,
             intent="inform",
             reply_chunks=("Dados recebidos.",),
-            facts=(),
+            facts=(
+                ModelFact("full_name", "Pessoa Original Silva"),
+                ModelFact("email", "original.person@example.invalid"),
+                ModelFact("country_code", "BR"),
+            ),
             read_requests=(),
             effect_proposals=(),
         ),
@@ -517,14 +537,12 @@ def test_private_correction_after_summary_cannot_confirm_stale_summary(
         ),
         ModelProposal(
             source_event_id=correction_batch.batch_id,
-            intent="confirm",
-            reply_chunks=("Confirmado.",),
-            facts=(),
+            intent="adjust",
+            reply_chunks=(correction_reply,),
+            facts=(ModelFact("full_name", correction_value),),
             read_requests=(),
             effect_proposals=(),
-            confirmed_summary_version=1,
-            confirmed_action_kinds=(CriticalActionKind.RESERVE_LODGING,),
-            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
+            pending_disposition="revoke",
         ),
     ]
 
@@ -567,7 +585,7 @@ def test_private_correction_after_summary_cannot_confirm_stale_summary(
             )
             is None
         )
-        assert correction_text.split(":", 1)[1].strip() not in model.calls[-1].message
+        assert model.calls[-1].message == correction_batch.combined_text
         assert expected_reply_fragment in " ".join(correction.reply_chunks).casefold()
         assert private_store.load(correction_batch.lead_id).full_name == expected_name
     finally:
@@ -596,7 +614,11 @@ def test_private_collection_does_not_suppress_explicit_handoff(tmp_path: Path) -
                 source_event_id=batch.batch_id,
                 intent="request_handoff",
                 reply_chunks=("Vou chamar uma pessoa.",),
-                facts=(),
+                facts=(
+                    ModelFact("full_name", "Pessoa Handoff Silva"),
+                    ModelFact("email", "handoff.person@example.invalid"),
+                    ModelFact("country_code", "BR"),
+                ),
                 read_requests=(),
                 effect_proposals=(),
             )
@@ -624,6 +646,8 @@ def test_private_collection_does_not_suppress_explicit_handoff(tmp_path: Path) -
         assert result.receipt.relay_rows == ()
         assert len(result.receipt.internal_outbox_rows) == 1
         assert boundary.load_state(batch.lead_id).state.handoff is not None
+        assert private_store.load(batch.lead_id).full_name == "Pessoa Handoff Silva"
+        assert model.calls[0].message == batch.combined_text
     finally:
         private_store.close()
         boundary.close()

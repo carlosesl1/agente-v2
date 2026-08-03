@@ -193,6 +193,8 @@ def test_original_private_context_reaches_maya_with_holder_semantics() -> None:
     assert "explicitly" in prompt
     assert "phone_e164" in prompt
     assert "do not guess" in prompt
+    assert "correction wins" in prompt
+    assert "pending_disposition=revoke" in prompt
     assert "bracketed private-field markers" not in prompt
 
 

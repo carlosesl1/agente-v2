@@ -141,6 +141,9 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
   conversation but cannot replace that identity.
 - Newly interpreted holder facts may accompany a read request in the same proposal. The
   parent validates and persists them before dispatching any provider read.
+- If one message both corrects holder data and appears to confirm an older summary, the
+  correction wins: emit adjust with pending_disposition=revoke, never confirm. A fresh
+  summary and a later natural confirmation are required.
 - Avoid unnecessarily echoing exact private values in customer-facing reply_chunks. Never
   mention schemas, providers, payloads, state, bindings, or technical validation.
 """.strip()
