@@ -25,7 +25,7 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 | 4. Protocolo collection-only e privacidade de artifacts | `DONE` | `f08a0af949464ff9426056122ab002b3cc6e0fe5` |
 | 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
 | 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
-| 7. Qualificação, revisão, push e CI exatos | `CANDIDATE_FROZEN — REVIEW NEXT` | `000d8cabf6bea97361a9fb5539d17c9fdbfd8461` |
+| 7. Qualificação, revisão, push e CI exatos | `CANDIDATE_FROZEN — REVIEW NEXT` | `202492c2c5870a3208a8d2e53faba1fe4fadff95` |
 
 Evidência Task 2:
 
@@ -35,14 +35,17 @@ Evidência Task 2:
 - Ruff, compileall e `git diff --check`: verdes;
 - zero cliente HTTP/provider/ManyChat e zero efeito externo nos arquivos da task.
 
-Evidência da candidata de qualificação `000d8cabf6bea97361a9fb5539d17c9fdbfd8461`:
+Evidência da candidata de qualificação `202492c2c5870a3208a8d2e53faba1fe4fadff95`:
 
 - três revisores read-only expiraram sem veredito, mas seus transcripts produziram witnesses causais que foram reproduzidos em RED antes das correções;
 - hardlinks tardios entre owners SQLite, inclusive audit lazy, são rejeitados antes de schema write; bootstrap incompatível e facts adulterados/unbacked falham fechados;
+- a revisão `deleg_7214bfd0` bloqueou a candidata anterior com dois witnesses adicionais: row privada com `value_hash` recalculado divergia silenciosamente do journal, e schema `STRICT` sem os `CHECK` obrigatórios era aceito;
+- os dois witnesses foram reproduzidos em RED; o journal agora autentica hashes por campo e seu conteúdo completo, e o bootstrap compara também o SQL canônico integral das tabelas;
 - markers ignoram PII legada na projeção e valores ManyChat inválidos/expirados; fallback privado só perde para valor ManyChat válido e fresco;
 - telefone ausente/futuro/expirado bloqueia todas as leituras de provider e todo command; somente `KNOWLEDGE` local permanece elegível;
 - binding ManyChat é reautenticado na decisão e imediatamente antes de commit com command; mudança material aborta sem command/relay;
-- gate oficial local: `1479 passed, 7 deselected, 2940 subtests passed`;
+- regressão proporcional após os reparos: `93 passed`;
+- gate oficial local após os reparos: `1481 passed, 7 deselected, 2940 subtests passed`;
 - Ruff, `fasttrack-boundaries`, compileall e `git diff --check`: verdes;
 - nenhum POST Cloudbeds/Bókun, pagamento, entrega ManyChat, deploy ou alteração de reserva real foi executado.
 
