@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 from pathlib import Path
 import sqlite3
 
@@ -227,6 +228,42 @@ def test_store_rejects_incompatible_existing_schema_during_open(tmp_path: Path) 
         SQLitePrivateCustomerFactStore(path)
 
 
+def test_store_rejects_schema_with_required_checks_removed(tmp_path: Path) -> None:
+    path = tmp_path / "private-customer-without-checks.sqlite3"
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE private_customer_fact_turns (
+                lead_id TEXT NOT NULL,
+                source_turn_id TEXT NOT NULL,
+                source_event_hash TEXT NOT NULL,
+                fact_names_json TEXT NOT NULL,
+                private_content_hash TEXT NOT NULL,
+                persisted_at TEXT NOT NULL,
+                PRIMARY KEY (lead_id, source_turn_id)
+            ) STRICT;
+            CREATE TABLE private_customer_facts (
+                lead_id TEXT NOT NULL,
+                fact_name TEXT NOT NULL,
+                private_value TEXT NOT NULL,
+                value_hash TEXT NOT NULL,
+                source_turn_id TEXT NOT NULL,
+                source_event_hash TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                persisted_at TEXT NOT NULL,
+                PRIMARY KEY (lead_id, fact_name)
+            ) STRICT;
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        SQLitePrivateCustomerFactStore(path)
+
+
 def test_store_load_rejects_tampered_value_and_unbacked_source(tmp_path: Path) -> None:
     store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer-tamper.sqlite3")
     try:
@@ -252,5 +289,35 @@ def test_store_load_rejects_tampered_value_and_unbacked_source(tmp_path: Path) -
         )
         with pytest.raises(RuntimeError, match="store row is invalid"):
             store.load(LEAD_ID)
+    finally:
+        store.close()
+
+
+def test_store_load_rejects_value_rehashed_without_matching_turn_journal(
+    tmp_path: Path,
+) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer-rehash.sqlite3")
+    tampered = "tampered@example.invalid"
+    tampered_hash = hashlib.sha256(
+        b"v2-private-customer-fact-value-v1\0" + tampered.encode("utf-8")
+    ).hexdigest()
+    try:
+        store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            facts=_facts(),
+            persisted_at=NOW,
+        )
+        store._connection.execute(
+            "UPDATE private_customer_facts SET private_value=?,value_hash=? "
+            "WHERE lead_id=? AND fact_name='email'",
+            (tampered, tampered_hash, LEAD_ID),
+        )
+
+        with pytest.raises(RuntimeError, match="store row is invalid") as error:
+            store.load(LEAD_ID)
+        assert tampered not in repr(error.value)
+        assert EMAIL not in repr(error.value)
     finally:
         store.close()

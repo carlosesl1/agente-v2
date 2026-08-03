@@ -322,6 +322,40 @@ _EXPECTED_SCHEMA = {
     ),
 }
 
+_EXPECTED_TABLE_SQL = {
+    "private_customer_fact_turns": """
+        CREATE TABLE private_customer_fact_turns (
+            lead_id TEXT NOT NULL,
+            source_turn_id TEXT NOT NULL,
+            source_event_hash TEXT NOT NULL,
+            fact_names_json TEXT NOT NULL,
+            private_content_hash TEXT NOT NULL,
+            persisted_at TEXT NOT NULL,
+            PRIMARY KEY (lead_id, source_turn_id)
+        ) STRICT
+    """,
+    "private_customer_facts": """
+        CREATE TABLE private_customer_facts (
+            lead_id TEXT NOT NULL,
+            fact_name TEXT NOT NULL
+                CHECK (fact_name IN ('full_name','email','country_code')),
+            private_value TEXT NOT NULL,
+            value_hash TEXT NOT NULL,
+            source_turn_id TEXT NOT NULL,
+            source_event_hash TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 1),
+            persisted_at TEXT NOT NULL,
+            PRIMARY KEY (lead_id, fact_name)
+        ) STRICT
+    """,
+}
+
+
+def _normalized_schema_sql(value: object) -> str:
+    if type(value) is not str:
+        raise RuntimeError("private customer schema is incompatible")
+    return " ".join(value.split())
+
 
 def _validate_schema(connection: sqlite3.Connection) -> None:
     table_rows = {
@@ -341,21 +375,74 @@ def _validate_schema(connection: sqlite3.Connection) -> None:
         )
         if actual != expected:
             raise RuntimeError("private customer schema is incompatible")
+        schema_row = connection.execute(
+            "SELECT sql FROM main.sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if (
+            schema_row is None
+            or _normalized_schema_sql(schema_row[0])
+            != _normalized_schema_sql(_EXPECTED_TABLE_SQL[table])
+        ):
+            raise RuntimeError("private customer schema is incompatible")
 
 
-def _journal_fact_names(value: object) -> tuple[str, ...]:
+def _value_hash(value: str) -> str:
+    return _domain_hash(
+        b"v2-private-customer-fact-value-v1",
+        value.encode("utf-8"),
+    )
+
+
+def _journal_fact_material(value: object) -> tuple[tuple[str, str], ...]:
     try:
         decoded = json.loads(value)
     except (TypeError, json.JSONDecodeError):
         raise RuntimeError("private customer turn journal is invalid") from None
     if (
         type(decoded) is not list
-        or any(type(item) is not str or item not in _PRIVATE_FACTS for item in decoded)
-        or tuple(name for name in _PRIVATE_FACT_ORDER if name in decoded)
-        != tuple(decoded)
+        or any(
+            type(item) is not dict
+            or set(item) != {"name", "value_hash"}
+            or item["name"] not in _PRIVATE_FACTS
+            or type(item["value_hash"]) is not str
+            or _HASH_RE.fullmatch(item["value_hash"]) is None
+            for item in decoded
+        )
     ):
         raise RuntimeError("private customer turn journal is invalid")
-    return tuple(decoded)
+    material = tuple((item["name"], item["value_hash"]) for item in decoded)
+    names = tuple(item[0] for item in material)
+    if tuple(name for name in _PRIVATE_FACT_ORDER if name in names) != names:
+        raise RuntimeError("private customer turn journal is invalid")
+    return material
+
+
+def _journal_fact_names(value: object) -> tuple[str, ...]:
+    return tuple(item[0] for item in _journal_fact_material(value))
+
+
+def _turn_content_hash(
+    *,
+    lead_id: str,
+    source_turn_id: str,
+    source_event_hash: str,
+    fact_material: tuple[tuple[str, str], ...],
+) -> str:
+    return _domain_hash(
+        b"v2-private-customer-fact-turn-v2",
+        _canonical_json(
+            {
+                "facts": [
+                    {"name": name, "value_hash": value_hash}
+                    for name, value_hash in fact_material
+                ],
+                "lead_id": lead_id,
+                "source_event_hash": source_event_hash,
+                "source_turn_id": source_turn_id,
+            }
+        ),
+    )
 
 
 class SQLitePrivateCustomerFactStore:
@@ -452,18 +539,21 @@ class SQLitePrivateCustomerFactStore:
                 _hash(journal_content_hash, "private_content_hash")
                 _utc(datetime.fromisoformat(persisted_at), "persisted_at")
                 _utc(datetime.fromisoformat(journal_persisted_at), "persisted_at")
-                journal_names = _journal_fact_names(journal_names_json)
+                journal_material = _journal_fact_material(journal_names_json)
             except (PrivateCustomerFactValidationError, RuntimeError, TypeError, ValueError):
                 raise RuntimeError("private customer store row is invalid") from None
-            expected_value_hash = _domain_hash(
-                b"v2-private-customer-fact-value-v1",
-                value.encode("utf-8"),
+            expected_journal_hash = _turn_content_hash(
+                lead_id=canonical_lead,
+                source_turn_id=source_turn_id,
+                source_event_hash=source_event_hash,
+                fact_material=journal_material,
             )
             if (
                 canonical != value
-                or value_hash != expected_value_hash
+                or value_hash != _value_hash(value)
                 or journal_event_hash != source_event_hash
-                or name not in journal_names
+                or dict(journal_material).get(name) != value_hash
+                or journal_content_hash != expected_journal_hash
                 or type(revision) is not int
                 or revision < 1
             ):
@@ -499,20 +589,19 @@ class SQLitePrivateCustomerFactStore:
         instant = _utc(persisted_at, "persisted_at")
         rows = _canonical_fact_rows(facts)
         names = tuple(name for name, _ in rows)
-        payload_hash = _domain_hash(
-            b"v2-private-customer-fact-turn-v1",
-            _canonical_json(
-                {
-                    "facts": [
-                        {"name": name, "value": value} for name, value in rows
-                    ],
-                    "lead_id": canonical_lead,
-                    "source_event_hash": canonical_event_hash,
-                    "source_turn_id": canonical_turn,
-                }
-            ),
+        fact_material = tuple((name, _value_hash(value)) for name, value in rows)
+        payload_hash = _turn_content_hash(
+            lead_id=canonical_lead,
+            source_turn_id=canonical_turn,
+            source_event_hash=canonical_event_hash,
+            fact_material=fact_material,
         )
-        names_json = _canonical_json(list(names)).decode("utf-8")
+        names_json = _canonical_json(
+            [
+                {"name": name, "value_hash": value_hash}
+                for name, value_hash in fact_material
+            ]
+        ).decode("utf-8")
         try:
             self._connection.execute("BEGIN IMMEDIATE")
             existing_turn = self._connection.execute(
@@ -543,10 +632,7 @@ class SQLitePrivateCustomerFactStore:
                 if existing is not None and existing[0] == value:
                     continue
                 revision = 1 if existing is None else existing[1] + 1
-                value_hash = _domain_hash(
-                    b"v2-private-customer-fact-value-v1",
-                    value.encode("utf-8"),
-                )
+                value_hash = _value_hash(value)
                 self._connection.execute(
                     "INSERT INTO private_customer_facts "
                     "(lead_id,fact_name,private_value,value_hash,source_turn_id,"
@@ -616,18 +702,7 @@ class SQLitePrivateCustomerFactStore:
             raise RuntimeError("private customer store read failed") from None
         if row is None:
             return ()
-        try:
-            decoded = json.loads(row[0])
-        except (TypeError, json.JSONDecodeError):
-            raise RuntimeError("private customer turn journal is invalid") from None
-        if (
-            type(decoded) is not list
-            or any(type(item) is not str or item not in _PRIVATE_FACTS for item in decoded)
-            or tuple(name for name in _PRIVATE_FACT_ORDER if name in decoded)
-            != tuple(decoded)
-        ):
-            raise RuntimeError("private customer turn journal is invalid")
-        return tuple(decoded)
+        return _journal_fact_names(row[0])
 
     def close(self) -> None:
         if self._closed:
