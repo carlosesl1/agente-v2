@@ -1,9 +1,11 @@
 # Split-Origin Reservation Profile Authority Design
 
 **Date:** 2026-08-02
-**Status:** approved by the user request captured in this session
+**Status:** historical foundation; model-input/turn protocol superseded on 2026-08-03
 **Candidate base:** `1219ff2c12efa989f44f5caa7364363011ea281d`
 **Branch:** `maya-v2-operational-readiness`
+
+> **Supersession notice:** `docs/superpowers/specs/2026-08-03-maya-owned-reservation-holder-interpretation-design.md` replaces the marker-only model wire, deterministic private extractor, collection-only progress gate, and delayed-summary rules in this document. Field authority, private SQLite ownership, ManyChat-only phone, technical-artifact privacy, reauthentication, and effect safety remain active.
 
 ## 1. Problem
 

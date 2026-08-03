@@ -1,9 +1,11 @@
 # Same-Turn Private Profile Continuation Design
 
 **Date:** 2026-08-03
-**Status:** approved by explicit product request; written design pending final user review
+**Status:** historical; input/extraction sections superseded on 2026-08-03
 **Branch:** `maya-v2-operational-readiness`
 **Parent design:** `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
+
+> **Supersession notice:** `docs/superpowers/specs/2026-08-03-maya-owned-reservation-holder-interpretation-design.md` replaces every requirement here that assigns holder extraction to a deterministic parent collector, redacts the current inbound message before Maya, or treats model-produced private facts as acknowledgement-only. The same-turn summary, correction/revocation, later-confirmation, zero-command, replay, exactly-once, and provider-safety requirements remain active.
 
 ## 1. Problem
 
