@@ -456,7 +456,7 @@ def test_valid_private_correction_replaces_summary_in_same_turn(
         ),
     ),
 )
-def test_private_correction_after_summary_cannot_confirm_stale_summary(
+def test_private_correction_after_summary_cannot_preserve_or_confirm_stale_summary(
     tmp_path: Path,
     correction_text: str,
     expected_name: str,
@@ -542,7 +542,7 @@ def test_private_correction_after_summary_cannot_confirm_stale_summary(
             facts=(ModelFact("full_name", correction_value),),
             read_requests=(),
             effect_proposals=(),
-            pending_disposition="revoke",
+            pending_disposition="preserve",
         ),
     ]
 
@@ -641,7 +641,9 @@ def test_private_collection_does_not_suppress_explicit_handoff(tmp_path: Path) -
     try:
         result = executor.execute(batch)
 
-        assert result.reply_chunks == ("Vou chamar uma pessoa.",)
+        assert result.reply_chunks == (
+            "Vou encaminhar seu atendimento para uma pessoa.",
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(result.receipt.internal_outbox_rows) == 1

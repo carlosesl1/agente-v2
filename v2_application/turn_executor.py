@@ -27,7 +27,7 @@ from reservation_boundary.conversation import (
     TranscriptDirection,
     TranscriptKind,
 )
-from reservation_boundary.serialization import semantic_hash, to_wire_json
+from reservation_boundary.serialization import semantic_hash
 from reservation_boundary.sqlite_store import (
     CommandRelayWrite,
     ConcurrencyConflict,
@@ -37,12 +37,12 @@ from reservation_boundary.sqlite_store import (
     StateNotFound,
     TurnArtifactWrite,
     TurnReceipt,
+    kernel_decision_commitment,
 )
 from reservation_boundary.types import (
     BoundaryCommit,
     BoundaryState,
     ConversationIntentKind,
-    KernelDecision,
     StringSlot,
     TypedFact,
 )
@@ -251,17 +251,6 @@ _BIRTH_EN_MONTH_RE: Final = re.compile(
     r"\s+(\d{4})\b",
     re.IGNORECASE,
 )
-_GENDER_EN_RE: Final = re.compile(
-    r"\b(?:i\s+am|i['’]m|(?:my\s+)?gender\s*(?:is|:)?)\s+(female|male)\b",
-    re.IGNORECASE,
-)
-_GENDER_PT_RE: Final = re.compile(
-    r"\b(?:sou|(?:meu\s+)?g[eê]nero(?:\s+cadastral)?\s*(?:é|e|:)?)\s+"
-    r"(mulher|homem|feminino|masculino)\b",
-    re.IGNORECASE,
-)
-
-
 def _safe_date(year: int, month: int, day: int) -> date | None:
     try:
         return date(year, month, day)
@@ -269,7 +258,7 @@ def _safe_date(year: int, month: int, day: int) -> date | None:
         return None
 
 
-def _extract_explicit_customer_facts(message: str) -> tuple[ModelFact, ...]:
+def _explicit_birth_date_candidates(message: str) -> frozenset[date]:
     if type(message) is not str or not message:
         raise ValueError("message must be non-empty exact text")
     birth_dates: set[date] = set()
@@ -290,22 +279,7 @@ def _extract_explicit_customer_facts(message: str) -> tuple[ModelFact, ...]:
         if parsed is not None:
             birth_dates.add(parsed)
 
-    genders: set[str] = set()
-    for match in _GENDER_EN_RE.finditer(message):
-        genders.add("f" if match.group(1).casefold() == "female" else "m")
-    for match in _GENDER_PT_RE.finditer(message):
-        genders.add(
-            "f"
-            if match.group(1).casefold() in {"mulher", "feminino"}
-            else "m"
-        )
-
-    facts: list[ModelFact] = []
-    if len(birth_dates) == 1:
-        facts.append(ModelFact("birth_date", next(iter(birth_dates))))
-    if len(genders) == 1:
-        facts.append(ModelFact("gender", next(iter(genders))))
-    return tuple(facts)
+    return frozenset(birth_dates)
 
 
 _COMMERCIAL_CATALOG_PATH: Final = (
@@ -428,11 +402,7 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
         parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
         if parsed is not None:
             activity_dates.add(parsed)
-    activity_dates.difference_update(
-        fact.value
-        for fact in _extract_explicit_customer_facts(message)
-        if fact.name == "birth_date" and type(fact.value) is date
-    )
+    activity_dates.difference_update(_explicit_birth_date_candidates(message))
 
     number_words = {
         "zero": 0,
@@ -1082,22 +1052,48 @@ def _private_update_no_command_proposal(
     pending_action: PendingCriticalActionContext | None,
     locale: str,
 ) -> ModelProposal:
-    if proposal.intent != "confirm":
+    if proposal.intent == "select" or (
+        proposal.intent == "inform" and proposal.read_requests
+    ):
         return proposal
-    revoke_pending = pending_action is not None
-    reply = (
-        "I updated your details. I'll present a new summary before asking for confirmation."
-        if locale.startswith("en")
-        else "Atualizei seus dados. Vou apresentar um novo resumo antes de pedir confirmação."
-    )
+    if proposal.intent == "request_handoff":
+        reply = (
+            "I'll connect you with a person."
+            if locale.startswith("en")
+            else "Vou encaminhar seu atendimento para uma pessoa."
+        )
+        return ModelProposal(
+            source_event_id=proposal.source_event_id,
+            intent="request_handoff",
+            reply_chunks=(reply,),
+            facts=proposal.facts,
+            read_requests=(),
+            effect_proposals=(),
+        )
+    if pending_action is not None:
+        reply = (
+            "I updated your details. I'll present a new summary before asking for confirmation."
+            if locale.startswith("en")
+            else "Atualizei seus dados. Vou apresentar um novo resumo antes de pedir confirmação."
+        )
+        return ModelProposal(
+            source_event_id=proposal.source_event_id,
+            intent="adjust",
+            reply_chunks=(reply,),
+            facts=proposal.facts,
+            read_requests=(),
+            effect_proposals=(),
+            pending_disposition="revoke",
+            passengers=proposal.passengers,
+        )
     return ModelProposal(
         source_event_id=proposal.source_event_id,
-        intent="adjust" if revoke_pending else "inform",
-        reply_chunks=(reply,),
-        facts=(),
+        intent="inform",
+        reply_chunks=(_collection_reply(locale),),
+        facts=proposal.facts,
         read_requests=(),
         effect_proposals=(),
-        pending_disposition="revoke" if revoke_pending else None,
+        passengers=proposal.passengers,
     )
 
 
@@ -1545,9 +1541,8 @@ class V2TurnExecutor:
         )
         private_update_turn = bool(journal_fact_names)
         collection_only = False
-        explicit_customer_facts = (
-            *_extract_explicit_commercial_facts(batch.combined_text),
-            *_extract_explicit_customer_facts(batch.combined_text),
+        explicit_customer_facts = _extract_explicit_commercial_facts(
+            batch.combined_text
         )
         effective_profile_complete = reservation_profile_ready(
             profile,
@@ -2090,16 +2085,11 @@ class V2TurnExecutor:
             raise TurnExecutionError(
                 "private customer update cannot authorize a reservation command"
             )
-        kernel = KernelDecision(
+        commit = BoundaryCommit(decision.next_state, execution_commands, (), ())
+        kernel_bytes, kernel_hash = kernel_decision_commitment(
             decision.next_state,
             execution_commands,
-            (),
-            (),
-            (),
         )
-        commit = BoundaryCommit(decision.next_state, execution_commands, (), ())
-        kernel_bytes = to_wire_json(kernel).encode("utf-8")
-        kernel_hash = semantic_hash(kernel)
 
         intent = _intent(proposal)
         route = _route(decision.projection, intent)

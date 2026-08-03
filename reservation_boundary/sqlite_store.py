@@ -806,7 +806,7 @@ def _validate_v8_artifact_graph(
     public_chunks: tuple[PublicReplyChunk, ...],
     expected_state: BoundaryState | None = None,
     expected_commands: tuple[object, ...] | None = None,
-) -> KernelDecision:
+) -> KernelDecision | None:
     """Recompose transcript → closure → proposal → decision bilaterally."""
     by_kind = {
         kind: tuple(item for item in artifacts if item.artifact_kind == kind)
@@ -939,7 +939,59 @@ def _validate_v8_artifact_graph(
         raise ValueError("v8 public chunks do not bind accepted closure")
 
     decision_artifact = by_kind["kernel_decision"][0]
-    decision = from_wire_json(decision_artifact.canonical_bytes.decode("utf-8"), KernelDecision)
+    decision_envelope = _receipt_load_json(
+        decision_artifact.canonical_bytes,
+        "kernel decision artifact",
+    )
+    if decision_envelope.get("schema") == "phase8-kernel-decision-commitment":
+        if (
+            set(decision_envelope) != {"schema", "version", "data"}
+            or decision_envelope.get("version") != 1
+            or type(decision_envelope.get("data")) is not dict
+        ):
+            raise ValueError("kernel decision commitment envelope diverged")
+        commitment = decision_envelope["data"]
+        if set(commitment) != {"state_hash", "state_version", "command_rows"}:
+            raise ValueError("kernel decision commitment fields diverged")
+        _require_hash(commitment["state_hash"], "kernel state hash")
+        _require_int(commitment["state_version"], "kernel state version", minimum=1)
+        raw_rows = commitment["command_rows"]
+        if type(raw_rows) is not list or any(
+            type(row) is not dict
+            or set(row) != {"command_id", "command_hash"}
+            for row in raw_rows
+        ):
+            raise ValueError("kernel decision command commitments diverged")
+        decision_rows = tuple(
+            (
+                _require_id(row["command_id"], "kernel command id"),
+                _require_hash(row["command_hash"], "kernel command hash"),
+            )
+            for row in raw_rows
+        )
+        if len({row[0] for row in decision_rows}) != len(decision_rows):
+            raise ValueError("kernel decision command IDs are not unique")
+        if (
+            decision_artifact.artifact_hash != receipt.kernel_decision_hash
+            or commitment["state_hash"] != receipt.committed_state_hash
+            or commitment["state_version"] != receipt.committed_state_version
+            or decision_rows != receipt.command_rows
+        ):
+            raise ValueError("kernel commitment/receipt binding diverged")
+        if expected_state is not None and (
+            semantic_hash(expected_state) != commitment["state_hash"]
+            or expected_state.version != commitment["state_version"]
+        ):
+            raise ValueError("kernel commitment state diverges from commit")
+        if expected_commands is not None and (
+            _kernel_command_rows(expected_commands) != decision_rows
+        ):
+            raise ValueError("kernel commitment commands diverge from commit")
+        return None
+
+    decision = from_wire_json(
+        decision_artifact.canonical_bytes.decode("utf-8"), KernelDecision
+    )
     decision_rows = tuple(
         (
             command.command_id,
@@ -970,6 +1022,43 @@ def _command_record(command: object) -> tuple[str, str, str]:
         wire = to_phase6_wire_json(command)
         return command.settlement_command_id, "payment_settlement", wire
     raise TypeError("command must be an exact BoundaryCommand member")
+
+
+def _kernel_command_rows(commands: tuple[object, ...]) -> tuple[tuple[str, str], ...]:
+    if type(commands) is not tuple:
+        raise TypeError("kernel commands must be an exact tuple")
+    return tuple(
+        (command_id, _sha(command_json))
+        for command_id, _kind, command_json in (
+            _command_record(command) for command in commands
+        )
+    )
+
+
+def kernel_decision_commitment(
+    state: BoundaryState,
+    commands: tuple[object, ...],
+) -> tuple[bytes, str]:
+    """Commit a kernel result without duplicating state or command payloads."""
+
+    if type(state) is not BoundaryState:
+        raise TypeError("kernel state must be an exact BoundaryState")
+    command_rows = _kernel_command_rows(commands)
+    canonical_bytes = _receipt_json(
+        {
+            "schema": "phase8-kernel-decision-commitment",
+            "version": 1,
+            "data": {
+                "state_hash": semantic_hash(state),
+                "state_version": state.version,
+                "command_rows": [
+                    {"command_id": command_id, "command_hash": command_hash}
+                    for command_id, command_hash in command_rows
+                ],
+            },
+        }
+    )
+    return canonical_bytes, hashlib.sha256(canonical_bytes).hexdigest()
 
 
 def _validate_outbox_bindings(commit: BoundaryCommit) -> None:
@@ -2556,6 +2645,7 @@ __all__ = (
     "DataCorruption",
     "IdentityConflict",
     "InternalOutboxWrite",
+    "kernel_decision_commitment",
     "LegacyStateReadPort",
     "PublicOutboxWrite",
     "SQLiteBoundaryStore",

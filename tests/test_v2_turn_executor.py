@@ -33,7 +33,6 @@ from v2_application.turn_executor import (
     _confirmation_read_requests,
     _explicit_customer_fact_commitment,
     _extract_explicit_commercial_facts,
-    _extract_explicit_customer_facts,
     _explicit_summary_preparation_requested,
     _force_structured_activity_summary_preparation,
     _merge_explicit_customer_facts,
@@ -83,33 +82,71 @@ def test_critical_outcome_is_separate_from_material_state_facts() -> None:
     assert _state_model_facts(projection) == ()
 
 
-@pytest.mark.parametrize(
-    ("message", "expected"),
-    (
-        (
-            "I was born on 17 May 1991 and I am female.",
-            (ModelFact("birth_date", date(1991, 5, 17)), ModelFact("gender", "f")),
-        ),
-        (
-            "Nasci em 14/04/1990 e sou mulher.",
-            (ModelFact("birth_date", date(1990, 4, 14)), ModelFact("gender", "f")),
-        ),
-        (
-            "Minha data de nascimento é 11/01/1988. Sou homem.",
-            (ModelFact("birth_date", date(1988, 1, 11)), ModelFact("gender", "m")),
-        ),
-    ),
-)
-def test_parent_extracts_only_explicit_customer_facts(
-    message: str, expected: tuple[ModelFact, ...]
+def test_parent_does_not_promote_birth_or_gender_from_raw_customer_text(
+    tmp_path,
 ) -> None:
-    assert _extract_explicit_customer_facts(message) == expected
+    message = "Nasci em 14/04/1990 e sou mulher."
+    event = replace(
+        EVENT,
+        event_id="event:no-parent-private-extraction",
+        text=message,
+        payload_hash="9" * 64,
+    )
+    batch = InboundBatch(
+        batch_id="batch:no-parent-private-extraction",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(event,),
+        combined_text=message,
+    )
+    authority = replace(
+        AUTHORITY,
+        authorization_id="auth:no-parent-private-extraction",
+        allocation_ids=("allocation:no-parent-private-extraction",),
+        allocation_manifest_hash="9" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "no-parent-private-extraction.sqlite3"
+    )
+    model = FakeAuditedModel(
+        store,
+        [
+            ModelProposal(
+                source_event_id=batch.batch_id,
+                intent="inform",
+                reply_chunks=("Como posso continuar ajudando?",),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            )
+        ],
+    )
+    _install_public_authority(store, authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        executor.execute(batch)
+        projection = store.load_latest_conversation_projection(batch.lead_id)
 
-
-def test_parent_customer_fact_extraction_ignores_unbound_dates_and_gender_words() -> None:
-    assert _extract_explicit_customer_facts(
-        "The tour is on 17 May 2026 and the guide may be female."
-    ) == ()
+        assert projection is not None
+        assert not {"birth_date", "gender"}.intersection(
+            fact.name for fact in projection.facts
+        )
+    finally:
+        private_store.close()
+        store.close()
 
 
 def test_parent_extracts_unambiguous_catalog_product_date_and_party() -> None:
@@ -233,10 +270,8 @@ def test_parent_forces_only_a_fresh_read_for_explicit_summary_preparation() -> N
     assert request.activity_party() == (1, 0)
 
 
-def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() -> None:
-    extracted = _extract_explicit_customer_facts(
-        "I was born on 17 May 1991 and I am female."
-    )
+def test_parent_explicit_fact_merge_rejects_model_conflict_and_commits_source() -> None:
+    extracted = (ModelFact("payment_method", "stripe"),)
     proposal = ModelProposal(
         source_event_id="batch:explicit-customer-facts",
         intent="inform",
@@ -257,7 +292,7 @@ def test_parent_customer_fact_merge_rejects_model_conflict_and_commits_source() 
 
     with pytest.raises(TurnExecutionError, match="conflicts with explicit customer fact"):
         _merge_explicit_customer_facts(
-            replace(proposal, facts=(ModelFact("gender", "m"),)),
+            replace(proposal, facts=(ModelFact("payment_method", "wise"),)),
             extracted,
         )
 
@@ -1351,7 +1386,9 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
     proposal = ModelProposal(
         source_event_id=BATCH.batch_id,
         intent="inform",
-        reply_chunks=("Dados do titular recebidos.",),
+        reply_chunks=(
+            f"Dados do titular: {private_name}, {private_email}, {private_country}.",
+        ),
         facts=(
             ModelFact("full_name", private_name),
             ModelFact("email", private_email),
@@ -1386,7 +1423,9 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
             ).fetchall()
         )
 
-        assert result.reply_chunks == ("Dados do titular recebidos.",)
+        assert result.reply_chunks == (
+            "Obrigado. Guardei esses dados para continuar a reserva.",
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert snapshot.full_name == private_name
@@ -1518,7 +1557,13 @@ def test_maya_semantics_assign_holder_without_parent_regex(
 
         assert model.calls[0].message == message
         assert (snapshot.full_name, snapshot.email, snapshot.country_code) == expected
-        assert result.reply_chunks == (reply,)
+        assert result.reply_chunks == (
+            (
+                "Obrigado. Guardei esses dados para continuar a reserva."
+                if maya_facts
+                else reply
+            ),
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert projection is not None
@@ -1765,7 +1810,10 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
     selection = ModelProposal(
         source_event_id=batch.batch_id,
         intent="select",
-        reply_chunks=("Vou preparar o resumo.",),
+        reply_chunks=(
+            f"Vou preparar o resumo para {private_name}, {private_email}, "
+            f"{private_country}.",
+        ),
         facts=(
             ModelFact("service", "hostel"),
             ModelFact("start_date", date(2026, 8, 10)),
@@ -1778,7 +1826,8 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         effect_proposals=(),
         target_offer_id="offer:" + "7" * 64,
     )
-    store = SQLiteBoundaryStore.open_memory_v8()
+    boundary_path = tmp_path / "private-prompt-boundary.sqlite3"
+    store = SQLiteBoundaryStore.open_path_v8(boundary_path)
     private_store = SQLitePrivateCustomerFactStore(
         tmp_path / "private-prompt-redaction.sqlite3"
     )
@@ -1802,6 +1851,13 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         result = executor.execute(batch)
         snapshot = private_store.load(batch.lead_id)
         state = store.load_state(batch.lead_id).state
+        artifact_blob = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts "
+                "ORDER BY artifact_index"
+            ).fetchall()
+        )
 
         assert "Só para confirmar" in result.reply_chunks[0]
         assert "Guardei esses dados" not in " ".join(result.reply_chunks)
@@ -1822,12 +1878,15 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
             assert private_value not in repr(model.calls[0])
             assert private_value not in repr(model.calls[1])
             assert private_value not in repr(snapshot)
+            assert private_value not in artifact_blob
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
         assert type(state.workflow) is AwaitingConfirmationState
-        assert state.workflow.draft.customer.phone_e164 == "+12025550199"
+        assert state.workflow.draft.customer.phone_e164 == "+" + "12025550199"
         assert state.workflow.draft.customer.phone_e164 != typed_phone
+        reopened = SQLiteBoundaryStore.open_readonly_v8(boundary_path)
+        reopened.close()
     finally:
         private_store.close()
         store.close()
@@ -1879,7 +1938,9 @@ def test_private_update_journal_survives_crash_without_becoming_progress_gate(
 
         result = build(store).execute(BATCH)
 
-        assert result.reply_chunks == ("Continuação autenticada.",)
+        assert result.reply_chunks == (
+            "Obrigado. Guardei esses dados para continuar a reserva.",
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(model.calls) == 2

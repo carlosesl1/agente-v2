@@ -122,7 +122,11 @@ The raw current message is authorized model context, not technical evidence. Pro
 - no raw stdin/stdout persistence; only transcript commitments/hashes are durable;
 - `ModelRequest`, `ModelFact`, `ModelProposal`, private snapshots, and writes remain excluded from value-bearing `repr`;
 - private holder facts are stripped before public reducer/projection/artifacts;
+- when holder facts are accepted, collection/correction/handoff text is parent-owned and generic, while a same-turn `select` still yields the parent-owned reservation summary;
+- an ambiguity that accepted no holder fact preserves Maya's natural clarification;
+- the parent never creates `birth_date` or `gender` facts from raw text; a labelled birth date may only be excluded from commercial-date parsing and is not persisted;
 - private SQLite journals contain hashes and field names, not raw values;
+- new `kernel_decision` artifacts contain only a state/version/command-hash commitment; readers remain compatible with historical full-decision artifacts, but new turns do not duplicate the operational state payload into the artifact graph;
 - errors remain categorical and never include values, payloads, SQL dumps, child stdout, or tracebacks with PII;
 - provider-facing customer data remains available only through the authenticated effective-customer path at execution time;
 - Cloudbeds reservation IDs remain private under existing execution/audit boundaries.
@@ -161,6 +165,9 @@ Customer-facing replies and the channel's source message are conversational reco
 11. Committed replay performs zero additional model/read/write calls.
 12. Exactly one later valid confirmation can result in at most one Cloudbeds POST; no real transport is used.
 13. Technical artifacts, public projection, errors, and `repr` do not contain holder fact values or Cloudbeds reservation ID.
+14. A model reply that echoes accepted holder facts is replaced before closure/proposal/public-artifact construction.
+15. Raw text alone cannot create `birth_date` or `gender`; labelled birth dates remain excluded from commercial dates without persistence.
+16. New kernel commitments authenticate state/version/command hashes without payload duplication, and the startup semantic scan still accepts historical full decisions.
 
 ## 9. Qualification and Stop Boundary
 

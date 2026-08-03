@@ -18,6 +18,8 @@
 - The parent canonicalizes and persists only model-produced `full_name`, `email`, and `country_code`.
 - `phone_e164` remains ManyChat/WhatsApp-binding-only.
 - Private facts must be stripped before reducer, public projection, typed facts, Maya proposal artifact, kernel, logs, evidence, and generic errors.
+- Accepted private-update replies are parent-owned unless the turn reaches a parent-generated summary; Maya's natural clarification is preserved only when no private fact was accepted.
+- The parent must not promote raw-text birth date or gender into facts. New kernel artifacts store only state/version/command commitments, with backward-compatible reads of historical full decisions.
 - Same-turn summary is allowed after persistence; reservation command/relay is forbidden until a later aggregate turn.
 - Correction revokes the old summary and may present a new one in the same turn.
 - Preserve exactly-once and at most one provider POST; use only fake transports and `.invalid` hosts.
