@@ -12,6 +12,7 @@ from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
+from reservation_domain import AwaitingConfirmationState
 from tests.test_v2_cloudbeds_monotonic_e2e import (
     NOW as PROVIDER_NOW,
     PROPERTY_ID,
@@ -57,6 +58,7 @@ def _batch(*, suffix: str, text: str) -> InboundBatch:
                 "summary": "4",
                 "confirm": "5",
                 "correct": "6",
+                "handoff": "9",
             }[suffix]
             * 64
         ),
@@ -92,12 +94,9 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         suffix="collect",
         text=(
             f"Meu nome completo é {private_name}, meu e-mail é {private_email} "
-            f"e sou do {private_country_name}."
+            f"e sou do {private_country_name}. "
+            "Quero a suíte de 10 a 12 de agosto para dois adultos."
         ),
-    )
-    summary_batch = _batch(
-        suffix="summary",
-        text="Quero a suíte de 10 a 12 de agosto para dois adultos.",
     )
     confirm_batch = _batch(
         suffix="confirm",
@@ -105,7 +104,6 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
     )
     authorities = {
         collect_batch.batch_id: _authority(collect_batch, "3"),
-        summary_batch.batch_id: _authority(summary_batch, "4"),
         confirm_batch.batch_id: _authority(confirm_batch, "5"),
     }
 
@@ -130,21 +128,13 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         ModelProposal(
             source_event_id=collect_batch.batch_id,
             intent="inform",
-            reply_chunks=("Dados recebidos.",),
-            facts=(),
-            read_requests=(),
-            effect_proposals=(),
-        ),
-        ModelProposal(
-            source_event_id=summary_batch.batch_id,
-            intent="inform",
             reply_chunks=("Vou consultar.",),
             facts=(),
             read_requests=(read_request,),
             effect_proposals=(),
         ),
         ModelProposal(
-            source_event_id=summary_batch.batch_id,
+            source_event_id=collect_batch.batch_id,
             intent="select",
             reply_chunks=("Vou preparar o resumo.",),
             facts=summary_facts,
@@ -202,21 +192,29 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
     execution = SQLiteUnitOfWork.open_v6(tmp_path / "execution-e2e.sqlite3")
     submit_client: httpx.Client | None = None
     try:
-        collected = executor.execute(collect_batch)
+        summary = executor.execute(collect_batch)
         snapshot = private_store.load(collect_batch.lead_id)
-        assert collected.receipt.command_rows == ()
+        assert summary.receipt.command_rows == ()
+        assert summary.receipt.relay_rows == ()
+        assert "Só para confirmar" in summary.reply_chunks[0]
+        assert "Guardei esses dados" not in " ".join(summary.reply_chunks)
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
         for private_value in (private_name, private_email, private_country_name):
             assert private_value not in model.calls[0].message
-
-        summary = executor.execute(summary_batch)
-        assert summary.receipt.command_rows == ()
-        assert "Só para confirmar" in summary.reply_chunks[0]
+            assert private_value not in model.calls[1].message
+        calls_after_summary = tuple(model.calls)
+        reads_after_summary = tuple(read_port.calls)
+        replayed_summary = executor.execute(collect_batch)
+        assert replayed_summary.replayed is True
+        assert replayed_summary.receipt == summary.receipt
+        assert replayed_summary.reply_chunks == summary.reply_chunks
+        assert tuple(model.calls) == calls_after_summary
+        assert tuple(read_port.calls) == reads_after_summary
 
         confirmed = executor.execute(confirm_batch)
-        pending = model.calls[3].pending_action
+        pending = model.calls[2].pending_action
         assert pending is not None
         assert pending.public_summary == summary.reply_chunks[0]
         replayed_confirmation = executor.execute(confirm_batch)
@@ -293,8 +291,166 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         boundary.close()
 
 
-def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
+def test_valid_private_correction_replaces_summary_in_same_turn(
     tmp_path: Path,
+) -> None:
+    original_name = "Pessoa Original Silva"
+    corrected_name = "Pessoa Corrigida Silva"
+    private_email = "corrected.person@example.invalid"
+    collect_batch = _batch(
+        suffix="collect",
+        text=(
+            f"Meu nome completo é {original_name}, meu e-mail é {private_email} "
+            "e sou do Brasil. Quero a suíte de 10 a 12 de agosto para dois adultos."
+        ),
+    )
+    correction_batch = _batch(
+        suffix="correct",
+        text=f"Nome completo: {corrected_name}",
+    )
+    authorities = {
+        collect_batch.batch_id: _authority(collect_batch, "3"),
+        correction_batch.batch_id: _authority(correction_batch, "6"),
+    }
+    initial_read = ReadRequest(
+        request_id="read:split-origin-initial-summary",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    correction_read = replace(
+        initial_read,
+        request_id="read:split-origin-corrected-summary",
+    )
+    summary_facts = (
+        ModelFact("language", "pt-BR"),
+        ModelFact("service", "hostel"),
+        ModelFact("start_date", date(2026, 8, 10)),
+        ModelFact("end_date", date(2026, 8, 12)),
+        ModelFact("adults", 2),
+        ModelFact("children", 0),
+        ModelFact("payment_method", "stripe"),
+    )
+    proposals = [
+        ModelProposal(
+            source_event_id=collect_batch.batch_id,
+            intent="inform",
+            reply_chunks=("Vou consultar.",),
+            facts=(),
+            read_requests=(initial_read,),
+            effect_proposals=(),
+        ),
+        ModelProposal(
+            source_event_id=collect_batch.batch_id,
+            intent="select",
+            reply_chunks=("Vou preparar o resumo.",),
+            facts=summary_facts,
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_id="offer:" + "7" * 64,
+        ),
+        ModelProposal(
+            source_event_id=correction_batch.batch_id,
+            intent="inform",
+            reply_chunks=("Vou atualizar.",),
+            facts=(),
+            read_requests=(correction_read,),
+            effect_proposals=(),
+        ),
+        ModelProposal(
+            source_event_id=correction_batch.batch_id,
+            intent="select",
+            reply_chunks=("Vou preparar o resumo atualizado.",),
+            facts=summary_facts,
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_id="offer:" + "7" * 64,
+        ),
+    ]
+
+    boundary = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer-valid-correction.sqlite3"
+    )
+    model = FakeAuditedModel(boundary, proposals)
+    read_port = FakeLodgingReadPort(boundary)
+    for authority in authorities.values():
+        _install_public_authority(boundary, authority)
+    executor = V2TurnExecutor(
+        store=boundary,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+        profile=PhoneOnlyManyChatContact(boundary),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(authorities),
+        clock=SequenceClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        original = executor.execute(collect_batch)
+        original_workflow = boundary.load_state(collect_batch.lead_id).state.workflow
+        assert isinstance(original_workflow, AwaitingConfirmationState)
+        assert original_workflow.draft.customer.full_name == original_name
+
+        corrected = executor.execute(correction_batch)
+        corrected_workflow = boundary.load_state(correction_batch.lead_id).state.workflow
+        snapshot = private_store.load(correction_batch.lead_id)
+
+        assert isinstance(corrected_workflow, AwaitingConfirmationState)
+        assert corrected_workflow.draft.customer.full_name == corrected_name
+        assert corrected_workflow.draft.subject_signature != (
+            original_workflow.draft.subject_signature
+        )
+        assert "Só para confirmar" in corrected.reply_chunks[0]
+        assert "Guardei esses dados" not in " ".join(corrected.reply_chunks)
+        assert corrected.receipt.command_rows == ()
+        assert corrected.receipt.relay_rows == ()
+        assert snapshot.full_name == corrected_name
+        assert original_name not in " ".join(corrected.reply_chunks)
+        assert corrected_name not in " ".join(corrected.reply_chunks)
+        assert read_port.calls == [initial_read, correction_read]
+
+        model_calls = tuple(model.calls)
+        read_calls = tuple(read_port.calls)
+        replayed = executor.execute(correction_batch)
+        assert replayed.replayed is True
+        assert replayed.receipt == corrected.receipt
+        assert replayed.reply_chunks == corrected.reply_chunks
+        assert tuple(model.calls) == model_calls
+        assert tuple(read_port.calls) == read_calls
+        assert original.receipt.command_rows == ()
+    finally:
+        private_store.close()
+        boundary.close()
+
+
+@pytest.mark.parametrize(
+    ("correction_text", "expected_name", "expected_reply_fragment"),
+    (
+        pytest.param(
+            "Nome completo: Mononym",
+            "Pessoa Original Silva",
+            "nome completo",
+            id="invalid",
+        ),
+        pytest.param(
+            "Nome completo: Pessoa Corrigida Silva",
+            "Pessoa Corrigida Silva",
+            "novo resumo",
+            id="valid",
+        ),
+    ),
+)
+def test_private_correction_after_summary_cannot_confirm_stale_summary(
+    tmp_path: Path,
+    correction_text: str,
+    expected_name: str,
+    expected_reply_fragment: str,
 ) -> None:
     collect_batch = _batch(
         suffix="collect",
@@ -309,7 +465,7 @@ def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
     )
     correction_batch = _batch(
         suffix="correct",
-        text="Nome completo: Mononym",
+        text=correction_text,
     )
     authorities = {
         collect_batch.batch_id: _authority(collect_batch, "3"),
@@ -411,11 +567,63 @@ def test_invalid_private_correction_after_summary_revokes_pending_confirmation(
             )
             is None
         )
-        assert "Mononym" not in model.calls[-1].message
-        assert "nome completo" in " ".join(correction.reply_chunks).casefold()
-        assert private_store.load(correction_batch.lead_id).full_name == (
-            "Pessoa Original Silva"
-        )
+        assert correction_text.split(":", 1)[1].strip() not in model.calls[-1].message
+        assert expected_reply_fragment in " ".join(correction.reply_chunks).casefold()
+        assert private_store.load(correction_batch.lead_id).full_name == expected_name
+    finally:
+        private_store.close()
+        boundary.close()
+
+
+def test_private_collection_does_not_suppress_explicit_handoff(tmp_path: Path) -> None:
+    batch = _batch(
+        suffix="handoff",
+        text=(
+            "Meu nome completo é Pessoa Handoff Silva, "
+            "meu e-mail é handoff.person@example.invalid, sou do Brasil. "
+            "Quero falar com uma pessoa."
+        ),
+    )
+    authority = _authority(batch, "9")
+    boundary = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "private-customer-handoff.sqlite3"
+    )
+    model = FakeAuditedModel(
+        boundary,
+        [
+            ModelProposal(
+                source_event_id=batch.batch_id,
+                intent="request_handoff",
+                reply_chunks=("Vou chamar uma pessoa.",),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            )
+        ],
+    )
+    _install_public_authority(boundary, authority)
+    executor = V2TurnExecutor(
+        store=boundary,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(boundary),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        clock=SequenceClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        result = executor.execute(batch)
+
+        assert result.reply_chunks == ("Vou chamar uma pessoa.",)
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+        assert len(result.receipt.internal_outbox_rows) == 1
+        assert boundary.load_state(batch.lead_id).state.handoff is not None
     finally:
         private_store.close()
         boundary.close()

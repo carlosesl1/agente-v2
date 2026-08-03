@@ -1116,6 +1116,31 @@ def _collection_only_proposal(
     )
 
 
+def _private_update_no_command_proposal(
+    proposal: ModelProposal,
+    *,
+    pending_action: PendingCriticalActionContext | None,
+    locale: str,
+) -> ModelProposal:
+    if proposal.intent != "confirm":
+        return proposal
+    revoke_pending = pending_action is not None
+    reply = (
+        "I updated your details. I'll present a new summary before asking for confirmation."
+        if locale.startswith("en")
+        else "Atualizei seus dados. Vou apresentar um novo resumo antes de pedir confirmação."
+    )
+    return ModelProposal(
+        source_event_id=proposal.source_event_id,
+        intent="adjust" if revoke_pending else "inform",
+        reply_chunks=(reply,),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        pending_disposition="revoke" if revoke_pending else None,
+    )
+
+
 def _persist_private_collection(
     owner: object,
     *,
@@ -1552,21 +1577,28 @@ class V2TurnExecutor:
         private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")
-        collection_turn_fact_names = (
+        journal_fact_names = (
             self._private_customer_facts.turn_supplied_fact_names(
                 batch.lead_id,
                 batch.batch_id,
             )
         )
+        missing_fact_names = _expected_private_customer_fact_names(
+            profile,
+            private_facts,
+        )
+        expected_fact_names = tuple(
+            name
+            for name in ("full_name", "email", "country_code")
+            if name in {*missing_fact_names, *journal_fact_names}
+        )
         private_collection = collect_private_customer_facts(
             batch.combined_text,
-            expected_fact_names=_expected_private_customer_fact_names(
-                profile,
-                private_facts,
-            ),
+            expected_fact_names=expected_fact_names,
         )
         if type(private_collection) is not PrivateCustomerCollection:
             raise TypeError("private customer collector returned an invalid result")
+        parent_private_update_turn = bool(private_collection.facts)
         if private_collection.facts:
             private_facts = _persist_private_collection(
                 self._private_customer_facts,
@@ -1576,11 +1608,10 @@ class V2TurnExecutor:
                 facts=private_collection.facts,
                 persisted_at=now,
             )
-            collection_turn_fact_names = tuple(
-                item.name for item in private_collection.facts
-            )
         collection_only = bool(
-            collection_turn_fact_names or private_collection.invalid_fact_names
+            private_collection.invalid_fact_names
+            or journal_fact_names
+            and not parent_private_update_turn
         )
         explicit_customer_facts = (
             *_extract_explicit_commercial_facts(batch.combined_text),
@@ -1804,6 +1835,12 @@ class V2TurnExecutor:
                 frames=first_audited.frames,
                 ephemeral_session_id=first_audited.closure.ephemeral_session_id,
             )
+        if parent_private_update_turn and not collection_only:
+            first_proposal = _private_update_no_command_proposal(
+                first_proposal,
+                pending_action=pending_action,
+                locale=projection.locale,
+            )
         material_scope_bound = (
             self._reducer.confirmation_projection_matches(
                 current.state.workflow,
@@ -2021,6 +2058,13 @@ class V2TurnExecutor:
             audited = first_audited
             proposal = first_proposal
 
+        if parent_private_update_turn and not collection_only:
+            proposal = _private_update_no_command_proposal(
+                proposal,
+                pending_action=pending_action,
+                locale=projection.locale,
+            )
+
         decision_now = self._clock.now()
         if (
             type(decision_now) is not datetime
@@ -2111,6 +2155,10 @@ class V2TurnExecutor:
             raise TurnExecutionError("reducer did not advance state exactly once")
         facts = decision.projection.facts
         execution_commands = _execution_commands(decision.commands)
+        if parent_private_update_turn and execution_commands:
+            raise TurnExecutionError(
+                "private customer update cannot authorize a reservation command"
+            )
         kernel = KernelDecision(
             decision.next_state,
             execution_commands,
@@ -2284,6 +2332,10 @@ class V2TurnExecutor:
         )
         command_rows = _command_rows(execution_commands)
         command_relays = _command_relays(batch.batch_id, execution_commands)
+        if parent_private_update_turn and (command_rows or command_relays):
+            raise TurnExecutionError(
+                "private customer update cannot persist reservation effects"
+            )
         internal_jobs = _handoff_jobs(batch.batch_id, decision.handoff_request)
         commit_now = self._clock.now()
         if (
