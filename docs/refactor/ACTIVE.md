@@ -28,7 +28,7 @@ Carlos autorizou em 2026-08-03 que Maya receba a mensagem original integral e at
 | 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
 | 8. Conversa-first para nome/e-mail/país | `DONE — SUPERSEDED BY SAME-TURN CONTINUATION` | `8c5db0724a74a52f5d2319f80787a9a2a4f8a0e9` |
 | 9. Continuar até resumo após coleta/correção privada | `DONE — INPUT PATH SUPERSEDED` | `b110662461dca1ce5d2f15c0d6bfe366b9ce00a2` |
-| 10. Maya interpreta titular a partir da mensagem original | `LOCALLY QUALIFIED — REVIEW NEXT` | `31835d5a2ce06835970dc216a4602336d37ed3ea` |
+| 10. Maya interpreta titular a partir da mensagem original | `LOCALLY QUALIFIED — REVIEW NEXT` | `ffa0cad6ef902fb0372d8fe1f83b8def7518a9ea` |
 
 Evidência Task 2:
 
@@ -95,7 +95,10 @@ Evidência Task 10:
 - Maya recebe `combined_text` integral em todas as chamadas; fatos `full_name`, `email` e `country_code` estruturados são canonicalizados/persistidos antes de reads e removidos do proposal público/artifacts; telefone conversacional é descartado como identidade e o draft usa o binding ManyChat autenticado;
 - matriz semântica cobre lead versus esposa/hostel incidental, terceiro explicitamente nomeado titular, ambiguidade com pergunta natural e telefone digitado; executor+adapter `80 passed`; E2E split-origin `9 passed`; regressão proporcional integrada `214 passed`;
 - correção válida pode produzir novo resumo no mesmo turno; correção junto de confirmação exige `adjust/revoke`; zero command/relay no lote da atualização; confirmação posterior, replay e exatamente um POST Cloudbeds simulado permanecem provados;
-- gate oficial clean-env com sete exclusions históricos: `1489 passed, 7 deselected, 2940 subtests passed`;
+- os três revisores finais da candidata anterior expiraram sem veredito; seus transcripts não foram tratados como aprovação e produziram três witnesses reproduzidos em RED: `adjust+preserve` conservava resumo obsoleto, reply model-owned podia ecoar PII em artifacts e regex legado ainda promovia DOB/gênero do texto bruto;
+- hardening funcional `ffa0cad6ef902fb0372d8fe1f83b8def7518a9ea`, tree `c0dffa1ceac81d839c01312a08a882ef6b61dcdb`: toda atualização privada pendente revoga o resumo salvo quando chega a novo `select`; coleta/correção/handoff aceitos usam resposta parent-owned; DOB/gênero não são criados pelo parent;
+- novos `kernel_decision` artifacts persistem somente commitment de state/version/command hashes; commit e semantic scan autenticam o conteúdo contra rows reais e continuam aceitando artifacts históricos com decisão completa;
+- regressão proporcional ampla: `543 passed, 39 subtests passed`; gate oficial clean-env com as sete exclusions históricas do workflow: `1486 passed, 7 deselected, 2940 subtests passed`;
 - Ruff, `fasttrack-boundaries`, compileall, `git diff --check` e scan do extrator: verdes;
 - `runtime=dark_read_only`, `kill_switch=true`, `post_budget_armed=false`, `SAFE_FOR_BROAD_ROLLOUT=false`;
 - nenhum push, deploy, POST real, pagamento, entrega/reset ManyChat ou alteração de reserva real foi executado.
