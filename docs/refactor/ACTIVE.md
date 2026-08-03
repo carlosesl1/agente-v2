@@ -8,14 +8,14 @@
 - Especificação ativa: `docs/superpowers/specs/2026-08-02-split-origin-reservation-profile-authority-design.md`
 - Plano ativo: `docs/superpowers/plans/2026-08-02-split-origin-reservation-profile-authority.md`
 - Base funcional do reparo: `1219ff2c12efa989f44f5caa7364363011ea281d`
-- Autoridade: solicitação explícita de Carlos em 2026-08-02 para substituir a exclusividade ManyChat de nome/e-mail por fallback conversacional privado, preservando telefone autenticado
+- Autoridade: solicitação explícita de Carlos em 2026-08-03 para fazer nome/e-mail/país conversacionais válidos prevalecerem sobre ManyChat, preservando telefone exclusivamente autenticado
 - Rollout: `LOCAL_FAKE_ONLY_IMPLEMENTATION`
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 
-Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canônicos sejam fallback privado quando o ManyChat não possuir valores válidos, mantendo telefone exclusivamente autenticado pelo binding ManyChat fresco e país ManyChat-first. Valores privados não pertencem à projeção/artifacts públicos; coleta não pode criar resumo/comando no mesmo turno; confirmação posterior revalida cliente efetivo e todos os termos congelados.
+Carlos autorizou em 2026-08-03 que nome completo, e-mail e país conversacionais canônicos prevaleçam sobre valores ManyChat válidos porém divergentes. ManyChat é fallback para esses campos; telefone continua exclusivamente autenticado pelo binding ManyChat fresco. Valores privados não pertencem à projeção/artifacts públicos; coleta não pode criar resumo/comando no mesmo turno; confirmação posterior revalida o cliente efetivo e apenas o material de perfil realmente selecionado.
 
 | Task | Estado | Commit |
 |---|---|---|
@@ -25,7 +25,8 @@ Carlos autorizou em 2026-08-02 que nome completo e e-mail conversacionais canôn
 | 4. Protocolo collection-only e privacidade de artifacts | `DONE` | `f08a0af949464ff9426056122ab002b3cc6e0fe5` |
 | 5. Wiring/settings/close do store privado | `DONE` | `b0283b6fea67f9e6e6dd4b7ad2dad69de975ed57` |
 | 6. E2E Cloudbeds fake, replay e regressões | `DONE` | `f3f143b883adf7c02c74e75356286e245ca63938` |
-| 7. Qualificação, revisão, push e CI exatos | `CANDIDATE_FROZEN — REVIEW NEXT` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
+| 7. Qualificação, revisão, push e CI exatos | `SUPERSEDED BY AUTHORITY OVERRIDE` | `314376d4a946dcc8523015bf1da1d8aed1699d7d` |
+| 8. Conversa-first para nome/e-mail/país | `NEXT — DESIGN APPROVED` | — |
 
 Evidência Task 2:
 
@@ -43,7 +44,7 @@ Evidência da candidata de qualificação `314376d4a946dcc8523015bf1da1d8aed1699
 - os dois witnesses foram reproduzidos em RED; o journal agora autentica hashes por campo e seu conteúdo completo, e o bootstrap compara também o SQL canônico integral das tabelas;
 - a revisão `deleg_f7863e12` bloqueou a candidata sucessora porque `turn_supplied_fact_names()` não autenticava journals de turnos que reapresentavam valor igual e por isso não eram referenciados por rows atuais;
 - o witness de crash/retry foi reproduzido em RED; a API de presença agora valida evento, material por campo, hash integral e timestamp antes de retornar somente os nomes;
-- markers ignoram PII legada na projeção e valores ManyChat inválidos/expirados; fallback privado só perde para valor ManyChat válido e fresco;
+- a regra anterior em que valores conversacionais perdiam para ManyChat válido foi explicitamente revogada por Carlos; nome/e-mail/país conversacionais válidos agora vencem;
 - telefone ausente/futuro/expirado bloqueia todas as leituras de provider e todo command; somente `KNOWLEDGE` local permanece elegível;
 - binding ManyChat é reautenticado na decisão e imediatamente antes de commit com command; mudança material aborta sem command/relay;
 - regressão proporcional após os reparos: `94 passed`;
@@ -51,7 +52,7 @@ Evidência da candidata de qualificação `314376d4a946dcc8523015bf1da1d8aed1699
 - Ruff, `fasttrack-boundaries`, compileall e `git diff --check`: verdes;
 - nenhum POST Cloudbeds/Bókun, pagamento, entrega ManyChat, deploy ou alteração de reserva real foi executado.
 
-- NEXT: obter parecer independente `CLEAR` sobre o SHA final que contém este ledger; somente então push e CI remoto `test/image/gate` no mesmo SHA. Runtime, post budget e rollout permanecem fechados.
+- NEXT: executar Task 8 em RED/GREEN, provar precedência conversacional e reautenticação source-aware; depois repetir gate/revisão antes de qualquer push. Runtime, post budget e rollout permanecem fechados.
 
 ## REPAROS OPERACIONAIS AUTORIZADOS
 

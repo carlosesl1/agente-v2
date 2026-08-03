@@ -14,8 +14,8 @@ The correction deliberately replaces the former profile rule. It must preserve t
 ## 2. Goals
 
 1. Keep the phone exclusively ManyChat/WhatsApp-authenticated and fresh.
-2. Use valid ManyChat name/email/country first.
-3. Permit canonical conversational `full_name`, `email`, and `country_code` only as fallbacks.
+2. Use canonical conversational `full_name`, `email`, and `country_code` first whenever the lead explicitly supplied and persisted them.
+3. Use valid, fresh ManyChat name/email/country only when the corresponding conversational value is absent.
 4. Persist fallback values under a parent-owned private durable owner before they can contribute to a summary.
 5. Never put those values in public conversation facts, `state_facts`, model-history state, Maya artifacts, logs, exception text, `repr`, evidence, or public serialization.
 6. Keep the model wire limited to field-presence markers after collection; do not rehydrate private values into later prompts.
@@ -47,6 +47,18 @@ A separate `PrivateConversationCustomerStore` owns only conversational reservati
 
 This approach best matches the split-origin rule, minimizes public-boundary changes, and makes the privacy assertion mechanically testable.
 
+### D. Precedence amendment approved on 2026-08-03
+
+Three precedence variants were considered: preserve fail-closed divergence; make only the name conversation-first; or make all approved conversational identity fields conversation-first while preserving a ManyChat-only phone. Carlos selected the third variant because ManyChat display/profile values are not reliable enough to override an explicit answer from the lead.
+
+The field-level order is therefore:
+
+1. valid persisted conversational value for `full_name`, `email`, or `country_code`;
+2. otherwise the corresponding valid value from a fresh ManyChat binding;
+3. otherwise missing/not ready.
+
+Divergence is not a conflict and never allows ManyChat to silently overwrite the conversational value. `phone_e164` remains outside this precedence rule and continues to require a valid fresh ManyChat binding.
+
 ## 5. Authority model
 
 ### 5.1 Phone
@@ -71,7 +83,7 @@ A canonical reservation full name:
 - has at least two non-empty name components;
 - never invents or expands a surname.
 
-A valid complete ManyChat name wins. If ManyChat has no name or only an incomplete one-component name, a persisted conversational full name may be used. If a valid complete ManyChat name and a persisted conversational name differ after canonical comparison, resolution is `conflict`; neither silently overwrites the other and no summary/command is authorized until the lead explicitly supplies a value agreeing with the authoritative profile or the profile is corrected and a new summary is generated.
+A persisted canonical conversational full name wins even when a fresh ManyChat name is also valid and different. ManyChat supplies the name only when no persisted conversational full name exists. A one-component ManyChat name remains unusable, and no surname is inferred.
 
 ### 5.3 Email
 
@@ -80,27 +92,29 @@ A canonical reservation email:
 - is stripped and normalized to the same lowercase canonical form already used by `CustomerFacts`;
 - contains exactly one `@`, non-empty local/domain parts, no whitespace/control characters, and at most 254 characters.
 
-A valid ManyChat email wins. A persisted conversational email is fallback only when ManyChat has none. Divergence between a valid ManyChat email and a persisted conversational email is a conflict, not a silent overwrite.
+A persisted canonical conversational email wins even when a fresh ManyChat email is valid and different. ManyChat supplies the email only when no persisted conversational email exists.
 
 ### 5.4 Country
 
 The existing rule remains:
 
-- valid ManyChat ISO alpha-2 first;
-- otherwise persisted conversational ISO alpha-2;
+- persisted conversational ISO alpha-2 first;
+- otherwise valid ManyChat ISO alpha-2 from a fresh binding;
 - no inference from phone, locale, language, IP, or default.
 
-Divergent valid values are treated consistently with name/email: fail closed until correction/new summary.
+Divergent valid values are treated consistently with name/email: the conversational country is used without a conflict.
 
 ### 5.5 Effective customer identity
 
 The parent resolver returns a private `EffectiveReservationCustomer`/`CustomerFacts` only when:
 
 - the binding is fresh and phone-authenticated;
-- each required field resolves without conflict;
+- each required field resolves according to the conversation-first field order;
 - activity passenger requirements, when applicable, still pass existing checks.
 
-`customer_ref` is a domain-separated digest of the fresh ManyChat binding identity plus the private fallback snapshot hash. The draft therefore freezes both origins without exposing either value publicly.
+`customer_ref` is a domain-separated digest of the lead binding identity, authenticated phone, effective customer values, their selected origins, and the private snapshot hash. The draft therefore freezes all material actually used without exposing any value publicly.
+
+Raw ManyChat `content_hash`, name, email, country, and `complete` are not independently material when a persisted conversational value supplies those fields. A refresh that changes only an unused ManyChat field must not revoke a valid summary or confirmation. Binding ID, authenticated phone, freshness, every ManyChat field actually selected, every conversational field selected, and the resulting effective customer remain material and are reauthenticated.
 
 ## 6. Private durable protocol
 
@@ -167,26 +181,25 @@ This remains true on retry after a crash because the private turn journal rememb
 
 ### 7.3 Later summary turn
 
-Only a later `batch_id` may use the persisted snapshot. The effective resolver combines it with the fresh ManyChat binding. If ready and conflict-free, the existing reducer may select an offer and create an `AwaitingConfirmationState`. `CustomerFacts` in the draft contains the exact effective values and the split-origin `customer_ref`.
+Only a later `batch_id` may use the persisted snapshot. The effective resolver applies the conversation-first field order and combines the result with the fresh ManyChat-authenticated phone. If ready, the existing reducer may select an offer and create an `AwaitingConfirmationState`. `CustomerFacts` in the draft contains the exact effective values and the split-origin `customer_ref`.
 
 ### 7.4 Confirmation turn
 
 A contextual natural confirmation remains valid; no magic phrase is added. Before command creation, the existing confirmation path additionally proves:
 
-- fresh ManyChat binding;
-- authenticated phone;
+- fresh ManyChat binding and authenticated phone;
 - current private snapshot;
 - effective customer equals the draft customer exactly;
 - projection/draft, offer, dates, party, amount, currency, payment method, capability, TTL, and fresh provider read remain equal under existing checks.
 
-Any customer/profile/snapshot/offer/material change rejects the old confirmation and requires a new summary. The existing post-command guard prevents a second command for an already consumed workflow.
+Any change to material actually selected into the effective customer, the authenticated phone/binding identity, snapshot, offer, or commercial terms rejects the old confirmation and requires a new summary. Changes only to unused ManyChat name/email/country fields do not revoke the confirmation. The existing post-command guard prevents a second command for an already consumed workflow.
 
 ## 8. Public behavior
 
 - Maya asks only for missing name/email/country fields and does so naturally.
 - Maya does not ask for a phone when a fresh authenticated phone exists.
 - Presence markers prevent asking again for persisted fields.
-- Invalid or conflicting input produces a non-technical correction request.
+- Invalid conversational input produces a non-technical correction request; valid divergence from ManyChat does not.
 - Public text never names ManyChat, Cloudbeds, provider, payload, schema, ledger, state, gate, or technical blocker.
 
 ## 9. Privacy properties
@@ -206,7 +219,7 @@ The private SQLite store and the private reservation command/execution path may 
 
 - Invalid private fact: reject/fail closed; no command; public correction response where a turn can safely continue.
 - Profile absent/invalid/future/expired: no authorizable summary/command/provider call.
-- ManyChat/fallback conflict: no silent overwrite and no command.
+- Valid conversational name/email/country divergence: use the conversational value; do not overwrite it with ManyChat and do not create a conflict.
 - Private store identity conflict or corruption: generic failure, no command.
 - Crash after private persistence and before boundary commit: retry remains collection-only.
 - Timeout/ambiguous provider result: existing `CALLED_UNKNOWN`, no POST retry.
@@ -218,7 +231,8 @@ Required tests cover:
 - phone-only ManyChat + conversational name/email/country over collection → later summary → later contextual confirmation;
 - one-word ManyChat name fallback;
 - missing ManyChat email fallback;
-- divergent valid ManyChat/fallback conflict;
+- divergent valid ManyChat/conversational values resolve to the conversational name/email/country;
+- changes only to unused ManyChat name/email/country fields do not revoke summary/confirmation;
 - absent/invalid/future/expired phone binding;
 - invalid name/email/country;
 - customer change after summary;

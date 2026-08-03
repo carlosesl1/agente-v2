@@ -4,7 +4,7 @@
 
 **Goal:** Allow a reservation to use conversational full name/email/country fallbacks while preserving a fresh ManyChat-authenticated phone and keeping private values out of public/model/evidence artifacts.
 
-**Architecture:** A dedicated SQLite private customer-fact owner persists canonical fallback facts and their source-turn provenance. A parent-owned resolver builds the effective reservation customer with ManyChat-first precedence, explicit conflict detection, and a split-origin digest. Collection turns are always command-free; only a later turn can create a summary, and a later contextual confirmation revalidates the exact customer and all existing material terms.
+**Architecture:** A dedicated SQLite private customer-fact owner persists canonical conversational facts and their source-turn provenance. A parent-owned resolver builds the effective reservation customer with conversation-first precedence for name/email/country, a ManyChat-only authenticated phone, and a source-aware split-origin digest. Collection turns are always command-free; only a later turn can create a summary, and a later contextual confirmation revalidates the exact selected customer material and all existing commercial terms.
 
 **Tech stack:** Python 3.11+, immutable dataclasses, SQLite, pytest, Ruff, existing V2 boundary/domain stores.
 
@@ -132,14 +132,14 @@ def resolve_effective_customer(
 - fresh phone-only binding + private name/email/country resolves;
 - one-word ManyChat name falls back to private full name;
 - missing email falls back;
-- valid complete ManyChat name/email/country win only when no conflict;
-- divergent stored fallback is explicit conflict and not ready;
+- valid persisted conversational name/email/country win over divergent valid ManyChat values;
+- valid fresh ManyChat values supply only conversationally absent fields;
 - no phone fallback even if a `ModelFact("phone_e164", ...)` exists elsewhere;
 - absent/future/expired/invalid profile is not ready;
-- split-origin `customer_ref` changes when either authoritative origin changes;
+- split-origin `customer_ref` changes when selected customer material changes, but not when an unused ManyChat field changes;
 - resolver/customer repr does not reveal PII.
 
-**GREEN:** replace profile/projection-only `_customer` and readiness with the exact resolver. Preserve activity passenger checks.
+**GREEN:** replace profile/projection-only `_customer` and readiness with the exact source-aware resolver. Preserve activity passenger checks. Bind confirmation reauthentication to binding identity, authenticated phone, effective selected fields/origins, and private snapshot rather than unrelated ManyChat metadata.
 
 **Verification:** reducer/profile/customer tests plus reservation-domain serialization/signature regressions; static gates; commit + control update.
 
@@ -164,7 +164,7 @@ def resolve_effective_customer(
 - later request exposes only ordered presence markers and never stored values;
 - `ConversationProjection`, `MayaTurnProposal`, typed-fact artifacts, receipt, public rows, logs, repr, and exception strings omit fixture PII;
 - conversational phone proposal never enters private store or readiness;
-- invalid/conflicting private fields yield a natural non-technical correction request;
+- invalid private fields yield a natural non-technical correction request; valid divergence does not;
 - model prompt asks only missing fields and never asks for an already authenticated phone.
 
 **GREEN:**
@@ -223,7 +223,8 @@ def resolve_effective_customer(
 **Counterexamples:**
 - one-word ManyChat name fallback;
 - missing email fallback;
-- divergent ManyChat/fallback conflict;
+- divergent valid ManyChat/conversation values use the conversational fields;
+- mutation of an unused ManyChat name/email/country field does not revoke confirmation;
 - expired/missing phone;
 - invalid private fields;
 - any customer change after summary rejects old confirmation until a new summary;
@@ -251,3 +252,28 @@ def resolve_effective_customer(
 8. Authenticate the OCI digest for the same candidate if CI publishes one.
 9. Report SHA, tree, test/subtest counts, CI run/jobs, OCI digest, review verdict, and effect ledger (`0` real POST/messages/reservations/payments).
 10. Stop at readiness gate. Do not deploy, open relay, arm write budget, or roll out.
+
+---
+
+### Task 8: Superseding conversation-first authority correction
+
+**Authority:** Carlos explicitly superseded fail-closed ManyChat/conversation divergence on 2026-08-03. Name, email, and country supplied explicitly by the lead win; phone remains ManyChat-only.
+
+**Files:**
+- Modify: `v2_application/conversation.py`
+- Modify: `v2_application/turn_executor.py`
+- Modify: `tests/test_v2_effective_customer_profile.py`
+- Modify: `tests/test_v2_split_origin_cloudbeds_e2e.py`
+- Modify focused reducer/executor tests only if a causal witness requires them
+- Modify: this spec/plan and `docs/refactor/ACTIVE.md`
+
+**RED witnesses:**
+1. Valid persisted conversational name/email/country diverge from valid fresh ManyChat values; resolver must be ready with the conversational values and no conflicts.
+2. With conversational overrides frozen into a summary, a refresh changing only unused ManyChat name/email/country metadata must still permit confirmation.
+3. Changing binding identity or authenticated phone still blocks confirmation with zero command/relay.
+4. If a conversational field is absent, changing the selected ManyChat value remains material and requires a new summary.
+5. Cloudbeds fake payload receives the conversational name/email/country and ManyChat phone exactly once; no payment effect.
+
+**GREEN:** implement field-level source selection, a source-aware opaque customer reference, and source-aware profile material reauthentication. Remove divergence conflicts only for the approved three fields; preserve invalid-input, phone, freshness, exactly-once, payment-separation, privacy, and provider-effect guards.
+
+**Verification:** focused resolver/executor/E2E RED→GREEN; proportional profile/Cloudbeds/replay/privacy suite; exact official regression command; Ruff, boundaries, compileall, and `git diff --check`; independent review on the final SHA before push/CI.
