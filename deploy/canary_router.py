@@ -278,14 +278,20 @@ def build_app(
         except (UnicodeError, json.JSONDecodeError, ValueError):
             return JSONResponse(status_code=400, content={"status": "invalid"})
 
-        select_v2 = subscriber_id == allowed_subscriber_id
-        if select_v2 and clock() >= cutover_deadline:
-            select_v2 = False
+        is_canary_target = subscriber_id == allowed_subscriber_id
+        select_v2 = is_canary_target
+        if is_canary_target and clock() >= cutover_deadline:
+            return JSONResponse(status_code=503, content={"status": "canary_closed"})
         if select_v2:
             try:
                 select_v2 = await ready_probe(v2_ready_url)
             except (httpx.HTTPError, TimeoutError):
                 select_v2 = False
+            if not select_v2:
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "canary_unavailable"},
+                )
 
         if select_v2:
             try:

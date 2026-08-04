@@ -68,7 +68,7 @@ def test_ready_tester_routes_once_to_v2() -> None:
     assert canonical["event_id"].startswith("manychat-event:")
 
 
-def test_expired_deadline_routes_tester_to_legacy_without_v2_probe() -> None:
+def test_expired_deadline_fails_closed_for_tester_without_any_forward() -> None:
     client, forwarded, probes = _client(
         ready=True,
         now=NOW + timedelta(minutes=30),
@@ -81,13 +81,13 @@ def test_expired_deadline_routes_tester_to_legacy_without_v2_probe() -> None:
         json=payload,
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 503
+    assert response.json() == {"status": "canary_closed"}
     assert probes == []
-    assert [item[0] for item in forwarded] == [LEGACY_URL]
-    assert json.loads(forwarded[0][1]) == payload
+    assert forwarded == []
 
 
-def test_unready_v2_routes_tester_to_legacy_before_any_v2_post() -> None:
+def test_unready_v2_fails_closed_for_tester_before_any_forward() -> None:
     client, forwarded, probes = _client(ready=False, now=NOW)
 
     response = client.post(
@@ -96,9 +96,10 @@ def test_unready_v2_routes_tester_to_legacy_before_any_v2_post() -> None:
         json=_payload(),
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 503
+    assert response.json() == {"status": "canary_unavailable"}
     assert probes == [READY_URL]
-    assert [item[0] for item in forwarded] == [LEGACY_URL]
+    assert forwarded == []
 
 
 def test_non_allowlisted_subscriber_never_probes_v2() -> None:
