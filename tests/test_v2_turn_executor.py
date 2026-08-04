@@ -727,6 +727,36 @@ class FakeLodgingReadPort:
         )
 
 
+class ManyOptionLodgingReadPort(FakeLodgingReadPort):
+    def read(self, request: ReadRequest) -> ReadObservation:
+        assert self.store._connection.in_transaction is False
+        self.calls.append(request)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="cloudbeds",
+            observed_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            public_payload={
+                "options": [
+                    {
+                        "offer_id": f"offer:{index:064x}",
+                        "room_public_name": f"Quarto Privativo {index:02d}",
+                        "check_in": "2026-09-12",
+                        "check_out": "2026-09-15",
+                        "adults": 2,
+                        "children": 0,
+                        "total_amount": f"{450 + index}.00",
+                        "currency": "BRL",
+                        "available": True,
+                        "available_units": 1,
+                    }
+                    for index in range(1, 34)
+                ]
+            },
+            private_binding_hash="8" * 64,
+        )
+
+
 class FakeActivityReadPort:
     def __init__(self, store: SQLiteBoundaryStore) -> None:
         self.store = store
@@ -1463,7 +1493,7 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
     )
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first_proposal, first_final, recap_final])
-    lodging_port = FakeLodgingReadPort(store)
+    lodging_port = ManyOptionLodgingReadPort(store)
     activity_port = NegativeActivityReadPort(store)
     _install_public_authority(store)
     _install_public_authority(store, recap_authority)
@@ -1511,18 +1541,15 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
             "adults": 2,
             "children": 0,
         }
-        assert lodging_history.public_context["offers"] == [
-            {
-                "public_label": "Suíte Casal",
-                "start_date": "2026-09-12",
-                "end_date": "2026-09-15",
-                "start_time": None,
-                "adults": 2,
-                "children": 0,
-                "total_amount": "480.00",
-                "currency": "BRL",
-            }
-        ]
+        assert lodging_history.public_context["offer_count"] == 33
+        assert lodging_history.public_context["offers_truncated"] is True
+        assert len(lodging_history.public_context["offers"]) == 32
+        assert lodging_history.public_context["offers"][0]["public_label"] == (
+            "Quarto Privativo 01"
+        )
+        assert lodging_history.public_context["offers"][-1]["public_label"] == (
+            "Quarto Privativo 32"
+        )
         activity_history = history["activity"]
         assert activity_history.public_context["status"] == "negative"
         assert activity_history.public_context["query"] == {
@@ -1532,6 +1559,8 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
             "children": 0,
         }
         assert activity_history.public_context["offers"] == []
+        assert activity_history.public_context["offer_count"] == 0
+        assert activity_history.public_context["offers_truncated"] is False
         assert all(item.fresh_at_turn_start for item in history.values())
         assert store.load_recent_public_lookup_observations(
             "manychat:another-lead"

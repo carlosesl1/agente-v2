@@ -175,6 +175,8 @@ def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
                 "children": 0,
             },
             "offers": [],
+            "offer_count": 0,
+            "offers_truncated": False,
         },
     )
     request = ModelRequest(

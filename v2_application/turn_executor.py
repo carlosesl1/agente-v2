@@ -1266,7 +1266,7 @@ def _consultation_history_entry(
         }
     else:
         raise TurnExecutionError("consultation history read kind is unsupported")
-    offers = [
+    all_offers = [
         {
             "public_label": item.public_label,
             "start_date": item.start_date.isoformat(),
@@ -1283,6 +1283,7 @@ def _consultation_history_entry(
         }
         for item in result.offers
     ]
+    offers = all_offers[:32]
     return ConsultationHistoryEntry(
         observation_hash=observation.canonical_hash(),
         observed_at=result.observed_at,
@@ -1293,6 +1294,8 @@ def _consultation_history_entry(
             "status": result.status.value,
             "query": query,
             "offers": offers,
+            "offer_count": len(all_offers),
+            "offers_truncated": len(all_offers) > len(offers),
         },
     )
 

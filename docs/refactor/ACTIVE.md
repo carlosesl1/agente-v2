@@ -53,7 +53,9 @@ A correção substituta fecha a classe:
 - regressão proporcional atual: `155 passed, 84 subtests passed`;
 - suíte oficial clean-env atual: `1492 passed, 7 deselected, 2940 subtests passed`.
 
-- NEXT: congelar a candidata substituta e repetir somente a conversa real isolada afetada, com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
+Os dois revisores read-only expiraram sem veredito terminal. Um witness de handoff não era causal ao histórico: pedido humano de equipe deve continuar possível, e o gate externo permanece fechado. O segundo witness era válido: 33 ofertas commitadas excediam o bound de 32 no próximo `ModelRequest`. A projeção agora envia as primeiras 32, preserva `offer_count=33`, marca `offers_truncated=true` e instrui a Maya a não alegar conjunto completo. O witness 33→32 passou; regressão e suíte oficial mantiveram os mesmos totais verdes.
+
+- NEXT: congelar a candidata final e repetir a conversa real isolada em estado novo, com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 

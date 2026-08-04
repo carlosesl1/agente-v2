@@ -120,7 +120,14 @@ class ConsultationHistoryEntry:
                 "consultation fresh_at_turn_start must be an exact boolean"
             )
         context = _closed_dict(self.public_context, "consultation public_context")
-        if set(context) != {"service", "status", "query", "offers"}:
+        if set(context) != {
+            "service",
+            "status",
+            "query",
+            "offers",
+            "offer_count",
+            "offers_truncated",
+        }:
             raise InvalidModelProposal("consultation public_context fields mismatch")
         if context["service"] not in ("lodging", "activity"):
             raise InvalidModelProposal("consultation service is outside the catalog")
@@ -128,14 +135,20 @@ class ConsultationHistoryEntry:
             raise InvalidModelProposal("consultation status is outside the catalog")
         query = context["query"]
         offers = context["offers"]
+        offer_count = context["offer_count"]
+        offers_truncated = context["offers_truncated"]
         if (
             type(query) is not dict
             or type(offers) is not list
             or len(offers) > 32
             or any(type(item) is not dict for item in offers)
+            or type(offer_count) is not int
+            or offer_count < len(offers)
+            or type(offers_truncated) is not bool
+            or offers_truncated is not (offer_count > len(offers))
         ):
             raise InvalidModelProposal("consultation query/offers shape mismatch")
-        if (context["status"] == "positive") != bool(offers):
+        if (context["status"] == "positive") != (offer_count > 0):
             raise InvalidModelProposal("consultation status/offer cardinality mismatch")
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         if len(serialized.encode("utf-8")) > 16_384:
