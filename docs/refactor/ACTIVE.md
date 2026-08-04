@@ -13,6 +13,22 @@
 - Provider writes reais: `BLOQUEADOS POR GATES INDEPENDENTES`
 - ManyChat público real: `BLOQUEADO ATÉ NOVA AUTORIDADE ASSINADA`
 
+## CORREÇÃO DO GATE DE CONSULTAS READ-ONLY
+
+Carlos autorizou explicitamente em 2026-08-04 simplificar o processo após a conversa natural provar que Maya emitiu consultas válidas de hospedagem e passeio, mas o controlador as descartou porque o perfil não tinha `country_code`. Consulta read-only não é seleção nem efeito comercial: com telefone ManyChat/WhatsApp autenticado e fresco, disponibilidade, preço e descrição permanecem elegíveis mesmo que nome, e-mail ou país ainda estejam incompletos. `select`, `confirm`, comandos, reservas e provider writes continuam exigindo o perfil efetivo completo nos boundaries existentes.
+
+- correção funcional: `d2f5dc2c7947c3be440b7e4ee5df8bd0686bcb71`, tree `739304b20b4622f5482ec93572172fc80aeb5f1b`;
+- RED causal: dois selectors falharam porque `private_profile_complete=false` suprimiu lodging/activity reads e a segunda chamada da Maya;
+- GREEN focado: `2 passed`; irmãos de telefone ausente/futuro/expirado, privacidade, read normal e package: `9 passed`;
+- regressão proporcional de executor, perfil efetivo, reducer, split-origin E2E e superfície comercial: `122 passed`;
+- gate oficial clean-env: `1489 passed, 7 deselected, 2940 subtests passed`;
+- Ruff, compileall, `fasttrack-boundaries` e `git diff --check`: verdes;
+- o witness com país ausente executa uma leitura Cloudbeds fake e uma Bókun fake, entrega duas observations e mantém zero command/relay;
+- o witness post-read `select` continua retornando `profile_completion`, sem `AwaitingConfirmationState`, command ou relay;
+- nenhum provider real, ManyChat, pagamento, deploy ou rollout foi chamado.
+
+- NEXT: obter revisão independente sobre o SHA final que contém código e este ledger; parar antes de push, CI, imagem, runtime, provider real ou delivery.
+
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 
 Carlos autorizou em 2026-08-03 que Maya receba a mensagem original integral e atribua semanticamente nome completo, e-mail e país ao titular da reserva. O controlador valida, canonicaliza e persiste os fatos estruturados da Maya antes de qualquer read, sem extrator regex nem marcadores; ManyChat é fallback nesses três campos e fonte exclusiva do telefone autenticado. PII permanece fora de projeção, history, artifacts/evidence, logs, exceções e `repr`. Coleta/correção pode produzir resumo no mesmo turno, mas nunca command/relay; confirmação posterior revalida o cliente efetivo e o material selecionado.
