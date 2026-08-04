@@ -43,7 +43,17 @@ O teste real de 2026-08-04 comprovou que a correção do gate sem `country_code`
 - gate oficial clean-env: `1491 passed, 7 deselected, 2940 subtests passed`;
 - Ruff isolado nas superfícies do workflow, `fasttrack-boundaries`, compileall e `git diff --check`: verdes.
 
-- NEXT: obter a revisão independente já disparada e repetir a conversa real isolada com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
+O primeiro teste real da candidata de continuidade (`3bde613`) passou nos quatro turnos informativos, inclusive os dois recaps sem novo read, mas revelou um segundo defeito no turno de pressão para reservar package: após reads atuais positivos/negativos, a Maya repetiu `read_requests`; o adapter iniciou reparo e o deadline/lease, dimensionados para uma única completion, expiraram antes do commit. A candidata foi desmontada com 4 eventos commitados, o 5º sem receipt, zero em todos os owners de efeito, zero delivery, autoridade vazia, credenciais removidas, zero contêineres e legado HTTP 200.
+
+A correção substituta fecha a classe:
+
+- com `observations` atuais, read recursivo vira fallback determinístico imediato, `read_requests=()`, `selection_requested=false` e nenhum novo I/O; observation negativa produz resposta verdadeira de indisponibilidade/nada reservado;
+- o budget produtivo cobre até três completions, duas tentativas de protocolo por completion e overhead de provider; o lease do inbox vence somente após esse budget;
+- RED/GREEN focal: recursive read exigia duas inferências e agora usa uma; o budget produtivo falhava em `50s` contra `300s` esperados e agora está vinculado ao contrato;
+- regressão proporcional atual: `155 passed, 84 subtests passed`;
+- suíte oficial clean-env atual: `1492 passed, 7 deselected, 2940 subtests passed`.
+
+- NEXT: congelar a candidata substituta e repetir somente a conversa real isolada afetada, com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 

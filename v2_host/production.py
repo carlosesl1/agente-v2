@@ -95,6 +95,12 @@ def _critical_action_policy(settings: V2Settings) -> CriticalActionPolicy:
     )
 
 
+def _inbox_turn_budget(settings: V2Settings) -> timedelta:
+    if type(settings) is not V2Settings:
+        raise TypeError("inbox turn budget requires exact V2Settings")
+    return timedelta(seconds=(settings.hermes_timeout_seconds * 6) + 30)
+
+
 class ControlledEffectGuard:
     """Re-evaluate the immutable kill-switch/window contract for every claim."""
 
@@ -391,6 +397,7 @@ def _build_inbox_worker(
         timeout=settings.hermes_timeout_seconds,
         transcript_key=settings.hermes_transcript_key,
     )
+    turn_budget = _inbox_turn_budget(settings)
     executor = V2TurnExecutor(
         store=container.boundary,
         model=model,
@@ -408,14 +415,14 @@ def _build_inbox_worker(
         public_authority=authority,
         clock=clock,
         locale="pt-BR",
-        turn_timeout=timedelta(seconds=settings.hermes_timeout_seconds + 5),
+        turn_timeout=turn_budget,
         max_commit_attempts=2,
     )
     return InboxTurnWorker(
         inbox=container.inbox,
         executor=executor,
         quiet_window=timedelta(milliseconds=750),
-        lease_ttl=timedelta(seconds=settings.hermes_timeout_seconds + 15),
+        lease_ttl=turn_budget + timedelta(seconds=15),
     )
 
 

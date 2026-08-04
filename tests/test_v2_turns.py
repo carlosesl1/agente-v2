@@ -351,7 +351,7 @@ def test_hermes_adapter_repairs_repeated_read_after_observation() -> None:
     assert audited.proposal.read_requests == ()
     assert audited.proposal.effect_proposals == ()
     assert audited.closure.ephemeral_session_id.startswith("deterministic:")
-    assert len(audited.frames) == 3
+    assert len(audited.frames) == 1
 
 
 def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair() -> (

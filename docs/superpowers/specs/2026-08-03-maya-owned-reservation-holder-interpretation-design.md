@@ -158,6 +158,8 @@ Customer-facing replies and the channel's source message are conversational reco
 - one-shot/monotonic Cloudbeds execution with at most one POST;
 - Bókun GET-only behavior, payment separation, and existing audit fences;
 - committed provider observations survive later turns as public recap context without becoming effect authority;
+- after current observations exist, recursive model reads become a deterministic zero-read/zero-effect fallback instead of a second provider or repair round; explicit negative evidence yields a truthful unavailable/nothing-booked reply;
+- the productive deadline covers up to three model completions with two protocol attempts each plus bounded provider overhead, and the inbox lease remains strictly longer than that deadline;
 - private Cloudbeds reservation ID;
 - runtime remains `dark_read_only`, kill switch enabled, POST budget disarmed, and broad rollout unsafe.
 
@@ -183,6 +185,8 @@ Customer-facing replies and the channel's source message are conversational reco
 18. The same incomplete-country turn may read availability, but a post-read `select` remains profile-gated with zero command and zero relay.
 19. A later turn receives both positive lodging options and negative activity availability from earlier committed reads while current-turn `observations` remains empty and command/relay counts remain zero.
 20. Consultation history is scoped to the exact `lead_key`; modified artifact bytes fail as authenticated data corruption rather than reaching Maya.
+21. A follow-up response that repeats reads after current observations uses one child invocation and becomes a deterministic, zero-read, zero-effect fallback.
+22. Productive composition binds the inbox lease beyond the complete multi-call turn budget rather than the timeout for one model completion.
 
 ## 9. Qualification and Stop Boundary
 

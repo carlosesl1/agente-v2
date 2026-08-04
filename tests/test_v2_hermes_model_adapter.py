@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -32,6 +32,7 @@ from v2_contracts.model import (
     ModelFact,
     ModelRequest,
 )
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
 def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validation() -> None:
@@ -673,4 +674,106 @@ def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
     assert len(turn.frames) == 3
     assert turn.closure.ephemeral_session_id.startswith(
         "deterministic:protocol-fallback:"
+    )
+
+
+def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
+    read = ReadRequest(
+        request_id="batch:negative-package:read:activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:tour-4ps",
+        activity_date=date(2026, 9, 13),
+        participants=2,
+    )
+    request = ModelRequest(
+        request_id="request:negative-package:followup",
+        lead_id="manychat:negative-package",
+        source_event_id="batch:negative-package",
+        message="Quero reservar a hospedagem e o 4Ps.",
+        locale="pt-BR",
+        state_version=4,
+        observations=(
+            ReadObservation(
+                request_hash=read.canonical_hash(),
+                provider="bokun",
+                observed_at=datetime(2026, 8, 4, 7, 3, tzinfo=timezone.utc),
+                expires_at=datetime(2026, 8, 4, 7, 8, tzinfo=timezone.utc),
+                public_payload={
+                    "product_id": "product:tour-4ps",
+                    "activity_date": "2026-09-13",
+                    "adults": 2,
+                    "children": 0,
+                    "participants": 2,
+                    "available": False,
+                },
+                private_binding_hash="f" * 64,
+            ),
+        ),
+    )
+    payload = json.dumps(
+        {
+            "schema": "v2-model-proposal-v6",
+            "source_event_id": request.source_event_id,
+            "intent": "inform",
+            "reply_chunks": [
+                "O 4Ps continua indisponível nessa data, então nada foi reservado."
+            ],
+            "facts": [],
+            "read_requests": [
+                {
+                    "request_id": read.request_id,
+                    "kind": "activity",
+                    "product_id": read.product_id,
+                    "activity_date": read.activity_date.isoformat(),
+                    "participants": read.participants,
+                }
+            ],
+            "effect_proposals": [],
+            "target_offer_id": None,
+            "target_offer_ids": [],
+            "confirmed_summary_version": None,
+            "confirmed_action_kinds": [],
+            "approval_basis": None,
+            "selection_requested": True,
+            "pending_disposition": None,
+            "passengers": [],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    attempts = 0
+
+    def run(command, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + payload,
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"recursive-read-normalization-key-001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert attempts == 1
+    assert turn.proposal.intent == "inform"
+    assert turn.proposal.reply_chunks == (
+        "O passeio solicitado não está disponível para a data consultada. "
+        "Nada foi reservado. Posso consultar outra data.",
+    )
+    assert turn.proposal.read_requests == ()
+    assert turn.proposal.selection_requested is False
+    assert turn.proposal.effect_proposals == ()
+    assert len(turn.frames) == 1
+    assert turn.closure.ephemeral_session_id.startswith(
+        "deterministic:recursive-read-fallback:"
     )

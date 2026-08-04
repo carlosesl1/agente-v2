@@ -732,7 +732,17 @@ class HermesModelAdapter:
         except InvalidModelProposal:
             return None, frame
         if request.observations and proposal.read_requests:
-            return None, frame
+            session_hash = hashlib.sha256(stdin_bytes).hexdigest()[:32]
+            return (
+                AuditedModelTurn.from_frames(
+                    proposal=self._recursive_read_fallback(request),
+                    frames=(frame,),
+                    ephemeral_session_id=(
+                        f"deterministic:recursive-read-fallback:{session_hash}"
+                    ),
+                ),
+                frame,
+            )
         turn = AuditedModelTurn.from_exchange(
             proposal=proposal,
             stdin_bytes=stdin_bytes,
@@ -752,6 +762,41 @@ class HermesModelAdapter:
                 "Não consegui concluir essa resposta agora. "
                 "Pode repetir sua última mensagem?"
             )
+        return ModelProposal(
+            source_event_id=request.source_event_id,
+            intent="inform",
+            reply_chunks=(text,),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        )
+
+    @staticmethod
+    def _recursive_read_fallback(request: ModelRequest) -> ModelProposal:
+        negative_providers = {
+            observation.provider
+            for observation in request.observations
+            if observation.public_payload.get("available") is False
+        }
+        english = request.locale.lower().startswith("en")
+        if "bokun" in negative_providers:
+            text = (
+                "The requested activity is not available for the consulted date. "
+                "Nothing was booked. I can check another date."
+                if english
+                else "O passeio solicitado não está disponível para a data consultada. "
+                "Nada foi reservado. Posso consultar outra data."
+            )
+        elif "cloudbeds" in negative_providers:
+            text = (
+                "The requested lodging is not available for the consulted dates. "
+                "Nothing was booked. I can check other dates."
+                if english
+                else "A hospedagem solicitada não está disponível para as datas consultadas. "
+                "Nada foi reservado. Posso consultar outras datas."
+            )
+        else:
+            return HermesModelAdapter._fallback_proposal(request)
         return ModelProposal(
             source_event_id=request.source_event_id,
             intent="inform",

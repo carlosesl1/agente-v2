@@ -292,6 +292,13 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         workers = build_worker_set(container=container, settings=settings)
 
         assert type(workers[WorkerQueue.INBOX]).__name__ == "InboxTurnWorker"
+        turn_budget = timedelta(
+            seconds=(settings.hermes_timeout_seconds * 6) + 30
+        )
+        assert workers[WorkerQueue.INBOX]._executor._turn_timeout == turn_budget
+        assert workers[WorkerQueue.INBOX]._lease_ttl == turn_budget + timedelta(
+            seconds=15
+        )
         assert type(workers[WorkerQueue.BOUNDARY_RELAY]) is BoundaryRelayWorker
         assert type(workers[WorkerQueue.RESERVATION]) is ClosedCapabilityWorker
         assert workers[WorkerQueue.RECONCILIATION]._manual_handoff is not None
