@@ -14,7 +14,6 @@ import re
 
 _REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 _CONTROLLED_MODEL = "openai-codex/gpt-5.6-luna"
-_MAX_WRITE_WINDOW = timedelta(hours=24)
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -278,13 +277,11 @@ class V2Settings:
         if any(gates):
             if self.global_kill_switch_engaged:
                 raise ValueError("real effects require the global kill switch to be released")
-            if self.write_window_end is None:
-                raise ValueError("real effects require an open write window")
-            now = datetime.now(timezone.utc)
-            if self.write_window_end <= now:
+            if (
+                self.write_window_end is not None
+                and self.write_window_end <= datetime.now(timezone.utc)
+            ):
                 raise ValueError("write window must end in the future")
-            if self.write_window_end - now > _MAX_WRITE_WINDOW:
-                raise ValueError("write window may not exceed 24 hours")
         if (
             self.stripe_links_enabled
             or self.wise_instructions_enabled
@@ -503,8 +500,10 @@ class V2Settings:
             raise ValueError("now must be a timezone-aware datetime")
         return bool(
             not self.global_kill_switch_engaged
-            and self.write_window_end is not None
-            and now.astimezone(timezone.utc) < self.write_window_end
+            and (
+                self.write_window_end is None
+                or now.astimezone(timezone.utc) < self.write_window_end
+            )
         )
 
     @property

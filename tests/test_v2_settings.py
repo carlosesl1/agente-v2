@@ -122,9 +122,48 @@ def test_effect_gate_requires_ack_kill_switch_release_and_bounded_window(tmp_pat
     with pytest.raises(ValueError, match="write window"):
         V2Settings.from_env(env)
 
-    env["V2_WRITE_WINDOW_END"] = _future_window(minutes=24 * 60 + 1)
-    with pytest.raises(ValueError, match="24 hours"):
-        V2Settings.from_env(env)
+    env["V2_WRITE_WINDOW_END"] = _future_window(minutes=30 * 24 * 60)
+    env["V2_CLOUDBEDS_SOURCE_ID"] = "source-live"
+    settings = V2Settings.from_env(env)
+    assert settings.write_window_is_open(datetime.now(timezone.utc)) is True
+
+
+def test_effect_gates_may_remain_open_without_an_auto_close_deadline(
+    tmp_path: Path,
+) -> None:
+    env = _controlled_env(tmp_path)
+    env.update(
+        {
+            "V2_ENABLE_CLOUDBEDS_WRITES": "true",
+            "V2_ENABLE_BOKUN_WRITES": "true",
+            "V2_ENABLE_STRIPE_LINKS": "true",
+            "V2_ENABLE_PIX_INSTRUCTIONS": "true",
+            "V2_ENABLE_WISE_INSTRUCTIONS": "true",
+            "V2_ENABLE_MANYCHAT_DELIVERY": "true",
+            "V2_REAL_EFFECTS_ACK": "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST",
+            "V2_GLOBAL_KILL_SWITCH": "false",
+            "V2_WRITE_WINDOW_END": "",
+            "V2_CLOUDBEDS_SOURCE_ID": "source-live",
+            "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID": "stripe-account:hostel:test",
+            "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
+            "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_test_hostel",
+            "V2_STRIPE_AGENCY_SECRET_KEY": "rk_test_agency",
+            "V2_PAYMENT_INSTRUCTION_PATH": str(tmp_path / "payments.json"),
+            "V2_MANYCHAT_REPLY_FIELD_ID": "101",
+            "V2_MANYCHAT_REPLY_FLOW_NS": "reply-flow",
+            "V2_MANYCHAT_PAYMENT_LINK_FIELD_ID": "102",
+            "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID": "103",
+            "V2_MANYCHAT_PAYMENT_FLOW_NS": "payment-flow",
+        }
+    )
+
+    settings = V2Settings.from_env(env)
+
+    assert settings.write_window_end is None
+    assert settings.write_window_is_open(datetime.now(timezone.utc)) is True
+    assert settings.enabled_payment_methods == ("stripe", "wise", "pix")
+    assert settings.cloudbeds_writes_enabled is True
+    assert settings.bokun_writes_enabled is True
 
 
 def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) -> None:
