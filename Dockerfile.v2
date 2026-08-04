@@ -37,6 +37,7 @@ COPY v2_adapters /app/v2_adapters
 COPY v2_application /app/v2_application
 COPY v2_contracts /app/v2_contracts
 COPY v2_host /app/v2_host
+COPY deploy /app/deploy
 COPY config/cerebro_faq.yaml /app/config/cerebro_faq.yaml
 COPY config/v2_bokun_product_map.json /app/config/v2_bokun_product_map.json
 COPY config/v2_luna_system_prompt.txt /app/config/v2_luna_system_prompt.txt
@@ -54,6 +55,8 @@ RUN python -m compileall -q \
       v2_application \
       v2_contracts \
       v2_host \
+      deploy \
+    && python -c "from deploy.canary_router import create_app_from_env" \
     && addgroup --system --gid 10001 v2 \
     && adduser --system --uid 10001 --ingroup v2 --home /nonexistent --no-create-home v2 \
     && chmod -R a+rX /app \
