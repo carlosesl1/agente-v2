@@ -1486,7 +1486,7 @@ def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts
         store=store,
         model=model,
         reads=V2ReadService({ReadKind.LODGING: read_port}),
-        profile=PhoneOnlyManyChatContact(store),
+        profile=UnusableManyChatPhone(store, "missing"),
         private_customer_facts=private_store,
         reducer=_enabled_reducer(),
         public_authority=FixedAuthority(),
@@ -2133,6 +2133,129 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [activity]
         assert len(result.receipt.read_observations) == 2
+    finally:
+        store.close()
+
+
+def test_authenticated_phone_allows_read_only_package_without_country() -> None:
+    lodging = ReadRequest(
+        request_id="read:incomplete-country-package-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    activity = ReadRequest(
+        request_id="read:incomplete-country-package-activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(lodging, activity),
+        effect_proposals=(),
+    )
+    final = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Encontrei opções de hospedagem e Buracão.",),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [first, final])
+    lodging_port = FakeLodgingReadPort(store)
+    activity_port = FakeActivityReadPort(store)
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=AuthenticatedManyChatContactWithoutCountry(store),
+        reads=V2ReadService(
+            {
+                ReadKind.LODGING: lodging_port,
+                ReadKind.ACTIVITY: activity_port,
+            }
+        ),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert model.calls[0].private_profile_complete is False
+        assert model.calls[1].private_profile_complete is False
+        assert len(model.calls[1].observations) == 2
+        assert result.reply_chunks == ("Encontrei opções de hospedagem e Buracão.",)
+        assert lodging_port.calls == [lodging]
+        assert activity_port.calls == [activity]
+        assert len(result.receipt.read_observations) == 2
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        store.close()
+
+
+def test_incomplete_country_allows_read_but_blocks_followup_selection() -> None:
+    request = ReadRequest(
+        request_id="read:incomplete-country-selection",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar a hospedagem.",),
+        facts=(),
+        read_requests=(request,),
+        effect_proposals=(),
+    )
+    selection = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo.",),
+        facts=(
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 8, 10)),
+            ModelFact("end_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [first, selection])
+    read_port = FakeLodgingReadPort(store)
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=AuthenticatedManyChatContactWithoutCountry(store),
+        reads=V2ReadService({ReadKind.LODGING: read_port}),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert read_port.calls == [request]
+        assert len(model.calls) == 2
+        assert len(result.receipt.read_observations) == 1
+        assert result.reply_chunks == (
+            "Para avançar com a reserva, preciso dos seus dados de contato.",
+        )
+        assert not isinstance(store.load_state(BATCH.lead_id).state.workflow, AwaitingConfirmationState)
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
     finally:
         store.close()
 

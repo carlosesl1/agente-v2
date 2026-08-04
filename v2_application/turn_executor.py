@@ -1808,7 +1808,11 @@ class V2TurnExecutor:
         else:
             read_requests = first_proposal.read_requests
             derived_confirmation_reads = False
-        if not effective_profile_complete and read_requests:
+        authenticated_phone_ready = (
+            profile.phone_e164 is not None
+            and profile.observed_at <= now < profile.expires_at
+        )
+        if not authenticated_phone_ready and read_requests:
             read_requests = tuple(
                 item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
             )

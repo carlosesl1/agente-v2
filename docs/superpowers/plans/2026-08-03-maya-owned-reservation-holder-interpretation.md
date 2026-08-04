@@ -22,6 +22,7 @@
 - The parent must not promote raw-text birth date or gender into facts. New kernel artifacts store only state/version/command commitments, with backward-compatible reads of historical full decisions.
 - Same-turn summary is allowed after persistence; reservation command/relay is forbidden until a later aggregate turn.
 - Correction revokes the old summary and may present a new one in the same turn.
+- A fresh authenticated ManyChat/WhatsApp phone permits read-only availability, price, and description queries even when name, e-mail, or country is still incomplete. Full effective-customer readiness remains required for selection, confirmation, commands, and writes.
 - Preserve exactly-once and at most one provider POST; use only fake transports and `.invalid` hosts.
 - Run with `PYTHONDONTWRITEBYTECODE=1` and pytest `-p no:cacheprovider`.
 - Official config: `/home/ubuntu/chapada-leads-hermes/config/leads_agent.yaml`.
@@ -188,6 +189,7 @@ and OR it with `bool(accepted_private_facts)` at every stage. Do not derive it f
 - invalid holder fields: drop, generic natural correction, no reads/commands;
 - model `phone_e164`: drop unconditionally, never persist, but do not force acknowledgement-only when authenticated profile phone is already valid;
 - incomplete authenticated phone: existing readiness filter allows only local knowledge reads and zero commands.
+- authenticated fresh phone with incomplete name/e-mail/country: commercial provider reads remain eligible, but any post-read selection still yields zero commands until the effective profile is complete.
 
 - [ ] **Step 6: Preserve no-command transformations**
 

@@ -24,6 +24,7 @@ The deterministic extractor must therefore leave the initial conversational path
 6. Mentions of a companion, spouse, hostel, or third party do not update the holder unless the lead explicitly says that person is or will be the reservation holder.
 7. Real ambiguity yields a natural clarification question and no guessed holder fact.
 8. `phone_e164` remains exclusively sourced from the authenticated fresh ManyChat/WhatsApp binding. A phone typed in the conversation may remain visible to Maya as context but is discarded if proposed as a holder fact and never changes authenticated identity.
+9. A fresh authenticated `phone_e164` is sufficient for read-only commercial provider queries. Missing `full_name`, `email`, or `country_code` must not block availability, price, or description reads; the complete effective profile remains mandatory only for `select`, `confirm`, reservation commands, and provider writes.
 
 ## 3. Chosen Architecture
 
@@ -142,7 +143,7 @@ Customer-facing replies and the channel's source message are conversational reco
 - later natural confirmation required;
 - correction invalidates and re-presents summary;
 - zero reservation command/relay in a collection/correction turn;
-- provider-read gating on a complete effective profile;
+- provider-read gating on a fresh authenticated phone, with the complete effective profile enforced at `select`, `confirm`, reservation-command, and provider-write boundaries;
 - source-aware reauthentication before decision and command commit;
 - SQLite owner integrity and authenticated journals;
 - one-shot/monotonic Cloudbeds execution with at most one POST;
@@ -165,9 +166,11 @@ Customer-facing replies and the channel's source message are conversational reco
 11. Committed replay performs zero additional model/read/write calls.
 12. Exactly one later valid confirmation can result in at most one Cloudbeds POST; no real transport is used.
 13. Technical artifacts, public projection, errors, and `repr` do not contain holder fact values or Cloudbeds reservation ID.
-14. A model reply that echoes accepted holder facts is replaced before closure/proposal/public-artifact construction, including the partial-profile case where its proposed provider read is filtered to zero.
+14. A model reply that echoes accepted holder facts is replaced before closure/proposal/public-artifact construction, including the missing/stale authenticated-phone case where its proposed provider read is filtered to zero.
 15. Raw text alone cannot create `birth_date` or `gender`; labelled birth dates remain excluded from commercial dates without persistence.
 16. New kernel commitments authenticate state/version/command hashes without payload duplication, and the startup semantic scan still accepts historical full decisions.
+17. With a fresh authenticated phone but no country, lodging and activity reads execute and return observations while `private_profile_complete=false`.
+18. The same incomplete-country turn may read availability, but a post-read `select` remains profile-gated with zero command and zero relay.
 
 ## 9. Qualification and Stop Boundary
 
