@@ -160,6 +160,7 @@ Customer-facing replies and the channel's source message are conversational reco
 - committed provider observations survive later turns as public recap context without becoming effect authority;
 - consultation projection caps the model-visible options at 32 while preserving the authenticated total in `offer_count` and explicitly marking `offers_truncated`; a large valid provider result never makes the next turn fail;
 - after current observations exist, recursive model reads become a deterministic zero-read/zero-effect fallback instead of a second provider or repair round; explicit negative evidence yields a truthful unavailable/nothing-booked reply;
+- when both lodging and activity observations are explicitly negative, the deterministic fallback names both unavailable components; provider ordering cannot hide one negative result;
 - the productive deadline covers up to three model completions with two protocol attempts each plus bounded provider overhead, and the inbox lease remains strictly longer than that deadline;
 - private Cloudbeds reservation ID;
 - runtime remains `dark_read_only`, kill switch enabled, POST budget disarmed, and broad rollout unsafe.
@@ -189,6 +190,7 @@ Customer-facing replies and the channel's source message are conversational reco
 21. A follow-up response that repeats reads after current observations uses one child invocation and becomes a deterministic, zero-read, zero-effect fallback.
 22. Productive composition binds the inbox lease beyond the complete multi-call turn budget rather than the timeout for one model completion.
 23. A committed result with 33 offers reaches the next turn as 32 bounded public options plus `offer_count=33` and `offers_truncated=true`; negative zero-offer history remains `0/false`.
+24. Recursive reads with both Cloudbeds and Bókun explicitly negative produce one combined zero-read/zero-effect response naming lodging and activity.
 
 ## 9. Qualification and Stop Boundary
 

@@ -55,7 +55,9 @@ A correção substituta fecha a classe:
 
 Os dois revisores read-only expiraram sem veredito terminal. Um witness de handoff não era causal ao histórico: pedido humano de equipe deve continuar possível, e o gate externo permanece fechado. O segundo witness era válido: 33 ofertas commitadas excediam o bound de 32 no próximo `ModelRequest`. A projeção agora envia as primeiras 32, preserva `offer_count=33`, marca `offers_truncated=true` e instrui a Maya a não alegar conjunto completo. O witness 33→32 passou; regressão e suíte oficial mantiveram os mesmos totais verdes.
 
-- NEXT: congelar a candidata final e repetir a conversa real isolada em estado novo, com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
+O revisor final do SHA `818705e` encontrou um finding Important adicional: no fallback recursivo, Cloudbeds e Bókun negativos juntos citavam apenas o passeio devido a `if/elif`. O witness foi reproduzido em RED e o fallback agora produz uma resposta combinada para hospedagem+passeio, ainda com uma única inferência, zero reads, zero selection e zero effects. O focal passou `2 passed`; regressão e suíte oficial permaneceram `155 passed, 84 subtests` e `1492 passed, 7 deselected, 2940 subtests`.
+
+- NEXT: autenticar a imagem do SHA final e concluir relatório/cleanup; push, CI remoto, publicação, deploy e delivery continuam não autorizados.
 
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 

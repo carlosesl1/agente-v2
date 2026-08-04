@@ -781,7 +781,15 @@ class HermesModelAdapter:
             if observation.public_payload.get("available") is False
         }
         english = request.locale.lower().startswith("en")
-        if "bokun" in negative_providers:
+        if {"bokun", "cloudbeds"}.issubset(negative_providers):
+            text = (
+                "The requested lodging and activity are not available for the "
+                "consulted dates. Nothing was booked. I can check other dates."
+                if english
+                else "A hospedagem e o passeio solicitados não estão disponíveis para "
+                "as datas consultadas. Nada foi reservado. Posso consultar outras datas."
+            )
+        elif "bokun" in negative_providers:
             text = (
                 "The requested activity is not available for the consulted date. "
                 "Nothing was booked. I can check another date."

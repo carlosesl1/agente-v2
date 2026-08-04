@@ -680,6 +680,14 @@ def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
 
 
 def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
+    lodging_read = ReadRequest(
+        request_id="batch:negative-package:read:lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 9, 12),
+        check_out=date(2026, 9, 15),
+        adults=2,
+        children=0,
+    )
     read = ReadRequest(
         request_id="batch:negative-package:read:activity",
         kind=ReadKind.ACTIVITY,
@@ -695,6 +703,20 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
         locale="pt-BR",
         state_version=4,
         observations=(
+            ReadObservation(
+                request_hash=lodging_read.canonical_hash(),
+                provider="cloudbeds",
+                observed_at=datetime(2026, 8, 4, 7, 3, tzinfo=timezone.utc),
+                expires_at=datetime(2026, 8, 4, 7, 8, tzinfo=timezone.utc),
+                public_payload={
+                    "check_in": "2026-09-12",
+                    "check_out": "2026-09-15",
+                    "adults": 2,
+                    "children": 0,
+                    "available": False,
+                },
+                private_binding_hash="e" * 64,
+            ),
             ReadObservation(
                 request_hash=read.canonical_hash(),
                 provider="bokun",
@@ -769,8 +791,8 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
     assert attempts == 1
     assert turn.proposal.intent == "inform"
     assert turn.proposal.reply_chunks == (
-        "O passeio solicitado não está disponível para a data consultada. "
-        "Nada foi reservado. Posso consultar outra data.",
+        "A hospedagem e o passeio solicitados não estão disponíveis para as "
+        "datas consultadas. Nada foi reservado. Posso consultar outras datas.",
     )
     assert turn.proposal.read_requests == ()
     assert turn.proposal.selection_requested is False
