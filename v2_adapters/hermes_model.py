@@ -149,6 +149,23 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
 """.strip()
 
 
+_CONSULTATION_HISTORY_SYSTEM_SUFFIX: Final = """
+COMMITTED CONSULTATION HISTORY PROTOCOL:
+- consultation_history contains authenticated public lookup evidence from earlier
+  committed turns. It is recap-only context, not a current provider observation.
+- Use it to answer comparisons, recaps, and questions about what was previously found,
+  including prior prices, availability, and proven unavailability. Preserve positive and
+  negative results; never claim that a prior consultation did not happen when it is listed.
+- Say that a result was found at the recorded time. If fresh_at_turn_start is false, make
+  clear that current availability or price needs another check.
+- consultation_history must never authorize selection, confirmation, reservation,
+  payment, handoff, or any effect. Those paths require a fresh provider read in the current
+  turn and the normal typed authority gates. Only observations contains current-turn reads.
+- When the current message asks to select, reserve, or act on a historical option, request
+  the corresponding fresh provider read; do not emit a historical offer ID or invent one.
+""".strip()
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -186,6 +203,16 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         }
         for item in request.observations
     ]
+    consultation_history = [
+        {
+            "observed_at": item.observed_at.isoformat(),
+            "expires_at": item.expires_at.isoformat(),
+            "fresh_at_turn_start": item.fresh_at_turn_start,
+            "usage": "recap_only",
+            "public_context": item.public_context,
+        }
+        for item in request.consultation_history
+    ]
     user_payload = {
         "request_id": request.request_id,
         "lead_id": request.lead_id,
@@ -199,6 +226,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "confirmation_review_required": request.confirmation_review_required,
         "selection_review_required": request.selection_review_required,
         "observations": observations,
+        "consultation_history": consultation_history,
     }
     if request.state_facts:
         user_payload["state_facts"] = [
@@ -232,7 +260,11 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
     return _canonical(
         {
             "system_prompt": (
-                system_prompt + "\n\n" + _PRIVATE_PROFILE_SYSTEM_SUFFIX
+                system_prompt
+                + "\n\n"
+                + _PRIVATE_PROFILE_SYSTEM_SUFFIX
+                + "\n\n"
+                + _CONSULTATION_HISTORY_SYSTEM_SUFFIX
             ),
             "messages": [["user", _canonical(user_payload).decode("utf-8")]],
         }

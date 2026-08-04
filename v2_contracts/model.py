@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import ClassVar, Final
 
 from v2_contracts.critical_actions import (
@@ -85,6 +85,74 @@ def _closed_dict(value: object, name: str) -> dict[str, object]:
     return decoded
 
 
+def _utc(value: object, name: str) -> datetime:
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() != timedelta(0)
+    ):
+        raise InvalidModelProposal(f"{name} must be an exact UTC datetime")
+    return value
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ConsultationHistoryEntry:
+    """Public lookup evidence from an earlier committed turn, for recap only."""
+
+    observation_hash: str
+    observed_at: datetime
+    expires_at: datetime
+    fresh_at_turn_start: bool
+    public_context: dict[str, object]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.observation_hash) is not str
+            or _SHA256_RE.fullmatch(self.observation_hash) is None
+        ):
+            raise InvalidModelProposal("consultation observation_hash must be SHA-256")
+        observed = _utc(self.observed_at, "consultation observed_at")
+        expires = _utc(self.expires_at, "consultation expires_at")
+        if expires <= observed:
+            raise InvalidModelProposal("consultation expires_at must follow observed_at")
+        if type(self.fresh_at_turn_start) is not bool:
+            raise InvalidModelProposal(
+                "consultation fresh_at_turn_start must be an exact boolean"
+            )
+        context = _closed_dict(self.public_context, "consultation public_context")
+        if set(context) != {"service", "status", "query", "offers"}:
+            raise InvalidModelProposal("consultation public_context fields mismatch")
+        if context["service"] not in ("lodging", "activity"):
+            raise InvalidModelProposal("consultation service is outside the catalog")
+        if context["status"] not in ("positive", "negative"):
+            raise InvalidModelProposal("consultation status is outside the catalog")
+        query = context["query"]
+        offers = context["offers"]
+        if (
+            type(query) is not dict
+            or type(offers) is not list
+            or len(offers) > 32
+            or any(type(item) is not dict for item in offers)
+        ):
+            raise InvalidModelProposal("consultation query/offers shape mismatch")
+        if (context["status"] == "positive") != bool(offers):
+            raise InvalidModelProposal("consultation status/offer cardinality mismatch")
+        serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized.encode("utf-8")) > 16_384:
+            raise InvalidModelProposal("consultation public_context exceeds the bound")
+        for forbidden in (
+            "offer_id",
+            "private_binding_hash",
+            "request_hash",
+            "source_evidence_hash",
+        ):
+            if f'"{forbidden}":' in serialized:
+                raise InvalidModelProposal(
+                    "consultation public_context contains a private or internal key"
+                )
+        object.__setattr__(self, "public_context", context)
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ModelFact:
     name: str
@@ -157,6 +225,7 @@ class ModelRequest:
     locale: str
     state_version: int
     observations: tuple[ReadObservation, ...] = ()
+    consultation_history: tuple[ConsultationHistoryEntry, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
     private_customer_fact_names: tuple[str, ...] = ()
     passenger_manifest_status: PassengerManifestStatus | None = None
@@ -183,6 +252,27 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "observations must contain exact ReadObservation values"
             )
+        if type(self.consultation_history) is not tuple or any(
+            type(item) is not ConsultationHistoryEntry
+            for item in self.consultation_history
+        ):
+            raise InvalidModelProposal(
+                "consultation_history must contain exact ConsultationHistoryEntry values"
+            )
+        if len(self.consultation_history) > 8:
+            raise InvalidModelProposal("consultation_history exceeds the eight-entry bound")
+        history_hashes = tuple(
+            item.observation_hash for item in self.consultation_history
+        )
+        if len(set(history_hashes)) != len(history_hashes):
+            raise InvalidModelProposal("consultation_history must be unique")
+        if self.consultation_history != tuple(
+            sorted(
+                self.consultation_history,
+                key=lambda item: (item.observed_at, item.observation_hash),
+            )
+        ):
+            raise InvalidModelProposal("consultation_history must be canonical")
         if type(self.state_facts) is not tuple or any(
             type(item) is not ModelFact for item in self.state_facts
         ):
@@ -639,6 +729,7 @@ __all__ = [
     "AuditedModelTurn",
     "AuditedTranscriptClosure",
     "AuditedTranscriptFrame",
+    "ConsultationHistoryEntry",
     "EffectProposal",
     "InvalidModelProposal",
     "ModelFact",

@@ -27,6 +27,7 @@ from v2_contracts.critical_actions import (
     PendingCriticalActionContext,
 )
 from v2_contracts.model import (
+    ConsultationHistoryEntry,
     InvalidModelProposal,
     ModelFact,
     ModelRequest,
@@ -153,6 +154,63 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         "+551",
         "profile-binding:",
         "content_hash",
+    ):
+        assert forbidden not in serialized
+
+
+def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
+    history = ConsultationHistoryEntry(
+        observation_hash="a" * 64,
+        observed_at=datetime(2026, 8, 4, 2, 30, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 8, 4, 2, 35, tzinfo=timezone.utc),
+        fresh_at_turn_start=False,
+        public_context={
+            "service": "activity",
+            "status": "negative",
+            "query": {
+                "product_id": "product:tour-4ps",
+                "activity_date": "2026-09-13",
+                "adults": 2,
+                "children": 0,
+            },
+            "offers": [],
+        },
+    )
+    request = ModelRequest(
+        request_id="request:consultation-history-wire",
+        lead_id="manychat:consultation-history-wire",
+        source_event_id="batch:consultation-history-wire",
+        message="Resuma o que você consultou, sem reservar.",
+        locale="pt-BR",
+        state_version=2,
+        consultation_history=(history,),
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    user = json.loads(envelope["messages"][0][1])
+    serialized = json.dumps(user, ensure_ascii=False)
+    prompt = envelope["system_prompt"].casefold()
+
+    assert user["observations"] == []
+    assert user["consultation_history"] == [
+        {
+            "observed_at": "2026-08-04T02:30:00+00:00",
+            "expires_at": "2026-08-04T02:35:00+00:00",
+            "fresh_at_turn_start": False,
+            "usage": "recap_only",
+            "public_context": history.public_context,
+        }
+    ]
+    assert "recap-only" in prompt
+    assert "fresh provider read" in prompt
+    assert "selection" in prompt
+    assert "reservation" in prompt
+    for forbidden in (
+        history.observation_hash,
+        "private_binding_hash",
+        "source_evidence_hash",
+        "request_hash",
+        "offer:",
     ):
         assert forbidden not in serialized
 

@@ -9,7 +9,11 @@ import pytest
 from reservation_boundary import ConversationStage, StringSlot, TypedFact
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.effects import HandoffRelayBundle, ReservationRelayBundle
-from reservation_boundary.sqlite_store import ConcurrencyConflict, SQLiteBoundaryStore
+from reservation_boundary.sqlite_store import (
+    ConcurrencyConflict,
+    DataCorruption,
+    SQLiteBoundaryStore,
+)
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
@@ -1369,6 +1373,180 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert row[0] == "read_observation"
         assert row[1] is None
         assert type(row[2]) is str and len(row[2]) == 64
+    finally:
+        store.close()
+
+
+def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only_history() -> None:
+    lodging = ReadRequest(
+        request_id="read:history-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 9, 12),
+        check_out=date(2026, 9, 15),
+        adults=2,
+        children=0,
+    )
+    activity = ReadRequest(
+        request_id="read:history-activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:tour-4ps",
+        activity_date=date(2026, 9, 13),
+        adults=2,
+        children=0,
+    )
+
+    class NegativeActivityReadPort:
+        def __init__(self, store: SQLiteBoundaryStore) -> None:
+            self.store = store
+            self.calls: list[ReadRequest] = []
+
+        def read(self, request: ReadRequest) -> ReadObservation:
+            assert self.store._connection.in_transaction is False
+            self.calls.append(request)
+            return ReadObservation(
+                request_hash=request.canonical_hash(),
+                provider="bokun",
+                observed_at=NOW,
+                expires_at=NOW + timedelta(minutes=5),
+                public_payload={
+                    "product_id": "product:tour-4ps",
+                    "product_public_name": "Roteiro dos 4Ps",
+                    "activity_date": "2026-09-13",
+                    "adults": 2,
+                    "children": 0,
+                    "available": False,
+                },
+                private_binding_hash="4" * 64,
+            )
+
+    first_proposal = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar hospedagem e passeio.",),
+        facts=(),
+        read_requests=(lodging, activity),
+        effect_proposals=(),
+    )
+    first_final = _proposal(
+        "Há uma suíte disponível por BRL 480.00; o Roteiro dos 4Ps está indisponível."
+    )
+    recap_event = replace(
+        EVENT,
+        event_id="event:consultation-history-recap",
+        text="Resuma tudo sem reservar.",
+        occurred_at=NOW + timedelta(seconds=1),
+        payload_hash="4" * 64,
+    )
+    recap_batch = InboundBatch(
+        batch_id="batch:consultation-history-recap",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(recap_event,),
+        combined_text=recap_event.text,
+    )
+    recap_final = ModelProposal(
+        source_event_id=recap_batch.batch_id,
+        intent="inform",
+        reply_chunks=(
+            "A suíte consultada estava disponível por BRL 480.00 e o Roteiro dos "
+            "4Ps estava indisponível; nada foi reservado.",
+        ),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    recap_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:consultation-history-recap",
+        allocation_ids=("allocation:consultation-history-recap",),
+        allocation_manifest_hash="4" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [first_proposal, first_final, recap_final])
+    lodging_port = FakeLodgingReadPort(store)
+    activity_port = NegativeActivityReadPort(store)
+    _install_public_authority(store)
+    _install_public_authority(store, recap_authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService(
+            {
+                ReadKind.LODGING: lodging_port,
+                ReadKind.ACTIVITY: activity_port,
+            }
+        ),
+        profile=FakeProfile(store),
+        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(
+            {
+                BATCH.batch_id: AUTHORITY,
+                recap_batch.batch_id: recap_authority,
+            }
+        ),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        first_result = executor.execute(BATCH)
+        recap_result = executor.execute(recap_batch)
+
+        assert len(first_result.receipt.read_observations) == 2
+        assert len(model.calls) == 3
+        recap_request = model.calls[2]
+        assert recap_request.observations == ()
+        assert len(recap_request.consultation_history) == 2
+        history = {
+            item.public_context["service"]: item
+            for item in recap_request.consultation_history
+        }
+        lodging_history = history["lodging"]
+        assert lodging_history.public_context["status"] == "positive"
+        assert lodging_history.public_context["query"] == {
+            "check_in": "2026-09-12",
+            "check_out": "2026-09-15",
+            "adults": 2,
+            "children": 0,
+        }
+        assert lodging_history.public_context["offers"] == [
+            {
+                "public_label": "Suíte Casal",
+                "start_date": "2026-09-12",
+                "end_date": "2026-09-15",
+                "start_time": None,
+                "adults": 2,
+                "children": 0,
+                "total_amount": "480.00",
+                "currency": "BRL",
+            }
+        ]
+        activity_history = history["activity"]
+        assert activity_history.public_context["status"] == "negative"
+        assert activity_history.public_context["query"] == {
+            "product_id": "product:tour-4ps",
+            "activity_date": "2026-09-13",
+            "adults": 2,
+            "children": 0,
+        }
+        assert activity_history.public_context["offers"] == []
+        assert all(item.fresh_at_turn_start for item in history.values())
+        assert store.load_recent_public_lookup_observations(
+            "manychat:another-lead"
+        ) == ()
+        assert recap_result.reply_chunks == recap_final.reply_chunks
+        assert recap_result.receipt.read_observations == ()
+        assert recap_result.receipt.command_rows == ()
+        assert recap_result.receipt.relay_rows == ()
+
+        store._connection.execute(
+            "UPDATE boundary_turn_artifacts SET artifact_json='{}' "
+            "WHERE artifact_kind='read_observation'"
+        )
+        with pytest.raises(DataCorruption, match="public lookup history"):
+            store.load_recent_public_lookup_observations(BATCH.lead_id)
     finally:
         store.close()
 

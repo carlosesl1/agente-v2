@@ -29,6 +29,22 @@ Carlos autorizou explicitamente em 2026-08-04 simplificar o processo após a con
 
 - NEXT: obter revisão independente sobre o SHA final que contém código e este ledger; parar antes de push, CI, imagem, runtime, provider real ou delivery.
 
+## CONTINUIDADE DURÁVEL DE CONSULTAS ENTRE TURNOS
+
+O teste real de 2026-08-04 comprovou que a correção do gate sem `country_code` leva as consultas até Cloudbeds/Bókun, mas também revelou que disponibilidade, preços, opções e indisponibilidade existiam somente nas observations do próprio turno. Carlos solicitou corrigir a continuidade completa. O owner permanece o artifact/receipt autenticado do boundary: o turno seguinte recebe uma projeção pública, limitada a oito observations commitadas do mesmo `lead_key`, com uso fixo `recap_only`.
+
+- `ModelRequest.observations` continua exclusivo para provider reads do turno atual;
+- `consultation_history` permite resumo/comparação posterior e preserva resultados positivos e negativos;
+- histórico nunca autoriza `select`, `confirm`, reserva, pagamento, handoff ou qualquer efeito; ação sobre opção histórica exige read fresco no turno atual e todos os gates tipados existentes;
+- wire não inclui offer ID, request/evidence hash, private binding hash ou payload bruto do provider;
+- adulteração do artifact falha como `DataCorruption`, e consulta para outro `lead_key` retorna vazio;
+- RED causal: a conversa de dois turnos falhou porque `ModelRequest` não tinha `consultation_history`;
+- GREEN focado: `2 passed`; regressão proporcional de adapter/executor/boundary/reads: `130 passed, 84 subtests passed`;
+- gate oficial clean-env: `1491 passed, 7 deselected, 2940 subtests passed`;
+- Ruff isolado nas superfícies do workflow, `fasttrack-boundaries`, compileall e `git diff --check`: verdes.
+
+- NEXT: obter a revisão independente já disparada e repetir a conversa real isolada com providers somente leitura, kill switch e todos os effect gates fechados; nenhuma publicação, deploy ou delivery está autorizada nesta etapa.
+
 ## REPARO SPLIT-ORIGIN DE PERFIL ATIVO
 
 Carlos autorizou em 2026-08-03 que Maya receba a mensagem original integral e atribua semanticamente nome completo, e-mail e país ao titular da reserva. O controlador valida, canonicaliza e persiste os fatos estruturados da Maya antes de qualquer read, sem extrator regex nem marcadores; ManyChat é fallback nesses três campos e fonte exclusiva do telefone autenticado. PII permanece fora de projeção, history, artifacts/evidence, logs, exceções e `repr`. Coleta/correção pode produzir resumo no mesmo turno, mas nunca command/relay; confirmação posterior revalida o cliente efetivo e o material selecionado.

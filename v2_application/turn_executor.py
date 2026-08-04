@@ -27,6 +27,11 @@ from reservation_boundary.conversation import (
     TranscriptDirection,
     TranscriptKind,
 )
+from reservation_boundary.reads import (
+    Phase8ToolReadRequest,
+    ReadObservation as BoundaryReadObservation,
+    SanitizedLookupResult,
+)
 from reservation_boundary.serialization import semantic_hash
 from reservation_boundary.sqlite_store import (
     CommandRelayWrite,
@@ -40,9 +45,12 @@ from reservation_boundary.sqlite_store import (
     kernel_decision_commitment,
 )
 from reservation_boundary.types import (
+    ActivityGroupReadArguments,
+    ActivityReadArguments,
     BoundaryCommit,
     BoundaryState,
     ConversationIntentKind,
+    LodgingReadArguments,
     StringSlot,
     TypedFact,
 )
@@ -84,6 +92,7 @@ from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
 from v2_contracts.model import (
     AuditedModelTurn,
+    ConsultationHistoryEntry,
     ModelFact,
     ModelProposal,
     ModelRequest,
@@ -1213,6 +1222,96 @@ def _critical_outcome(projection: ConversationProjection) -> str | None:
     return outcome
 
 
+def _consultation_history_entry(
+    observation: BoundaryReadObservation,
+    *,
+    now: datetime,
+) -> ConsultationHistoryEntry:
+    if type(observation) is not BoundaryReadObservation:
+        raise TypeError("consultation history requires exact boundary observations")
+    if not observation.safe_for_public_claims:
+        raise TurnExecutionError("consultation history is not public-safe")
+    try:
+        request = Phase8ToolReadRequest.from_canonical_bytes(
+            observation.request_bytes
+        )
+        result = SanitizedLookupResult.from_canonical_bytes(
+            observation.typed_result_bytes
+        )
+    except (TypeError, ValueError) as exc:
+        raise TurnExecutionError("consultation history cannot be reconstructed") from exc
+    if result.observed_at > now:
+        raise TurnExecutionError("consultation history is from the future")
+    arguments = request.arguments
+    if type(arguments) is LodgingReadArguments:
+        query = {
+            "check_in": arguments.check_in.isoformat(),
+            "check_out": arguments.check_out.isoformat(),
+            "adults": arguments.adults,
+            "children": arguments.children,
+        }
+    elif type(arguments) is ActivityReadArguments:
+        query = {
+            "product_id": arguments.activity_id,
+            "activity_date": arguments.activity_date.isoformat(),
+            "adults": arguments.participants,
+            "children": 0,
+        }
+    elif type(arguments) is ActivityGroupReadArguments:
+        query = {
+            "product_id": arguments.activity_id,
+            "activity_date": arguments.activity_date.isoformat(),
+            "adults": arguments.adults,
+            "children": arguments.children,
+        }
+    else:
+        raise TurnExecutionError("consultation history read kind is unsupported")
+    offers = [
+        {
+            "public_label": item.public_label,
+            "start_date": item.start_date.isoformat(),
+            "end_date": item.end_date.isoformat() if item.end_date is not None else None,
+            "start_time": (
+                item.start_time.strftime("%H:%M")
+                if item.start_time is not None
+                else None
+            ),
+            "adults": item.adults,
+            "children": item.children,
+            "total_amount": format(item.total_amount, "f"),
+            "currency": item.currency,
+        }
+        for item in result.offers
+    ]
+    return ConsultationHistoryEntry(
+        observation_hash=observation.canonical_hash(),
+        observed_at=result.observed_at,
+        expires_at=result.expires_at,
+        fresh_at_turn_start=result.observed_at <= now < result.expires_at,
+        public_context={
+            "service": result.service.value,
+            "status": result.status.value,
+            "query": query,
+            "offers": offers,
+        },
+    )
+
+
+def _consultation_history(
+    store: SQLiteBoundaryStore,
+    lead_id: str,
+    *,
+    now: datetime,
+) -> tuple[ConsultationHistoryEntry, ...]:
+    observations = store.load_recent_public_lookup_observations(lead_id, limit=8)
+    entries = tuple(
+        _consultation_history_entry(item, now=now) for item in observations
+    )
+    return tuple(
+        sorted(entries, key=lambda item: (item.observed_at, item.observation_hash))
+    )
+
+
 def _confirmation_read_requests(
     state: BoundaryState,
     projection: ConversationProjection,
@@ -1526,6 +1625,11 @@ class V2TurnExecutor:
         if projection is None:
             projection = _genesis_projection(self._locale)
         previous_receipt_hash = self._store.latest_turn_receipt_hash(batch.lead_id)
+        consultation_history = _consultation_history(
+            self._store,
+            batch.lead_id,
+            now=now,
+        )
 
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
@@ -1565,6 +1669,7 @@ class V2TurnExecutor:
             message=batch.combined_text,
             locale=projection.locale,
             state_version=current.version,
+            consultation_history=consultation_history,
             state_facts=_state_model_facts(projection),
             private_customer_fact_names=_private_customer_fact_names(
                 projection,
@@ -1878,6 +1983,7 @@ class V2TurnExecutor:
                 locale=projection.locale,
                 state_version=current.version,
                 observations=v2_observations,
+                consultation_history=consultation_history,
                 state_facts=_state_model_facts(projection),
                 private_customer_fact_names=_private_customer_fact_names(
                     projection,

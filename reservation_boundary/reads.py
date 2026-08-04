@@ -277,6 +277,13 @@ class Phase8ToolReadRequest:
             + self.to_canonical_bytes()
         ).hexdigest()
 
+    @classmethod
+    def from_canonical_bytes(cls, payload: bytes) -> Phase8ToolReadRequest:
+        request = _decode_read_request(payload)
+        if type(request) is not cls or request.to_canonical_bytes() != payload:
+            raise ValueError("Phase8ToolReadRequest is not byte-canonical")
+        return request
+
 
 @dataclass(frozen=True, slots=True)
 class LegacyGenesisReadRequest:

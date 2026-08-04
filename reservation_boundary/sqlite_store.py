@@ -25,7 +25,7 @@ from reservation_boundary.conversation import (
     TranscriptCommitment,
 )
 from reservation_boundary.effects import ReservationRelayBundle
-from reservation_boundary.reads import ReadObservation
+from reservation_boundary.reads import ReadObservation, ReadObservationStatus
 from reservation_boundary.schema import (
     BOUNDARY_V8_TABLES,
     TABLE_NAMES,
@@ -1877,6 +1877,78 @@ class SQLiteBoundaryStore:
         if projection.canonical_hash() != receipt.behavior_state_snapshot_digest:
             raise DataCorruption("runtime projection/receipt binding diverged")
         return projection
+
+    def load_recent_public_lookup_observations(
+        self,
+        lead_key: str,
+        *,
+        limit: int = 8,
+    ) -> tuple[ReadObservation, ...]:
+        """Load bounded public-safe lookup evidence from committed turns only."""
+
+        self._ensure_open()
+        if self._schema_version != 8:
+            raise BoundaryStoreError("lookup history requires an authenticated v8 store")
+        exact_lead = _require_id(lead_key, "lead_key")
+        if type(limit) is not int or not 1 <= limit <= 8:
+            raise ValueError("lookup history limit must be an exact integer from 1 to 8")
+        rows = self._connection.execute(
+            "SELECT e.state_version,a.artifact_index,a.artifact_id,a.artifact_json,"
+            "a.artifact_hash,a.source_turn_receipt_hash,e.turn_receipt_json,"
+            "e.turn_receipt_hash FROM boundary_turn_artifacts a "
+            "JOIN boundary_events e ON e.lead_key=a.lead_key "
+            "AND e.aggregate_turn_id=a.aggregate_turn_id "
+            "WHERE a.lead_key=? AND a.artifact_kind='read_observation' "
+            "ORDER BY e.state_version DESC,a.artifact_index DESC LIMIT ?",
+            (exact_lead, limit),
+        ).fetchall()
+        authenticated: list[tuple[int, int, ReadObservation]] = []
+        for (
+            state_version,
+            artifact_index,
+            artifact_id,
+            artifact_json,
+            artifact_hash,
+            backlink,
+            receipt_json,
+            receipt_hash,
+        ) in rows:
+            try:
+                exact_version = _require_int(
+                    state_version,
+                    "lookup history state_version",
+                    minimum=1,
+                )
+                exact_index = _require_int(
+                    artifact_index,
+                    "lookup history artifact_index",
+                    minimum=0,
+                )
+                if type(artifact_json) is not str or type(receipt_json) is not str:
+                    raise TypeError("lookup history JSON must be exact text")
+                payload = artifact_json.encode("utf-8")
+                receipt = TurnReceipt.from_canonical_bytes(
+                    receipt_json.encode("utf-8")
+                )
+                observation = ReadObservation.from_canonical_bytes(payload)
+            except (TypeError, ValueError, UnicodeError) as exc:
+                raise DataCorruption(
+                    "committed public lookup history cannot be authenticated"
+                ) from exc
+            receipt_child = (artifact_id, payload, artifact_hash)
+            if (
+                receipt.artifact_hash != receipt_hash
+                or backlink != receipt_hash
+                or receipt_child not in receipt.read_observations
+                or observation.canonical_hash() != artifact_hash
+                or observation.status
+                not in (ReadObservationStatus.POSITIVE, ReadObservationStatus.NEGATIVE)
+                or not observation.safe_for_public_claims
+            ):
+                raise DataCorruption("committed public lookup history diverged")
+            authenticated.append((exact_version, exact_index, observation))
+        authenticated.sort(key=lambda item: (item[0], item[1]))
+        return tuple(item[2] for item in authenticated)
 
     def import_genesis(
         self,

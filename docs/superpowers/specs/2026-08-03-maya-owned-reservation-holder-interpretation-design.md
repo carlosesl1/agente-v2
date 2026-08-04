@@ -25,6 +25,7 @@ The deterministic extractor must therefore leave the initial conversational path
 7. Real ambiguity yields a natural clarification question and no guessed holder fact.
 8. `phone_e164` remains exclusively sourced from the authenticated fresh ManyChat/WhatsApp binding. A phone typed in the conversation may remain visible to Maya as context but is discarded if proposed as a holder fact and never changes authenticated identity.
 9. A fresh authenticated `phone_e164` is sufficient for read-only commercial provider queries. Missing `full_name`, `email`, or `country_code` must not block availability, price, or description reads; the complete effective profile remains mandatory only for `select`, `confirm`, reservation commands, and provider writes.
+10. Public-safe availability observations from committed turns remain available to Maya as bounded `recap_only` consultation history. That history supports later summaries and comparisons but never authorizes selection, confirmation, reservation, payment, or any other effect; those paths still require a fresh current-turn provider read.
 
 ## 3. Chosen Architecture
 
@@ -66,6 +67,14 @@ The private-profile system suffix must state:
 - a proposal may include newly interpreted holder facts and a read request in the same response; the parent validates and persists before dispatching any read.
 
 The protocol-repair prompt preserves these rules through the shared suffix.
+
+### 3.4 Durable consultation continuity
+
+The authenticated boundary receipt/artifact graph remains the single owner of provider-read evidence. At the start of a later turn, the controller loads at most eight committed, public-safe lodging/activity observations for the same `lead_key`, authenticates each artifact against its turn receipt, and projects only public query/result fields into `ModelRequest.consultation_history`.
+
+The model wire omits observation hashes, request hashes, private binding hashes, evidence hashes, and internal offer IDs. Positive history includes public labels, dates, party, total, and currency; negative history preserves the queried service/date/party and empty offers. Every entry carries observation/expiry times plus `fresh_at_turn_start`, while its fixed usage remains `recap_only` even when it has not yet expired.
+
+`ModelRequest.observations` continues to mean current-turn provider evidence. Consultation history is never supplied to the reducer as current evidence and therefore cannot satisfy offer selection or any effect gate. Corrupt history or cross-lead lookup fails closed before model inference.
 
 ## 4. Parent Validation and Persistence
 
@@ -148,6 +157,7 @@ Customer-facing replies and the channel's source message are conversational reco
 - SQLite owner integrity and authenticated journals;
 - one-shot/monotonic Cloudbeds execution with at most one POST;
 - Bókun GET-only behavior, payment separation, and existing audit fences;
+- committed provider observations survive later turns as public recap context without becoming effect authority;
 - private Cloudbeds reservation ID;
 - runtime remains `dark_read_only`, kill switch enabled, POST budget disarmed, and broad rollout unsafe.
 
@@ -171,6 +181,8 @@ Customer-facing replies and the channel's source message are conversational reco
 16. New kernel commitments authenticate state/version/command hashes without payload duplication, and the startup semantic scan still accepts historical full decisions.
 17. With a fresh authenticated phone but no country, lodging and activity reads execute and return observations while `private_profile_complete=false`.
 18. The same incomplete-country turn may read availability, but a post-read `select` remains profile-gated with zero command and zero relay.
+19. A later turn receives both positive lodging options and negative activity availability from earlier committed reads while current-turn `observations` remains empty and command/relay counts remain zero.
+20. Consultation history is scoped to the exact `lead_key`; modified artifact bytes fail as authenticated data corruption rather than reaching Maya.
 
 ## 9. Qualification and Stop Boundary
 
