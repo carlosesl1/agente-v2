@@ -145,6 +145,8 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     assert "Never output phone_e164 from conversational text" in envelope[
         "system_prompt"
     ]
+    assert "CURRENT-TURN COMMERCIAL PROGRESSION" in envelope["system_prompt"]
+    assert '"one adult" or "1 adulto"' in envelope["system_prompt"]
     assert user["handoff_active"] is False
     assert user["confirmation_review_required"] is False
     assert user["selection_review_required"] is False

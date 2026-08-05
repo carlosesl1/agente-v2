@@ -149,6 +149,20 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
 """.strip()
 
 
+_COMMERCIAL_PROGRESSION_SYSTEM_SUFFIX: Final = """
+CURRENT-TURN COMMERCIAL PROGRESSION:
+- The request contains the complete original customer message. When that message already
+  provides the service, date or period, and party needed for an availability or price
+  check, emit the corresponding typed facts and read_requests in this same frame.
+- Never reply that you are ready to check, will check later, or need the customer to send
+  another booking message when the current message already has the required query data.
+- "one adult" or "1 adulto" with no other traveler mentioned means adults=1 and
+  children=0 for this read; do not ask a redundant children question.
+- This progression authorizes only read_requests. It never authorizes a reservation,
+  payment, handoff, delivery, or effect.
+""".strip()
+
+
 _CONSULTATION_HISTORY_SYSTEM_SUFFIX: Final = """
 COMMITTED CONSULTATION HISTORY PROTOCOL:
 - consultation_history contains authenticated public lookup evidence from earlier
@@ -265,6 +279,8 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 system_prompt
                 + "\n\n"
                 + _PRIVATE_PROFILE_SYSTEM_SUFFIX
+                + "\n\n"
+                + _COMMERCIAL_PROGRESSION_SYSTEM_SUFFIX
                 + "\n\n"
                 + _CONSULTATION_HISTORY_SYSTEM_SUFFIX
             ),

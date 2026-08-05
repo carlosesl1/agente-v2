@@ -62,6 +62,10 @@ from reservation_domain import (
     dumps_command,
 )
 from reservation_followup import HandoffRequested
+from v2_application.active_execution import (
+    execution_in_progress_reply,
+    is_redundant_post_command_read,
+)
 from v2_application.conversation import (
     V2ConversationReducer,
     effective_customer_material_hash,
@@ -81,12 +85,18 @@ from v2_application.private_customer_facts import (
     canonical_email,
     canonical_full_name,
 )
+from v2_application.public_reply import apply_positive_grounding
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import (
     build_handoff_relay_bundle,
     build_reservation_relay_bundle,
 )
 from v2_application.reservations import ReservationAllocator
+from v2_application.turn_plan import (
+    derive_adjustment_reads,
+    preserve_initial_adjustment,
+    preserve_initial_facts,
+)
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
@@ -495,6 +505,15 @@ def _merge_explicit_customer_facts(
             and current.value.casefold().split("-", 1)[0]
             == fact.value.casefold().split("-", 1)[0]
         ):
+            continue
+        if (
+            current is not None
+            and fact.name == "service"
+            and current.value == "package"
+            and fact.value in {"hostel", "agency"}
+        ):
+            # A package is the semantic composite of its lodging/activity parts.
+            # A lexical component hint must never demote the model-owned package plan.
             continue
         if current is not None and current.value != fact.value:
             raise TurnExecutionError(
@@ -1424,8 +1443,6 @@ def _critical_model_reads_allowed(
             now=now,
             material_scope_bound=material_scope_bound,
         )
-    if proposal.intent == "adjust":
-        return False
     return True
 
 
@@ -1916,6 +1933,12 @@ class V2TurnExecutor:
         else:
             read_requests = first_proposal.read_requests
             derived_confirmation_reads = False
+            if not read_requests:
+                read_requests = derive_adjustment_reads(
+                    current.state,
+                    projection,
+                    first_proposal,
+                )
         authenticated_phone_ready = (
             profile.phone_e164 is not None
             and profile.observed_at <= now < profile.expires_at
@@ -1925,6 +1948,22 @@ class V2TurnExecutor:
                 item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
             )
             derived_confirmation_reads = False
+        if is_redundant_post_command_read(
+            current.state,
+            projection,
+            first_proposal,
+            read_requests,
+        ):
+            read_requests = ()
+            derived_confirmation_reads = False
+            first_proposal = replace(
+                first_proposal,
+                reply_chunks=execution_in_progress_reply(projection.locale),
+                read_requests=(),
+                target_offer_id=None,
+                target_offer_ids=(),
+                selection_requested=False,
+            )
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
             raise TurnExecutionError("model proposed duplicate reads")
@@ -2055,18 +2094,7 @@ class V2TurnExecutor:
                 proposal,
                 frame_commitment_hash=second_frame_hash,
             )
-            second_fact_names = {item.name for item in proposal.facts}
-            proposal = replace(
-                proposal,
-                facts=(
-                    *proposal.facts,
-                    *(
-                        item
-                        for item in first_proposal.facts
-                        if item.name not in second_fact_names
-                    ),
-                ),
-            )
+            proposal = preserve_initial_facts(first_proposal, proposal)
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
             if not collection_only:
@@ -2094,6 +2122,7 @@ class V2TurnExecutor:
                         reply_chunks=proposal.reply_chunks,
                         read_requests=(),
                     )
+                proposal = preserve_initial_adjustment(first_proposal, proposal)
             audited = AuditedModelTurn.combine((first_audited, second_audited))
         else:
             audited = first_audited
@@ -2105,6 +2134,12 @@ class V2TurnExecutor:
                 pending_action=pending_action,
                 locale=projection.locale,
             )
+        proposal = apply_positive_grounding(
+            proposal,
+            v2_observations,
+            locale=projection.locale,
+            force=private_update_turn,
+        )
 
         decision_now = self._clock.now()
         if (

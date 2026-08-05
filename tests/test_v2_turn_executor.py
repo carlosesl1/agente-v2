@@ -17,7 +17,7 @@ from reservation_boundary.sqlite_store import (
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
-from reservation_domain import AwaitingConfirmationState
+from reservation_domain import AwaitingAdjustmentState, AwaitingConfirmationState
 from v2_application.conversation import V2ConversationReducer
 from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
@@ -299,6 +299,30 @@ def test_parent_explicit_fact_merge_rejects_model_conflict_and_commits_source() 
             replace(proposal, facts=(ModelFact("payment_method", "wise"),)),
             extracted,
         )
+
+
+def test_parent_fact_merge_treats_package_as_composite_not_agency_conflict() -> None:
+    proposal = ModelProposal(
+        source_event_id="batch:package-semantic-owner",
+        intent="inform",
+        reply_chunks=("Vou consultar hospedagem e passeio.",),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+
+    merged = _merge_explicit_customer_facts(
+        proposal,
+        (
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+        ),
+    )
+
+    assert {item.name: item.value for item in merged.facts} == {
+        "service": "package",
+        "product_id": "product:buracao",
+    }
 
 
 def test_parent_repairs_only_structured_requested_activity_selection() -> None:
@@ -923,6 +947,7 @@ def _executor(
     model: FakeAuditedModel,
     profile: FakeProfile,
     reads: V2ReadService | None = None,
+    public_authority=None,
 ) -> V2TurnExecutor:
     return V2TurnExecutor(
         store=store,
@@ -931,7 +956,7 @@ def _executor(
         profile=profile,
         private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
         reducer=_enabled_reducer(),
-        public_authority=FixedAuthority(),
+        public_authority=public_authority or FixedAuthority(),
         clock=FixedClock(),
         locale="pt-BR",
         turn_timeout=timedelta(seconds=30),
@@ -1374,7 +1399,7 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         read_requests=(request,),
         effect_proposals=(),
     )
-    final = _proposal("A suíte está disponível por BRL 480.00.")
+    final = _proposal("I’m here to help. What would you like to check next?")
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first, final])
     profile = FakeProfile(store)
@@ -1396,6 +1421,10 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert read_port.calls == [request]
         assert result.receipt.uds_final_seq == 2
         assert len(result.receipt.read_observations) == 1
+        assert result.reply_chunks == (
+            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
+            "por BRL 480.00. Nada foi reservado.",
+        )
         row = store._connection.execute(
             "SELECT artifact_kind,frame_sequence,frame_reference "
             "FROM boundary_turn_artifacts WHERE artifact_kind='read_observation'"
@@ -1404,6 +1433,73 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert row[1] is None
         assert type(row[2]) is str and len(row[2]) == 64
     finally:
+        store.close()
+
+
+def test_private_update_with_positive_read_keeps_commercial_reply_without_private_echo(
+    tmp_path,
+) -> None:
+    private_name = "Pessoa Consulta Privada"
+    private_email = "consulta.privada@example.invalid"
+    request = ReadRequest(
+        request_id="read:private-update-commercial-reply",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou consultar.",),
+        facts=(
+            ModelFact("full_name", private_name),
+            ModelFact("email", private_email),
+            ModelFact("country_code", "BR"),
+        ),
+        read_requests=(request,),
+        effect_proposals=(),
+    )
+    followup = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(f"{private_name}, encontrei uma suíte disponível.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(tmp_path / "private-reply.sqlite3")
+    model = FakeAuditedModel(store, [first, followup])
+    port = FakeLodgingReadPort(store)
+    _install_public_authority(store)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({ReadKind.LODGING: port}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        public_text = " ".join(result.reply_chunks)
+        assert "Suíte Casal" in public_text
+        assert "BRL 480.00" in public_text
+        assert private_name not in public_text
+        assert private_email not in public_text
+        assert "Guardei esses dados" not in public_text
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        private_store.close()
         store.close()
 
 
@@ -2286,6 +2382,19 @@ def test_conversation_country_marks_authenticated_manychat_contact_complete_next
 
 
 def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
+    package_event = replace(
+        EVENT,
+        text=(
+            "Quero hostel de 10/08/2026 a 12/08/2026 e Buracão em "
+            "12/08/2026 para 2 adultos e nenhuma criança. Consulte os dois."
+        ),
+        payload_hash="5" * 64,
+    )
+    package_batch = replace(
+        BATCH,
+        events=(package_event,),
+        combined_text=package_event.text,
+    )
     lodging = ReadRequest(
         request_id="read:package-lodging",
         kind=ReadKind.LODGING,
@@ -2313,7 +2422,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         source_event_id=BATCH.batch_id,
         intent="inform",
         reply_chunks=("Encontrei opções de hospedagem e Buracão.",),
-        facts=(ModelFact("service", "package"),),
+        facts=(),
         read_requests=(),
         effect_proposals=(),
     )
@@ -2321,7 +2430,12 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
     model = FakeAuditedModel(store, [first, final])
     lodging_port = FakeLodgingReadPort(store)
     activity_port = FakeActivityReadPort(store)
-    _install_public_authority(store)
+    package_authority = replace(
+        AUTHORITY,
+        allocation_ids=("allocation:package:0", "allocation:package:1"),
+        allocation_manifest_hash="5" * 64,
+    )
+    _install_public_authority(store, package_authority)
     executor = _executor(
         store=store,
         model=model,
@@ -2332,14 +2446,30 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
                 ReadKind.ACTIVITY: activity_port,
             }
         ),
+        public_authority=MappingAuthority(
+            {package_batch.batch_id: package_authority}
+        ),
     )
     try:
-        result = executor.execute(BATCH)
+        result = executor.execute(package_batch)
 
-        assert result.reply_chunks == ("Encontrei opções de hospedagem e Buracão.",)
+        assert result.reply_chunks == (
+            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
+            "por BRL 480.00. Nada foi reservado.",
+            "Encontrei Cachoeira do Buracão disponível em 12/08/2026 por "
+            "BRL 1300.00. Nada foi reservado.",
+        )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [activity]
         assert len(result.receipt.read_observations) == 2
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert projection is not None
+        assert {item.value for item in projection.desired_services} == {
+            "hostel",
+            "agency",
+        }
+        service_fact = next(item for item in projection.facts if item.name == "service")
+        assert service_fact.value.value == "package"
     finally:
         store.close()
 
@@ -2371,8 +2501,8 @@ def test_authenticated_phone_allows_read_only_package_without_country() -> None:
     final = ModelProposal(
         source_event_id=BATCH.batch_id,
         intent="inform",
-        reply_chunks=("Encontrei opções de hospedagem e Buracão.",),
-        facts=(ModelFact("service", "package"),),
+        reply_chunks=("Encontrei Suíte Casal e Buracão disponíveis.",),
+        facts=(),
         read_requests=(),
         effect_proposals=(),
     )
@@ -2398,7 +2528,9 @@ def test_authenticated_phone_allows_read_only_package_without_country() -> None:
         assert model.calls[0].private_profile_complete is False
         assert model.calls[1].private_profile_complete is False
         assert len(model.calls[1].observations) == 2
-        assert result.reply_chunks == ("Encontrei opções de hospedagem e Buracão.",)
+        assert result.reply_chunks == (
+            "Encontrei Suíte Casal e Buracão disponíveis.",
+        )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [activity]
         assert len(result.receipt.read_observations) == 2
@@ -2910,7 +3042,9 @@ def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
         read_requests=(),
         effect_proposals=(),
     )
-    assert reads_allowed(adjustment) is False
+    assert reads_allowed(adjustment) is True
+    assert reads_allowed(adjustment, now=pending.expires_at) is True
+    assert reads_allowed(adjustment, material_scope_bound=False) is True
     information = replace(
         adjustment,
         source_event_id="batch:critical-information",
@@ -3011,6 +3145,138 @@ def test_confirmation_without_domain_command_never_claims_processing() -> None:
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_command_relays"
         ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+def test_adjustment_revokes_pending_summary_and_reads_new_scope_in_same_turn() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=30),
+        confirmation_clock=SequenceClock(),
+    )
+    adjusted_event = replace(
+        second_batch.events[0],
+        text="Mude para 11/08/2026 a 13/08/2026 e consulte novamente.",
+        payload_hash="3" * 64,
+    )
+    adjusted_batch = replace(
+        second_batch,
+        events=(adjusted_event,),
+        combined_text=adjusted_event.text,
+    )
+    adjusted_read = ReadRequest(
+        request_id="read:adjusted-scope",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 11),
+        check_out=date(2026, 8, 13),
+        adults=2,
+        children=0,
+    )
+    model.proposals[:] = [
+        ModelProposal(
+            source_event_id=adjusted_batch.batch_id,
+            intent="adjust",
+            reply_chunks=("Vou consultar as novas datas.",),
+            facts=(
+                ModelFact("start_date", date(2026, 8, 11)),
+                ModelFact("end_date", date(2026, 8, 13)),
+            ),
+            read_requests=(),
+            effect_proposals=(),
+            pending_disposition="revoke",
+        ),
+        ModelProposal(
+            source_event_id=adjusted_batch.batch_id,
+            intent="inform",
+            reply_chunks=("As novas datas estão disponíveis.",),
+            facts=(),
+            read_requests=(),
+            effect_proposals=(),
+        ),
+    ]
+    try:
+        result = executor.execute(adjusted_batch)
+
+        observed_adjustment_read = read_port.calls[-1]
+        assert replace(
+            observed_adjustment_read,
+            request_id=adjusted_read.request_id,
+        ) == adjusted_read
+        assert len(read_port.calls) == 2
+        assert "disponível" in " ".join(result.reply_chunks).casefold()
+        assert type(store.load_state(BATCH.lead_id).state.workflow) is AwaitingAdjustmentState
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        store.close()
+
+
+def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=30),
+        confirmation_clock=SequenceClock(),
+    )
+    try:
+        confirmed = executor.execute(second_batch)
+        assert len(confirmed.receipt.command_rows) == 1
+        reads_after_confirmation = len(read_port.calls)
+
+        duplicate_event = replace(
+            second_batch.events[0],
+            event_id="event:queued-duplicate-new-event",
+            occurred_at=NOW + timedelta(seconds=1),
+            payload_hash="4" * 64,
+        )
+        duplicate_batch = InboundBatch(
+            batch_id="batch:queued-duplicate-new-event",
+            lead_id=second_batch.lead_id,
+            subscriber_id=second_batch.subscriber_id,
+            events=(duplicate_event,),
+            combined_text=duplicate_event.text,
+        )
+        duplicate_authority = replace(
+            AUTHORITY,
+            authorization_id="auth:queued-duplicate-new-event",
+            allocation_ids=("allocation:queued-duplicate-new-event",),
+            allocation_manifest_hash="4" * 64,
+        )
+        _install_public_authority(store, duplicate_authority)
+        executor._public_authority.values[duplicate_batch.batch_id] = duplicate_authority
+        repeated_read = ReadRequest(
+            request_id="read:queued-duplicate-new-event",
+            kind=ReadKind.LODGING,
+            check_in=date(2026, 8, 10),
+            check_out=date(2026, 8, 12),
+            adults=2,
+            children=0,
+        )
+        model.proposals[:] = [
+            ModelProposal(
+                source_event_id=duplicate_batch.batch_id,
+                intent="inform",
+                reply_chunks=("Vou consultar novamente.",),
+                facts=(),
+                read_requests=(repeated_read,),
+                effect_proposals=(),
+                selection_requested=True,
+            ),
+            ModelProposal(
+                source_event_id=duplicate_batch.batch_id,
+                intent="inform",
+                reply_chunks=("Qual quarto você prefere?",),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            ),
+        ]
+
+        duplicate = executor.execute(duplicate_batch)
+
+        assert len(read_port.calls) == reads_after_confirmation
+        assert "processamento" in " ".join(duplicate.reply_chunks).casefold()
+        assert store._connection.execute(
+            "SELECT count(*) FROM boundary_commands"
+        ).fetchone() == (1,)
     finally:
         store.close()
 
