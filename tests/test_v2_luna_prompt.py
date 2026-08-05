@@ -42,6 +42,21 @@ def test_private_profile_marker_prevents_reasking_authenticated_contact() -> Non
     assert "female→f" in PROMPT
 
 
+def test_holder_ambiguity_never_blocks_a_complete_read_only_consultation() -> None:
+    assert "Ambiguidade sobre qual acompanhante será o titular nunca bloqueia" in PROMPT
+    assert "identidade do titular é requisito para selecionar/reservar" in PROMPT
+    assert "não para consultar" in PROMPT
+
+
+def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
+    assert "`active_execution_status`" in PROMPT
+    assert "uma reserva já está em processamento" in PROMPT
+    assert "nunca nova escolha, read, seleção, confirmação ou promessa de reenvio" in PROMPT
+    assert "`recap_reuse_required: bool`" in PROMPT
+    assert "read_requests=[]" in PROMPT
+    assert "sem seleção, confirmação, facts privados, passengers ou efeitos" in PROMPT
+
+
 def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> None:
     assert "Toda data de serviço explícita na mensagem atual" in PROMPT
     assert "toda quantidade explícita de adultos/crianças/participantes" in PROMPT

@@ -150,6 +150,9 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     assert user["handoff_active"] is False
     assert user["confirmation_review_required"] is False
     assert user["selection_review_required"] is False
+    assert user["active_execution_status"] is None
+    assert user["recap_reuse_required"] is False
+    assert "identity is a write-boundary requirement" in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
         "Pessoa Qualificação",
@@ -218,6 +221,59 @@ def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
         "offer:",
     ):
         assert forbidden not in serialized
+
+
+def test_active_execution_and_recap_reuse_are_closed_public_markers() -> None:
+    history = ConsultationHistoryEntry(
+        observation_hash="b" * 64,
+        observed_at=datetime(2026, 8, 4, 2, 30, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 8, 4, 2, 35, tzinfo=timezone.utc),
+        fresh_at_turn_start=True,
+        public_context={
+            "service": "lodging",
+            "status": "negative",
+            "query": {
+                "check_in": "2026-09-13",
+                "check_out": "2026-09-15",
+                "adults": 2,
+                "children": 0,
+            },
+            "offers": [],
+            "offer_count": 0,
+            "offers_truncated": False,
+        },
+    )
+    request = ModelRequest(
+        request_id="request:closed-runtime-markers",
+        lead_id="manychat:closed-runtime-markers",
+        source_event_id="batch:closed-runtime-markers",
+        message="Recapitule sem fazer outra consulta.",
+        locale="pt-BR",
+        state_version=3,
+        consultation_history=(history,),
+        active_execution_status="queued",
+        recap_reuse_required=True,
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    user = json.loads(envelope["messages"][0][1])
+    prompt = envelope["system_prompt"]
+
+    assert user["active_execution_status"] == "queued"
+    assert user["recap_reuse_required"] is True
+    assert user["observations"] == []
+    assert "ACTIVE EXECUTION STATUS" in prompt
+    assert "FRESH CONSULTATION REUSE" in prompt
+    with pytest.raises(InvalidModelProposal, match="closed request catalog"):
+        ModelRequest(
+            request_id="request:bad-active-status",
+            lead_id="manychat:bad-active-status",
+            source_event_id="batch:bad-active-status",
+            message="Status.",
+            locale="pt-BR",
+            state_version=0,
+            active_execution_status="finished",
+        )
 
 
 def test_original_private_context_reaches_maya_with_holder_semantics() -> None:

@@ -7,10 +7,84 @@ from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
+def active_execution_status(state: BoundaryState) -> str | None:
+    if type(state) is not BoundaryState:
+        raise TypeError("active execution status requires an exact BoundaryState")
+    if type(state.workflow) is ExecutionQueuedState:
+        return "queued"
+    if type(state.workflow) is ExecutingState:
+        return "executing"
+    return None
+
+
 def execution_in_progress_reply(locale: str) -> tuple[str, ...]:
     if locale.casefold().startswith("en"):
         return ("That booking is already being processed. I won’t submit it again.",)
     return ("Essa reserva já está em processamento. Não vou enviá-la novamente.",)
+
+
+def blocks_active_commercial_progression(
+    state: BoundaryState,
+    proposal: ModelProposal,
+) -> bool:
+    """Keep an enqueued/executing draft authoritative over new commercial progress."""
+
+    if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
+        raise TypeError("active progression guard requires exact V2 contracts")
+    if active_execution_status(state) is None:
+        return False
+    if (
+        proposal.intent in {"select", "confirm", "adjust"}
+        or proposal.target_offer_id is not None
+        or proposal.target_offer_ids
+        or proposal.selection_requested
+        or proposal.passengers
+        or proposal.effect_proposals
+        or any(fact.name != "language" for fact in proposal.facts)
+    ):
+        return True
+    return any(
+        request.kind in {ReadKind.LODGING, ReadKind.ACTIVITY}
+        for request in proposal.read_requests
+    )
+
+
+def is_short_inert_post_command_followup(
+    state: BoundaryState,
+    proposal: ModelProposal,
+    message: str,
+) -> bool:
+    """Ground a regressive model question while the same command is active.
+
+    This is status-only: it cannot authorize, enqueue, select, or read anything. It
+    applies only when a short non-question follow-up incorrectly produces another
+    question; factual answers and explicit customer questions remain conversational.
+    """
+
+    if (
+        type(state) is not BoundaryState
+        or type(proposal) is not ModelProposal
+        or type(message) is not str
+    ):
+        raise TypeError("post-command followup requires exact V2 contracts")
+    if active_execution_status(state) is None:
+        return False
+    if (
+        proposal.intent != "inform"
+        or proposal.facts
+        or proposal.read_requests
+        or proposal.effect_proposals
+        or proposal.target_offer_id is not None
+        or proposal.target_offer_ids
+        or proposal.selection_requested
+        or proposal.passengers
+    ):
+        return False
+    if "?" in message or "¿" in message:
+        return False
+    if not any("?" in chunk or "¿" in chunk for chunk in proposal.reply_chunks):
+        return False
+    return 0 < len(message.split()) <= 12
 
 
 def _request_matches_active_draft(

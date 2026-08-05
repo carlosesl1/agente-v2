@@ -248,6 +248,8 @@ class ModelRequest:
     handoff_active: bool = False
     confirmation_review_required: bool = False
     selection_review_required: bool = False
+    active_execution_status: str | None = None
+    recap_reuse_required: bool = False
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
@@ -363,6 +365,22 @@ class ModelRequest:
             raise InvalidModelProposal("selection review is allowed only before reads")
         if self.selection_review_required and self.confirmation_review_required:
             raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
+        if self.active_execution_status not in (None, "queued", "executing"):
+            raise InvalidModelProposal(
+                "active_execution_status is outside the closed request catalog"
+            )
+        if type(self.recap_reuse_required) is not bool:
+            raise InvalidModelProposal(
+                "recap_reuse_required must be an exact boolean"
+            )
+        if self.recap_reuse_required and (
+            self.observations
+            or self.confirmation_review_required
+            or self.selection_review_required
+        ):
+            raise InvalidModelProposal(
+                "recap reuse cannot coexist with observations or semantic reviews"
+            )
 
 
 @dataclass(frozen=True, slots=True, repr=False)

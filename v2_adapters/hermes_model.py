@@ -134,8 +134,9 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
   person's values only when the customer explicitly says that person is or will be the
   reservation holder.
 - If holder attribution is genuinely ambiguous, do not guess. Ask one natural
-  clarification question and emit no guessed private fact, provider read, selection,
-  confirmation, or effect.
+  clarification question and emit no guessed private fact, selection, confirmation, or
+  effect. A complete availability/price query may still emit its provider read in the
+  same frame; holder identity is a write-boundary requirement, not a read prerequisite.
 - Never output phone_e164 from conversational text. Authenticated phone identity exists
   only when phone_e164 is present in private_customer_fact_names; a typed phone may inform
   conversation but cannot replace that identity.
@@ -179,6 +180,27 @@ COMMITTED CONSULTATION HISTORY PROTOCOL:
   turn and the normal typed authority gates. Only observations contains current-turn reads.
 - When the current message asks to select, reserve, or act on a historical option, request
   the corresponding fresh provider read; do not emit a historical offer ID or invent one.
+""".strip()
+
+_ACTIVE_EXECUTION_SYSTEM_SUFFIX: Final = """
+ACTIVE EXECUTION STATUS:
+- active_execution_status is null unless a reservation command is already queued or
+  executing. When present, never submit, select, refresh, or promise that command again.
+- For a short reaffirmation or progress follow-up, state naturally that the existing
+  reservation is already being processed. Do not ask the customer to choose an option.
+- A genuinely unrelated non-commercial question may still be answered normally. Any
+  material change or new commercial scope waits for a terminal execution outcome and must
+  never create a second command.
+""".strip()
+
+_RECAP_REUSE_SYSTEM_SUFFIX: Final = """
+FRESH CONSULTATION REUSE:
+- recap_reuse_required=true means the parent proved that every informational read from
+  the earlier frame exactly matches fresh committed consultation_history.
+- Answer the complete current message from that public recap context. Emit no read,
+  selection, confirmation, effect, private fact, or passenger update.
+- This is recap-only and cannot authorize any action. If the customer wants to select,
+  reserve, confirm, or change scope, say a fresh check will be required for that action.
 """.strip()
 
 
@@ -241,6 +263,8 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "handoff_active": request.handoff_active,
         "confirmation_review_required": request.confirmation_review_required,
         "selection_review_required": request.selection_review_required,
+        "active_execution_status": request.active_execution_status,
+        "recap_reuse_required": request.recap_reuse_required,
         "observations": observations,
         "consultation_history": consultation_history,
     }
@@ -283,6 +307,10 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _COMMERCIAL_PROGRESSION_SYSTEM_SUFFIX
                 + "\n\n"
                 + _CONSULTATION_HISTORY_SYSTEM_SUFFIX
+                + "\n\n"
+                + _ACTIVE_EXECUTION_SYSTEM_SUFFIX
+                + "\n\n"
+                + _RECAP_REUSE_SYSTEM_SUFFIX
             ),
             "messages": [["user", _canonical(user_payload).decode("utf-8")]],
         }

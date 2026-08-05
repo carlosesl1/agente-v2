@@ -63,10 +63,13 @@ from reservation_domain import (
 )
 from reservation_followup import HandoffRequested
 from v2_application.active_execution import (
+    active_execution_status,
+    blocks_active_commercial_progression,
     execution_in_progress_reply,
-    is_redundant_post_command_read,
+    is_short_inert_post_command_followup,
 )
 from v2_application.conversation import (
+    ConversationReductionError,
     V2ConversationReducer,
     effective_customer_material_hash,
     reservation_profile_ready,
@@ -94,8 +97,10 @@ from v2_application.relay_worker import (
 from v2_application.reservations import ReservationAllocator
 from v2_application.turn_plan import (
     derive_adjustment_reads,
+    normalize_initial_commercial_plan,
     preserve_initial_adjustment,
     preserve_initial_facts,
+    reuses_fresh_consultation,
 )
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
@@ -315,6 +320,19 @@ _PT_ACTIVITY_DATE_RE: Final = re.compile(
     r"\s+de\s+(\d{4})\b",
     re.IGNORECASE,
 )
+_DMY_LODGING_RANGE_RE: Final = re.compile(
+    r"\b(\d{1,2})/(\d{1,2})/(\d{4})\s*(?:a|ate|até|to|-)\s*"
+    r"(\d{1,2})/(\d{1,2})/(\d{4})\b",
+    re.IGNORECASE,
+)
+_EN_LODGING_RANGE_RE: Final = re.compile(
+    r"\b(?:from\s+)?"
+    r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"\s+(\d{1,2})(?:,?\s+(\d{4}))?\s+(?:to|until|-)\s+"
+    r"(?:(january|february|march|april|may|june|july|august|september|october|november|december)\s+)?"
+    r"(\d{1,2}),?\s+(\d{4})\b",
+    re.IGNORECASE,
+)
 _PT_MONTHS: Final = {
     "janeiro": 1,
     "fevereiro": 2,
@@ -359,6 +377,120 @@ def _catalog_aliases() -> tuple[tuple[str, str], ...]:
     return tuple(sorted(aliases.items(), key=lambda item: (-len(item[0]), item[0])))
 
 
+def _explicit_lodging_facts(message: str, folded: str) -> tuple[ModelFact, ...]:
+    padded = f" {folded} "
+    lodging_markers = (
+        " private room ",
+        " dormitory ",
+        " dorm bed ",
+        " accommodation ",
+        " hostel ",
+        " quarto privativo ",
+        " cama em dormitorio ",
+        " hospedagem ",
+        " quarto ",
+    )
+    if not any(marker in padded for marker in lodging_markers):
+        return ()
+
+    periods: set[tuple[date, date]] = set()
+    for match in _DMY_LODGING_RANGE_RE.finditer(message):
+        check_in = _safe_date(
+            int(match.group(3)),
+            int(match.group(2)),
+            int(match.group(1)),
+        )
+        check_out = _safe_date(
+            int(match.group(6)),
+            int(match.group(5)),
+            int(match.group(4)),
+        )
+        if check_in is not None and check_out is not None and check_in < check_out:
+            periods.add((check_in, check_out))
+    for match in _EN_LODGING_RANGE_RE.finditer(message):
+        year = int(match.group(6))
+        check_in = _safe_date(
+            int(match.group(3)) if match.group(3) is not None else year,
+            _EN_MONTHS[match.group(1).casefold()],
+            int(match.group(2)),
+        )
+        check_out = _safe_date(
+            year,
+            _EN_MONTHS[(match.group(4) or match.group(1)).casefold()],
+            int(match.group(5)),
+        )
+        if check_in is not None and check_out is not None and check_in < check_out:
+            periods.add((check_in, check_out))
+    if len(periods) != 1:
+        return ()
+
+    number_words = {
+        "one": 1,
+        "um": 1,
+        "uma": 1,
+        "dois": 2,
+        "duas": 2,
+    }
+    adults: set[int] = set()
+    for pattern in (
+        r"\bfor\s+(one|\d+)\s+(?:adult|person|guest)s?\b",
+        r"\bpara\s+(um|uma|dois|duas|\d+)\s+(?:adulto|adulta|pessoa|hospede)s?\b",
+    ):
+        for match in re.finditer(pattern, folded):
+            token = match.group(1)
+            adults.add(number_words.get(token, int(token) if token.isdigit() else 0))
+    if re.search(r"\b(?:so eu|just me)\b", folded):
+        adults.add(1)
+    adults.discard(0)
+    if len(adults) != 1:
+        return ()
+
+    children: set[int] = set()
+    if re.search(
+        r"\b(?:no children|without children|sem criancas|nenhuma crianca)\b",
+        folded,
+    ):
+        children.add(0)
+    for pattern in (
+        r"\b(?:with|and)\s+(one|\d+)\s+(?:child|children)\b",
+        r"\b(?:com|e)\s+(um|uma|\d+)\s+criancas?\b",
+    ):
+        for match in re.finditer(pattern, folded):
+            token = match.group(1)
+            children.add(number_words.get(token, int(token) if token.isdigit() else 0))
+    if len(children) > 1:
+        return ()
+    child_count = next(iter(children)) if children else 0
+    check_in, check_out = next(iter(periods))
+    facts: list[ModelFact] = []
+    english_markers = len(
+        re.findall(
+            r"\b(?:i|please|room|booking|check|availability|adult|guest)\b",
+            folded,
+        )
+    )
+    portuguese_markers = len(
+        re.findall(
+            r"\b(?:quero|reservar|quarto|hospedagem|adultos?|criancas?|disponibilidade)\b",
+            folded,
+        )
+    )
+    if english_markers >= 2 and english_markers > portuguese_markers:
+        facts.append(ModelFact("language", "en"))
+    elif portuguese_markers >= 2 and portuguese_markers > english_markers:
+        facts.append(ModelFact("language", "pt-BR"))
+    facts.extend(
+        (
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", check_in),
+            ModelFact("end_date", check_out),
+            ModelFact("adults", next(iter(adults))),
+            ModelFact("children", child_count),
+        )
+    )
+    return tuple(facts)
+
+
 def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
     if type(message) is not str or not message:
         raise ValueError("message must be non-empty exact text")
@@ -400,6 +532,7 @@ def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
         if f" {alias} " in padded
     }
     if len(products) != 1:
+        facts.extend(_explicit_lodging_facts(message, folded))
         return tuple(facts)
     product_id = next(iter(products))
 
@@ -547,6 +680,58 @@ def _explicit_summary_preparation_requested(message: str) -> bool:
             "prepare the booking summary",
             "prepare o resumo final",
             "preparar o resumo final",
+        )
+    )
+
+
+def _explicit_commercial_read_requested(message: str) -> bool:
+    if type(message) is not str or not message:
+        raise ValueError("message must be non-empty exact text")
+    folded = _fold_public_text(message)
+    if any(
+        phrase in folded
+        for phrase in (
+            "do not check",
+            "dont check",
+            "do not consult",
+            "dont consult",
+            "without checking",
+            "nao consulte",
+            "nao consultar",
+            "sem consultar",
+            "nao verifique",
+            "sem verificar",
+        )
+    ):
+        return False
+    return any(
+        phrase in folded
+        for phrase in (
+            "availability",
+            "room available",
+            "check the price",
+            "check availability",
+            "consult availability",
+            "what is the rate",
+            "nightly rate",
+            "room rate",
+            "rate for",
+            "what is the price",
+            "room price",
+            "price for",
+            "disponibilidade",
+            "quarto disponivel",
+            "tem vaga",
+            "tem quarto",
+            "consulte",
+            "consultar",
+            "verifique",
+            "verificar",
+            "quanto custa",
+            "qual o valor",
+            "qual e o valor",
+            "preco para",
+            "valor para",
         )
     )
 
@@ -1048,6 +1233,63 @@ def _collection_reply(
     if locale.startswith("en"):
         return "Thank you. I saved those details so we can continue the reservation."
     return "Obrigado. Guardei esses dados para continuar a reserva."
+
+
+def _consultation_reuse_fallback(locale: str) -> tuple[str, ...]:
+    if locale.startswith("en"):
+        return (
+            "The earlier lookup for this same scope is still fresh. I can recap it, but selecting or booking requires the normal fresh-action checks.",
+        )
+    return (
+        "A consulta anterior para esse mesmo escopo ainda está válida. Posso recapitulá-la, mas selecionar ou reservar exige as verificações normais da ação.",
+    )
+
+
+def _selection_binding_failure_proposal(
+    proposal: ModelProposal,
+    *,
+    locale: str,
+) -> ModelProposal:
+    if proposal.intent != "select":
+        raise ValueError("selection binding fallback requires select intent")
+    reply = (
+        "I couldn’t bind that choice to exactly one current option. Nothing was "
+        "reserved; I’ll refresh it before preparing a summary."
+        if locale.casefold().startswith("en")
+        else "Não consegui vincular essa escolha a uma única opção atual. Nada foi "
+        "reservado; vou atualizá-la antes de preparar um resumo."
+    )
+    return replace(
+        proposal,
+        intent="inform",
+        reply_chunks=(reply,),
+        target_offer_id=None,
+        target_offer_ids=(),
+        selection_requested=False,
+    )
+
+
+def _active_execution_guard_proposal(
+    proposal: ModelProposal,
+    *,
+    locale: str,
+) -> ModelProposal:
+    return replace(
+        proposal,
+        intent="inform",
+        reply_chunks=execution_in_progress_reply(locale),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id=None,
+        target_offer_ids=(),
+        confirmed_summary_version=None,
+        confirmed_action_kinds=(),
+        approval_basis=None,
+        selection_requested=False,
+        pending_disposition=None,
+        passengers=(),
+    )
 
 
 def _collection_only_proposal(
@@ -1702,6 +1944,7 @@ class V2TurnExecutor:
             pending_action=pending_action,
             private_profile_complete=effective_profile_complete,
             handoff_active=current.state.handoff is not None,
+            active_execution_status=active_execution_status(current.state),
         )
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
@@ -1744,6 +1987,22 @@ class V2TurnExecutor:
                 invalid_fact_names=first_invalid_private_facts,
                 revoke_pending=pending_action is not None,
             )
+        else:
+            first_proposal = (
+                normalize_initial_commercial_plan(
+                    first_proposal,
+                    informational_read_requested=_explicit_commercial_read_requested(
+                        batch.combined_text
+                    ),
+                )
+                if pending_action is None
+                else first_proposal
+            )
+        if blocks_active_commercial_progression(current.state, first_proposal):
+            first_proposal = _active_execution_guard_proposal(
+                first_proposal,
+                locale=projection.locale,
+            )
         first_audited = AuditedModelTurn.from_frames(
             proposal=first_proposal,
             frames=first_audited.frames,
@@ -1758,6 +2017,7 @@ class V2TurnExecutor:
         selection_review = (
             not collection_only
             and current.state.handoff is None
+            and active_execution_status(current.state) is None
             and pending_action is None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
@@ -1868,6 +2128,18 @@ class V2TurnExecutor:
                 frames=(*first_audited.frames, *review_audited.frames),
                 ephemeral_session_id=review_audited.closure.ephemeral_session_id,
             )
+        if not collection_only and pending_action is None:
+            first_proposal = normalize_initial_commercial_plan(
+                first_proposal,
+                informational_read_requested=_explicit_commercial_read_requested(
+                    batch.combined_text
+                ),
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
+            )
         if (
             not collection_only
             and selection_review
@@ -1948,21 +2220,58 @@ class V2TurnExecutor:
                 item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
             )
             derived_confirmation_reads = False
-        if is_redundant_post_command_read(
-            current.state,
-            projection,
-            first_proposal,
-            read_requests,
+        if blocks_active_commercial_progression(current.state, first_proposal):
+            read_requests = ()
+            derived_confirmation_reads = False
+            first_proposal = _active_execution_guard_proposal(
+                first_proposal,
+                locale=projection.locale,
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
+            )
+        pre_read_floor = now
+        reused_consultation = False
+        consultation_reuse_proposal: ModelProposal | None = None
+        if (
+            pending_action is None
+            and not private_update_turn
+            and bool(read_requests)
+            and read_requests == first_proposal.read_requests
         ):
+            reuse_now = self._clock.now()
+            if (
+                type(reuse_now) is not datetime
+                or reuse_now.tzinfo is None
+                or reuse_now.utcoffset() != timedelta(0)
+                or reuse_now < pre_read_floor
+            ):
+                raise TurnExecutionError("consultation reuse clock is not monotonic UTC")
+            if reuse_now > now + self._turn_timeout:
+                raise TurnExecutionError("turn deadline expired before consultation reuse")
+            pre_read_floor = reuse_now
+            reused_consultation = reuses_fresh_consultation(
+                first_proposal,
+                consultation_history,
+                now=reuse_now,
+            )
+        if reused_consultation:
+            consultation_reuse_proposal = first_proposal
             read_requests = ()
             derived_confirmation_reads = False
             first_proposal = replace(
                 first_proposal,
-                reply_chunks=execution_in_progress_reply(projection.locale),
                 read_requests=(),
                 target_offer_id=None,
                 target_offer_ids=(),
                 selection_requested=False,
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
             )
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
@@ -1970,7 +2279,7 @@ class V2TurnExecutor:
         v2_observations = ()
         if read_requests:
             accepted_observations: list[ReadObservation] = []
-            read_floor = now
+            read_floor = pre_read_floor
             for item in read_requests:
                 read_now = self._clock.now()
                 if (
@@ -2016,7 +2325,7 @@ class V2TurnExecutor:
             v2_observations = tuple(accepted_observations)
         if not read_requests and first_proposal.read_requests:
             first_proposal = replace(first_proposal, read_requests=())
-        if read_requests:
+        if read_requests or reused_consultation:
             followup = ModelRequest(
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
@@ -2041,6 +2350,8 @@ class V2TurnExecutor:
                 pending_action=pending_action,
                 private_profile_complete=effective_profile_complete,
                 handoff_active=current.state.handoff is not None,
+                active_execution_status=active_execution_status(current.state),
+                recap_reuse_required=reused_consultation,
             )
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:
@@ -2051,6 +2362,20 @@ class V2TurnExecutor:
             )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
+            if reused_consultation and (
+                proposal.intent != "inform"
+                or proposal.facts
+                or proposal.read_requests
+                or proposal.effect_proposals
+                or proposal.target_offer_id is not None
+                or proposal.target_offer_ids
+                or proposal.selection_requested
+                or proposal.passengers
+            ):
+                proposal = replace(
+                    first_proposal,
+                    reply_chunks=_consultation_reuse_fallback(projection.locale),
+                )
             (
                 second_private_facts,
                 second_public_facts,
@@ -2082,6 +2407,11 @@ class V2TurnExecutor:
                     locale=projection.locale,
                     invalid_fact_names=second_invalid_private_facts,
                     revoke_pending=pending_action is not None,
+                )
+            if blocks_active_commercial_progression(current.state, proposal):
+                proposal = _active_execution_guard_proposal(
+                    proposal,
+                    locale=projection.locale,
                 )
             second_audited = AuditedModelTurn.from_frames(
                 proposal=proposal,
@@ -2134,6 +2464,20 @@ class V2TurnExecutor:
                 pending_action=pending_action,
                 locale=projection.locale,
             )
+        if blocks_active_commercial_progression(current.state, proposal):
+            proposal = _active_execution_guard_proposal(
+                proposal,
+                locale=projection.locale,
+            )
+        elif is_short_inert_post_command_followup(
+            current.state,
+            proposal,
+            batch.combined_text,
+        ):
+            proposal = replace(
+                proposal,
+                reply_chunks=execution_in_progress_reply(projection.locale),
+            )
         proposal = apply_positive_grounding(
             proposal,
             v2_observations,
@@ -2151,6 +2495,15 @@ class V2TurnExecutor:
             raise TurnExecutionError("decision clock is not monotonic UTC")
         if decision_now > now + self._turn_timeout:
             raise TurnExecutionError("turn deadline expired before decision")
+        if reused_consultation and (
+            consultation_reuse_proposal is None
+            or not reuses_fresh_consultation(
+                consultation_reuse_proposal,
+                consultation_history,
+                now=decision_now,
+            )
+        ):
+            raise TurnExecutionError("consultation expired before recap decision")
         decision_private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(decision_private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")
@@ -2204,16 +2557,39 @@ class V2TurnExecutor:
             for read_request, observation in zip(read_requests, v2_observations)
             if read_request.kind in (ReadKind.LODGING, ReadKind.ACTIVITY)
         )
-        decision = self._reducer.reduce(
-            state=current.state,
-            projection=projection,
-            proposal=proposal,
-            profile=profile,
-            private_facts=private_facts,
-            reads=v2_observations,
-            fact_commitment_hash=fact_commitment_hash,
-            now=decision_now,
-        )
+        try:
+            decision = self._reducer.reduce(
+                state=current.state,
+                projection=projection,
+                proposal=proposal,
+                profile=profile,
+                private_facts=private_facts,
+                reads=v2_observations,
+                fact_commitment_hash=fact_commitment_hash,
+                now=decision_now,
+            )
+        except ConversationReductionError:
+            if proposal.intent != "select":
+                raise
+            proposal = _selection_binding_failure_proposal(
+                proposal,
+                locale=projection.locale,
+            )
+            audited = AuditedModelTurn.from_frames(
+                proposal=proposal,
+                frames=audited.frames,
+                ephemeral_session_id=audited.closure.ephemeral_session_id,
+            )
+            decision = self._reducer.reduce(
+                state=current.state,
+                projection=projection,
+                proposal=proposal,
+                profile=profile,
+                private_facts=private_facts,
+                reads=v2_observations,
+                fact_commitment_hash=fact_commitment_hash,
+                now=decision_now,
+            )
         if not any(item.name == "language" for item in decision.projection.facts):
             language_fact = TypedFact(
                 "language",
