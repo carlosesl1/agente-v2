@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -15,6 +16,7 @@ def synthetic_payment_display_details(
     *,
     business_unit: BusinessUnit,
     amount_minor: int,
+    customer_language: CustomerLanguage,
     package_component: bool = False,
 ) -> PaymentDisplayDetails:
     if business_unit is BusinessUnit.HOSTEL:
@@ -28,6 +30,7 @@ def synthetic_payment_display_details(
             children=0,
             reservation_total_minor=amount_minor,
             package_component=package_component,
+            customer_language=customer_language,
         )
     if business_unit is BusinessUnit.AGENCY:
         return PaymentDisplayDetails(
@@ -40,6 +43,7 @@ def synthetic_payment_display_details(
             children=0,
             reservation_total_minor=amount_minor,
             package_component=package_component,
+            customer_language=customer_language,
         )
     raise TypeError("business_unit must be an exact BusinessUnit")
 

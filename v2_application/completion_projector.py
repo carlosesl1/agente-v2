@@ -19,6 +19,10 @@ from reservation_execution.projection import LedgerSnapshot
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from v2_application.completion import PublicOutboxStore, PublicReply
 from v2_application.payments import SQLitePaymentInitiationStore
+from v2_contracts.localization import (
+    CustomerLanguage,
+    customer_language_from_phone,
+)
 from v2_contracts.payments import BusinessUnit, PaymentInstruction, StripePaymentLink
 
 
@@ -128,7 +132,11 @@ class CompletionProjector:
                 raise RuntimeError("completed payment offer has an unknown receiver profile")
             if type(offer) is StripePaymentLink:
                 message_id = _opaque("message:payment-link", offer.payment_id)
-                text = _payment_text(unit, offer.public_url)
+                text = _payment_text(
+                    unit,
+                    offer.public_url,
+                    offer.customer_language,
+                )
             else:
                 message_id = _opaque(
                     f"message:payment-{offer.method.value}",
@@ -179,22 +187,60 @@ def _confirmed_group(
 
 
 def _confirmation_text(commands: tuple[ReservationCommand, ...]) -> str:
+    languages = {
+        customer_language_from_phone(command.payload.customer.phone_e164)
+        for command in commands
+    }
+    if len(languages) != 1:
+        raise RuntimeError("confirmed public group has mixed customer language")
+    language = languages.pop()
     services = {
         command.payload.components[0].service for command in commands
     }
-    if services == {ServiceKind.LODGING, ServiceKind.ACTIVITY}:
-        return "Sua hospedagem e seu passeio foram confirmados."
-    if services == {ServiceKind.LODGING}:
-        return "Sua hospedagem foi confirmada."
-    if services == {ServiceKind.ACTIVITY}:
-        return "Seu passeio foi confirmado."
-    raise RuntimeError("confirmed public group has an unsupported service shape")
+    copy = {
+        CustomerLanguage.PT_BR: {
+            frozenset((ServiceKind.LODGING, ServiceKind.ACTIVITY)): (
+                "Sua hospedagem e seu passeio foram confirmados."
+            ),
+            frozenset((ServiceKind.LODGING,)): "Sua hospedagem foi confirmada.",
+            frozenset((ServiceKind.ACTIVITY,)): "Seu passeio foi confirmado.",
+        },
+        CustomerLanguage.EN: {
+            frozenset((ServiceKind.LODGING, ServiceKind.ACTIVITY)): (
+                "Your accommodation and tour have been confirmed."
+            ),
+            frozenset((ServiceKind.LODGING,)): (
+                "Your accommodation has been confirmed."
+            ),
+            frozenset((ServiceKind.ACTIVITY,)): "Your tour has been confirmed.",
+        },
+    }
+    try:
+        return copy[language][frozenset(services)]
+    except KeyError as exc:
+        raise RuntimeError(
+            "confirmed public group has an unsupported service shape"
+        ) from exc
 
 
-def _payment_text(unit: BusinessUnit, url: str) -> str:
-    if unit is BusinessUnit.HOSTEL:
-        return f"Link de pagamento da hospedagem: {url}"
-    return f"Link de pagamento do passeio: {url}"
+def _payment_text(
+    unit: BusinessUnit,
+    url: str,
+    customer_language: CustomerLanguage | None,
+) -> str:
+    if type(customer_language) is not CustomerLanguage:
+        raise ValueError("payment message requires exact customer_language")
+    label = {
+        CustomerLanguage.PT_BR: {
+            BusinessUnit.HOSTEL: "Link de pagamento da hospedagem",
+            BusinessUnit.AGENCY: "Link de pagamento do passeio",
+        },
+        CustomerLanguage.EN: {
+            BusinessUnit.HOSTEL: "Accommodation payment link",
+            BusinessUnit.AGENCY: "Tour payment link",
+        },
+    }[customer_language][unit]
+    return f"{label}: {url}"
 
 
 def _opaque(prefix: str, *parts: str) -> str:

@@ -23,6 +23,7 @@ from v2_application.recovery import (
 )
 from v2_application.reservations import V2ReservationExecutionAdapter
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     DueKind,
@@ -195,6 +196,7 @@ def _obligation(unit: BusinessUnit, suffix: str) -> PaymentObligation:
         display_details=synthetic_payment_display_details(
             business_unit=unit,
             amount_minor=amount_minor,
+            customer_language=CustomerLanguage.PT_BR,
             package_component=suffix.startswith("package-"),
         ),
     )
