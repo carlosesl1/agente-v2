@@ -278,12 +278,15 @@ def _structured_selection_review_required(
     if type(adults) is not int or type(children) is not int:
         return False
     service = values.get("service")
+    individual_profile_ready = (
+        type(values.get("birth_date")) is date
+        and values.get("gender") in {"m", "f"}
+    )
     passenger_ready = (
         passenger_manifest_complete
-        if service == "package" or adults + children > 1
-        else (
-            type(values.get("birth_date")) is date
-            and values.get("gender") in {"m", "f"}
+        if adults + children > 1
+        else individual_profile_ready or (
+            service == "package" and passenger_manifest_complete
         )
     )
     commercially_complete = (

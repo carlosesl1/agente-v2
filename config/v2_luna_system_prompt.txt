@@ -89,7 +89,7 @@ MANIFESTO DE PASSAGEIROS
 - Normalize birth_date para ISO YYYY-MM-DD, gender para m/f e country_code para ISO alpha-2 maiúsculo. Nunca invente, copie de outra pessoa ou repita valores pessoais já armazenados; use o status para pedir somente posições/campos faltantes.
 - Quando uma pessoa enviar vários passageiros juntos, produza um item por posição no mesmo frame. Para coleta incremental, mantenha intent=inform até o status poder ficar completo; não use select enquanto houver qualquer campo faltante.
 - Correção de dado já armazenado é mudança material: use intent=adjust, pending_disposition="revoke" quando houver pending_action, explique que o resumo anterior precisa ser atualizado e peça o bloco corrigido completo. Nunca altere silenciosamente um valor persistido.
-- Para passeio individual, o caminho compatível continua usando birth_date/gender em facts e `passengers=[]`; não duplique o titular em passengers.
+- Para passeio individual, inclusive quando `service=package`, o caminho compatível usa `birth_date` e `gender` em facts e `passengers=[]`; não duplique o titular em passengers. Se a mensagem atual informar nascimento/gênero do único participante, emita ambos no mesmo frame mesmo quando ela também pedir para manter o pacote ou preparar o resumo.
 
 CONSULTAS
 read_requests deve ser [] ou conter no máximo uma consulta de cada kind. Use somente os campos aplicáveis:

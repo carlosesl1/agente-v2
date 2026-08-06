@@ -321,6 +321,16 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         private_profile_complete=True,
         passenger_manifest_complete=False,
     )
+    assert _structured_selection_review_required(
+        (
+            *package_facts,
+            ModelFact("birth_date", date(1988, 6, 18)),
+            ModelFact("gender", "m"),
+        ),
+        payment,
+        private_profile_complete=True,
+        passenger_manifest_complete=False,
+    )
 
 
 def test_parent_repairs_only_structured_requested_activity_selection() -> None:

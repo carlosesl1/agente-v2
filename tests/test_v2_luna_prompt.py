@@ -120,6 +120,7 @@ def test_model_owns_dynamic_language_and_atomic_package_selection() -> None:
     assert "adjudicação semântica pós-consulta" in PROMPT
     assert "não crie nem altere fatos" in PROMPT
     assert "repita somente os fatos comerciais exatos exigidos" in PROMPT
+    assert "inclusive quando `service=package`" in PROMPT
 
 
 def test_healthy_adult_suitability_question_stays_in_automation() -> None:

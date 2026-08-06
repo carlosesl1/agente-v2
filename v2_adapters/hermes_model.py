@@ -161,6 +161,9 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
   another booking message when the current message already has the required query data.
 - "one adult" or "1 adulto" with no other traveler mentioned means adults=1 and
   children=0 for this read; do not ask a redundant children question.
+- For one activity participant, including service=package, emit explicit birth_date and
+  gender from the current message as typed facts and keep passengers empty. Do this in the
+  same frame even when the message also asks to keep the package or prepare its summary.
 - This progression authorizes only read_requests. It never authorizes a reservation,
   payment, handoff, delivery, or effect.
 - For a package, resolve the customer's lodging and activity references semantically
