@@ -128,6 +128,25 @@ def _exact_payload(snapshot, *, reservation_id: str | None = None):
     }
 
 
+def _real_get_payload(snapshot):
+    facts = snapshot.task.expected
+    return {
+        "success": True,
+        "data": {
+            "reservationID": snapshot.task.reservation_id,
+            "propertyID": facts.property_id,
+            "startDate": facts.start_date,
+            "endDate": facts.end_date,
+            "status": facts.status,
+            "total": float(facts.amount),
+            "assigned": [
+                {"adults": str(facts.adults), "children": str(facts.children)}
+            ],
+            "unassigned": [],
+        },
+    }
+
+
 class ScriptedGETPort:
     def __init__(self, actions: list[object]) -> None:
         self.actions = list(actions)
@@ -347,6 +366,70 @@ def test_eventual_incomplete_then_exact_get_retries_and_matches_with_bindings(
         assert matched.lease is None
         assert worker.run_once(now=NOW + timedelta(seconds=4)) is None
         assert len(port.calls) == 2
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+def test_real_get_shape_derives_party_and_normalizes_numeric_total(
+    tmp_path: Path,
+) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / "real-shape-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        initial = audit_store.list_tasks()[0]
+        payload = _real_get_payload(initial)
+
+        result = _worker(
+            api,
+            audit_store,
+            ScriptedGETPort([payload]),
+        ).run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.status is api.CloudbedsAuditStatus.MATCHED
+        assert result.attempts == 1
+        assert result.lease is None
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+@pytest.mark.parametrize("conflict", ("total", "party", "currency"))
+def test_real_get_shape_conflicts_are_terminal(
+    tmp_path: Path,
+    conflict: str,
+) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / f"real-shape-{conflict}-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        initial = audit_store.list_tasks()[0]
+        payload = _real_get_payload(initial)
+        if conflict == "total":
+            payload["data"]["total"] += 1.0
+        elif conflict == "party":
+            payload["data"]["assigned"][0]["adults"] = str(
+                int(payload["data"]["assigned"][0]["adults"]) + 1
+            )
+        else:
+            payload["data"]["currency"] = "USD"
+
+        result = _worker(
+            api,
+            audit_store,
+            ScriptedGETPort([payload]),
+        ).run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.status is api.CloudbedsAuditStatus.DIVERGENT
+        assert result.attempts == 1
+        assert result.lease is None
     finally:
         audit_store.close()
         execution.close()

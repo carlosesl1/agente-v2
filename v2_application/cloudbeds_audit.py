@@ -592,10 +592,6 @@ def _validate_observation(
         ("propertyID", expected.property_id),
         ("startDate", expected.start_date),
         ("endDate", expected.end_date),
-        ("adults", expected.adults),
-        ("children", expected.children),
-        ("total", expected.amount),
-        ("currency", expected.currency),
         ("status", expected.status),
     )
     if any(name not in data for name, _ in fields):
@@ -604,7 +600,73 @@ def _validate_observation(
         observed = data[name]
         if type(observed) is not type(value) or observed != value:
             return CloudbedsAuditStatus.DIVERGENT
+
+    if "total" not in data:
+        return CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+    observed_amount = _canonical_observed_amount(data["total"])
+    if observed_amount is None or observed_amount != expected.amount:
+        return CloudbedsAuditStatus.DIVERGENT
+    if "currency" in data and (
+        type(data["currency"]) is not str or data["currency"] != expected.currency
+    ):
+        return CloudbedsAuditStatus.DIVERGENT
+
+    party_claims: list[tuple[int, int]] = []
+    top_party_fields = ("adults", "children")
+    if any(name in data for name in top_party_fields):
+        if not all(name in data for name in top_party_fields):
+            return CloudbedsAuditStatus.DIVERGENT
+        adults = _canonical_observed_count(data["adults"])
+        children = _canonical_observed_count(data["children"])
+        if adults is None or adults < 1 or children is None:
+            return CloudbedsAuditStatus.DIVERGENT
+        party_claims.append((adults, children))
+
+    room_fields = ("assigned", "unassigned")
+    if any(name in data for name in room_fields):
+        if not all(type(data.get(name)) is list for name in room_fields):
+            return CloudbedsAuditStatus.DIVERGENT
+        adults = 0
+        children = 0
+        for room in (*data["assigned"], *data["unassigned"]):
+            if type(room) is not dict:
+                return CloudbedsAuditStatus.DIVERGENT
+            room_adults = _canonical_observed_count(room.get("adults"))
+            room_children = _canonical_observed_count(room.get("children"))
+            if room_adults is None or room_children is None:
+                return CloudbedsAuditStatus.DIVERGENT
+            adults += room_adults
+            children += room_children
+        party_claims.append((adults, children))
+
+    if not party_claims:
+        return CloudbedsAuditStatus.RETRYABLE_NOT_VISIBLE
+    if any(claim != (expected.adults, expected.children) for claim in party_claims):
+        return CloudbedsAuditStatus.DIVERGENT
     return CloudbedsAuditStatus.MATCHED
+
+
+def _canonical_observed_amount(value: object) -> str | None:
+    if type(value) not in (str, int, float):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount < 0:
+        return None
+    canonical = amount.quantize(Decimal("0.01"))
+    if canonical != amount:
+        return None
+    return f"{canonical:.2f}"
+
+
+def _canonical_observed_count(value: object) -> int | None:
+    if type(value) is int:
+        return value if value >= 0 else None
+    if type(value) is not str or re.fullmatch(r"(?:0|[1-9][0-9]*)", value) is None:
+        return None
+    return int(value)
 
 
 def _require_text(value: object, name: str) -> str:
