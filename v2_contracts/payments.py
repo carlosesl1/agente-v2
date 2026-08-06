@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from enum import Enum
 import re
 from typing import Final
@@ -18,6 +19,11 @@ _COUNTRY_RE: Final = re.compile(r"^[A-Z]{2}$")
 class BusinessUnit(str, Enum):
     HOSTEL = "hostel"
     AGENCY = "agency"
+
+
+class CheckoutService(str, Enum):
+    LODGING = "lodging"
+    ACTIVITY = "activity"
 
 
 class DueKind(str, Enum):
@@ -45,6 +51,69 @@ def _money(amount_minor: object, currency: object) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class PaymentDisplayDetails:
+    service: CheckoutService
+    public_label: str
+    start_date: date
+    end_date: date | None
+    start_time: str | None
+    adults: int
+    children: int
+    provider_reference: str
+    reservation_total_minor: int
+    package_component: bool
+
+    def __post_init__(self) -> None:
+        if type(self.service) is not CheckoutService:
+            raise TypeError("service must be exact CheckoutService")
+        label = " ".join(str(self.public_label or "").split())
+        if not label or len(label) > 200 or "\x00" in label:
+            raise ValueError(
+                "public_label must contain 1..200 normalized NUL-free characters"
+            )
+        object.__setattr__(self, "public_label", label)
+        if isinstance(self.start_date, datetime) or type(self.start_date) is not date:
+            raise ValueError("start_date must be an exact date")
+        if self.service is CheckoutService.LODGING:
+            if (
+                isinstance(self.end_date, datetime)
+                or type(self.end_date) is not date
+                or self.end_date <= self.start_date
+            ):
+                raise ValueError("lodging requires end_date after start_date")
+            if self.start_time is not None:
+                raise ValueError("lodging forbids start_time")
+        else:
+            if self.end_date is not None:
+                raise ValueError("activity forbids end_date")
+            if self.start_time is not None and re.fullmatch(
+                r"(?:[01]\d|2[0-3]):[0-5]\d", self.start_time
+            ) is None:
+                raise ValueError("activity start_time must use HH:MM or be absent")
+        if type(self.adults) is not int or self.adults < 1:
+            raise ValueError("adults must be an exact integer >= 1")
+        if type(self.children) is not int or self.children < 0:
+            raise ValueError("children must be an exact integer >= 0")
+        reference = str(self.provider_reference or "").strip()
+        if (
+            not reference
+            or len(reference) > 128
+            or "\x00" in reference
+            or reference != self.provider_reference
+        ):
+            raise ValueError("provider_reference must be normalized NUL-free text")
+        if (
+            type(self.reservation_total_minor) is not int
+            or self.reservation_total_minor < 1
+        ):
+            raise ValueError(
+                "reservation_total_minor must be an exact positive integer"
+            )
+        if type(self.package_component) is not bool:
+            raise TypeError("package_component must be an exact boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class PaymentObligation:
     payment_id: str
     reservation_anchor_id: str
@@ -54,6 +123,7 @@ class PaymentObligation:
     due_kind: DueKind
     economic_version: int
     receiver_profile_id: str
+    display_details: PaymentDisplayDetails | None = None
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -66,6 +136,13 @@ class PaymentObligation:
         if type(self.economic_version) is not int or self.economic_version < 1:
             raise ValueError("economic_version must be an exact positive integer")
         _id(self.receiver_profile_id, "receiver_profile_id")
+        if (
+            self.display_details is not None
+            and type(self.display_details) is not PaymentDisplayDetails
+        ):
+            raise TypeError(
+                "display_details must be exact PaymentDisplayDetails or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +155,7 @@ class ReservationPaymentContext:
     receiver_profile_id: str
     guest_country_code: str
     economic_version: int = 1
+    display_details: PaymentDisplayDetails | None = None
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -92,6 +170,13 @@ class ReservationPaymentContext:
             raise ValueError("guest_country_code must be two uppercase letters")
         if type(self.economic_version) is not int or self.economic_version < 1:
             raise ValueError("economic_version must be an exact positive integer")
+        if (
+            self.display_details is not None
+            and type(self.display_details) is not PaymentDisplayDetails
+        ):
+            raise TypeError(
+                "display_details must be exact PaymentDisplayDetails or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +203,7 @@ class StripeLinkRequest:
     subscriber_fingerprint: str = ""
     payment_percentage: int = 100
     business_unit: BusinessUnit = BusinessUnit.HOSTEL
+    display_details: PaymentDisplayDetails | None = None
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -139,6 +225,13 @@ class StripeLinkRequest:
             raise ValueError("payment_percentage must be an exact integer from 1 to 100")
         if type(self.business_unit) is not BusinessUnit:
             raise TypeError("business_unit must be exact BusinessUnit")
+        if (
+            self.display_details is not None
+            and type(self.display_details) is not PaymentDisplayDetails
+        ):
+            raise TypeError(
+                "display_details must be exact PaymentDisplayDetails or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +309,9 @@ class PaymentPlan:
 
 __all__ = [
     "BusinessUnit",
+    "CheckoutService",
     "DueKind",
+    "PaymentDisplayDetails",
     "PaymentInstruction",
     "PaymentMethod",
     "PaymentMethodOffer",

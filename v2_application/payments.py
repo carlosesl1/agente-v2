@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 import hashlib
 import json
@@ -21,7 +21,9 @@ from reservation_followup.sqlite_store import (
 )
 from v2_contracts.payments import (
     BusinessUnit,
+    CheckoutService,
     DueKind,
+    PaymentDisplayDetails,
     PaymentInstruction,
     PaymentMethod,
     PaymentMethodOffer,
@@ -63,6 +65,7 @@ class PaymentService:
             due_kind=due_kind,
             economic_version=context.economic_version,
             receiver_profile_id=context.receiver_profile_id,
+            display_details=context.display_details,
         )
         effects = (
             ()
@@ -230,6 +233,62 @@ def _utc_text(value: object, name: str) -> str:
     return value.isoformat(timespec="microseconds")
 
 
+_DISPLAY_DETAIL_FIELDS = frozenset(
+    {
+        "service",
+        "public_label",
+        "start_date",
+        "end_date",
+        "start_time",
+        "adults",
+        "children",
+        "provider_reference",
+        "reservation_total_minor",
+        "package_component",
+    }
+)
+
+
+def _display_details_value(details: PaymentDisplayDetails | None) -> dict | None:
+    if details is None:
+        return None
+    return {
+        "service": details.service.value,
+        "public_label": details.public_label,
+        "start_date": details.start_date.isoformat(),
+        "end_date": details.end_date.isoformat() if details.end_date else None,
+        "start_time": details.start_time,
+        "adults": details.adults,
+        "children": details.children,
+        "provider_reference": details.provider_reference,
+        "reservation_total_minor": details.reservation_total_minor,
+        "package_component": details.package_component,
+    }
+
+
+def _display_details_from_value(value: object) -> PaymentDisplayDetails | None:
+    if value is None:
+        return None
+    if type(value) is not dict or set(value) != _DISPLAY_DETAIL_FIELDS:
+        raise ValueError("payment display fields mismatch")
+    return PaymentDisplayDetails(
+        service=CheckoutService(value["service"]),
+        public_label=value["public_label"],
+        start_date=date.fromisoformat(value["start_date"]),
+        end_date=(
+            date.fromisoformat(value["end_date"])
+            if value["end_date"] is not None
+            else None
+        ),
+        start_time=value["start_time"],
+        adults=value["adults"],
+        children=value["children"],
+        provider_reference=value["provider_reference"],
+        reservation_total_minor=value["reservation_total_minor"],
+        package_component=value["package_component"],
+    )
+
+
 def _selection_bytes(selection: PaymentSelection) -> bytes:
     if type(selection) is not PaymentSelection:
         raise TypeError("selection must be exact PaymentSelection")
@@ -246,6 +305,7 @@ def _selection_bytes(selection: PaymentSelection) -> bytes:
                 "due_kind": item.due_kind.value,
                 "economic_version": item.economic_version,
                 "receiver_profile_id": item.receiver_profile_id,
+                "display_details": _display_details_value(item.display_details),
             },
         },
         sort_keys=True,
@@ -269,6 +329,9 @@ def _selection_from_bytes(raw: object) -> PaymentSelection:
                 due_kind=DueKind(obligation["due_kind"]),
                 economic_version=obligation["economic_version"],
                 receiver_profile_id=obligation["receiver_profile_id"],
+                display_details=_display_details_from_value(
+                    obligation.get("display_details")
+                ),
             ),
             PaymentMethod(value["method"]),
         )

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
+
+import pytest
 
 from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.stripe import StripeLinkAdapter
@@ -12,10 +16,14 @@ from v2_application.payments import (
     PaymentInitiationWorker,
     PaymentService,
     SQLitePaymentInitiationStore,
+    _selection_bytes,
+    _selection_from_bytes,
 )
 from v2_contracts.payments import (
     BusinessUnit,
+    CheckoutService,
     DueKind,
+    PaymentDisplayDetails,
     PaymentMethod,
     PaymentObligation,
     PaymentSelection,
@@ -244,6 +252,88 @@ def test_economic_change_increments_only_financial_version() -> None:
 
 NOW = datetime(2026, 7, 23, 16, 0, tzinfo=timezone.utc)
 RESULT_KEY = b"payment-result-test-key-00000001"
+
+ACTIVITY_DETAILS = PaymentDisplayDetails(
+    service=CheckoutService.ACTIVITY,
+    public_label="Roteiro dos 4Ps",
+    start_date=date(2026, 12, 3),
+    end_date=None,
+    start_time="08:30",
+    adults=1,
+    children=0,
+    provider_reference="99859093",
+    reservation_total_minor=33495,
+    package_component=True,
+)
+
+
+def test_payment_display_details_validate_closed_service_shapes() -> None:
+    assert ACTIVITY_DETAILS.public_label == "Roteiro dos 4Ps"
+    with pytest.raises(ValueError, match="activity.*end_date"):
+        replace(ACTIVITY_DETAILS, end_date=date(2026, 12, 4))
+    with pytest.raises(ValueError, match="lodging.*end_date"):
+        replace(
+            ACTIVITY_DETAILS,
+            service=CheckoutService.LODGING,
+            end_date=None,
+            start_time=None,
+        )
+    with pytest.raises(ValueError, match="lodging.*start_time"):
+        replace(
+            ACTIVITY_DETAILS,
+            service=CheckoutService.LODGING,
+            end_date=date(2026, 12, 4),
+        )
+    with pytest.raises(ValueError, match="adults"):
+        replace(ACTIVITY_DETAILS, adults=0)
+    with pytest.raises(ValueError, match="provider_reference"):
+        replace(ACTIVITY_DETAILS, provider_reference="bad\x00reference")
+
+
+def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows() -> None:
+    selection = PaymentSelection(
+        replace(AGENCY, display_details=ACTIVITY_DETAILS),
+        PaymentMethod.STRIPE,
+    )
+
+    raw = _selection_bytes(selection)
+    payload = json.loads(raw)
+
+    assert payload["obligation"]["display_details"] == {
+        "service": "activity",
+        "public_label": "Roteiro dos 4Ps",
+        "start_date": "2026-12-03",
+        "end_date": None,
+        "start_time": "08:30",
+        "adults": 1,
+        "children": 0,
+        "provider_reference": "99859093",
+        "reservation_total_minor": 33495,
+        "package_component": True,
+    }
+    assert _selection_from_bytes(raw) == selection
+
+    del payload["obligation"]["display_details"]
+    legacy = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    assert _selection_from_bytes(legacy).obligation.display_details is None
+
+
+def test_payment_selection_rejects_unknown_display_fields() -> None:
+    selection = PaymentSelection(
+        replace(AGENCY, display_details=ACTIVITY_DETAILS),
+        PaymentMethod.STRIPE,
+    )
+    payload = json.loads(_selection_bytes(selection))
+    payload["obligation"]["display_details"]["customer_name"] = "forbidden"
+
+    with pytest.raises(RuntimeError, match="selection is corrupt"):
+        _selection_from_bytes(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        )
 
 
 def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path) -> None:
