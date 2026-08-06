@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import stat
 
 import pytest
 
@@ -164,6 +165,7 @@ def test_birth_and_gender_round_trip_only_through_private_owner(tmp_path: Path) 
         assert result.snapshot.gender == "f"
         assert result.snapshot.present_fact_names == ("birth_date", "gender")
         assert "1991-05-12" not in repr(result.snapshot)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     finally:
         store.close()
 

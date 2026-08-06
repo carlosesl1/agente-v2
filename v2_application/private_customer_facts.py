@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -578,6 +579,11 @@ class SQLitePrivateCustomerFactStore:
         self.path: Path | None = path
         self._closed = False
         self._initialize_connection(str(path))
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            self.close()
+            raise RuntimeError("private customer store permissions failed") from None
 
     @classmethod
     def open_memory(cls) -> "SQLitePrivateCustomerFactStore":
