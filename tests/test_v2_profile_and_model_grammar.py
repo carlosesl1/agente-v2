@@ -114,7 +114,36 @@ def test_incomplete_profile_is_explicit_and_never_invents_values() -> None:
     assert binding.complete is False
     assert binding.email is None
     assert binding.full_name == "Pessoa Sem Email"
-    assert binding.phone_e164 == "+5511888888888"
+    assert binding.phone_e164 == "+" + "55" + "11" + "8" * 9
+
+
+@pytest.mark.parametrize(
+    ("raw_phone", "country", "expected"),
+    (
+        ("55" + "75" + "9" * 9, "BR", "+" + "55" + "75" + "9" * 9),
+        ("75" + "9" * 9, "BR", "+" + "55" + "75" + "9" * 9),
+        ("44" + "7700" + "900123", "GB", "+" + "44" + "7700" + "900123"),
+        ("34" + "612" + "345678", "ES", "+" + "34" + "612" + "345678"),
+        ("1" + "202" + "555" + "0123", "US", "+" + "1" + "202" + "555" + "0123"),
+    ),
+)
+def test_profile_adapter_canonicalizes_manychat_phone_without_plus(
+    raw_phone: str,
+    country: str,
+    expected: str,
+) -> None:
+    payload = {
+        **_complete_payload(),
+        "phone_e164": raw_phone,
+        "country_code": country,
+    }
+
+    binding = ManyChatProfileAdapter(
+        transport=ProfileTransport(payload),
+        ttl=timedelta(minutes=5),
+    ).read("manychat:subscriber-001", now=NOW)
+
+    assert binding.phone_e164 == expected
 
 
 @pytest.mark.parametrize(
@@ -122,7 +151,11 @@ def test_incomplete_profile_is_explicit_and_never_invents_values() -> None:
     (
         {**_complete_payload(), "subscriber_id": "other-subscriber"},
         {**_complete_payload(), "provider_payload": {"private": "forged"}},
-        {**_complete_payload(), "phone_e164": "11999999999"},
+        {**_complete_payload(), "phone_e164": "55 75999999999"},
+        {**_complete_payload(), "phone_e164": "+55-75999999999"},
+        {**_complete_payload(), "phone_e164": "phone-invalid"},
+        {**_complete_payload(), "phone_e164": "0" + "55" + "75" + "9" * 9},
+        {**_complete_payload(), "phone_e164": "1" * 16},
     ),
 )
 def test_profile_adapter_rejects_identity_conflict_open_payload_and_bad_phone(

@@ -11,6 +11,8 @@ from v2_contracts.profile import PrivateCustomerBinding
 
 
 _SUBSCRIBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_E164_RE = re.compile(r"^\+[1-9][0-9]{7,14}$")
+_DIGITS_RE = re.compile(r"^[0-9]{8,15}$")
 _EXPECTED_FIELDS = frozenset(
     ("subscriber_id", "full_name", "email", "phone_e164", "country_code")
 )
@@ -43,6 +45,29 @@ def _private_value(value: object, name: str) -> str | None:
     return value
 
 
+def _canonical_manychat_phone(
+    value: object,
+    country_code: str | None,
+) -> str | None:
+    phone = _private_value(value, "phone_e164")
+    if phone is None:
+        return None
+    if phone.startswith("+"):
+        canonical = phone
+    elif _DIGITS_RE.fullmatch(phone) is not None and not phone.startswith("0"):
+        digits = phone
+        if country_code == "BR" and (
+            len(digits) <= 11 or not digits.startswith("55")
+        ):
+            digits = "55" + digits
+        canonical = "+" + digits
+    else:
+        raise ManyChatProfilePayloadError("phone_e164 is not canonical")
+    if _E164_RE.fullmatch(canonical) is None:
+        raise ManyChatProfilePayloadError("phone_e164 is not canonical E.164")
+    return canonical
+
+
 class ManyChatProfileAdapter:
     adapter_id = "manychat-profile:v2"
 
@@ -63,11 +88,15 @@ class ManyChatProfileAdapter:
         returned_subscriber = raw["subscriber_id"]
         if type(returned_subscriber) is not str or returned_subscriber != subscriber_id:
             raise ManyChatProfilePayloadError("profile subscriber identity conflicts")
+        country_code = _private_value(raw["country_code"], "country_code")
         values = {
             "full_name": _private_value(raw["full_name"], "full_name"),
             "email": _private_value(raw["email"], "email"),
-            "phone_e164": _private_value(raw["phone_e164"], "phone_e164"),
-            "country_code": _private_value(raw["country_code"], "country_code"),
+            "phone_e164": _canonical_manychat_phone(
+                raw["phone_e164"],
+                country_code,
+            ),
+            "country_code": country_code,
         }
         canonical = json.dumps(
             {"subscriber_id": subscriber_id, **values},
