@@ -1,7 +1,7 @@
 # Stripe checkout commercial details — design
 
-**Date:** 2026-08-06  
-**Status:** approved by timeout/default decision  
+**Date:** 2026-08-06
+**Status:** approved by timeout/default decision
 **Scope:** Maya V2 Stripe test-link creation for lodging, activity, and package components
 
 ## Problem
