@@ -279,6 +279,8 @@ class StripeLinkAdapter:
             raise RuntimeError("stripe_link_gate_closed")
         if obligation.display_details is None:
             raise ValueError("Stripe link creation requires display_details")
+        if obligation.display_details.customer_language is None:
+            raise ValueError("Stripe link creation requires customer_language")
         payment_percentage = self._percentages[obligation.business_unit]
         amount_minor = int(
             (
@@ -319,6 +321,9 @@ class StripeLinkAdapter:
                 "economic_version": request.economic_version,
                 "idempotency_key": request.idempotency_key,
                 "link_id": link_id,
+                "customer_language": (
+                    obligation.display_details.customer_language.value
+                ),
                 "payment_id": request.payment_id,
                 "url": url,
             },
@@ -333,6 +338,7 @@ class StripeLinkAdapter:
             public_url=url,
             provider_reference_fingerprint=hashlib.sha256(link_id.encode()).hexdigest(),
             receipt_hash=hashlib.sha256(b"v2-stripe-link-receipt-v1\0" + receipt).hexdigest(),
+            customer_language=obligation.display_details.customer_language,
         )
 
 

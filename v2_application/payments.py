@@ -19,6 +19,7 @@ from reservation_followup.sqlite_store import (
     IdentityConflict as FollowupIdentityConflict,
     SQLiteFollowupUnitOfWork,
 )
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -240,7 +241,7 @@ def _utc_text(value: object, name: str) -> str:
     return value.isoformat(timespec="microseconds")
 
 
-_DISPLAY_DETAIL_FIELDS = frozenset(
+_LEGACY_DISPLAY_DETAIL_FIELDS = frozenset(
     {
         "service",
         "public_label",
@@ -253,6 +254,7 @@ _DISPLAY_DETAIL_FIELDS = frozenset(
         "package_component",
     }
 )
+_DISPLAY_DETAIL_FIELDS = _LEGACY_DISPLAY_DETAIL_FIELDS | {"customer_language"}
 
 
 def _display_details_value(details: PaymentDisplayDetails | None) -> dict | None:
@@ -268,13 +270,21 @@ def _display_details_value(details: PaymentDisplayDetails | None) -> dict | None
         "children": details.children,
         "reservation_total_minor": details.reservation_total_minor,
         "package_component": details.package_component,
+        "customer_language": (
+            details.customer_language.value
+            if details.customer_language is not None
+            else None
+        ),
     }
 
 
 def _display_details_from_value(value: object) -> PaymentDisplayDetails | None:
     if value is None:
         return None
-    if type(value) is not dict or set(value) != _DISPLAY_DETAIL_FIELDS:
+    if type(value) is not dict or set(value) not in (
+        _DISPLAY_DETAIL_FIELDS,
+        _LEGACY_DISPLAY_DETAIL_FIELDS,
+    ):
         raise ValueError("payment display fields mismatch")
     return PaymentDisplayDetails(
         service=CheckoutService(value["service"]),
@@ -290,6 +300,11 @@ def _display_details_from_value(value: object) -> PaymentDisplayDetails | None:
         children=value["children"],
         reservation_total_minor=value["reservation_total_minor"],
         package_component=value["package_component"],
+        customer_language=(
+            CustomerLanguage(value["customer_language"])
+            if value.get("customer_language") is not None
+            else None
+        ),
     )
 
 
@@ -359,6 +374,11 @@ def _offer_bytes(offer: PaymentMethodOffer) -> bytes:
             "public_url": offer.public_url,
             "provider_reference_fingerprint": offer.provider_reference_fingerprint,
             "receipt_hash": offer.receipt_hash,
+            "customer_language": (
+                offer.customer_language.value
+                if offer.customer_language is not None
+                else None
+            ),
             "settled": offer.settled,
         }
     elif type(offer) is PaymentInstruction:
@@ -383,7 +403,7 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
     try:
         value = json.loads(raw)
         if value["type"] == "stripe_link":
-            if set(value) != {
+            legacy_fields = {
                 "type",
                 "payment_id",
                 "reservation_anchor_id",
@@ -393,7 +413,11 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
                 "provider_reference_fingerprint",
                 "receipt_hash",
                 "settled",
-            }:
+            }
+            if set(value) not in (
+                legacy_fields,
+                legacy_fields | {"customer_language"},
+            ):
                 raise ValueError("Stripe result fields mismatch")
             return StripePaymentLink(
                 payment_id=value["payment_id"],
@@ -405,6 +429,11 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
                     "provider_reference_fingerprint"
                 ],
                 receipt_hash=value["receipt_hash"],
+                customer_language=(
+                    CustomerLanguage(value["customer_language"])
+                    if value.get("customer_language") is not None
+                    else None
+                ),
                 settled=value["settled"],
             )
         if value["type"] == "instruction":

@@ -27,14 +27,20 @@ from v2_application.relay_worker import (
     reservation_target_operation_id,
 )
 from v2_application.reservations import ReservationAllocator
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import BusinessUnit, PaymentMethod
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
 RESULT_KEY = b"outcome-projector-key-0000000001"
+BR_PHONE = "+" + "55" + "75" + "9" * 9
+US_PHONE = "+" + "1" + "202" + "555" + "0124"
 
 
 def _package_command(
-    *, country_code: str = "BR", payment_method: str = "stripe"
+    *,
+    country_code: str = "BR",
+    payment_method: str = "stripe",
+    phone_e164: str = BR_PHONE,
 ) -> ReservationCommand:
     lodging = _lookup("cloudbeds").offers[0]
     activity = _lookup("bokun").offers[0]
@@ -56,7 +62,7 @@ def _package_command(
         customer_ref="customer:outcome-projector",
         full_name="Pessoa Projector",
         email="projector@example.invalid",
-        phone_e164="+12025550124",
+        phone_e164=phone_e164,
         country_code=country_code,
         birth_date=datetime(1990, 1, 2).date(),
         gender="m",
@@ -226,6 +232,7 @@ def test_single_reservation_projects_one_obligation(tmp_path: Path) -> None:
                 component.total.amount * Decimal("100")
             ),
             "package_component": False,
+            "customer_language": CustomerLanguage.PT_BR.value,
         }
     finally:
         payments.close()
@@ -337,10 +344,12 @@ def test_package_projects_two_unit_specific_obligations_once(tmp_path: Path) -> 
                     component.total.amount * Decimal("100")
                 ),
                 "package_component": True,
+                "customer_language": CustomerLanguage.PT_BR.value,
             }
             serialized = json.dumps(details, ensure_ascii=False)
             assert command.payload.customer.full_name not in serialized
             assert command.payload.customer.email not in serialized
+            assert command.payload.customer.phone_e164 not in serialized
     finally:
         payments.close()
         execution.close()
@@ -350,7 +359,7 @@ def test_foreign_package_projects_agency_prepayment_only(tmp_path: Path) -> None
     execution, payments, projector = _stores(tmp_path)
     try:
         commands = ReservationAllocator().allocate(
-            _package_command(country_code="US")
+            _package_command(country_code="US", phone_e164=US_PHONE)
         ).commands
         _persist(execution, commands)
         _finish_next(
@@ -373,6 +382,8 @@ def test_foreign_package_projects_agency_prepayment_only(tmp_path: Path) -> None
             ).fetchone()[0]
         )
         assert payload["obligation"]["business_unit"] == "agency"
+        assert payload["obligation"]["display_details"]["customer_language"] == "en"
+        assert US_PHONE not in json.dumps(payload)
     finally:
         payments.close()
         execution.close()

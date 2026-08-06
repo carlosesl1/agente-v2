@@ -9,6 +9,8 @@ import re
 from typing import Final
 from urllib.parse import urlparse
 
+from v2_contracts.localization import CustomerLanguage
+
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 _CURRENCY_RE: Final = re.compile(r"^[A-Z]{3}$")
@@ -61,6 +63,7 @@ class PaymentDisplayDetails:
     children: int
     reservation_total_minor: int
     package_component: bool
+    customer_language: CustomerLanguage | None = None
 
     def __post_init__(self) -> None:
         if type(self.service) is not CheckoutService:
@@ -102,6 +105,12 @@ class PaymentDisplayDetails:
             )
         if type(self.package_component) is not bool:
             raise TypeError("package_component must be an exact boolean")
+        if self.customer_language is not None and type(
+            self.customer_language
+        ) is not CustomerLanguage:
+            raise TypeError(
+                "customer_language must be exact CustomerLanguage or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +250,7 @@ class StripePaymentLink:
     public_url: str
     provider_reference_fingerprint: str
     receipt_hash: str
+    customer_language: CustomerLanguage | None = None
     settled: bool = False
 
     def __post_init__(self) -> None:
@@ -258,6 +268,12 @@ class StripePaymentLink:
             raise ValueError("provider_reference_fingerprint must be SHA-256")
         if type(self.receipt_hash) is not str or _HASH_RE.fullmatch(self.receipt_hash) is None:
             raise ValueError("receipt_hash must be SHA-256")
+        if self.customer_language is not None and type(
+            self.customer_language
+        ) is not CustomerLanguage:
+            raise TypeError(
+                "customer_language must be exact CustomerLanguage or None"
+            )
         if self.settled is not False:
             raise ValueError("payment initiation can never claim settlement")
 

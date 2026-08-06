@@ -24,6 +24,7 @@ from reservation_followup.types import (
     ConfirmedReservationAnchor,
 )
 from v2_application.payments import SQLitePaymentInitiationStore
+from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -196,6 +197,9 @@ class ReservationOutcomeProjector:
             children=component.party.children,
             reservation_total_minor=amount_minor,
             package_component=package_component,
+            customer_language=customer_language_from_phone(
+                command.payload.customer.phone_e164
+            ),
         )
         anchor_id = _opaque("reservation-anchor", command.command_id)
         payment_id = _opaque("payment", command.command_id, unit.value)

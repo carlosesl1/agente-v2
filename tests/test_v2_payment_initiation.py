@@ -16,9 +16,12 @@ from v2_application.payments import (
     PaymentInitiationWorker,
     PaymentService,
     SQLitePaymentInitiationStore,
+    _offer_bytes,
+    _offer_from_bytes,
     _selection_bytes,
     _selection_from_bytes,
 )
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -29,6 +32,7 @@ from v2_contracts.payments import (
     PaymentSelection,
     ReservationPaymentContext,
     StripeLinkRequest,
+    StripePaymentLink,
 )
 
 
@@ -42,6 +46,7 @@ HOSTEL_DETAILS = PaymentDisplayDetails(
     children=0,
     reservation_total_minor=30000,
     package_component=False,
+    customer_language=CustomerLanguage.PT_BR,
 )
 AGENCY_DETAILS = PaymentDisplayDetails(
     service=CheckoutService.ACTIVITY,
@@ -53,6 +58,7 @@ AGENCY_DETAILS = PaymentDisplayDetails(
     children=0,
     reservation_total_minor=45000,
     package_component=False,
+    customer_language=CustomerLanguage.PT_BR,
 )
 
 
@@ -302,6 +308,7 @@ ACTIVITY_DETAILS = PaymentDisplayDetails(
     children=0,
     reservation_total_minor=33495,
     package_component=True,
+    customer_language=CustomerLanguage.PT_BR,
 )
 
 
@@ -324,6 +331,8 @@ def test_payment_display_details_validate_closed_service_shapes() -> None:
         )
     with pytest.raises(ValueError, match="adults"):
         replace(ACTIVITY_DETAILS, adults=0)
+    with pytest.raises(TypeError, match="customer_language"):
+        replace(ACTIVITY_DETAILS, customer_language="pt-BR")
 
 
 def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows() -> None:
@@ -349,16 +358,28 @@ def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows()
         "children": 0,
         "reservation_total_minor": 33495,
         "package_component": True,
+        "customer_language": "pt-BR",
     }
     assert _selection_from_bytes(raw) == selection
 
-    del payload["obligation"]["display_details"]
+    del payload["obligation"]["display_details"]["customer_language"]
     legacy = json.dumps(
         payload,
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    assert _selection_from_bytes(legacy).obligation.display_details is None
+    assert (
+        _selection_from_bytes(legacy).obligation.display_details.customer_language
+        is None
+    )
+
+    del payload["obligation"]["display_details"]
+    oldest = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    assert _selection_from_bytes(oldest).obligation.display_details is None
 
 
 def test_payment_selection_rejects_unknown_display_fields() -> None:
@@ -400,6 +421,7 @@ def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path)
     assert second.disposition is PaymentInitiationDisposition.IDLE
     assert len(transport.requests) == 1
     assert store.dispatch_slots(selection) == 1
+    assert store.completed_offers()[0].customer_language is CustomerLanguage.PT_BR
     persisted = b"".join(
         candidate.read_bytes()
         for candidate in path.parent.glob(path.name + "*")
@@ -417,6 +439,41 @@ def test_legacy_stripe_obligation_fails_before_transport() -> None:
         )
 
     assert transport.requests == []
+
+    with pytest.raises(ValueError, match="customer_language"):
+        payments.initiate(
+            replace(
+                HOSTEL,
+                display_details=replace(
+                    HOSTEL_DETAILS,
+                    customer_language=None,
+                ),
+            ),
+            PaymentMethod.STRIPE,
+        )
+
+    assert transport.requests == []
+
+
+def test_stripe_result_decodes_historical_row_without_customer_language() -> None:
+    current = StripePaymentLink(
+        payment_id="payment:hostel:legacy-language",
+        reservation_anchor_id="anchor:hostel:legacy-language",
+        account_profile_id="stripe-account:hostel:test",
+        economic_version=1,
+        public_url="https://pay.invalid/legacy-language",
+        provider_reference_fingerprint="a" * 64,
+        receipt_hash="b" * 64,
+        customer_language=CustomerLanguage.PT_BR,
+    )
+    payload = json.loads(_offer_bytes(current))
+    del payload["customer_language"]
+
+    historical = _offer_from_bytes(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    )
+
+    assert historical.customer_language is None
 
 
 def test_stripe_timeout_after_fence_is_manual_review_without_retry(tmp_path: Path) -> None:
