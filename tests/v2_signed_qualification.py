@@ -32,6 +32,7 @@ from tests.test_phase6_payment_claims import (
 )
 from tests.test_phase6_payment_outbox import FakePaymentEffectDelivery
 from tests.test_phase6_payment_worker import FakeSettlementPort
+from tests.v2_payment_display_fixtures import synthetic_payment_display_details
 from v2_adapters.bokun import BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReservationPort
 from v2_adapters.manychat import ManyChatDeliveryAdapter, ManyChatTransportResponse
@@ -409,6 +410,16 @@ class SignedQualificationRuntime:
                 due_kind=DueKind.PREPAYMENT,
                 economic_version=subject.payment_version,
                 receiver_profile_id=subject.receiver_profile_id,
+                display_details=synthetic_payment_display_details(
+                    business_unit=BusinessUnit(subject.business_unit.value),
+                    amount_minor=subject.amount_minor,
+                    provider_reference=(
+                        "fake-cloudbeds-reference"
+                        if subject.business_unit.value == "hostel"
+                        else "fake-bokun-reference"
+                    ),
+                    package_component=self.scenario == "package_wise",
+                ),
             )
             self.container.payment_initiation.enqueue(
                 PaymentSelection(obligation, method),

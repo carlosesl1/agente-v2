@@ -34,6 +34,7 @@ from v2_contracts.providers import ProviderWriteAuthorization
 from v2_host.composition import V2Container, V2Role
 from v2_host.settings import V2Settings
 from tests.v2_signed_qualification import SignedQualificationRuntime
+from tests.v2_payment_display_fixtures import synthetic_payment_display_details
 
 
 NOW = datetime(2026, 11, 1, 13, 0, tzinfo=timezone.utc)
@@ -181,15 +182,26 @@ def _payments() -> tuple[PaymentService, StripeTransport, Knowledge]:
 
 
 def _obligation(unit: BusinessUnit, suffix: str) -> PaymentObligation:
+    amount_minor = 30_000 if unit is BusinessUnit.HOSTEL else 45_000
     return PaymentObligation(
         payment_id=f"payment:{suffix}",
         reservation_anchor_id=f"anchor:{suffix}",
         business_unit=unit,
-        amount_minor=30_000 if unit is BusinessUnit.HOSTEL else 45_000,
+        amount_minor=amount_minor,
         currency="BRL",
         due_kind=DueKind.PREPAYMENT,
         economic_version=1,
         receiver_profile_id=f"receiver:{unit.value}",
+        display_details=synthetic_payment_display_details(
+            business_unit=unit,
+            amount_minor=amount_minor,
+            provider_reference=(
+                "fake-cloudbeds-reference"
+                if unit is BusinessUnit.HOSTEL
+                else "fake-bokun-reference"
+            ),
+            package_component=suffix.startswith("package-"),
+        ),
     )
 
 
