@@ -9,6 +9,7 @@ import re
 import pytest
 
 from v2_adapters.stripe_checkout import stripe_product_presentation
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -39,6 +40,7 @@ def _activity_request() -> StripeLinkRequest:
             children=0,
             reservation_total_minor=33495,
             package_component=True,
+            customer_language=CustomerLanguage.PT_BR,
         ),
     )
 
@@ -65,6 +67,7 @@ def _lodging_request() -> StripeLinkRequest:
             children=0,
             reservation_total_minor=30000,
             package_component=False,
+            customer_language=CustomerLanguage.EN,
         ),
     )
 
@@ -72,13 +75,11 @@ def _lodging_request() -> StripeLinkRequest:
 def test_activity_presentation_details_package_deposit() -> None:
     presentation = stripe_product_presentation(_activity_request())
 
-    assert presentation.name == (
-        "Pacote / Package — Roteiro dos 4Ps — Sinal / Deposit 20%"
-    )
+    assert presentation.name == "Pacote — Roteiro dos 4Ps — Sinal 20%"
     assert presentation.description == (
-        "Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • "
-        "Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%) • "
-        "Saldo restante / Remaining balance R$ 267,96"
+        "Passeio • 03/12/2026 às 08:30 • 1 adulto • "
+        "Total R$ 334,95 • Pagar agora R$ 66,99 (20%) • "
+        "Saldo restante R$ 267,96"
     )
     assert re.fullmatch(r"[0-9a-f]{64}", presentation.details_sha256)
     assert presentation == stripe_product_presentation(_activity_request())
@@ -97,6 +98,7 @@ def test_presentation_hash_binds_exact_rendered_product_copy() -> None:
         "display_details": {
             "adults": details.adults,
             "children": details.children,
+            "customer_language": details.customer_language.value,
             "end_date": None,
             "package_component": details.package_component,
             "public_label": details.public_label,
@@ -117,18 +119,18 @@ def test_presentation_hash_binds_exact_rendered_product_copy() -> None:
     ).encode("utf-8")
 
     assert presentation.details_sha256 == hashlib.sha256(
-        b"v2-stripe-product-presentation-v1\0" + canonical
+        b"v2-stripe-product-presentation-v2\0" + canonical
     ).hexdigest()
 
 
 def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:
     presentation = stripe_product_presentation(_lodging_request())
 
-    assert presentation.name == "Suíte Casal — Pagamento integral / Full payment"
+    assert presentation.name == "Suíte Casal — Full payment"
     assert presentation.description == (
-        "Hospedagem / Accommodation • Check-in 02/12/2026 • "
-        "Check-out 04/12/2026 • 1 hóspede / guest • "
-        "Total R$ 300,00 • Pagar agora / Pay now R$ 300,00 (100%)"
+        "Accommodation • Check-in 02 Dec 2026 • "
+        "Check-out 04 Dec 2026 • 1 guest • "
+        "Total R$300.00 • Pay now R$300.00 (100%)"
     )
     assert "Cloudbeds" not in presentation.description
     assert "provider:" not in presentation.description
@@ -147,12 +149,9 @@ def test_party_pluralization_and_missing_activity_time() -> None:
         replace(_activity_request(), display_details=details)
     )
 
-    assert (
-        "03/12/2026 • 2 adultos / adults + 1 criança / child •"
-        in presentation.description
-    )
-    assert " às / at " not in presentation.description
-    assert "Saldo restante / Remaining balance R$ 267,96" in presentation.description
+    assert "03/12/2026 • 2 adultos + 1 criança •" in presentation.description
+    assert " às " not in presentation.description
+    assert "Saldo restante R$ 267,96" in presentation.description
 
 
 def test_product_name_truncates_label_but_preserves_payment_suffix() -> None:
@@ -165,8 +164,8 @@ def test_product_name_truncates_label_but_preserves_payment_suffix() -> None:
     )
 
     assert len(presentation.name) == 120
-    assert "… — Sinal / Deposit 20%" in presentation.name
-    assert presentation.name.startswith("Pacote / Package — Passeio muito detalhado")
+    assert "… — Sinal 20%" in presentation.name
+    assert presentation.name.startswith("Pacote — Passeio muito detalhado")
 
 
 def test_presentation_fails_closed_when_required_copy_exceeds_limit() -> None:
@@ -190,7 +189,40 @@ def test_presentation_rejects_legacy_or_cross_unit_request() -> None:
     with pytest.raises(ValueError, match="display_details"):
         stripe_product_presentation(replace(_activity_request(), display_details=None))
 
+    with pytest.raises(ValueError, match="customer_language"):
+        stripe_product_presentation(
+            replace(
+                _activity_request(),
+                display_details=replace(
+                    _activity_request().display_details,
+                    customer_language=None,
+                ),
+            )
+        )
+
     with pytest.raises(ValueError, match="service.*business unit"):
         stripe_product_presentation(
             replace(_activity_request(), business_unit=BusinessUnit.HOSTEL)
         )
+
+
+def test_english_activity_is_not_mixed_with_portuguese_copy() -> None:
+    details = replace(
+        _activity_request().display_details,
+        customer_language=CustomerLanguage.EN,
+        adults=2,
+        children=1,
+    )
+
+    presentation = stripe_product_presentation(
+        replace(_activity_request(), display_details=details)
+    )
+
+    assert presentation.name == "Package — Roteiro dos 4Ps — Deposit 20%"
+    assert presentation.description == (
+        "Tour • 03 Dec 2026 at 08:30 • 2 adults + 1 child • "
+        "Total R$334.95 • Pay now R$66.99 (20%) • "
+        "Remaining balance R$267.96"
+    )
+    assert "Pagar" not in presentation.description
+    assert "Passeio" not in presentation.description

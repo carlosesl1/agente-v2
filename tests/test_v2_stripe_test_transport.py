@@ -17,6 +17,7 @@ from v2_application.payments import (
     PaymentService,
     SQLitePaymentInitiationStore,
 )
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -58,6 +59,7 @@ def _request() -> StripeLinkRequest:
             children=0,
             reservation_total_minor=15300,
             package_component=False,
+            customer_language=CustomerLanguage.PT_BR,
         ),
     )
 

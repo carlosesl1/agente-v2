@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import hashlib
 import json
 
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
     CheckoutService,
@@ -15,13 +17,34 @@ from v2_contracts.payments import (
 _NAME_LIMIT = 120
 _DESCRIPTION_LIMIT = 500
 _SERVICE_LABEL = {
-    CheckoutService.LODGING: "Hospedagem / Accommodation",
-    CheckoutService.ACTIVITY: "Passeio / Tour",
+    CustomerLanguage.PT_BR: {
+        CheckoutService.LODGING: "Hospedagem",
+        CheckoutService.ACTIVITY: "Passeio",
+    },
+    CustomerLanguage.EN: {
+        CheckoutService.LODGING: "Accommodation",
+        CheckoutService.ACTIVITY: "Tour",
+    },
 }
 _SERVICE_UNIT = {
     CheckoutService.LODGING: BusinessUnit.HOSTEL,
     CheckoutService.ACTIVITY: BusinessUnit.AGENCY,
 }
+_EN_MONTH = (
+    "",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +62,9 @@ def stripe_product_presentation(
     details = request.display_details
     if details is None:
         raise ValueError("Stripe checkout requires display_details")
+    language = details.customer_language
+    if language is None:
+        raise ValueError("Stripe checkout requires customer_language")
     if _SERVICE_UNIT[details.service] is not request.business_unit:
         raise ValueError("checkout service does not match payment business unit")
     expected_minor = (
@@ -47,39 +73,48 @@ def stripe_product_presentation(
     if expected_minor != request.amount_minor:
         raise ValueError("checkout payable amount diverges from reservation percentage")
 
-    suffix = (
-        " — Pagamento integral / Full payment"
-        if request.payment_percentage == 100
-        else f" — Sinal / Deposit {request.payment_percentage}%"
-    )
-    prefix = "Pacote / Package — " if details.package_component else ""
+    suffix = _payment_suffix(language, request.payment_percentage)
+    prefix = _package_prefix(language) if details.package_component else ""
     name = _bounded_name(prefix, details.public_label, suffix)
 
     party = _party_text(
+        language=language,
         service=details.service,
         adults=details.adults,
         children=details.children,
     )
-    if details.service is CheckoutService.LODGING:
-        schedule = (
-            f"Check-in {_date_text(details.start_date)} • "
-            f"Check-out {_date_text(details.end_date)}"
-        )
-    else:
-        schedule = _date_text(details.start_date)
-        if details.start_time is not None:
-            schedule += f" às / at {details.start_time}"
+    schedule = _schedule_text(
+        language=language,
+        service=details.service,
+        start_date=details.start_date,
+        end_date=details.end_date,
+        start_time=details.start_time,
+    )
     remaining = ""
     if request.payment_percentage < 100:
         remaining_minor = details.reservation_total_minor - request.amount_minor
+        remaining_label = {
+            CustomerLanguage.PT_BR: "Saldo restante",
+            CustomerLanguage.EN: "Remaining balance",
+        }[language]
         remaining = (
-            " • Saldo restante / Remaining balance "
-            f"{_money_text(remaining_minor, request.currency)}"
+            f" • {remaining_label} "
+            f"{_money_text(remaining_minor, request.currency, language)}"
         )
+    total_label = {
+        CustomerLanguage.PT_BR: "Total",
+        CustomerLanguage.EN: "Total",
+    }[language]
+    pay_now_label = {
+        CustomerLanguage.PT_BR: "Pagar agora",
+        CustomerLanguage.EN: "Pay now",
+    }[language]
     description = (
-        f"{_SERVICE_LABEL[details.service]} • {schedule} • {party} • "
-        f"Total {_money_text(details.reservation_total_minor, request.currency)} • "
-        f"Pagar agora / Pay now {_money_text(request.amount_minor, request.currency)} "
+        f"{_SERVICE_LABEL[language][details.service]} • {schedule} • {party} • "
+        f"{total_label} "
+        f"{_money_text(details.reservation_total_minor, request.currency, language)} • "
+        f"{pay_now_label} "
+        f"{_money_text(request.amount_minor, request.currency, language)} "
         f"({request.payment_percentage}%){remaining}"
     )
     if len(description) > _DESCRIPTION_LIMIT:
@@ -93,6 +128,7 @@ def stripe_product_presentation(
         "display_details": {
             "adults": details.adults,
             "children": details.children,
+            "customer_language": language.value,
             "end_date": details.end_date.isoformat() if details.end_date else None,
             "package_component": details.package_component,
             "public_label": details.public_label,
@@ -115,9 +151,29 @@ def stripe_product_presentation(
         name=name,
         description=description,
         details_sha256=hashlib.sha256(
-            b"v2-stripe-product-presentation-v1\0" + canonical
+            b"v2-stripe-product-presentation-v2\0" + canonical
         ).hexdigest(),
     )
+
+
+def _payment_suffix(language: CustomerLanguage, percentage: int) -> str:
+    if percentage == 100:
+        return {
+            CustomerLanguage.PT_BR: " — Pagamento integral",
+            CustomerLanguage.EN: " — Full payment",
+        }[language]
+    label = {
+        CustomerLanguage.PT_BR: "Sinal",
+        CustomerLanguage.EN: "Deposit",
+    }[language]
+    return f" — {label} {percentage}%"
+
+
+def _package_prefix(language: CustomerLanguage) -> str:
+    return {
+        CustomerLanguage.PT_BR: "Pacote — ",
+        CustomerLanguage.EN: "Package — ",
+    }[language]
 
 
 def _bounded_name(prefix: str, label: str, suffix: str) -> str:
@@ -132,30 +188,75 @@ def _bounded_name(prefix: str, label: str, suffix: str) -> str:
     return name
 
 
-def _party_text(*, service: CheckoutService, adults: int, children: int) -> str:
+def _schedule_text(
+    *,
+    language: CustomerLanguage,
+    service: CheckoutService,
+    start_date: date,
+    end_date: date | None,
+    start_time: str | None,
+) -> str:
+    if service is CheckoutService.LODGING:
+        if end_date is None:
+            raise ValueError("lodging checkout requires end_date")
+        return (
+            f"Check-in {_date_text(start_date, language)} • "
+            f"Check-out {_date_text(end_date, language)}"
+        )
+    schedule = _date_text(start_date, language)
+    if start_time is not None:
+        preposition = {
+            CustomerLanguage.PT_BR: "às",
+            CustomerLanguage.EN: "at",
+        }[language]
+        schedule += f" {preposition} {start_time}"
+    return schedule
+
+
+def _party_text(
+    *,
+    language: CustomerLanguage,
+    service: CheckoutService,
+    adults: int,
+    children: int,
+) -> str:
+    if language is CustomerLanguage.PT_BR:
+        adult_label = "adulto" if adults == 1 else "adultos"
+        child_label = "criança" if children == 1 else "crianças"
+        guest_label = "hóspede" if adults == 1 else "hóspedes"
+    else:
+        adult_label = "adult" if adults == 1 else "adults"
+        child_label = "child" if children == 1 else "children"
+        guest_label = "guest" if adults == 1 else "guests"
     if children:
-        adult_label = "adulto / adult" if adults == 1 else "adultos / adults"
-        child_label = "criança / child" if children == 1 else "crianças / children"
         return f"{adults} {adult_label} + {children} {child_label}"
     if service is CheckoutService.LODGING:
-        return f"{adults} " + (
-            "hóspede / guest" if adults == 1 else "hóspedes / guests"
-        )
-    return f"{adults} " + (
-        "adulto / adult" if adults == 1 else "adultos / adults"
-    )
+        return f"{adults} {guest_label}"
+    return f"{adults} {adult_label}"
 
 
-def _date_text(value) -> str:
-    return value.strftime("%d/%m/%Y")
+def _date_text(value: date, language: CustomerLanguage) -> str:
+    if language is CustomerLanguage.PT_BR:
+        return value.strftime("%d/%m/%Y")
+    return f"{value.day:02d} {_EN_MONTH[value.month]} {value.year:04d}"
 
 
-def _money_text(minor: int, currency: str) -> str:
+def _money_text(
+    minor: int,
+    currency: str,
+    language: CustomerLanguage,
+) -> str:
     major, cents = divmod(minor, 100)
-    grouped = f"{major:,}".replace(",", ".")
-    if currency == "BRL":
-        return f"R$ {grouped},{cents:02d}"
-    return f"{currency} {grouped},{cents:02d}"
+    if language is CustomerLanguage.PT_BR:
+        grouped = f"{major:,}".replace(",", ".")
+        separator = " "
+        decimal = ","
+    else:
+        grouped = f"{major:,}"
+        separator = ""
+        decimal = "."
+    prefix = "R$" if currency == "BRL" else currency
+    return f"{prefix}{separator}{grouped}{decimal}{cents:02d}"
 
 
 __all__ = ["StripeProductPresentation", "stripe_product_presentation"]
