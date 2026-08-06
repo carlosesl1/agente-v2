@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+import hashlib
+import json
 import re
 
 import pytest
@@ -82,6 +84,41 @@ def test_activity_presentation_details_package_deposit() -> None:
     assert presentation == stripe_product_presentation(_activity_request())
     assert "Bókun" not in presentation.description
     assert "provider:" not in presentation.description
+
+
+def test_presentation_hash_binds_exact_rendered_product_copy() -> None:
+    request = _activity_request()
+    details = request.display_details
+    assert details is not None
+    presentation = stripe_product_presentation(request)
+    payload = {
+        "amount_minor": request.amount_minor,
+        "currency": request.currency,
+        "display_details": {
+            "adults": details.adults,
+            "children": details.children,
+            "end_date": None,
+            "package_component": details.package_component,
+            "public_label": details.public_label,
+            "reservation_total_minor": details.reservation_total_minor,
+            "service": details.service.value,
+            "start_date": details.start_date.isoformat(),
+            "start_time": details.start_time,
+        },
+        "payment_percentage": request.payment_percentage,
+        "product_description": presentation.description,
+        "product_name": presentation.name,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    assert presentation.details_sha256 == hashlib.sha256(
+        b"v2-stripe-product-presentation-v1\0" + canonical
+    ).hexdigest()
 
 
 def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:

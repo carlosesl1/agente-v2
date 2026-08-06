@@ -234,7 +234,7 @@ _SERVICE_LABEL = {
 }
 ```
 
-Compute `details_sha256` over canonical UTF-8 JSON containing all display fields, payable amount, currency, and percentage. Do not include `payment_id`, subscriber ID, or customer data.
+Compute `details_sha256` over canonical UTF-8 JSON containing all display fields, payable amount, currency, percentage, and the exact bounded Product `name`/`description`. Do not include `payment_id`, subscriber ID, or customer data.
 
 - [ ] **Step 4: Write failing transport wire tests**
 

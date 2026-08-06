@@ -105,7 +105,7 @@ The Product creation request sends:
 - `name`;
 - `description`;
 - existing hashed metadata;
-- `metadata[display_details_sha256]`, calculated from a canonical display-details payload plus percentage and payable amount.
+- `metadata[display_details_sha256]`, calculated from a canonical payload containing display details, percentage, payable amount, and the exact rendered Product name/description.
 
 The Product response must be test-mode and must echo the exact name, description, and display hash. Any mismatch is an ambiguous Stripe creation outcome and enters the existing manual-review boundary; no second effect is attempted.
 

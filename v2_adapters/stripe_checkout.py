@@ -102,6 +102,8 @@ def stripe_product_presentation(
             "start_time": details.start_time,
         },
         "payment_percentage": request.payment_percentage,
+        "product_description": description,
+        "product_name": name,
     }
     canonical = json.dumps(
         hash_payload,
@@ -113,7 +115,7 @@ def stripe_product_presentation(
         name=name,
         description=description,
         details_sha256=hashlib.sha256(
-            b"v2-stripe-display-details-v1\0" + canonical
+            b"v2-stripe-product-presentation-v1\0" + canonical
         ).hexdigest(),
     )
 
