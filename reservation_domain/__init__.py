@@ -18,6 +18,7 @@ from .signature import (
     command_identity,
     combine_execution_outcomes,
     operation_for_components,
+    split_package_command,
     subject_signature,
 )
 from .types import *  # noqa: F403

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Final
 
 from reservation_domain import (
-    CommandPayload,
     ExecutionCertainty,
     ExecutionOutcome,
     ReservationCommand,
@@ -17,11 +16,7 @@ from reservation_domain import (
     dumps_command,
     effective_passengers,
     loads_command,
-)
-from reservation_domain.signature import (
-    command_identity,
-    operation_for_components,
-    subject_signature,
+    split_package_command,
 )
 from reservation_execution import DispatchPermit, DispatchRequest, PreparationFailure
 from v2_application.reads import (
@@ -262,56 +257,11 @@ class ReservationAllocator:
             raise DispatchRejected("allocate requires an exact ReservationCommand")
         if command.operation is not ReservationOperation.RESERVE_PACKAGE:
             return ReservationAllocation(command.command_id, (command,))
-        by_service = {item.service: item for item in command.payload.components}
-        if (
-            set(by_service) != {ServiceKind.LODGING, ServiceKind.ACTIVITY}
-            or len(command.payload.components) != 2
-        ):
-            raise DispatchRejected("package must contain one lodging and one activity")
-        allocated = []
-        for service in (ServiceKind.LODGING, ServiceKind.ACTIVITY):
-            component = by_service[service]
-            components = (component,)
-            child_workflow_id = (
-                "workflow:component:"
-                + hashlib.sha256(
-                    b"v2-package-component-workflow-v1\0"
-                    + command.workflow_id.encode("utf-8")
-                    + b"\0"
-                    + service.value.encode("ascii")
-                ).hexdigest()[:40]
-            )
-            signature = subject_signature(
-                components=components,
-                customer=command.payload.customer,
-                terms=command.payload.terms,
-            )
-            operation = operation_for_components(components)
-            command_id, idempotency_key = command_identity(
-                workflow_id=child_workflow_id,
-                draft_id=command.draft_id,
-                draft_version=command.draft_version,
-                signature=signature,
-                operation=operation,
-            )
-            allocated.append(
-                ReservationCommand(
-                    command_id=command_id,
-                    idempotency_key=idempotency_key,
-                    workflow_id=child_workflow_id,
-                    draft_id=command.draft_id,
-                    draft_version=command.draft_version,
-                    subject_signature=signature,
-                    operation=operation,
-                    payload=CommandPayload(
-                        components,
-                        command.payload.customer,
-                        command.payload.terms,
-                    ),
-                    created_at=command.created_at,
-                )
-            )
-        return ReservationAllocation(command.command_id, tuple(allocated))
+        try:
+            allocated = split_package_command(command)
+        except (TypeError, ValueError) as exc:
+            raise DispatchRejected(str(exc)) from exc
+        return ReservationAllocation(command.command_id, allocated)
 
     def expand_commands(
         self,

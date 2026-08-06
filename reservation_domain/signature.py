@@ -8,12 +8,15 @@ import json
 from typing import Iterable
 
 from .types import (
+    CommandPayload,
     CommercialDraft,
     CustomerFacts,
     EconomicTerms,
     ExecutionCertainty,
     OfferSnapshot,
+    ReservationCommand,
     ReservationOperation,
+    ServiceKind,
 )
 
 
@@ -174,6 +177,68 @@ def command_identity(
     )
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return f"cmd:{digest[:32]}", f"idem:{digest}"
+
+
+def split_package_command(
+    command: ReservationCommand,
+) -> tuple[ReservationCommand, ReservationCommand]:
+    """Derive the two exact execution children of one package command."""
+
+    if type(command) is not ReservationCommand:
+        raise TypeError("command must be an exact ReservationCommand")
+    if command.operation is not ReservationOperation.RESERVE_PACKAGE:
+        raise ValueError("command must be a package reservation")
+    by_service = {component.service: component for component in command.payload.components}
+    if (
+        set(by_service) != {ServiceKind.LODGING, ServiceKind.ACTIVITY}
+        or len(command.payload.components) != 2
+    ):
+        raise ValueError("package must contain one lodging and one activity")
+
+    children = []
+    for service in (ServiceKind.LODGING, ServiceKind.ACTIVITY):
+        component = by_service[service]
+        components = (component,)
+        child_workflow_id = (
+            "workflow:component:"
+            + hashlib.sha256(
+                b"v2-package-component-workflow-v1\0"
+                + command.workflow_id.encode("utf-8")
+                + b"\0"
+                + service.value.encode("ascii")
+            ).hexdigest()[:40]
+        )
+        signature = subject_signature(
+            components=components,
+            customer=command.payload.customer,
+            terms=command.payload.terms,
+        )
+        operation = operation_for_components(components)
+        command_id, idempotency_key = command_identity(
+            workflow_id=child_workflow_id,
+            draft_id=command.draft_id,
+            draft_version=command.draft_version,
+            signature=signature,
+            operation=operation,
+        )
+        children.append(
+            ReservationCommand(
+                command_id=command_id,
+                idempotency_key=idempotency_key,
+                workflow_id=child_workflow_id,
+                draft_id=command.draft_id,
+                draft_version=command.draft_version,
+                subject_signature=signature,
+                operation=operation,
+                payload=CommandPayload(
+                    components,
+                    command.payload.customer,
+                    command.payload.terms,
+                ),
+                created_at=command.created_at,
+            )
+        )
+    return children[0], children[1]
 
 
 def combine_execution_outcomes(

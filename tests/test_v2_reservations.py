@@ -23,7 +23,10 @@ from reservation_domain import (
     ServiceKind,
     SucceededState,
     dumps_command,
+    loads_state,
+    split_package_command,
 )
+from reservation_boundary.sqlite_store import _reservation_command_binds_workflow
 from reservation_domain.signature import command_identity, subject_signature
 from reservation_execution import DispatchPermit, Lease, PreparationFailure
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
@@ -686,6 +689,23 @@ def _package_command(*, booking_profile: bool = False) -> ReservationCommand:
         operation=ReservationOperation.RESERVE_PACKAGE,
         payload=CommandPayload(components, customer, terms),
         created_at=NOW,
+    )
+
+
+def test_package_children_bind_only_the_authoritative_parent_workflow() -> None:
+    parent = _package_command(booking_profile=True)
+    expected = split_package_command(parent)
+    assert ReservationAllocator().allocate(parent).commands == expected
+
+    queued = loads_state(
+        build_reservation_relay_bundle(parent).expected_final_state.decode("utf-8")
+    )
+    assert all(
+        _reservation_command_binds_workflow(command, queued) for command in expected
+    )
+    assert not _reservation_command_binds_workflow(
+        _group_activity_command(_group_passengers()),
+        queued,
     )
 
 

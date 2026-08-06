@@ -49,7 +49,13 @@ from reservation_boundary.types import (
     TypedFact,
     VersionedBoundaryState,
 )
-from reservation_domain import ReservationCommand, dumps_command
+from reservation_domain import (
+    ExecutionQueuedState,
+    ReservationCommand,
+    ReservationOperation,
+    dumps_command,
+    split_package_command,
+)
 from reservation_execution import OutboxMessage
 from reservation_followup import (
     PaymentSettlementCommand,
@@ -61,6 +67,26 @@ from reservation_followup import (
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _FACTORY_TOKEN = object()
+
+
+def _reservation_command_binds_workflow(
+    command: ReservationCommand,
+    workflow: object | None,
+) -> bool:
+    """Accept only the authoritative command or exact package children derived from it."""
+
+    if type(command) is not ReservationCommand:
+        raise TypeError("command must be an exact ReservationCommand")
+    if workflow is None:
+        return False
+    if command.workflow_id == workflow.meta.workflow_id:
+        return True
+    if type(workflow) is not ExecutionQueuedState:
+        return False
+    parent = workflow.command
+    if parent.operation is not ReservationOperation.RESERVE_PACKAGE:
+        return False
+    return command in split_package_command(parent)
 
 
 class BoundaryStoreError(RuntimeError):
@@ -2122,7 +2148,10 @@ class SQLiteBoundaryStore:
                 for command in commit.commands:
                     command_id, command_type, command_json = _command_record(command)
                     if type(command) is ReservationCommand:
-                        if commit.state.workflow is None or command.workflow_id != commit.state.workflow.meta.workflow_id:
+                        if not _reservation_command_binds_workflow(
+                            command,
+                            commit.state.workflow,
+                        ):
                             raise IdentityConflict("reservation command does not bind boundary workflow")
                     self._connection.execute(
                         "INSERT INTO boundary_commands "
@@ -2559,10 +2588,9 @@ class SQLiteBoundaryStore:
                 for index, (command, record) in enumerate(zip(commit.commands, command_records)):
                     command_id, command_type, command_json = record
                     if type(command) is ReservationCommand:
-                        if (
-                            commit.state.workflow is None
-                            or command.workflow_id
-                            != commit.state.workflow.meta.workflow_id
+                        if not _reservation_command_binds_workflow(
+                            command,
+                            commit.state.workflow,
                         ):
                             raise IdentityConflict(
                                 "reservation command does not bind boundary workflow"
