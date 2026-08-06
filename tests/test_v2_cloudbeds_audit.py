@@ -138,9 +138,15 @@ def _real_get_payload(snapshot):
             "startDate": facts.start_date,
             "endDate": facts.end_date,
             "status": facts.status,
-            "total": float(facts.amount),
+            "total": int(float(facts.amount)),
             "assigned": [
-                {"adults": str(facts.adults), "children": str(facts.children)}
+                {
+                    "reservationRoomID": "reservation-room-audit-1",
+                    "startDate": facts.start_date,
+                    "endDate": facts.end_date,
+                    "adults": str(facts.adults),
+                    "children": str(facts.children),
+                }
             ],
             "unassigned": [],
         },
@@ -398,7 +404,21 @@ def test_real_get_shape_derives_party_and_normalizes_numeric_total(
         execution.close()
 
 
-@pytest.mark.parametrize("conflict", ("total", "party", "currency"))
+@pytest.mark.parametrize(
+    "conflict",
+    (
+        "total",
+        "noncanonical_total",
+        "party",
+        "currency",
+        "duplicate_room",
+        "room_date",
+        "property",
+        "start_date",
+        "end_date",
+        "status",
+    ),
+)
 def test_real_get_shape_conflicts_are_terminal(
     tmp_path: Path,
     conflict: str,
@@ -414,12 +434,29 @@ def test_real_get_shape_conflicts_are_terminal(
         payload = _real_get_payload(initial)
         if conflict == "total":
             payload["data"]["total"] += 1.0
+        elif conflict == "noncanonical_total":
+            payload["data"]["total"] = f" {payload['data']['total']}.00 "
         elif conflict == "party":
             payload["data"]["assigned"][0]["adults"] = str(
                 int(payload["data"]["assigned"][0]["adults"]) + 1
             )
-        else:
+        elif conflict == "currency":
             payload["data"]["currency"] = "USD"
+        elif conflict == "duplicate_room":
+            duplicate = dict(payload["data"]["assigned"][0])
+            duplicate["adults"] = "0"
+            duplicate["children"] = "0"
+            payload["data"]["unassigned"] = [duplicate]
+        elif conflict == "room_date":
+            payload["data"]["assigned"][0]["startDate"] = "2026-08-11"
+        elif conflict == "property":
+            payload["data"]["propertyID"] = "property-audit-divergent"
+        elif conflict == "start_date":
+            payload["data"]["startDate"] = "2026-08-11"
+        elif conflict == "end_date":
+            payload["data"]["endDate"] = "2026-08-13"
+        else:
+            payload["data"]["status"] = "cancelled"
 
         result = _worker(
             api,
@@ -430,6 +467,30 @@ def test_real_get_shape_conflicts_are_terminal(
         assert result.status is api.CloudbedsAuditStatus.DIVERGENT
         assert result.attempts == 1
         assert result.lease is None
+    finally:
+        audit_store.close()
+        execution.close()
+
+
+def test_real_get_room_claim_without_identity_is_divergent(tmp_path: Path) -> None:
+    api = _audit_api()
+    execution, _ = _confirmed_execution(tmp_path)
+    audit_store = api.SQLiteCloudbedsAuditStore(
+        (tmp_path / "real-shape-missing-room-id-audit.sqlite3").resolve()
+    )
+    try:
+        _project(api, execution, audit_store)
+        initial = audit_store.list_tasks()[0]
+        payload = _real_get_payload(initial)
+        payload["data"]["assigned"][0].pop("reservationRoomID")
+
+        result = _worker(
+            api,
+            audit_store,
+            ScriptedGETPort([payload]),
+        ).run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.status is api.CloudbedsAuditStatus.DIVERGENT
     finally:
         audit_store.close()
         execution.close()

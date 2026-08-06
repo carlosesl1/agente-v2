@@ -174,7 +174,7 @@ class Phase8ReservationTargetIngressTests(unittest.TestCase):
             ) as decode:
                 store.assert_execution_consistency()
                 store.assert_execution_consistency()
-                self.assertEqual(decode.call_count, 1)
+                self.assertEqual(decode.call_count, 2)
             self.assertEqual(first.job_kind, effects.InternalJobKind.HANDOFF)
             self.assertEqual(first.target_result_hash, bundle.expected_final_state_hash)
             self.assertEqual(
@@ -194,6 +194,19 @@ class Phase8ReservationTargetIngressTests(unittest.TestCase):
         with SQLiteUnitOfWork.open_v6(self.path) as reopened:
             replay = self._accept(reopened, operation_id, bundle)
             self.assertEqual(replay.to_canonical_bytes(), first.to_canonical_bytes())
+
+    def test_consistency_reloads_ingress_bytes_after_same_connection_tamper(self) -> None:
+        bundle, _, _, _ = self._bundle()
+        operation_id = self._derive(bundle)
+        with SQLiteUnitOfWork.open_v6(self.path) as store:
+            self._accept(store, operation_id, bundle)
+            store.assert_execution_consistency()
+            store._connection.execute(
+                "UPDATE reservation_boundary_ingress_receipts SET bundle_json='{}'"
+            )
+
+            with self.assertRaises(DataCorruption):
+                store.assert_execution_consistency()
 
     def test_wrong_operation_and_wrong_final_hash_write_nothing(self) -> None:
         bundle, _, _, _ = self._bundle()

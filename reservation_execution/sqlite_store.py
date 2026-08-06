@@ -255,8 +255,7 @@ class SQLiteUnitOfWork:
         self._connection = connection
         self._schema_version = _schema_version
         self._phase8_reservation_fault_hook: Callable[[str], None] | None = None
-        self._boundary_genesis_cache: dict[str, State] | None = None
-        self._boundary_genesis_data_version: int | None = None
+        self._boundary_genesis_scope: dict[str, State] | None = None
         self._closed = False
 
     @classmethod
@@ -1089,8 +1088,6 @@ class SQLiteUnitOfWork:
                     committed_at_text,
                 ),
             )
-            self._boundary_genesis_cache = None
-            self._boundary_genesis_data_version = None
             trip("after_receipt_before_commit")
             return receipt
 
@@ -1692,19 +1689,11 @@ class SQLiteUnitOfWork:
                 raise DataCorruption("released outbox projection is invalid")
             return persisted
 
-    def _boundary_relay_genesis_map(self) -> dict[str, State]:
+    def _load_boundary_relay_genesis_map(self) -> dict[str, State]:
         if self._schema_version != SCHEMA_VERSION_V6:
             return {}
         from reservation_boundary.effects import ReservationRelayBundle
 
-        data_version = int(
-            self._connection.execute("PRAGMA data_version").fetchone()[0]
-        )
-        if (
-            self._boundary_genesis_cache is not None
-            and self._boundary_genesis_data_version == data_version
-        ):
-            return self._boundary_genesis_cache
         geneses: dict[str, State] = {}
         for (bundle_json,) in self._connection.execute(
             "SELECT bundle_json FROM reservation_boundary_ingress_receipts"
@@ -1726,12 +1715,26 @@ class SQLiteUnitOfWork:
             if genesis.meta.workflow_id in geneses:
                 raise DataCorruption("workflow has multiple reservation replay geneses")
             geneses[genesis.meta.workflow_id] = genesis
-        self._boundary_genesis_cache = geneses
-        self._boundary_genesis_data_version = data_version
         return geneses
 
+    @contextmanager
+    def _scoped_boundary_relay_geneses(self) -> Iterator[None]:
+        if self._boundary_genesis_scope is not None:
+            yield
+            return
+        self._boundary_genesis_scope = self._load_boundary_relay_genesis_map()
+        try:
+            yield
+        finally:
+            self._boundary_genesis_scope = None
+
     def _boundary_relay_genesis(self, workflow_id: str) -> State | None:
-        return self._boundary_relay_genesis_map().get(workflow_id)
+        geneses = (
+            self._boundary_genesis_scope
+            if self._boundary_genesis_scope is not None
+            else self._load_boundary_relay_genesis_map()
+        )
+        return geneses.get(workflow_id)
 
     def _replay_workflow_history(
         self,
@@ -1953,7 +1956,7 @@ class SQLiteUnitOfWork:
     def assert_execution_consistency(self) -> None:
         """Fail closed unless every execution projection agrees end to end."""
 
-        with self._transaction("assert_execution_consistency"):
+        with self._transaction("assert_execution_consistency"), self._scoped_boundary_relay_geneses():
             workflow_ids = tuple(
                 row[0]
                 for row in self._connection.execute(

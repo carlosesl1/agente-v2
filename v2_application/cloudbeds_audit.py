@@ -628,9 +628,22 @@ def _validate_observation(
             return CloudbedsAuditStatus.DIVERGENT
         adults = 0
         children = 0
+        room_ids: set[str] = set()
         for room in (*data["assigned"], *data["unassigned"]):
             if type(room) is not dict:
                 return CloudbedsAuditStatus.DIVERGENT
+            room_id = room.get("reservationRoomID")
+            if (
+                type(room_id) is not str
+                or not room_id
+                or room_id != room_id.strip()
+                or "\x00" in room_id
+                or room_id in room_ids
+                or room.get("startDate") != expected.start_date
+                or room.get("endDate") != expected.end_date
+            ):
+                return CloudbedsAuditStatus.DIVERGENT
+            room_ids.add(room_id)
             room_adults = _canonical_observed_count(room.get("adults"))
             room_children = _canonical_observed_count(room.get("children"))
             if room_adults is None or room_children is None:
@@ -647,15 +660,18 @@ def _validate_observation(
 
 
 def _canonical_observed_amount(value: object) -> str | None:
-    if type(value) not in (str, int, float):
+    if type(value) is str:
+        if re.fullmatch(r"(?:0|[1-9][0-9]*)\.[0-9]{2}", value) is None:
+            return None
+    elif type(value) not in (int, float):
         return None
     try:
         amount = Decimal(str(value))
-    except InvalidOperation:
+        canonical = amount.quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
         return None
     if not amount.is_finite() or amount < 0:
         return None
-    canonical = amount.quantize(Decimal("0.01"))
     if canonical != amount:
         return None
     return f"{canonical:.2f}"
