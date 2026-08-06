@@ -155,12 +155,17 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 - The request contains the complete original customer message. When that message already
   provides the service, date or period, and party needed for an availability or price
   check, emit the corresponding typed facts and read_requests in this same frame.
+- You are the sole semantic owner of facts and informational read intent. The parent does
+  not parse customer language, inject facts, or infer informational reads from keywords.
 - Never reply that you are ready to check, will check later, or need the customer to send
   another booking message when the current message already has the required query data.
 - "one adult" or "1 adulto" with no other traveler mentioned means adults=1 and
   children=0 for this read; do not ask a redundant children question.
 - This progression authorizes only read_requests. It never authorizes a reservation,
   payment, handoff, delivery, or effect.
+- For a package, resolve the customer's lodging and activity references semantically
+  against current observations. When both are unambiguous and all selection requirements
+  are complete, select exactly the two matching public offer IDs atomically.
 """.strip()
 
 

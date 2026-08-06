@@ -122,21 +122,17 @@ def _commercial_requests(
 
 def normalize_initial_commercial_plan(
     proposal: ModelProposal,
-    *,
-    informational_read_requested: bool = True,
 ) -> ModelProposal:
-    """Close safe read omissions before an unbound proposal reaches the reducer.
+    """Require model-owned reads and safely refresh model-owned selections.
 
-    This derives read-only work solely from typed facts accepted in the current frame.
-    It never consults historical projection facts and therefore cannot turn a generic
-    follow-up into a repeated provider lookup.
+    Informational provider reads are semantic actions and must be present in the model
+    proposal. A typed ``select`` intent may still be converted into a current provider
+    refresh because an unobserved target is never execution authority.
     """
 
     if type(proposal) is not ModelProposal:
         raise TypeError("commercial plan requires an exact ModelProposal")
-    if proposal.read_requests or proposal.intent not in {"inform", "select"}:
-        return proposal
-    if proposal.intent == "inform" and not informational_read_requested:
+    if proposal.read_requests or proposal.intent != "select":
         return proposal
 
     requests = _commercial_requests(
@@ -144,21 +140,17 @@ def normalize_initial_commercial_plan(
         values={item.name: item.value for item in proposal.facts},
     )
     if requests:
-        if proposal.intent == "select":
-            # A model-supplied target without current-turn evidence is not authority.
-            # Refresh first and ask the observation frame to bind a public offer.
-            return replace(
-                proposal,
-                intent="inform",
-                read_requests=requests,
-                target_offer_id=None,
-                target_offer_ids=(),
-                selection_requested=True,
-            )
-        return replace(proposal, read_requests=requests)
+        # A model-supplied target without current-turn evidence is not authority.
+        # Refresh first and ask the observation frame to bind a public offer.
+        return replace(
+            proposal,
+            intent="inform",
+            read_requests=requests,
+            target_offer_id=None,
+            target_offer_ids=(),
+            selection_requested=True,
+        )
 
-    if proposal.intent != "select":
-        return proposal
     language = next(
         (item.value for item in proposal.facts if item.name == "language"),
         None,

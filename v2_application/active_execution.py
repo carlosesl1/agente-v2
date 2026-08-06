@@ -49,24 +49,18 @@ def blocks_active_commercial_progression(
     )
 
 
-def is_short_inert_post_command_followup(
+def is_regressive_post_command_reply(
     state: BoundaryState,
     proposal: ModelProposal,
-    message: str,
 ) -> bool:
-    """Ground a regressive model question while the same command is active.
+    """Ground a regressive model output while the same command is active.
 
     This is status-only: it cannot authorize, enqueue, select, or read anything. It
-    applies only when a short non-question follow-up incorrectly produces another
-    question; factual answers and explicit customer questions remain conversational.
+    validates only the structured model proposal and never interprets customer text.
     """
 
-    if (
-        type(state) is not BoundaryState
-        or type(proposal) is not ModelProposal
-        or type(message) is not str
-    ):
-        raise TypeError("post-command followup requires exact V2 contracts")
+    if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
+        raise TypeError("post-command reply guard requires exact V2 contracts")
     if active_execution_status(state) is None:
         return False
     if (
@@ -80,11 +74,7 @@ def is_short_inert_post_command_followup(
         or proposal.passengers
     ):
         return False
-    if "?" in message or "¿" in message:
-        return False
-    if not any("?" in chunk or "¿" in chunk for chunk in proposal.reply_chunks):
-        return False
-    return 0 < len(message.split()) <= 12
+    return any("?" in chunk or "¿" in chunk for chunk in proposal.reply_chunks)
 
 
 def _request_matches_active_draft(

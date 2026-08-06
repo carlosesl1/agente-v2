@@ -13,14 +13,24 @@ from v2_contracts.providers import ReadKind, ReadRequest
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
 
-def _proposal(*, facts: tuple[ModelFact, ...], reads: tuple[ReadRequest, ...] = ()) -> ModelProposal:
+def _proposal(
+    *,
+    facts: tuple[ModelFact, ...],
+    reads: tuple[ReadRequest, ...] = (),
+    intent: str = "inform",
+) -> ModelProposal:
     return ModelProposal(
         source_event_id="batch:turn-plan",
-        intent="inform",
+        intent=intent,
         reply_chunks=("Vou verificar.",),
         facts=facts,
         read_requests=reads,
         effect_proposals=(),
+        target_offer_ids=(
+            ("offer:" + "1" * 64, "offer:" + "2" * 64)
+            if intent == "select"
+            else ()
+        ),
     )
 
 
@@ -68,8 +78,9 @@ def _history(*, fresh: bool = True, check_out: str = "2026-09-12") -> Consultati
     )
 
 
-def test_complete_package_plan_derives_both_read_only_components() -> None:
+def test_complete_package_selection_derives_both_refresh_components() -> None:
     proposal = _proposal(
+        intent="select",
         facts=(
             ModelFact("service", "package"),
             ModelFact("start_date", date(2026, 9, 10)),
@@ -103,7 +114,7 @@ def test_incomplete_inform_plan_does_not_invent_a_read() -> None:
     assert normalize_initial_commercial_plan(proposal) == proposal
 
 
-def test_complete_inform_plan_respects_explicit_read_deferral() -> None:
+def test_complete_inform_plan_without_model_read_stays_read_free() -> None:
     proposal = _proposal(
         facts=(
             ModelFact("service", "hostel"),
@@ -114,13 +125,7 @@ def test_complete_inform_plan_respects_explicit_read_deferral() -> None:
         )
     )
 
-    assert (
-        normalize_initial_commercial_plan(
-            proposal,
-            informational_read_requested=False,
-        )
-        == proposal
-    )
+    assert normalize_initial_commercial_plan(proposal) == proposal
 
 
 def test_consultation_reuse_requires_exact_fresh_scope_and_recap_only_plan() -> None:

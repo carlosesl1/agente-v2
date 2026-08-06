@@ -111,6 +111,14 @@ def test_select_prepares_summary_without_executing() -> None:
     assert "Esse sinal não autoriza efeito" in PROMPT
 
 
+def test_model_owns_dynamic_language_and_atomic_package_selection() -> None:
+    assert "única responsável pela interpretação semântica" in PROMPT
+    assert "o pai não usa palavras-chave ou regex" in PROMPT
+    assert "referências naturais do lead" in PROMPT
+    assert "selecione atomicamente os dois offer_id" in PROMPT
+    assert "não troque pela primeira opção mostrada" in PROMPT
+
+
 def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "adulto saudável com preparo normal ou razoável" in PROMPT
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT

@@ -5,11 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import unicodedata
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
-from functools import lru_cache
-from pathlib import Path
 from typing import Final
 
 from reservation_boundary.conversation import (
@@ -66,7 +63,7 @@ from v2_application.active_execution import (
     active_execution_status,
     blocks_active_commercial_progression,
     execution_in_progress_reply,
-    is_short_inert_post_command_followup,
+    is_regressive_post_command_reply,
 )
 from v2_application.conversation import (
     ConversationReductionError,
@@ -245,500 +242,9 @@ def _opaque(prefix: str, *parts: object) -> str:
     return f"{prefix}:" + hashlib.sha256(payload).hexdigest()[:32]
 
 
-_EN_MONTHS: Final = {
-    name: index
-    for index, name in enumerate(
-        (
-            "january", "february", "march", "april", "may", "june",
-            "july", "august", "september", "october", "november", "december",
-        ),
-        start=1,
-    )
-}
-_BIRTH_DMY_RE: Final = re.compile(
-    r"\b(?:nasci\s+em|(?:minha\s+)?data\s+de\s+nascimento\s*(?:é|e|is|:)?|"
-    r"i\s+was\s+born\s+(?:on\s+)?|(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
-    r"\s*(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b",
-    re.IGNORECASE,
-)
-_BIRTH_ISO_RE: Final = re.compile(
-    r"\b(?:nasci\s+em|(?:minha\s+)?data\s+de\s+nascimento\s*(?:é|e|is|:)?|"
-    r"i\s+was\s+born\s+(?:on\s+)?|(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
-    r"\s*(\d{4})-(\d{2})-(\d{2})\b",
-    re.IGNORECASE,
-)
-_BIRTH_EN_MONTH_RE: Final = re.compile(
-    r"\b(?:i\s+was\s+born\s+(?:on\s+)?|"
-    r"(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s*(?:is|:)?)"
-    r"\s*(\d{1,2})\s+"
-    r"(january|february|march|april|may|june|july|august|september|october|november|december)"
-    r"\s+(\d{4})\b",
-    re.IGNORECASE,
-)
-def _safe_date(year: int, month: int, day: int) -> date | None:
-    try:
-        return date(year, month, day)
-    except ValueError:
-        return None
-
-
-def _explicit_birth_date_candidates(message: str) -> frozenset[date]:
-    if type(message) is not str or not message:
-        raise ValueError("message must be non-empty exact text")
-    birth_dates: set[date] = set()
-    for match in _BIRTH_DMY_RE.finditer(message):
-        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
-        if parsed is not None:
-            birth_dates.add(parsed)
-    for match in _BIRTH_ISO_RE.finditer(message):
-        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        if parsed is not None:
-            birth_dates.add(parsed)
-    for match in _BIRTH_EN_MONTH_RE.finditer(message):
-        parsed = _safe_date(
-            int(match.group(3)),
-            _EN_MONTHS[match.group(2).casefold()],
-            int(match.group(1)),
-        )
-        if parsed is not None:
-            birth_dates.add(parsed)
-
-    return frozenset(birth_dates)
-
-
-_COMMERCIAL_CATALOG_PATH: Final = (
-    Path(__file__).resolve().parents[1] / "config" / "v2_public_commercial_catalog.json"
-)
-_EN_ACTIVITY_DATE_RE: Final = re.compile(
-    r"\b(january|february|march|april|may|june|july|august|september|october|november|december)"
-    r"\s+(\d{1,2}),?\s+(\d{4})\b",
-    re.IGNORECASE,
-)
-_PT_ACTIVITY_DATE_RE: Final = re.compile(
-    r"\b(\d{1,2})\s+de\s+"
-    r"(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)"
-    r"\s+de\s+(\d{4})\b",
-    re.IGNORECASE,
-)
-_DMY_LODGING_RANGE_RE: Final = re.compile(
-    r"\b(\d{1,2})/(\d{1,2})/(\d{4})\s*(?:a|ate|até|to|-)\s*"
-    r"(\d{1,2})/(\d{1,2})/(\d{4})\b",
-    re.IGNORECASE,
-)
-_EN_LODGING_RANGE_RE: Final = re.compile(
-    r"\b(?:from\s+)?"
-    r"(january|february|march|april|may|june|july|august|september|october|november|december)"
-    r"\s+(\d{1,2})(?:,?\s+(\d{4}))?\s+(?:to|until|-)\s+"
-    r"(?:(january|february|march|april|may|june|july|august|september|october|november|december)\s+)?"
-    r"(\d{1,2}),?\s+(\d{4})\b",
-    re.IGNORECASE,
-)
-_PT_MONTHS: Final = {
-    "janeiro": 1,
-    "fevereiro": 2,
-    "marco": 3,
-    "abril": 4,
-    "maio": 5,
-    "junho": 6,
-    "julho": 7,
-    "agosto": 8,
-    "setembro": 9,
-    "outubro": 10,
-    "novembro": 11,
-    "dezembro": 12,
-}
-
-
-def _fold_public_text(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value.casefold())
-    ascii_like = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", ascii_like).split())
-
-
-@lru_cache(maxsize=1)
-def _catalog_aliases() -> tuple[tuple[str, str], ...]:
-    payload = json.loads(_COMMERCIAL_CATALOG_PATH.read_text(encoding="utf-8"))
-    if payload.get("schema") != "v2-public-commercial-catalog-v1":
-        raise TurnExecutionError("public commercial catalog schema drifted")
-    aliases: dict[str, str] = {}
-    for product in payload.get("products", ()):
-        canonical_id = product.get("canonical_id")
-        candidates = (product.get("public_name"), *(product.get("aliases") or ()))
-        if type(canonical_id) is not str:
-            raise TurnExecutionError("public commercial catalog product is malformed")
-        for candidate in candidates:
-            if type(candidate) is not str:
-                raise TurnExecutionError("public commercial catalog alias is malformed")
-            folded = _fold_public_text(candidate)
-            previous = aliases.get(folded)
-            if previous is not None and previous != canonical_id:
-                raise TurnExecutionError("public commercial catalog alias is ambiguous")
-            aliases[folded] = canonical_id
-    return tuple(sorted(aliases.items(), key=lambda item: (-len(item[0]), item[0])))
-
-
-def _explicit_lodging_facts(message: str, folded: str) -> tuple[ModelFact, ...]:
-    padded = f" {folded} "
-    lodging_markers = (
-        " private room ",
-        " dormitory ",
-        " dorm bed ",
-        " accommodation ",
-        " hostel ",
-        " quarto privativo ",
-        " cama em dormitorio ",
-        " hospedagem ",
-        " quarto ",
-    )
-    if not any(marker in padded for marker in lodging_markers):
-        return ()
-
-    periods: set[tuple[date, date]] = set()
-    for match in _DMY_LODGING_RANGE_RE.finditer(message):
-        check_in = _safe_date(
-            int(match.group(3)),
-            int(match.group(2)),
-            int(match.group(1)),
-        )
-        check_out = _safe_date(
-            int(match.group(6)),
-            int(match.group(5)),
-            int(match.group(4)),
-        )
-        if check_in is not None and check_out is not None and check_in < check_out:
-            periods.add((check_in, check_out))
-    for match in _EN_LODGING_RANGE_RE.finditer(message):
-        year = int(match.group(6))
-        check_in = _safe_date(
-            int(match.group(3)) if match.group(3) is not None else year,
-            _EN_MONTHS[match.group(1).casefold()],
-            int(match.group(2)),
-        )
-        check_out = _safe_date(
-            year,
-            _EN_MONTHS[(match.group(4) or match.group(1)).casefold()],
-            int(match.group(5)),
-        )
-        if check_in is not None and check_out is not None and check_in < check_out:
-            periods.add((check_in, check_out))
-    if len(periods) != 1:
-        return ()
-
-    number_words = {
-        "one": 1,
-        "um": 1,
-        "uma": 1,
-        "dois": 2,
-        "duas": 2,
-    }
-    adults: set[int] = set()
-    for pattern in (
-        r"\bfor\s+(one|\d+)\s+(?:adult|person|guest)s?\b",
-        r"\bpara\s+(um|uma|dois|duas|\d+)\s+(?:adulto|adulta|pessoa|hospede)s?\b",
-    ):
-        for match in re.finditer(pattern, folded):
-            token = match.group(1)
-            adults.add(number_words.get(token, int(token) if token.isdigit() else 0))
-    if re.search(r"\b(?:so eu|just me)\b", folded):
-        adults.add(1)
-    adults.discard(0)
-    if len(adults) != 1:
-        return ()
-
-    children: set[int] = set()
-    if re.search(
-        r"\b(?:no children|without children|sem criancas|nenhuma crianca)\b",
-        folded,
-    ):
-        children.add(0)
-    for pattern in (
-        r"\b(?:with|and)\s+(one|\d+)\s+(?:child|children)\b",
-        r"\b(?:com|e)\s+(um|uma|\d+)\s+criancas?\b",
-    ):
-        for match in re.finditer(pattern, folded):
-            token = match.group(1)
-            children.add(number_words.get(token, int(token) if token.isdigit() else 0))
-    if len(children) > 1:
-        return ()
-    child_count = next(iter(children)) if children else 0
-    check_in, check_out = next(iter(periods))
-    facts: list[ModelFact] = []
-    english_markers = len(
-        re.findall(
-            r"\b(?:i|please|room|booking|check|availability|adult|guest)\b",
-            folded,
-        )
-    )
-    portuguese_markers = len(
-        re.findall(
-            r"\b(?:quero|reservar|quarto|hospedagem|adultos?|criancas?|disponibilidade)\b",
-            folded,
-        )
-    )
-    if english_markers >= 2 and english_markers > portuguese_markers:
-        facts.append(ModelFact("language", "en"))
-    elif portuguese_markers >= 2 and portuguese_markers > english_markers:
-        facts.append(ModelFact("language", "pt-BR"))
-    facts.extend(
-        (
-            ModelFact("service", "hostel"),
-            ModelFact("start_date", check_in),
-            ModelFact("end_date", check_out),
-            ModelFact("adults", next(iter(adults))),
-            ModelFact("children", child_count),
-        )
-    )
-    return tuple(facts)
-
-
-def _extract_explicit_commercial_facts(message: str) -> tuple[ModelFact, ...]:
-    if type(message) is not str or not message:
-        raise ValueError("message must be non-empty exact text")
-    folded = _fold_public_text(message)
-    padded = f" {folded} "
-    payment_methods: set[str] = set()
-    payment_patterns = {
-        "stripe": (
-            r"\bi choose card\b",
-            r"\bi will use card\b",
-            r"\bill use card\b",
-            r"\b(?:eu )?vou usar cartao\b",
-            r"\b(?:eu )?escolho cartao\b",
-        ),
-        "wise": (
-            r"\bi choose wise\b",
-            r"\bi will use wise\b",
-            r"\bill use wise\b",
-            r"\b(?:eu )?vou usar wise\b",
-            r"\b(?:eu )?escolho wise\b",
-        ),
-        "pix": (
-            r"\bi choose pix\b",
-            r"\bi will use pix\b",
-            r"\bill use pix\b",
-            r"\b(?:eu )?vou usar pix\b",
-            r"\b(?:eu )?escolho pix\b",
-        ),
-    }
-    for method, patterns in payment_patterns.items():
-        if any(re.search(pattern, folded) is not None for pattern in patterns):
-            payment_methods.add(method)
-    facts: list[ModelFact] = []
-    if len(payment_methods) == 1:
-        facts.append(ModelFact("payment_method", next(iter(payment_methods))))
-    products = {
-        canonical_id
-        for alias, canonical_id in _catalog_aliases()
-        if f" {alias} " in padded
-    }
-    if len(products) != 1:
-        facts.extend(_explicit_lodging_facts(message, folded))
-        return tuple(facts)
-    product_id = next(iter(products))
-
-    activity_dates: set[date] = set()
-    for match in _EN_ACTIVITY_DATE_RE.finditer(message):
-        parsed = _safe_date(
-            int(match.group(3)),
-            _EN_MONTHS[match.group(1).casefold()],
-            int(match.group(2)),
-        )
-        if parsed is not None:
-            activity_dates.add(parsed)
-    for match in _PT_ACTIVITY_DATE_RE.finditer(message):
-        month = _fold_public_text(match.group(2))
-        parsed = _safe_date(int(match.group(3)), _PT_MONTHS[month], int(match.group(1)))
-        if parsed is not None:
-            activity_dates.add(parsed)
-    for match in re.finditer(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", message):
-        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
-        if parsed is not None:
-            activity_dates.add(parsed)
-    activity_dates.difference_update(_explicit_birth_date_candidates(message))
-
-    number_words = {
-        "zero": 0,
-        "one": 1,
-        "um": 1,
-        "uma": 1,
-        "dois": 2,
-        "duas": 2,
-    }
-    adults: set[int] = set()
-    for pattern in (
-        r"\bfor\s+(one|\d+)\s+(?:adult|person|participant)s?\b",
-        r"\bpara\s+(um|uma|dois|duas|\d+)\s+(?:adulto|adulta|pessoa|participante)s?\b",
-    ):
-        for match in re.finditer(pattern, folded):
-            token = match.group(1)
-            adults.add(number_words.get(token, int(token) if token.isdigit() else 0))
-    if re.search(r"\b(?:so eu|just me)\b", folded):
-        adults.add(1)
-    adults.discard(0)
-
-    children: set[int] = set()
-    for pattern in (
-        r"\b(?:adults|people|participants)\s+(?:and\s+|with\s+)?"
-        r"(zero|one|\d+)\s+(?:child|children)\b",
-        r"\b(?:adultos|adultas|pessoas|participantes)\s+(?:e\s+|com\s+)?"
-        r"(zero|um|uma|\d+)\s+criancas?\b",
-    ):
-        for match in re.finditer(pattern, folded):
-            token = match.group(1)
-            children.add(number_words.get(token, int(token) if token.isdigit() else 0))
-
-    english_markers = len(
-        re.findall(r"\b(?:i|please|tour|booking|what|can|adult|person)\b", folded)
-    )
-    portuguese_markers = len(
-        re.findall(
-            r"\b(?:quero|reservar|roteiro|passeio|pagamento|adultos?|criancas?|"
-            r"passageiros?|disponibilidade|confirmar)\b",
-            folded,
-        )
-    )
-    if english_markers >= 2 and english_markers > portuguese_markers:
-        facts.append(ModelFact("language", "en"))
-    elif portuguese_markers >= 2 and portuguese_markers > english_markers:
-        facts.append(ModelFact("language", "pt-BR"))
-    facts.extend(
-        (
-            ModelFact("service", "agency"),
-            ModelFact("product_id", product_id),
-        )
-    )
-    if len(activity_dates) == 1:
-        facts.append(ModelFact("activity_date", next(iter(activity_dates))))
-    if len(adults) == 1 and len(children) <= 1:
-        child_count = next(iter(children)) if children else 0
-        facts.extend(
-            (
-                ModelFact("adults", next(iter(adults))),
-                ModelFact("children", child_count),
-            )
-        )
-    return tuple(facts)
-
-
-def _merge_explicit_customer_facts(
-    proposal: ModelProposal,
-    explicit_facts: tuple[ModelFact, ...],
-) -> ModelProposal:
-    if type(proposal) is not ModelProposal:
-        raise TypeError("proposal must be an exact ModelProposal")
-    existing = {item.name: item for item in proposal.facts}
-    additions: list[ModelFact] = []
-    for fact in explicit_facts:
-        current = existing.get(fact.name)
-        if (
-            current is not None
-            and fact.name == "language"
-            and type(current.value) is str
-            and type(fact.value) is str
-            and current.value.casefold().split("-", 1)[0]
-            == fact.value.casefold().split("-", 1)[0]
-        ):
-            continue
-        if (
-            current is not None
-            and fact.name == "service"
-            and current.value == "package"
-            and fact.value in {"hostel", "agency"}
-        ):
-            # A package is the semantic composite of its lodging/activity parts.
-            # A lexical component hint must never demote the model-owned package plan.
-            continue
-        if current is not None and current.value != fact.value:
-            raise TurnExecutionError(
-                f"model fact {fact.name} conflicts with explicit customer fact"
-            )
-        if current is None:
-            additions.append(fact)
-    return replace(proposal, facts=(*proposal.facts, *additions))
-
-
-def _explicit_summary_preparation_requested(message: str) -> bool:
-    if type(message) is not str or not message:
-        raise ValueError("message must be non-empty exact text")
-    folded = _fold_public_text(message)
-    if any(
-        phrase in folded
-        for phrase in (
-            "do not prepare the final booking summary",
-            "dont prepare the final booking summary",
-            "do not prepare the booking summary",
-            "dont prepare the booking summary",
-            "nao prepare o resumo final",
-            "nao preparar o resumo final",
-        )
-    ):
-        return False
-    return any(
-        phrase in folded
-        for phrase in (
-            "prepare the final booking summary",
-            "prepare the booking summary",
-            "prepare o resumo final",
-            "preparar o resumo final",
-        )
-    )
-
-
-def _explicit_commercial_read_requested(message: str) -> bool:
-    if type(message) is not str or not message:
-        raise ValueError("message must be non-empty exact text")
-    folded = _fold_public_text(message)
-    if any(
-        phrase in folded
-        for phrase in (
-            "do not check",
-            "dont check",
-            "do not consult",
-            "dont consult",
-            "without checking",
-            "nao consulte",
-            "nao consultar",
-            "sem consultar",
-            "nao verifique",
-            "sem verificar",
-        )
-    ):
-        return False
-    return any(
-        phrase in folded
-        for phrase in (
-            "availability",
-            "room available",
-            "check the price",
-            "check availability",
-            "consult availability",
-            "what is the rate",
-            "nightly rate",
-            "room rate",
-            "rate for",
-            "what is the price",
-            "room price",
-            "price for",
-            "disponibilidade",
-            "quarto disponivel",
-            "tem vaga",
-            "tem quarto",
-            "consulte",
-            "consultar",
-            "verifique",
-            "verificar",
-            "quanto custa",
-            "qual o valor",
-            "qual e o valor",
-            "preco para",
-            "valor para",
-        )
-    )
-
-
 def _structured_selection_review_required(
     state_facts: tuple[ModelFact, ...],
-    explicit_facts: tuple[ModelFact, ...],
+    current_facts: tuple[ModelFact, ...],
     *,
     private_profile_complete: bool,
     passenger_manifest_complete: bool = False,
@@ -748,18 +254,18 @@ def _structured_selection_review_required(
     if (
         type(state_facts) is not tuple
         or any(type(item) is not ModelFact for item in state_facts)
-        or type(explicit_facts) is not tuple
-        or any(type(item) is not ModelFact for item in explicit_facts)
+        or type(current_facts) is not tuple
+        or any(type(item) is not ModelFact for item in current_facts)
         or type(private_profile_complete) is not bool
         or type(passenger_manifest_complete) is not bool
     ):
         raise TypeError("selection review gate requires exact V2 contracts")
     if not private_profile_complete or not any(
-        fact.name == "payment_method" for fact in explicit_facts
+        fact.name == "payment_method" for fact in current_facts
     ):
         return False
     values: dict[str, str | int | date] = {}
-    for fact in (*state_facts, *explicit_facts):
+    for fact in (*state_facts, *current_facts):
         current = values.get(fact.name)
         if current is not None and current != fact.value:
             return False
@@ -782,48 +288,6 @@ def _structured_selection_review_required(
         and children >= 0
         and values.get("payment_method") in {"stripe", "wise", "pix"}
         and passenger_ready
-    )
-
-
-def _force_structured_activity_summary_preparation(
-    proposal: ModelProposal,
-    *,
-    state_facts: tuple[ModelFact, ...],
-    explicit_facts: tuple[ModelFact, ...],
-    passenger_manifest_complete: bool = False,
-) -> ModelProposal:
-    """Prepare one provider read; this cannot authorize or emit an effect."""
-
-    if type(proposal) is not ModelProposal:
-        raise TypeError("proposal must be an exact ModelProposal")
-    if not _structured_selection_review_required(
-        state_facts,
-        explicit_facts,
-        private_profile_complete=True,
-        passenger_manifest_complete=passenger_manifest_complete,
-    ):
-        return proposal
-    values = {fact.name: fact.value for fact in (*state_facts, *explicit_facts)}
-    activity_date = values.get("activity_date") or values.get("start_date")
-    adults = values["adults"]
-    children = values.get("children", 0)
-    return replace(
-        proposal,
-        intent="inform",
-        read_requests=(
-            ReadRequest(
-                request_id=f"{proposal.source_event_id}:read:activity",
-                kind=ReadKind.ACTIVITY,
-                product_id=values["product_id"],
-                activity_date=activity_date,
-                adults=adults,
-                children=children,
-            ),
-        ),
-        target_offer_id=None,
-        target_offer_ids=(),
-        selection_requested=True,
-        pending_disposition=None,
     )
 
 
@@ -940,39 +404,6 @@ def _repair_requested_activity_selection(
         ),
         target_offer_id=offer_id,
         selection_requested=False,
-    )
-
-
-def _explicit_customer_fact_commitment(
-    frame_hash: str,
-    event_hash: str,
-    explicit_facts: tuple[ModelFact, ...],
-) -> str:
-    if not explicit_facts:
-        return frame_hash
-    for name, value in (("frame_hash", frame_hash), ("event_hash", event_hash)):
-        if type(value) is not str or _HASH_RE.fullmatch(value) is None:
-            raise ValueError(f"{name} must be a lowercase SHA-256")
-    return _domain_hash(
-        "v2-explicit-customer-facts-v1",
-        _canonical(
-            "v2-explicit-customer-facts",
-            {
-                "frame_hash": frame_hash,
-                "event_hash": event_hash,
-                "facts": [
-                    {
-                        "name": fact.name,
-                        "value": (
-                            fact.value.isoformat()
-                            if type(fact.value) is date
-                            else fact.value
-                        ),
-                    }
-                    for fact in explicit_facts
-                ],
-            },
-        ),
     )
 
 
@@ -1907,9 +1338,6 @@ class V2TurnExecutor:
         )
         private_update_turn = bool(journal_fact_names)
         collection_only = False
-        explicit_customer_facts = _extract_explicit_commercial_facts(
-            batch.combined_text
-        )
         effective_profile_complete = reservation_profile_ready(
             profile,
             projection,
@@ -1949,10 +1377,7 @@ class V2TurnExecutor:
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
-        first_proposal = _merge_explicit_customer_facts(
-            validate_productive_proposal(first_audited.proposal),
-            explicit_customer_facts,
-        )
+        first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
         (
@@ -1989,12 +1414,7 @@ class V2TurnExecutor:
             )
         else:
             first_proposal = (
-                normalize_initial_commercial_plan(
-                    first_proposal,
-                    informational_read_requested=_explicit_commercial_read_requested(
-                        batch.combined_text
-                    ),
-                )
+                normalize_initial_commercial_plan(first_proposal)
                 if pending_action is None
                 else first_proposal
             )
@@ -2023,7 +1443,7 @@ class V2TurnExecutor:
             and not first_proposal.read_requests
             and _structured_selection_review_required(
                 _state_model_facts(projection),
-                explicit_customer_facts,
+                first_proposal.facts,
                 private_profile_complete=effective_profile_complete,
                 passenger_manifest_complete=_passenger_manifest_complete(
                     projection,
@@ -2066,10 +1486,7 @@ class V2TurnExecutor:
             review_audited = self._model.complete_audited(review_request)
             if type(review_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
-            review_proposal = _merge_explicit_customer_facts(
-                validate_productive_proposal(review_audited.proposal),
-                explicit_customer_facts,
-            )
+            review_proposal = validate_productive_proposal(review_audited.proposal)
             if review_proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("semantic review source event diverged")
             (
@@ -2129,32 +1546,7 @@ class V2TurnExecutor:
                 ephemeral_session_id=review_audited.closure.ephemeral_session_id,
             )
         if not collection_only and pending_action is None:
-            first_proposal = normalize_initial_commercial_plan(
-                first_proposal,
-                informational_read_requested=_explicit_commercial_read_requested(
-                    batch.combined_text
-                ),
-            )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
-        if (
-            not collection_only
-            and selection_review
-            and not first_proposal.selection_requested
-            and _explicit_summary_preparation_requested(batch.combined_text)
-        ):
-            first_proposal = _force_structured_activity_summary_preparation(
-                first_proposal,
-                state_facts=_state_model_facts(projection),
-                explicit_facts=explicit_customer_facts,
-                passenger_manifest_complete=_passenger_manifest_complete(
-                    projection,
-                    first_proposal,
-                ),
-            )
+            first_proposal = normalize_initial_commercial_plan(first_proposal)
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
                 frames=first_audited.frames,
@@ -2356,10 +1748,7 @@ class V2TurnExecutor:
             second_audited = self._model.complete_audited(followup)
             if type(second_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
-            proposal = _merge_explicit_customer_facts(
-                validate_productive_proposal(second_audited.proposal),
-                explicit_customer_facts,
-            )
+            proposal = validate_productive_proposal(second_audited.proposal)
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
             if reused_consultation and (
@@ -2469,10 +1858,9 @@ class V2TurnExecutor:
                 proposal,
                 locale=projection.locale,
             )
-        elif is_short_inert_post_command_followup(
+        elif is_regressive_post_command_reply(
             current.state,
             proposal,
-            batch.combined_text,
         ):
             proposal = replace(
                 proposal,
@@ -2537,11 +1925,7 @@ class V2TurnExecutor:
 
         frames = _frame_commitments(audited)
         final_frame_hash = frames[-1].canonical_hash()
-        fact_commitment_hash = _explicit_customer_fact_commitment(
-            final_frame_hash,
-            event_hash,
-            explicit_customer_facts,
-        )
+        fact_commitment_hash = final_frame_hash
         boundary_reads = tuple(
             bridge_availability_observation(
                 read_request,

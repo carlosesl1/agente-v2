@@ -38,12 +38,6 @@ from v2_application.turn_executor import (
     TurnExecutionError,
     V2TurnExecutor,
     _confirmation_read_requests,
-    _explicit_commercial_read_requested,
-    _explicit_customer_fact_commitment,
-    _extract_explicit_commercial_facts,
-    _explicit_summary_preparation_requested,
-    _force_structured_activity_summary_preparation,
-    _merge_explicit_customer_facts,
     _repair_requested_activity_selection,
     _structured_selection_review_required,
     _state_model_facts,
@@ -158,48 +152,89 @@ def test_parent_does_not_promote_birth_or_gender_from_raw_customer_text(
         store.close()
 
 
-def test_parent_extracts_unambiguous_catalog_product_date_and_party() -> None:
-    assert _extract_explicit_commercial_facts(
-        "Hi! I am considering the 4Ps Tour on November 18, 2026, for one adult."
-    ) == (
-        ModelFact("language", "en"),
-        ModelFact("service", "agency"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("activity_date", date(2026, 11, 18)),
-        ModelFact("adults", 1),
-        ModelFact("children", 0),
+def test_parent_does_not_reinterpret_personal_date_as_commercial_fact(
+    tmp_path,
+) -> None:
+    message = "Para o 4Ps, meu nascimento é 12/05/1991 e sou mulher."
+    event = replace(
+        EVENT,
+        event_id="event:model-owned-personal-date",
+        text=message,
+        payload_hash="8" * 64,
     )
-
-
-def test_parent_extracts_explicit_mixed_activity_party_before_passenger_ordinals() -> None:
-    assert _extract_explicit_commercial_facts(
-        "Quero o Roteiro dos 4Ps em 18/11/2026 para 2 adultos e 1 criança. "
-        "Passageiros: adulto 1, adulto 2, criança 3."
-    ) == (
-        ModelFact("language", "pt-BR"),
-        ModelFact("service", "agency"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("activity_date", date(2026, 11, 18)),
-        ModelFact("adults", 2),
-        ModelFact("children", 1),
+    batch = InboundBatch(
+        batch_id="batch:model-owned-personal-date",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(event,),
+        combined_text=message,
     )
+    authority = replace(
+        AUTHORITY,
+        authorization_id="auth:model-owned-personal-date",
+        allocation_ids=("allocation:model-owned-personal-date",),
+        allocation_manifest_hash="8" * 64,
+    )
+    proposal = ModelProposal(
+        source_event_id=batch.batch_id,
+        intent="inform",
+        reply_chunks=("Obrigado. Registrei seus dados para continuar.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:tour-4ps"),
+            ModelFact("activity_date", date(2026, 12, 3)),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+            ModelFact("birth_date", date(1991, 5, 12)),
+            ModelFact("gender", "f"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "model-owned-personal-date.sqlite3"
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store, authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        executor.execute(batch)
+
+        projection = store.load_latest_conversation_projection(batch.lead_id)
+        assert projection is not None
+        values = {fact.name: fact.value.value for fact in projection.facts}
+        assert values["activity_date"] == date(2026, 12, 3)
+        assert values["birth_date"] == date(1991, 5, 12)
+        assert values["gender"] == "f"
+    finally:
+        private_store.close()
+        store.close()
 
 
-def test_parent_commercial_extraction_ignores_date_without_product() -> None:
-    assert _extract_explicit_commercial_facts(
-        "I will be free on November 18, 2026, but have not chosen a tour."
-    ) == ()
+def test_turn_executor_has_no_raw_text_semantic_extractors() -> None:
+    import v2_application.turn_executor as turn_executor
 
-
-def test_parent_extracts_only_explicit_payment_choice() -> None:
-    assert _extract_explicit_commercial_facts(
-        "I choose card. Please prepare the final booking summary."
-    ) == (ModelFact("payment_method", "stripe"),)
-    assert _extract_explicit_commercial_facts(
-        "Pensando melhor, vou usar cartão com sinal de 20%."
-    ) == (ModelFact("payment_method", "stripe"),)
-    assert _extract_explicit_commercial_facts("Can I use card?") == ()
-    assert _extract_explicit_commercial_facts("Maybe Pix would be better.") == ()
+    for name in (
+        "_extract_explicit_commercial_facts",
+        "_explicit_birth_date_candidates",
+        "_explicit_commercial_read_requested",
+        "_explicit_summary_preparation_requested",
+        "_merge_explicit_customer_facts",
+    ):
+        assert not hasattr(turn_executor, name), name
 
 
 def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
@@ -228,106 +263,6 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         payment,
         private_profile_complete=True,
     )
-
-
-def test_explicit_summary_preparation_is_strict_and_non_authorizing() -> None:
-    assert _explicit_summary_preparation_requested(
-        "I choose card. Please prepare the final booking summary before executing anything."
-    )
-    assert _explicit_summary_preparation_requested(
-        "Pode preparar o resumo final, mas ainda não execute."
-    )
-    assert not _explicit_summary_preparation_requested(
-        "Do not prepare the final booking summary yet."
-    )
-    assert not _explicit_summary_preparation_requested(
-        "Can you explain what a booking summary is?"
-    )
-
-
-def test_parent_forces_only_a_fresh_read_for_explicit_summary_preparation() -> None:
-    proposal = ModelProposal(
-        source_event_id="batch:force-summary",
-        intent="inform",
-        reply_chunks=("I can continue helping.",),
-        facts=(ModelFact("payment_method", "stripe"),),
-        read_requests=(),
-        effect_proposals=(),
-    )
-    state_facts = (
-        ModelFact("service", "agency"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("activity_date", date(2026, 11, 18)),
-        ModelFact("adults", 1),
-        ModelFact("children", 0),
-        ModelFact("birth_date", date(1991, 5, 17)),
-        ModelFact("gender", "f"),
-    )
-    forced = _force_structured_activity_summary_preparation(
-        proposal,
-        state_facts=state_facts,
-        explicit_facts=(ModelFact("payment_method", "stripe"),),
-    )
-    assert forced.intent == "inform"
-    assert forced.selection_requested is True
-    assert forced.effect_proposals == ()
-    assert len(forced.read_requests) == 1
-    request = forced.read_requests[0]
-    assert request.kind is ReadKind.ACTIVITY
-    assert request.product_id == "product:tour-4ps"
-    assert request.activity_date == date(2026, 11, 18)
-    assert request.activity_party() == (1, 0)
-
-
-def test_parent_explicit_fact_merge_rejects_model_conflict_and_commits_source() -> None:
-    extracted = (ModelFact("payment_method", "stripe"),)
-    proposal = ModelProposal(
-        source_event_id="batch:explicit-customer-facts",
-        intent="inform",
-        reply_chunks=("Got it.",),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-    )
-    merged = _merge_explicit_customer_facts(proposal, extracted)
-    assert merged.facts == extracted
-    commitment = _explicit_customer_fact_commitment(
-        "d" * 64,
-        "e" * 64,
-        extracted,
-    )
-    assert len(commitment) == 64
-    assert commitment != "d" * 64
-
-    with pytest.raises(TurnExecutionError, match="conflicts with explicit customer fact"):
-        _merge_explicit_customer_facts(
-            replace(proposal, facts=(ModelFact("payment_method", "wise"),)),
-            extracted,
-        )
-
-
-def test_parent_fact_merge_treats_package_as_composite_not_agency_conflict() -> None:
-    proposal = ModelProposal(
-        source_event_id="batch:package-semantic-owner",
-        intent="inform",
-        reply_chunks=("Vou consultar hospedagem e passeio.",),
-        facts=(ModelFact("service", "package"),),
-        read_requests=(),
-        effect_proposals=(),
-    )
-
-    merged = _merge_explicit_customer_facts(
-        proposal,
-        (
-            ModelFact("service", "agency"),
-            ModelFact("product_id", "product:buracao"),
-        ),
-    )
-
-    assert {item.name: item.value for item in merged.facts} == {
-        "service": "package",
-        "product_id": "product:buracao",
-    }
 
 
 def test_parent_repairs_only_structured_requested_activity_selection() -> None:
@@ -1441,20 +1376,19 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         store.close()
 
 
-def test_complete_english_lodging_request_derives_read_when_model_omits_plan() -> None:
+def test_parent_does_not_invent_read_when_model_omits_it() -> None:
     message = (
         "I need a private room from September 10 to September 12, 2026, for one "
-        "adult. I am Canadian and I prefer Wise. Please only check availability; "
-        "do not book."
+        "adult. Do you have availability? Please do not book anything."
     )
     event = replace(
         EVENT,
-        event_id="event:english-derived-read",
+        event_id="event:model-owned-read-intent",
         text=message,
-        payload_hash="a" * 64,
+        payload_hash="c" * 64,
     )
     batch = InboundBatch(
-        batch_id="batch:english-derived-read",
+        batch_id="batch:model-owned-read-intent",
         lead_id=BATCH.lead_id,
         subscriber_id=BATCH.subscriber_id,
         events=(event,),
@@ -1462,58 +1396,28 @@ def test_complete_english_lodging_request_derives_read_when_model_omits_plan() -
     )
     authority = replace(
         AUTHORITY,
-        authorization_id="auth:english-derived-read",
-        allocation_ids=("allocation:english-derived-read",),
-        allocation_manifest_hash="a" * 64,
+        authorization_id="auth:model-owned-read-intent",
+        allocation_ids=("allocation:model-owned-read-intent",),
+        allocation_manifest_hash="c" * 64,
     )
-    first = ModelProposal(
+    proposal = ModelProposal(
         source_event_id=batch.batch_id,
         intent="inform",
-        reply_chunks=("I’m here to help with your stay and tours.",),
-        facts=(),
+        reply_chunks=("Tell me if you want me to check current availability.",),
+        facts=(
+            ModelFact("language", "en"),
+            ModelFact("service", "hostel"),
+            ModelFact("start_date", date(2026, 9, 10)),
+            ModelFact("end_date", date(2026, 9, 12)),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+        ),
         read_requests=(),
         effect_proposals=(),
     )
-    final = ModelProposal(
-        source_event_id=batch.batch_id,
-        intent="inform",
-        reply_chunks=("A private room is available for those dates.",),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-    )
-
-    class ScopedLodgingReadPort:
-        def __init__(self, store: SQLiteBoundaryStore) -> None:
-            self.store = store
-            self.calls: list[ReadRequest] = []
-
-        def read(self, request: ReadRequest) -> ReadObservation:
-            assert self.store._connection.in_transaction is False
-            self.calls.append(request)
-            return ReadObservation(
-                request_hash=request.canonical_hash(),
-                provider="cloudbeds",
-                observed_at=NOW,
-                expires_at=NOW + timedelta(minutes=5),
-                public_payload={
-                    "offer_id": "offer:" + "a" * 64,
-                    "room_public_name": "Private room",
-                    "check_in": request.check_in.isoformat(),
-                    "check_out": request.check_out.isoformat(),
-                    "adults": request.adults,
-                    "children": request.children,
-                    "total_amount": "440.00",
-                    "currency": "BRL",
-                    "available": True,
-                    "available_units": 1,
-                },
-                private_binding_hash="b" * 64,
-            )
-
     store = SQLiteBoundaryStore.open_memory_v8()
-    model = FakeAuditedModel(store, [first, final])
-    port = ScopedLodgingReadPort(store)
+    model = FakeAuditedModel(store, [proposal])
+    port = FakeLodgingReadPort(store)
     _install_public_authority(store, authority)
     executor = _executor(
         store=store,
@@ -1525,48 +1429,11 @@ def test_complete_english_lodging_request_derives_read_when_model_omits_plan() -
     try:
         result = executor.execute(batch)
 
-        assert len(port.calls) == 1
-        request = port.calls[0]
-        assert request.kind is ReadKind.LODGING
-        assert request.check_in == date(2026, 9, 10)
-        assert request.check_out == date(2026, 9, 12)
-        assert request.adults == 1
-        assert request.children == 0
-        assert len(model.calls) == 2
-        assert "available" in " ".join(result.reply_chunks).casefold()
-        assert result.receipt.command_rows == ()
-        assert result.receipt.relay_rows == ()
+        assert port.calls == []
+        assert len(model.calls) == 1
+        assert result.receipt.read_observations == ()
     finally:
         store.close()
-
-
-def test_explicit_read_fallback_respects_full_message_deferral() -> None:
-    assert (
-        _explicit_commercial_read_requested(
-            "I need a room from September 10 to September 12, 2026 for one adult, "
-            "but do not check availability yet."
-        )
-        is False
-    )
-    assert (
-        _explicit_commercial_read_requested(
-            "I need a room from September 10 to September 12, 2026 for one adult. "
-            "Do you have availability?"
-        )
-        is True
-    )
-    assert (
-        _explicit_commercial_read_requested(
-            "What is the room rate for September 10 to September 12, 2026?"
-        )
-        is True
-    )
-    assert (
-        _explicit_commercial_read_requested(
-            "Do you have a check-in time for my private room stay?"
-        )
-        is False
-    )
 
 
 def test_ambiguous_holder_does_not_block_complete_commercial_read(tmp_path) -> None:
@@ -1595,6 +1462,14 @@ def test_ambiguous_holder_does_not_block_complete_commercial_read(tmp_path) -> N
         allocation_ids=("allocation:ambiguous-holder-read",),
         allocation_manifest_hash="b" * 64,
     )
+    requested_read = ReadRequest(
+        request_id="read:ambiguous-holder-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
     first = ModelProposal(
         source_event_id=batch.batch_id,
         intent="inform",
@@ -1606,7 +1481,7 @@ def test_ambiguous_holder_does_not_block_complete_commercial_read(tmp_path) -> N
             ModelFact("adults", 2),
             ModelFact("children", 0),
         ),
-        read_requests=(),
+        read_requests=(requested_read,),
         effect_proposals=(),
     )
     final = ModelProposal(
@@ -4221,6 +4096,11 @@ def test_approval_expiring_between_reducer_and_commit_persists_zero_effect_rows(
         (
             "O que ficou descrito acima corresponde integralmente ao que quero; "
             "siga com o conjunto completo sem mudar nada.",
+            True,
+        ),
+        (
+            "Confirmo exatamente a hospedagem de 10/08/2026 a 12/08/2026 para "
+            "2 adultos e 0 crianças. Pode reservar agora.",
             True,
         ),
         ("Confirmed. Please book exactly that summary.", True),
