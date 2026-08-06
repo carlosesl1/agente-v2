@@ -32,6 +32,32 @@ from v2_contracts.payments import (
 )
 
 
+HOSTEL_DETAILS = PaymentDisplayDetails(
+    service=CheckoutService.LODGING,
+    public_label="Suíte Casal",
+    start_date=date(2026, 12, 2),
+    end_date=date(2026, 12, 4),
+    start_time=None,
+    adults=1,
+    children=0,
+    provider_reference="9081281187670",
+    reservation_total_minor=30000,
+    package_component=False,
+)
+AGENCY_DETAILS = PaymentDisplayDetails(
+    service=CheckoutService.ACTIVITY,
+    public_label="Roteiro dos 4Ps",
+    start_date=date(2026, 12, 3),
+    end_date=None,
+    start_time="08:30",
+    adults=1,
+    children=0,
+    provider_reference="99859093",
+    reservation_total_minor=45000,
+    package_component=False,
+)
+
+
 HOSTEL = PaymentObligation(
     payment_id="payment:hostel:001",
     reservation_anchor_id="anchor:hostel:001",
@@ -41,6 +67,7 @@ HOSTEL = PaymentObligation(
     due_kind=DueKind.PREPAYMENT,
     economic_version=1,
     receiver_profile_id="receiver:hostel",
+    display_details=HOSTEL_DETAILS,
 )
 AGENCY = PaymentObligation(
     payment_id="payment:agency:001",
@@ -51,6 +78,7 @@ AGENCY = PaymentObligation(
     due_kind=DueKind.PREPAYMENT,
     economic_version=1,
     receiver_profile_id="receiver:agency",
+    display_details=AGENCY_DETAILS,
 )
 
 
@@ -153,7 +181,14 @@ def test_agency_stripe_signal_uses_twenty_percent_of_fee_inclusive_bokun_total()
             BusinessUnit.AGENCY: 20,
         },
     )
-    fee_inclusive = replace(AGENCY, amount_minor=33495)
+    fee_inclusive = replace(
+        AGENCY,
+        amount_minor=33495,
+        display_details=replace(
+            AGENCY.display_details,
+            reservation_total_minor=33495,
+        ),
+    )
 
     adapter.create_link(fee_inclusive)
 
@@ -247,7 +282,13 @@ def test_economic_change_increments_only_financial_version() -> None:
     assert changed.obligation.reservation_anchor_id == HOSTEL.reservation_anchor_id
     assert changed.obligation.economic_version == HOSTEL.economic_version + 1
     assert changed.obligation.amount_minor == 31000
-    assert replace(changed.obligation, amount_minor=HOSTEL.amount_minor).reservation_anchor_id == HOSTEL.reservation_anchor_id
+    assert changed.obligation.display_details.reservation_total_minor == 31000
+    restored = replace(
+        changed.obligation,
+        amount_minor=HOSTEL.amount_minor,
+        display_details=HOSTEL.display_details,
+    )
+    assert restored.reservation_anchor_id == HOSTEL.reservation_anchor_id
 
 
 NOW = datetime(2026, 7, 23, 16, 0, tzinfo=timezone.utc)
@@ -292,7 +333,11 @@ def test_payment_display_details_validate_closed_service_shapes() -> None:
 
 def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows() -> None:
     selection = PaymentSelection(
-        replace(AGENCY, display_details=ACTIVITY_DETAILS),
+        replace(
+            AGENCY,
+            amount_minor=ACTIVITY_DETAILS.reservation_total_minor,
+            display_details=ACTIVITY_DETAILS,
+        ),
         PaymentMethod.STRIPE,
     )
 
@@ -324,7 +369,11 @@ def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows()
 
 def test_payment_selection_rejects_unknown_display_fields() -> None:
     selection = PaymentSelection(
-        replace(AGENCY, display_details=ACTIVITY_DETAILS),
+        replace(
+            AGENCY,
+            amount_minor=ACTIVITY_DETAILS.reservation_total_minor,
+            display_details=ACTIVITY_DETAILS,
+        ),
         PaymentMethod.STRIPE,
     )
     payload = json.loads(_selection_bytes(selection))
@@ -361,6 +410,18 @@ def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path)
         for candidate in path.parent.glob(path.name + "*")
     )
     assert b"https://pay.invalid" not in persisted
+
+
+def test_legacy_stripe_obligation_fails_before_transport() -> None:
+    payments, transport, _ = service()
+
+    with pytest.raises(ValueError, match="display_details"):
+        payments.initiate(
+            replace(HOSTEL, display_details=None),
+            PaymentMethod.STRIPE,
+        )
+
+    assert transport.requests == []
 
 
 def test_stripe_timeout_after_fence_is_manual_review_without_retry(tmp_path: Path) -> None:

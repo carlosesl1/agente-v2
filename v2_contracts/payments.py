@@ -143,6 +143,13 @@ class PaymentObligation:
             raise TypeError(
                 "display_details must be exact PaymentDisplayDetails or None"
             )
+        if (
+            self.display_details is not None
+            and self.display_details.reservation_total_minor != self.amount_minor
+        ):
+            raise ValueError(
+                "display reservation total must match obligation amount_minor"
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,6 +10,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from v2_adapters.stripe_checkout import stripe_product_presentation
 from v2_contracts.payments import (
     BusinessUnit,
     PaymentObligation,
@@ -142,19 +143,39 @@ class StripeTestHTTPTransport:
             raise TypeError("Stripe transport requires exact StripeLinkRequest")
         if not request.subscriber_fingerprint:
             raise ValueError("Stripe request requires allowlisted subscriber fingerprint")
+        presentation = stripe_product_presentation(request)
+        expected_product_metadata = {
+            "payment_id_sha256": hashlib.sha256(
+                request.payment_id.encode()
+            ).hexdigest(),
+            "economic_version": str(request.economic_version),
+            "display_details_sha256": presentation.details_sha256,
+        }
         product = self._post(
             profile=request.account_profile_id,
             path="/v1/products",
             form={
-                "name": f"V2 {request.business_unit.value} reservation payment",
-                "metadata[payment_id_sha256]": hashlib.sha256(
-                    request.payment_id.encode()
-                ).hexdigest(),
-                "metadata[economic_version]": str(request.economic_version),
+                "name": presentation.name,
+                "description": presentation.description,
+                **{
+                    f"metadata[{name}]": value
+                    for name, value in expected_product_metadata.items()
+                },
             },
             idempotency_key=request.idempotency_key + ":product",
         )
         self._require_test_mode(product, "product")
+        product_metadata = product.get("metadata")
+        if (
+            product.get("name") != presentation.name
+            or product.get("description") != presentation.description
+            or not isinstance(product_metadata, dict)
+            or any(
+                product_metadata.get(name) != value
+                for name, value in expected_product_metadata.items()
+            )
+        ):
+            raise RuntimeError("Stripe product display did not match")
         product_id = self._provider_id(product, "product")
         price = self._post(
             profile=request.account_profile_id,
@@ -176,6 +197,7 @@ class StripeTestHTTPTransport:
             "business_unit": request.business_unit.value,
             "economic_version": str(request.economic_version),
             "payment_percentage": str(request.payment_percentage),
+            "display_details_sha256": presentation.details_sha256,
         }
         link = self._post(
             profile=request.account_profile_id,
@@ -255,6 +277,8 @@ class StripeLinkAdapter:
             raise TypeError("obligation must be exact PaymentObligation")
         if not self._enabled:
             raise RuntimeError("stripe_link_gate_closed")
+        if obligation.display_details is None:
+            raise ValueError("Stripe link creation requires display_details")
         payment_percentage = self._percentages[obligation.business_unit]
         amount_minor = int(
             (
@@ -278,6 +302,7 @@ class StripeLinkAdapter:
             subscriber_fingerprint=self._subscriber_fingerprint,
             payment_percentage=payment_percentage,
             business_unit=obligation.business_unit,
+            display_details=obligation.display_details,
         )
         response = self._transport(request)
         if type(response) is not dict or set(response) != {"link_id", "url"}:

@@ -112,10 +112,17 @@ class PaymentService:
             raise ValueError("amount_minor must be an exact positive integer")
         if amount_minor == selected.obligation.amount_minor:
             return selected
+        display_details = selected.obligation.display_details
+        if display_details is not None:
+            display_details = replace(
+                display_details,
+                reservation_total_minor=amount_minor,
+            )
         obligation = replace(
             selected.obligation,
             amount_minor=amount_minor,
             economic_version=selected.obligation.economic_version + 1,
+            display_details=display_details,
         )
         return PaymentSelection(obligation, selected.method)
 

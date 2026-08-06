@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -9,6 +9,7 @@ import pytest
 
 from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
+from v2_adapters.stripe_checkout import stripe_product_presentation
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.payments import (
     PaymentInitiationDisposition,
@@ -18,7 +19,9 @@ from v2_application.payments import (
 )
 from v2_contracts.payments import (
     BusinessUnit,
+    CheckoutService,
     DueKind,
+    PaymentDisplayDetails,
     PaymentMethod,
     PaymentObligation,
     PaymentSelection,
@@ -44,6 +47,19 @@ def _request() -> StripeLinkRequest:
         idempotency_key="stripe-link:payment:hostel:stripe:001:v2",
         subscriber_fingerprint=SUBSCRIBER_FINGERPRINT,
         payment_percentage=100,
+        business_unit=BusinessUnit.HOSTEL,
+        display_details=PaymentDisplayDetails(
+            service=CheckoutService.LODGING,
+            public_label="Suíte Compartilhada",
+            start_date=date(2026, 12, 20),
+            end_date=date(2026, 12, 22),
+            start_time=None,
+            adults=1,
+            children=0,
+            provider_reference="4347105013175",
+            reservation_total_minor=15300,
+            package_component=False,
+        ),
     )
 
 
@@ -55,24 +71,58 @@ def _transport(handler, *, key: str = TEST_KEY) -> StripeTestHTTPTransport:
     )
 
 
+def _product_payload(*, product_id: str = "prod_test_001") -> dict[str, object]:
+    presentation = stripe_product_presentation(_request())
+    return {
+        "id": product_id,
+        "livemode": False,
+        "name": presentation.name,
+        "description": presentation.description,
+        "metadata": {
+            "payment_id_sha256": (
+                "753be5cfd85fdf54b74f42ed6a28eea417418711099ccd7e1f2109fab627635a"
+            ),
+            "economic_version": "2",
+            "display_details_sha256": presentation.details_sha256,
+        },
+    }
+
+
 def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> None:
     seen: list[httpx.Request] = []
+    presentation = stripe_product_presentation(_request())
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         form = parse_qs(request.content.decode(), keep_blank_values=True)
         if request.url.path == "/v1/products":
             assert form == {
-                "name": ["V2 hostel reservation payment"],
+                "name": [presentation.name],
+                "description": [presentation.description],
                 "metadata[payment_id_sha256]": [
                     "753be5cfd85fdf54b74f42ed6a28eea417418711099ccd7e1f2109fab627635a"
                 ],
                 "metadata[economic_version]": ["2"],
+                "metadata[display_details_sha256]": [
+                    presentation.details_sha256
+                ],
             }
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": "prod_test_001", "livemode": False},
+                json={
+                    "id": "prod_test_001",
+                    "livemode": False,
+                    "name": presentation.name,
+                    "description": presentation.description,
+                    "metadata": {
+                        "payment_id_sha256": (
+                            "753be5cfd85fdf54b74f42ed6a28eea417418711099ccd7e1f2109fab627635a"
+                        ),
+                        "economic_version": "2",
+                        "display_details_sha256": presentation.details_sha256,
+                    },
+                },
             )
         if request.url.path == "/v1/prices":
             assert form == {
@@ -96,6 +146,9 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                 "metadata[business_unit]": ["hostel"],
                 "metadata[economic_version]": ["2"],
                 "metadata[payment_percentage]": ["100"],
+                "metadata[display_details_sha256]": [
+                    presentation.details_sha256
+                ],
             }
             return httpx.Response(
                 200,
@@ -125,6 +178,7 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                     "business_unit": "hostel",
                     "economic_version": "2",
                     "payment_percentage": "100",
+                    "display_details_sha256": presentation.details_sha256,
                 },
             },
         )
@@ -163,6 +217,28 @@ def test_livemode_response_is_never_accepted_as_a_test_effect() -> None:
     assert [request.url.path for request in seen] == ["/v1/products"]
 
 
+@pytest.mark.parametrize("mismatch", ["name", "description", "display_hash"])
+def test_product_display_mismatch_stops_before_price(mismatch: str) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        payload = _product_payload()
+        if mismatch == "name":
+            payload["name"] = "generic payment"
+        elif mismatch == "description":
+            payload["description"] = "missing commercial facts"
+        else:
+            metadata = payload["metadata"]
+            assert isinstance(metadata, dict)
+            metadata["display_details_sha256"] = "0" * 64
+        return httpx.Response(200, request=request, json=payload)
+
+    with pytest.raises(RuntimeError, match="product.*match"):
+        _transport(handler)(_request())
+    assert [request.url.path for request in seen] == ["/v1/products"]
+
+
 def test_payment_link_readback_mismatch_is_unknown() -> None:
     seen: list[httpx.Request] = []
 
@@ -172,7 +248,7 @@ def test_payment_link_readback_mismatch_is_unknown() -> None:
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": "prod_test_001", "livemode": False},
+                json=_product_payload(),
             )
         if request.url.path == "/v1/prices":
             return httpx.Response(
@@ -237,10 +313,27 @@ def test_partial_creation_is_manual_review_and_never_recreates_product(
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
         if request.url.path == "/v1/products":
+            form = parse_qs(request.content.decode(), keep_blank_values=True)
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": "prod_test_partial", "livemode": False},
+                json={
+                    "id": "prod_test_partial",
+                    "livemode": False,
+                    "name": form["name"][0],
+                    "description": form["description"][0],
+                    "metadata": {
+                        "payment_id_sha256": form[
+                            "metadata[payment_id_sha256]"
+                        ][0],
+                        "economic_version": form[
+                            "metadata[economic_version]"
+                        ][0],
+                        "display_details_sha256": form[
+                            "metadata[display_details_sha256]"
+                        ][0],
+                    },
+                },
             )
         raise httpx.ReadTimeout("after Product creation", request=request)
 
@@ -283,6 +376,7 @@ def test_partial_creation_is_manual_review_and_never_recreates_product(
             due_kind=DueKind.PREPAYMENT,
             economic_version=1,
             receiver_profile_id="receiver:hostel",
+            display_details=_request().display_details,
         ),
         PaymentMethod.STRIPE,
     )
