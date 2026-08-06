@@ -294,7 +294,7 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         (),
         private_profile_complete=True,
     )
-    assert not _structured_selection_review_required(
+    assert _structured_selection_review_required(
         state_facts[:-1],
         payment,
         private_profile_complete=True,
@@ -315,7 +315,7 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         private_profile_complete=True,
         passenger_manifest_complete=True,
     )
-    assert not _structured_selection_review_required(
+    assert _structured_selection_review_required(
         package_facts,
         payment,
         private_profile_complete=True,
@@ -328,6 +328,12 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
             ModelFact("gender", "m"),
         ),
         payment,
+        private_profile_complete=True,
+        passenger_manifest_complete=False,
+    )
+    assert _structured_selection_review_required(
+        (*package_facts, *payment),
+        (),
         private_profile_complete=True,
         passenger_manifest_complete=False,
     )

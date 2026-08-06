@@ -164,6 +164,10 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 - For one activity participant, including service=package, emit explicit birth_date and
   gender from the current message as typed facts and keep passengers empty. Do this in the
   same frame even when the message also asks to keep the package or prepare its summary.
+- When selection_review_required is true without observations, first extract any explicit
+  individual birth_date/gender or group passenger updates from the complete current
+  message. If that message asks to prepare the current option, preserve the complete
+  commercial facts, set selection_requested=true, and emit the exact fresh read now.
 - This progression authorizes only read_requests. It never authorizes a reservation,
   payment, handoff, delivery, or effect.
 - For a package, resolve the customer's lodging and activity references semantically

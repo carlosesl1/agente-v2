@@ -263,9 +263,7 @@ def _structured_selection_review_required(
         or type(passenger_manifest_complete) is not bool
     ):
         raise TypeError("selection review gate requires exact V2 contracts")
-    if not private_profile_complete or not any(
-        fact.name == "payment_method" for fact in current_facts
-    ):
+    if not private_profile_complete:
         return False
     values: dict[str, str | int | date] = {}
     for fact in (*state_facts, *current_facts):
@@ -278,23 +276,11 @@ def _structured_selection_review_required(
     if type(adults) is not int or type(children) is not int:
         return False
     service = values.get("service")
-    individual_profile_ready = (
-        type(values.get("birth_date")) is date
-        and values.get("gender") in {"m", "f"}
-    )
-    passenger_ready = (
-        passenger_manifest_complete
-        if adults + children > 1
-        else individual_profile_ready or (
-            service == "package" and passenger_manifest_complete
-        )
-    )
     commercially_complete = (
         type(values.get("product_id")) is str
         and adults >= 1
         and children >= 0
         and values.get("payment_method") in {"stripe", "wise", "pix"}
-        and passenger_ready
     )
     if not commercially_complete:
         return False
