@@ -19,7 +19,11 @@ from v2_application.passengers import (
     manifest_status,
     merge_manifest,
 )
-from v2_application.turn_executor import _merge_passenger_updates, _state_model_facts
+from v2_application.turn_executor import (
+    _merge_passenger_updates,
+    _public_artifact_facts,
+    _state_model_facts,
+)
 from v2_contracts.model import ModelProposal, ModelRequest
 from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
 
@@ -337,6 +341,31 @@ def test_private_manifest_fact_round_trips_but_is_not_model_state() -> None:
 
     assert TypedFact.from_canonical_bytes(fact.to_canonical_bytes()) == fact
     assert _state_model_facts(projection) == ()
+
+
+def test_private_manifest_never_enters_public_maya_artifacts() -> None:
+    manifest = merge_manifest(
+        None,
+        (
+            _input(
+                1,
+                "adult",
+                full_name="Pessoa Privada",
+                birth_date=date(1990, 1, 2),
+                gender="f",
+                country_code="BR",
+            ),
+        ),
+        Party(1, 0),
+    )
+    language = TypedFact("language", StringSlot("pt-BR"), "a" * 64)
+    private_manifest = TypedFact(
+        "passenger_manifest",
+        StringSlot(manifest),
+        "b" * 64,
+    )
+
+    assert _public_artifact_facts((language, private_manifest)) == (language,)
 
 
 def test_executor_premerge_allows_only_explicit_revoking_passenger_correction() -> None:

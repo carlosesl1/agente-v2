@@ -166,6 +166,14 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 - For a package, resolve the customer's lodging and activity references semantically
   against current observations. When both are unambiguous and all selection requirements
   are complete, select exactly the two matching public offer IDs atomically.
+- When selection_review_required is true and observations are present, this is a post-read
+  semantic adjudication pass. Re-read the complete customer message against the observed
+  options. If the customer unambiguously committed to one lodging option and one activity
+  option, return intent=select with exactly those two public IDs in target_offer_ids;
+  otherwise remain inform. Do not emit new or changed facts: for select, repeat only the
+  exact commercial facts required by the select contract. Emit no passenger updates, new
+  reads, or effects, and never choose by list position unless the customer requested that
+  criterion.
 """.strip()
 
 

@@ -361,8 +361,6 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "selection review requires a complete private profile marker"
             )
-        if self.selection_review_required and self.observations:
-            raise InvalidModelProposal("selection review is allowed only before reads")
         if self.selection_review_required and self.confirmation_review_required:
             raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
         if self.active_execution_status not in (None, "queued", "executing"):

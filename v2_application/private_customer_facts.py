@@ -16,6 +16,7 @@ import re
 import sqlite3
 import unicodedata
 
+from reservation_boundary.types import StringSlot, TypedFact
 from v2_contracts.model import ModelFact
 
 
@@ -128,6 +129,15 @@ def _canonical_json(value: object) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate private passenger manifest key")
+        result[key] = value
+    return result
 
 
 def _domain_hash(domain: bytes, payload: bytes) -> str:
@@ -299,6 +309,15 @@ CREATE TABLE IF NOT EXISTS private_customer_facts (
     persisted_at TEXT NOT NULL,
     PRIMARY KEY (lead_id, fact_name)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS private_passenger_manifests (
+    lead_id TEXT NOT NULL PRIMARY KEY,
+    fact_json TEXT NOT NULL,
+    fact_hash TEXT NOT NULL,
+    source_turn_id TEXT NOT NULL,
+    source_event_hash TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    persisted_at TEXT NOT NULL
+) STRICT;
 """
 
 _EXPECTED_SCHEMA = {
@@ -315,6 +334,15 @@ _EXPECTED_SCHEMA = {
         ("fact_name", "TEXT", 1, 2),
         ("private_value", "TEXT", 1, 0),
         ("value_hash", "TEXT", 1, 0),
+        ("source_turn_id", "TEXT", 1, 0),
+        ("source_event_hash", "TEXT", 1, 0),
+        ("revision", "INTEGER", 1, 0),
+        ("persisted_at", "TEXT", 1, 0),
+    ),
+    "private_passenger_manifests": (
+        ("lead_id", "TEXT", 1, 1),
+        ("fact_json", "TEXT", 1, 0),
+        ("fact_hash", "TEXT", 1, 0),
         ("source_turn_id", "TEXT", 1, 0),
         ("source_event_hash", "TEXT", 1, 0),
         ("revision", "INTEGER", 1, 0),
@@ -346,6 +374,17 @@ _EXPECTED_TABLE_SQL = {
             revision INTEGER NOT NULL CHECK (revision >= 1),
             persisted_at TEXT NOT NULL,
             PRIMARY KEY (lead_id, fact_name)
+        ) STRICT
+    """,
+    "private_passenger_manifests": """
+        CREATE TABLE private_passenger_manifests (
+            lead_id TEXT NOT NULL PRIMARY KEY,
+            fact_json TEXT NOT NULL,
+            fact_hash TEXT NOT NULL,
+            source_turn_id TEXT NOT NULL,
+            source_event_hash TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 1),
+            persisted_at TEXT NOT NULL
         ) STRICT
     """,
 }
@@ -392,6 +431,32 @@ def _value_hash(value: str) -> str:
         b"v2-private-customer-fact-value-v1",
         value.encode("utf-8"),
     )
+
+
+def _canonical_passenger_manifest_fact(fact: object) -> TypedFact:
+    if (
+        type(fact) is not TypedFact
+        or fact.name != "passenger_manifest"
+        or type(fact.value) is not StringSlot
+    ):
+        raise PrivateCustomerFactValidationError(
+            "private passenger manifest must be an exact typed fact"
+        )
+    try:
+        decoded = json.loads(fact.value.value, object_pairs_hook=_unique_object)
+    except (TypeError, ValueError, json.JSONDecodeError, UnicodeError):
+        raise PrivateCustomerFactValidationError(
+            "private passenger manifest must be canonical JSON"
+        ) from None
+    if (
+        type(decoded) is not dict
+        or decoded.get("schema") != "v2-passenger-manifest-v1"
+        or _canonical_json(decoded).decode("utf-8") != fact.value.value
+    ):
+        raise PrivateCustomerFactValidationError(
+            "private passenger manifest must be canonical JSON"
+        )
+    return fact
 
 
 def _journal_fact_material(value: object) -> tuple[tuple[str, str], ...]:
@@ -472,8 +537,12 @@ class SQLitePrivateCustomerFactStore:
                 ).fetchall()
                 if row[0] in _EXPECTED_SCHEMA
             }
-            if existing:
-                _validate_schema(connection)
+            legacy_tables = {
+                "private_customer_fact_turns",
+                "private_customer_facts",
+            }
+            if existing and not legacy_tables.issubset(existing):
+                raise RuntimeError("private customer schema is incompatible")
             connection.executescript(_SCHEMA)
             _validate_schema(connection)
         except (sqlite3.DatabaseError, RuntimeError):
@@ -568,6 +637,110 @@ class SQLitePrivateCustomerFactStore:
             ),
             source_turns=tuple(sources),
         )
+
+    def load_passenger_manifest(self, lead_id: str) -> TypedFact | None:
+        self._require_open()
+        canonical_lead = _identifier(lead_id, "lead_id")
+        try:
+            row = self._connection.execute(
+                "SELECT fact_json,fact_hash,source_turn_id,source_event_hash,"
+                "revision,persisted_at FROM private_passenger_manifests "
+                "WHERE lead_id=?",
+                (canonical_lead,),
+            ).fetchone()
+        except sqlite3.DatabaseError:
+            raise RuntimeError("private passenger manifest read failed") from None
+        if row is None:
+            return None
+        fact_json, fact_hash, source_turn_id, source_event_hash, revision, persisted_at = row
+        try:
+            fact = TypedFact.from_canonical_bytes(fact_json.encode("utf-8"))
+            _canonical_passenger_manifest_fact(fact)
+            _hash(fact_hash, "passenger_manifest_hash")
+            _identifier(source_turn_id, "source_turn_id")
+            _hash(source_event_hash, "source_event_hash")
+            _utc(datetime.fromisoformat(persisted_at), "persisted_at")
+        except (PrivateCustomerFactValidationError, TypeError, ValueError):
+            raise RuntimeError("private passenger manifest row is invalid") from None
+        if (
+            fact.to_canonical_bytes().decode("utf-8") != fact_json
+            or fact.canonical_hash() != fact_hash
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise RuntimeError("private passenger manifest row is invalid")
+        return fact
+
+    def persist_passenger_manifest(
+        self,
+        *,
+        lead_id: str,
+        source_turn_id: str,
+        source_event_hash: str,
+        fact: TypedFact,
+        persisted_at: datetime,
+    ) -> bool:
+        self._require_open()
+        canonical_lead = _identifier(lead_id, "lead_id")
+        canonical_turn = _identifier(source_turn_id, "source_turn_id")
+        canonical_event_hash = _hash(source_event_hash, "source_event_hash")
+        instant = _utc(persisted_at, "persisted_at")
+        canonical_fact = _canonical_passenger_manifest_fact(fact)
+        fact_json = canonical_fact.to_canonical_bytes().decode("utf-8")
+        fact_hash = canonical_fact.canonical_hash()
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            existing = self._connection.execute(
+                "SELECT fact_json,fact_hash,source_turn_id,source_event_hash,revision "
+                "FROM private_passenger_manifests WHERE lead_id=?",
+                (canonical_lead,),
+            ).fetchone()
+            if existing is not None and existing[2] == canonical_turn:
+                if existing[:4] != (
+                    fact_json,
+                    fact_hash,
+                    canonical_turn,
+                    canonical_event_hash,
+                ):
+                    raise PrivateCustomerFactIdentityConflict(
+                        "private passenger manifest source turn conflicts"
+                    )
+                self._connection.execute("COMMIT")
+                return False
+            if existing is not None and existing[:2] == (fact_json, fact_hash):
+                self._connection.execute("COMMIT")
+                return False
+            revision = 1 if existing is None else existing[4] + 1
+            self._connection.execute(
+                "INSERT INTO private_passenger_manifests "
+                "(lead_id,fact_json,fact_hash,source_turn_id,source_event_hash,"
+                "revision,persisted_at) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(lead_id) DO UPDATE SET "
+                "fact_json=excluded.fact_json,fact_hash=excluded.fact_hash,"
+                "source_turn_id=excluded.source_turn_id,"
+                "source_event_hash=excluded.source_event_hash,"
+                "revision=excluded.revision,persisted_at=excluded.persisted_at",
+                (
+                    canonical_lead,
+                    fact_json,
+                    fact_hash,
+                    canonical_turn,
+                    canonical_event_hash,
+                    revision,
+                    instant.isoformat(),
+                ),
+            )
+            self._connection.execute("COMMIT")
+        except PrivateCustomerFactIdentityConflict:
+            self._connection.execute("ROLLBACK")
+            raise
+        except sqlite3.DatabaseError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.DatabaseError:
+                pass
+            raise RuntimeError("private passenger manifest write failed") from None
+        return True
 
     def persist_turn(
         self,

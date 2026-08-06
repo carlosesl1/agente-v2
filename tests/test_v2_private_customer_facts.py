@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 
 import pytest
 
+from reservation_boundary import StringSlot, TypedFact
 from v2_application.private_customer_facts import (
     PrivateCustomerFactIdentityConflict,
     PrivateCustomerFactValidationError,
@@ -38,6 +40,61 @@ def _facts(
         ModelFact("email", email),
         ModelFact("country_code", country),
     )
+
+
+def _passenger_manifest_fact() -> TypedFact:
+    manifest = json.dumps(
+        {
+            "schema": "v2-passenger-manifest-v1",
+            "adults": 1,
+            "children": 0,
+            "passengers": [
+                {
+                    "position": 1,
+                    "participant_type": "adult",
+                    "full_name": NAME,
+                    "birth_date": "1990-01-02",
+                    "gender": "f",
+                    "country_code": COUNTRY,
+                }
+            ],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return TypedFact("passenger_manifest", StringSlot(manifest), "b" * 64)
+
+
+def test_private_passenger_manifest_round_trips_across_restart(tmp_path: Path) -> None:
+    path = tmp_path / "private-customer.sqlite3"
+    first = SQLitePrivateCustomerFactStore(path)
+    fact = _passenger_manifest_fact()
+    try:
+        assert first.load_passenger_manifest(LEAD_ID) is None
+        assert first.persist_passenger_manifest(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            fact=fact,
+            persisted_at=NOW,
+        ) is True
+        assert first.load_passenger_manifest(LEAD_ID) == fact
+        assert first.persist_passenger_manifest(
+            lead_id=LEAD_ID,
+            source_turn_id=TURN_ID,
+            source_event_hash=EVENT_HASH,
+            fact=fact,
+            persisted_at=NOW,
+        ) is False
+    finally:
+        first.close()
+
+    restarted = SQLitePrivateCustomerFactStore(path)
+    try:
+        assert restarted.load_passenger_manifest(LEAD_ID) == fact
+    finally:
+        restarted.close()
 
 
 def test_private_customer_canonicalizers_are_strict_and_do_not_invent_values() -> None:

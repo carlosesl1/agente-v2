@@ -259,6 +259,15 @@ def projection_manifest_json(
 ) -> str | None:
     if type(projection) is not ConversationProjection:
         raise TypeError("projection must be an exact ConversationProjection")
+    fact = projection_manifest_fact(projection)
+    return None if fact is None else fact.value.value
+
+
+def projection_manifest_fact(
+    projection: ConversationProjection,
+) -> TypedFact | None:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be an exact ConversationProjection")
     matches = tuple(
         item for item in projection.facts if item.name == "passenger_manifest"
     )
@@ -266,7 +275,64 @@ def projection_manifest_json(
         return None
     if len(matches) != 1 or type(matches[0].value) is not StringSlot:
         raise ValueError("projection passenger manifest fact is invalid")
-    return matches[0].value.value
+    return matches[0]
+
+
+def attach_projection_manifest(
+    projection: ConversationProjection,
+    fact: TypedFact | None,
+) -> ConversationProjection:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be an exact ConversationProjection")
+    if fact is None:
+        return projection
+    if (
+        type(fact) is not TypedFact
+        or fact.name != "passenger_manifest"
+        or type(fact.value) is not StringSlot
+    ):
+        raise TypeError("private passenger manifest fact is invalid")
+    matches = tuple(
+        item for item in projection.facts if item.name == "passenger_manifest"
+    )
+    if matches:
+        if matches != (fact,):
+            raise PassengerManifestConflict(
+                "public and private passenger manifests diverge"
+            )
+        return projection
+    decoded = json.loads(fact.value.value, object_pairs_hook=_unique_object)
+    if type(decoded) is not dict:
+        raise ValueError("private passenger manifest root is invalid")
+    party = Party(decoded.get("adults"), decoded.get("children"))
+    _load(fact.value.value, party)
+    facts = (*projection.facts, fact)
+    return ConversationProjection(
+        stage=projection.stage,
+        desired_services=projection.desired_services,
+        locale=projection.locale,
+        facts=tuple(sorted(facts, key=lambda item: _FACT_ORDER[item.name])),
+        reservation_execution_projection=projection.reservation_execution_projection,
+    )
+
+
+def without_projection_manifest(
+    projection: ConversationProjection,
+) -> ConversationProjection:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("projection must be an exact ConversationProjection")
+    facts = tuple(
+        item for item in projection.facts if item.name != "passenger_manifest"
+    )
+    if facts == projection.facts:
+        return projection
+    return ConversationProjection(
+        stage=projection.stage,
+        desired_services=projection.desired_services,
+        locale=projection.locale,
+        facts=facts,
+        reservation_execution_projection=projection.reservation_execution_projection,
+    )
 
 
 def projection_manifest_party(
@@ -356,12 +422,15 @@ def projection_passengers(
 
 __all__ = [
     "PassengerManifestConflict",
+    "attach_projection_manifest",
     "complete_manifest",
     "manifest_status",
     "merge_manifest",
     "merge_projection_manifest",
     "projection_manifest_json",
+    "projection_manifest_fact",
     "projection_manifest_party",
     "projection_manifest_status",
     "projection_passengers",
+    "without_projection_manifest",
 ]

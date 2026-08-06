@@ -74,9 +74,12 @@ from v2_application.conversation import (
 from v2_application.read_bridge import bridge_availability_observation
 from v2_application.passengers import (
     PassengerManifestConflict,
+    attach_projection_manifest,
     merge_projection_manifest,
+    projection_manifest_fact,
     projection_manifest_party,
     projection_manifest_status,
+    without_projection_manifest,
 )
 from v2_application.private_customer_facts import (
     PrivateCustomerFactSnapshot,
@@ -274,21 +277,65 @@ def _structured_selection_review_required(
     children = values.get("children", 0)
     if type(adults) is not int or type(children) is not int:
         return False
+    service = values.get("service")
     passenger_ready = (
-        type(values.get("birth_date")) is date
-        and values.get("gender") in {"m", "f"}
-        if adults + children == 1
-        else passenger_manifest_complete
+        passenger_manifest_complete
+        if service == "package" or adults + children > 1
+        else (
+            type(values.get("birth_date")) is date
+            and values.get("gender") in {"m", "f"}
+        )
     )
-    return (
-        values.get("service") == "agency"
-        and type(values.get("product_id")) is str
-        and type(values.get("activity_date") or values.get("start_date")) is date
+    commercially_complete = (
+        type(values.get("product_id")) is str
         and adults >= 1
         and children >= 0
         and values.get("payment_method") in {"stripe", "wise", "pix"}
         and passenger_ready
     )
+    if not commercially_complete:
+        return False
+    if values.get("service") == "agency":
+        return type(values.get("activity_date") or values.get("start_date")) is date
+    if values.get("service") == "package":
+        start_date = values.get("start_date")
+        end_date = values.get("end_date")
+        return (
+            type(start_date) is date
+            and type(end_date) is date
+            and end_date > start_date
+            and type(values.get("activity_date")) is date
+        )
+    return False
+
+
+def _post_read_package_selection_review_required(
+    proposal: ModelProposal,
+    observations: tuple[ReadObservation, ...],
+) -> bool:
+    if type(proposal) is not ModelProposal:
+        raise TypeError("package selection review proposal must be exact")
+    if type(observations) is not tuple or any(
+        type(item) is not ReadObservation for item in observations
+    ):
+        raise TypeError("package selection review observations must be exact")
+    if (
+        proposal.intent != "inform"
+        or proposal.read_requests
+        or proposal.target_offer_id is not None
+        or proposal.target_offer_ids
+        or proposal.selection_requested
+    ):
+        return False
+    values = {item.name: item.value for item in proposal.facts}
+    if values.get("service") != "package":
+        return False
+    providers = {
+        item.provider
+        for item in observations
+        if item.public_payload.get("available") is not False
+    }
+    return {"cloudbeds", "bokun"}.issubset(providers)
 
 
 def _repair_requested_activity_selection(
@@ -447,6 +494,17 @@ def _genesis_projection(locale: str) -> ConversationProjection:
     )
 
 
+def _package_selection_commitment(target_offer_ids: tuple[str, ...]) -> str:
+    if len(target_offer_ids) != 2 or len(set(target_offer_ids)) != 2:
+        raise TurnExecutionError(
+            "package selection closure requires exactly two distinct offer IDs"
+        )
+    preimage = b"v2-package-selection-v1\x00" + b"\x00".join(
+        item.encode("utf-8") for item in sorted(target_offer_ids)
+    )
+    return "package-selection:" + hashlib.sha256(preimage).hexdigest()
+
+
 def _intent(proposal: ModelProposal) -> MayaIntentClosure:
     try:
         kind = ConversationIntentKind(proposal.intent)
@@ -456,9 +514,13 @@ def _intent(proposal: ModelProposal) -> MayaIntentClosure:
         ) from exc
     if kind is ConversationIntentKind.TOOL_REQUEST:
         raise TurnExecutionError("tool-request intent cannot enter the V2 runtime")
-    selection = (
-        proposal.target_offer_id if kind is ConversationIntentKind.SELECT else None
-    )
+    selection = None
+    if kind is ConversationIntentKind.SELECT:
+        selection = (
+            _package_selection_commitment(proposal.target_offer_ids)
+            if proposal.target_offer_ids
+            else proposal.target_offer_id
+        )
     confirmation = (
         proposal.confirmed_summary_version
         if kind is ConversationIntentKind.CONFIRM
@@ -551,6 +613,17 @@ def _state_model_facts(
         for item in projection.facts
         if item.name not in ("critical_outcome", "passenger_manifest")
         and item.name not in PRIVATE_CUSTOMER_FACT_ORDER
+    )
+
+
+_PRIVATE_ARTIFACT_FACT_NAMES: Final = frozenset(("passenger_manifest",))
+
+
+def _public_artifact_facts(facts: tuple[TypedFact, ...]) -> tuple[TypedFact, ...]:
+    if type(facts) is not tuple or any(type(item) is not TypedFact for item in facts):
+        raise TypeError("artifact facts must be an exact TypedFact tuple")
+    return tuple(
+        item for item in facts if item.name not in _PRIVATE_ARTIFACT_FACT_NAMES
     )
 
 
@@ -1187,7 +1260,13 @@ class V2TurnExecutor:
         for owner, method, name in required:
             if not callable(getattr(owner, method, None)):
                 raise TypeError(f"{name} must expose {method}")
-        for method in ("load", "persist_turn", "turn_supplied_fact_names"):
+        for method in (
+            "load",
+            "persist_turn",
+            "turn_supplied_fact_names",
+            "load_passenger_manifest",
+            "persist_passenger_manifest",
+        ):
             if not callable(getattr(private_customer_facts, method, None)):
                 raise TypeError(f"private_customer_facts must expose {method}")
         if type(reads) is not V2ReadService:
@@ -1249,6 +1328,12 @@ class V2TurnExecutor:
                     )
                     if current_projection is None:
                         current_projection = _genesis_projection(self._locale)
+                    current_projection = attach_projection_manifest(
+                        current_projection,
+                        self._private_customer_facts.load_passenger_manifest(
+                            batch.lead_id
+                        ),
+                    )
                     current_private_facts = self._private_customer_facts.load(
                         batch.lead_id
                     )
@@ -1317,6 +1402,10 @@ class V2TurnExecutor:
         projection = self._store.load_latest_conversation_projection(batch.lead_id)
         if projection is None:
             projection = _genesis_projection(self._locale)
+        projection = attach_projection_manifest(
+            projection,
+            self._private_customer_facts.load_passenger_manifest(batch.lead_id),
+        )
         previous_receipt_hash = self._store.latest_turn_receipt_hash(batch.lead_id)
         consultation_history = _consultation_history(
             self._store,
@@ -1816,6 +1905,59 @@ class V2TurnExecutor:
             proposal = preserve_initial_facts(first_proposal, proposal)
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
+            if (
+                not collection_only
+                and effective_profile_complete
+                and _post_read_package_selection_review_required(
+                    proposal,
+                    v2_observations,
+                )
+            ):
+                selection_review_request = replace(
+                    followup,
+                    request_id=_opaque(
+                        "model-post-read-selection-review",
+                        batch.batch_id,
+                        current.version,
+                    ),
+                    selection_review_required=True,
+                    passenger_manifest_status=_passenger_status(
+                        projection,
+                        proposal,
+                    ),
+                )
+                selection_review_audited = self._model.complete_audited(
+                    selection_review_request
+                )
+                if type(selection_review_audited) is not AuditedModelTurn:
+                    raise TypeError("model must return exact AuditedModelTurn")
+                selection_review_proposal = validate_productive_proposal(
+                    selection_review_audited.proposal
+                )
+                if selection_review_proposal.source_event_id != batch.batch_id:
+                    raise TurnExecutionError(
+                        "post-read selection review source event diverged"
+                    )
+                if (
+                    selection_review_proposal.intent
+                    in ("inform", "select", "request_handoff")
+                    and not selection_review_proposal.read_requests
+                ):
+                    proposal = replace(
+                        selection_review_proposal,
+                        facts=proposal.facts,
+                        passengers=(),
+                    )
+                selection_review_audited = AuditedModelTurn.from_frames(
+                    proposal=proposal,
+                    frames=selection_review_audited.frames,
+                    ephemeral_session_id=(
+                        selection_review_audited.closure.ephemeral_session_id
+                    ),
+                )
+                second_audited = AuditedModelTurn.combine(
+                    (second_audited, selection_review_audited)
+                )
             if not collection_only:
                 proposal = _repair_requested_activity_selection(
                     first_proposal,
@@ -1990,6 +2132,16 @@ class V2TurnExecutor:
         if decision.next_state.version != current.version + 1:
             raise TurnExecutionError("reducer did not advance state exactly once")
         facts = decision.projection.facts
+        manifest_fact = projection_manifest_fact(decision.projection)
+        if manifest_fact is not None:
+            self._private_customer_facts.persist_passenger_manifest(
+                lead_id=batch.lead_id,
+                source_turn_id=batch.batch_id,
+                source_event_hash=event_hash,
+                fact=manifest_fact,
+                persisted_at=decision_now,
+            )
+        public_projection = without_projection_manifest(decision.projection)
         execution_commands = _execution_commands(decision.commands)
         if private_update_turn and execution_commands:
             raise TurnExecutionError(
@@ -2037,10 +2189,11 @@ class V2TurnExecutor:
                 },
             ),
         )
+        artifact_facts = _public_artifact_facts(public_projection.facts)
         maya = MayaTurnProposal.from_accepted_closure(
             accepted_closure=closure,
             read_observations=boundary_reads,
-            facts=facts,
+            facts=artifact_facts,
             normalized_tool_proposals=(),
             learning_proposals=(),
             public_reply_chunks=chunks,
@@ -2132,7 +2285,7 @@ class V2TurnExecutor:
                     item.to_canonical_bytes(),
                     item.canonical_hash(),
                 )
-                for item in facts
+                for item in artifact_facts
             ]
             + [
                 TurnArtifactWrite(
@@ -2247,7 +2400,7 @@ class V2TurnExecutor:
             structural_graph_digest=graph_digest,
             capability_policy_digest=authority.capability_policy_digest,
             effective_stage_binding_digest=effective_binding,
-            behavior_state_snapshot_digest=decision.projection.canonical_hash(),
+            behavior_state_snapshot_digest=public_projection.canonical_hash(),
             qualification_id=None,
             admission_sequence=None,
             admission_revision=None,

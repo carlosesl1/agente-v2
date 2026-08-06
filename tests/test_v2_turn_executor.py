@@ -38,6 +38,7 @@ from v2_application.turn_executor import (
     TurnExecutionError,
     V2TurnExecutor,
     _confirmation_read_requests,
+    _intent,
     _repair_requested_activity_selection,
     _structured_selection_review_required,
     _state_model_facts,
@@ -237,6 +238,41 @@ def test_turn_executor_has_no_raw_text_semantic_extractors() -> None:
         assert not hasattr(turn_executor, name), name
 
 
+def test_package_intent_closure_commits_both_targets_without_selecting_first() -> None:
+    targets = ("offer:lodging-public", "offer:activity-public")
+
+    def proposal(order: tuple[str, str]) -> ModelProposal:
+        return ModelProposal(
+            source_event_id="event:package-intent-closure",
+            intent="select",
+            reply_chunks=("Encontrei as duas opções.",),
+            facts=(
+                ModelFact("language", "pt-BR"),
+                ModelFact("service", "package"),
+                ModelFact("start_date", date(2026, 8, 10)),
+                ModelFact("end_date", date(2026, 8, 12)),
+                ModelFact("activity_date", date(2026, 8, 11)),
+                ModelFact("adults", 1),
+                ModelFact("children", 0),
+                ModelFact("payment_method", "stripe"),
+            ),
+            read_requests=(),
+            effect_proposals=(),
+            target_offer_ids=order,
+        )
+
+    expected = "package-selection:" + hashlib.sha256(
+        b"v2-package-selection-v1\x00"
+        + b"\x00".join(item.encode("utf-8") for item in sorted(targets))
+    ).hexdigest()
+    forward = _intent(proposal(targets))
+    reverse = _intent(proposal(tuple(reversed(targets))))
+
+    assert forward.selection == expected
+    assert reverse.selection == expected
+    assert forward.selection not in targets
+
+
 def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
     state_facts = (
         ModelFact("service", "agency"),
@@ -262,6 +298,28 @@ def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
         state_facts[:-1],
         payment,
         private_profile_complete=True,
+    )
+
+    package_facts = (
+        ModelFact("service", "package"),
+        ModelFact("product_id", "product:tour-4ps"),
+        ModelFact("start_date", date(2026, 12, 16)),
+        ModelFact("end_date", date(2026, 12, 18)),
+        ModelFact("activity_date", date(2026, 12, 17)),
+        ModelFact("adults", 1),
+        ModelFact("children", 0),
+    )
+    assert _structured_selection_review_required(
+        package_facts,
+        payment,
+        private_profile_complete=True,
+        passenger_manifest_complete=True,
+    )
+    assert not _structured_selection_review_required(
+        package_facts,
+        payment,
+        private_profile_complete=True,
+        passenger_manifest_complete=False,
     )
 
 
@@ -2891,8 +2949,16 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         read_requests=(),
         effect_proposals=(),
     )
+    semantic_review = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Encontrei opções de hospedagem e Buracão.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
     store = SQLiteBoundaryStore.open_memory_v8()
-    model = FakeAuditedModel(store, [first, final])
+    model = FakeAuditedModel(store, [first, final, semantic_review])
     lodging_port = FakeLodgingReadPort(store)
     activity_port = FakeActivityReadPort(store)
     package_authority = replace(
@@ -2926,6 +2992,12 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [activity]
+        assert len(model.calls) == 3
+        assert model.calls[2].selection_review_required is True
+        assert tuple(item.provider for item in model.calls[2].observations) == (
+            "cloudbeds",
+            "bokun",
+        )
         assert len(result.receipt.read_observations) == 2
         projection = store.load_latest_conversation_projection(BATCH.lead_id)
         assert projection is not None
