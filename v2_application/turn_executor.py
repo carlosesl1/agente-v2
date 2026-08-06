@@ -79,14 +79,16 @@ from v2_application.passengers import (
     projection_manifest_fact,
     projection_manifest_party,
     projection_manifest_status,
-    without_projection_manifest,
+    projection_manifest_json,
 )
 from v2_application.private_customer_facts import (
     PrivateCustomerFactSnapshot,
     PrivateCustomerFactWriteResult,
+    canonical_birth_date,
     canonical_country_code,
     canonical_email,
     canonical_full_name,
+    canonical_gender,
 )
 from v2_application.public_reply import apply_positive_grounding
 from v2_application.reads import V2ReadService
@@ -605,7 +607,9 @@ def _state_model_facts(
     )
 
 
-_PRIVATE_ARTIFACT_FACT_NAMES: Final = frozenset(("passenger_manifest",))
+_PRIVATE_ARTIFACT_FACT_NAMES: Final = frozenset(
+    (*PRIVATE_CUSTOMER_FACT_ORDER, "passenger_manifest")
+)
 
 
 def _public_artifact_facts(facts: tuple[TypedFact, ...]) -> tuple[TypedFact, ...]:
@@ -660,6 +664,9 @@ def _private_customer_fact_names(
 
 
 _PRIVATE_CONVERSATION_FALLBACK_NAMES: Final = frozenset(
+    ("full_name", "email", "country_code", "birth_date", "gender")
+)
+_COMMAND_BLOCKING_PRIVATE_FACT_NAMES: Final = frozenset(
     ("full_name", "email", "country_code")
 )
 
@@ -680,6 +687,10 @@ def _partition_private_customer_facts(
         "full_name": canonical_full_name,
         "email": canonical_email,
         "country_code": canonical_country_code,
+        "birth_date": lambda value: date.fromisoformat(
+            canonical_birth_date(value)
+        ),
+        "gender": canonical_gender,
     }
     for fact in proposal.facts:
         if fact.name == "phone_e164":
@@ -1414,7 +1425,9 @@ class V2TurnExecutor:
                 batch.batch_id,
             )
         )
-        private_update_turn = bool(journal_fact_names)
+        private_update_turn = bool(
+            set(journal_fact_names) & _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
+        )
         collection_only = False
         effective_profile_complete = reservation_profile_ready(
             profile,
@@ -1473,7 +1486,10 @@ class V2TurnExecutor:
                 facts=first_private_facts,
                 persisted_at=now,
             )
-            private_update_turn = True
+            private_update_turn = private_update_turn or any(
+                item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
+                for item in first_private_facts
+            )
             effective_profile_complete = reservation_profile_ready(
                 profile,
                 projection,
@@ -1582,7 +1598,10 @@ class V2TurnExecutor:
                     facts=review_private_facts,
                     persisted_at=now,
                 )
-                private_update_turn = True
+                private_update_turn = private_update_turn or any(
+                    item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
+                    for item in review_private_facts
+                )
                 effective_profile_complete = reservation_profile_ready(
                     profile,
                     projection,
@@ -1858,7 +1877,10 @@ class V2TurnExecutor:
                     facts=second_private_facts,
                     persisted_at=now,
                 )
-                private_update_turn = True
+                private_update_turn = private_update_turn or any(
+                    item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
+                    for item in second_private_facts
+                )
                 effective_profile_complete = reservation_profile_ready(
                     profile,
                     projection,
@@ -2130,7 +2152,10 @@ class V2TurnExecutor:
                 fact=manifest_fact,
                 persisted_at=decision_now,
             )
-        public_projection = without_projection_manifest(decision.projection)
+        public_projection = replace(
+            decision.projection,
+            facts=_public_artifact_facts(decision.projection.facts),
+        )
         execution_commands = _execution_commands(decision.commands)
         if private_update_turn and execution_commands:
             raise TurnExecutionError(

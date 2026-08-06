@@ -8,6 +8,7 @@ import pytest
 from reservation_boundary import (
     ConversationProjection,
     ConversationStage,
+    DateSlot,
     StringSlot,
     TypedFact,
 )
@@ -364,8 +365,18 @@ def test_private_manifest_never_enters_public_maya_artifacts() -> None:
         StringSlot(manifest),
         "b" * 64,
     )
+    private_facts = (
+        TypedFact("full_name", StringSlot("Pessoa Privada"), "c" * 64),
+        TypedFact("email", StringSlot("private@example.invalid"), "d" * 64),
+        TypedFact("phone_e164", StringSlot("+15555550123"), "e" * 64),
+        TypedFact("country_code", StringSlot("BR"), "f" * 64),
+        TypedFact("birth_date", DateSlot(date(1990, 1, 2)), "1" * 64),
+        TypedFact("gender", StringSlot("f"), "2" * 64),
+    )
 
-    assert _public_artifact_facts((language, private_manifest)) == (language,)
+    assert _public_artifact_facts(
+        (language, private_manifest, *private_facts)
+    ) == (language,)
 
 
 def test_executor_premerge_allows_only_explicit_revoking_passenger_correction() -> None:

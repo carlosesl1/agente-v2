@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -144,6 +144,36 @@ def test_private_store_round_trip_is_exact_private_and_presence_only(tmp_path: P
             assert private_value not in str(loaded.public_presence())
     finally:
         store.close()
+
+
+def test_birth_and_gender_round_trip_only_through_private_owner(tmp_path: Path) -> None:
+    path = tmp_path / "private-birth-gender.sqlite3"
+    store = SQLitePrivateCustomerFactStore(path)
+    try:
+        result = store.persist_turn(
+            lead_id=LEAD_ID,
+            source_turn_id="batch:private-birth-gender",
+            source_event_hash="9" * 64,
+            facts=(
+                ModelFact("birth_date", date(1991, 5, 12)),
+                ModelFact("gender", "f"),
+            ),
+            persisted_at=NOW,
+        )
+        assert result.snapshot.birth_date == date(1991, 5, 12)
+        assert result.snapshot.gender == "f"
+        assert result.snapshot.present_fact_names == ("birth_date", "gender")
+        assert "1991-05-12" not in repr(result.snapshot)
+    finally:
+        store.close()
+
+    restarted = SQLitePrivateCustomerFactStore(path)
+    try:
+        loaded = restarted.load(LEAD_ID)
+        assert loaded.birth_date == date(1991, 5, 12)
+        assert loaded.gender == "f"
+    finally:
+        restarted.close()
 
 
 def test_same_turn_is_idempotent_and_crash_retry_remains_collection_only(

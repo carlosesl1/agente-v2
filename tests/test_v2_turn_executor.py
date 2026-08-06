@@ -217,9 +217,19 @@ def test_parent_does_not_reinterpret_personal_date_as_commercial_fact(
         projection = store.load_latest_conversation_projection(batch.lead_id)
         assert projection is not None
         values = {fact.name: fact.value.value for fact in projection.facts}
+        private_snapshot = private_store.load(batch.lead_id)
+        artifact_json = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts"
+            ).fetchall()
+        )
         assert values["activity_date"] == date(2026, 12, 3)
-        assert values["birth_date"] == date(1991, 5, 12)
-        assert values["gender"] == "f"
+        assert "birth_date" not in values
+        assert "gender" not in values
+        assert private_snapshot.birth_date == date(1991, 5, 12)
+        assert private_snapshot.gender == "f"
+        assert "1991-05-12" not in artifact_json
     finally:
         private_store.close()
         store.close()
@@ -962,13 +972,18 @@ def _executor(
     profile: FakeProfile,
     reads: V2ReadService | None = None,
     public_authority=None,
+    private_customer_facts: SQLitePrivateCustomerFactStore | None = None,
 ) -> V2TurnExecutor:
     return V2TurnExecutor(
         store=store,
         model=model,
         reads=reads or V2ReadService({}),
         profile=profile,
-        private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
+        private_customer_facts=(
+            private_customer_facts
+            if private_customer_facts is not None
+            else SQLitePrivateCustomerFactStore.open_memory()
+        ),
         reducer=_enabled_reducer(),
         public_authority=public_authority or FixedAuthority(),
         clock=FixedClock(),
@@ -3238,12 +3253,14 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
     )
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first, selection])
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
     _install_public_authority(store)
     executor = _executor(
         store=store,
         model=model,
         profile=FakeProfile(store),
         reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
+        private_customer_facts=private_store,
     )
     try:
         result = executor.execute(BATCH)
@@ -3252,8 +3269,10 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         assert result.reply_chunks[0].startswith("Só para confirmar:")
         assert projection is not None
         values = {fact.name: fact.value.value for fact in projection.facts}
-        assert values["birth_date"] == date(1992, 4, 15)
-        assert values["gender"] == "f"
+        assert "birth_date" not in values
+        assert "gender" not in values
+        assert private_store.load(BATCH.lead_id).birth_date == date(1992, 4, 15)
+        assert private_store.load(BATCH.lead_id).gender == "f"
 
         confirmation_event = replace(
             EVENT,
@@ -3308,7 +3327,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
             model=model,
             reads=V2ReadService({ReadKind.ACTIVITY: FakeActivityReadPort(store)}),
             profile=FakeProfile(store),
-            private_customer_facts=SQLitePrivateCustomerFactStore.open_memory(),
+            private_customer_facts=private_store,
             reducer=_enabled_reducer(),
             public_authority=MappingAuthority(
                 {confirmation_batch.batch_id: confirmation_authority}
@@ -3324,6 +3343,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         assert len(confirmed.receipt.command_rows) == 1
         assert confirmed.reply_chunks == ("Perfeito — vou processar sua reserva agora.",)
     finally:
+        private_store.close()
         store.close()
 
 

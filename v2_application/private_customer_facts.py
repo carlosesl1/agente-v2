@@ -8,7 +8,7 @@ this owner toward model context.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -36,7 +36,13 @@ _ISO_ALPHA2_CODES = frozenset(
     "TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI "
     "VN VU WF WS YE YT ZA ZM ZW".split()
 )
-_PRIVATE_FACT_ORDER = ("full_name", "email", "country_code")
+_PRIVATE_FACT_ORDER = (
+    "full_name",
+    "email",
+    "country_code",
+    "birth_date",
+    "gender",
+)
 _PRIVATE_FACTS = frozenset(_PRIVATE_FACT_ORDER)
 
 
@@ -90,6 +96,28 @@ def canonical_country_code(value: object) -> str:
         or normalized not in _ISO_ALPHA2_CODES
     ):
         raise PrivateCustomerFactValidationError("private country is invalid")
+    return normalized
+
+
+def canonical_birth_date(value: object) -> str:
+    if type(value) is date:
+        return value.isoformat()
+    normalized = _private_text(value, "birth date").strip()
+    try:
+        parsed = date.fromisoformat(normalized)
+    except ValueError as exc:
+        raise PrivateCustomerFactValidationError(
+            "private birth date is invalid"
+        ) from exc
+    if parsed.isoformat() != normalized:
+        raise PrivateCustomerFactValidationError("private birth date is invalid")
+    return normalized
+
+
+def canonical_gender(value: object) -> str:
+    normalized = _private_text(value, "gender").strip().lower()
+    if normalized not in {"m", "f"}:
+        raise PrivateCustomerFactValidationError("private gender is invalid")
     return normalized
 
 
@@ -162,6 +190,8 @@ def _canonical_fact_rows(
         "full_name": canonical_full_name,
         "email": canonical_email,
         "country_code": canonical_country_code,
+        "birth_date": canonical_birth_date,
+        "gender": canonical_gender,
     }
     values = {
         item.name: canonicalizers[item.name](item.value)
@@ -176,6 +206,8 @@ class PrivateCustomerFactSnapshot:
     full_name: str | None
     email: str | None
     country_code: str | None
+    birth_date: date | None
+    gender: str | None
     content_hash: str
     source_turns: tuple[tuple[str, str], ...]
 
@@ -191,6 +223,15 @@ class PrivateCustomerFactSnapshot:
             and canonical_country_code(self.country_code) != self.country_code
         ):
             raise PrivateCustomerFactValidationError("private country is not canonical")
+        if (
+            self.birth_date is not None
+            and canonical_birth_date(self.birth_date) != self.birth_date.isoformat()
+        ):
+            raise PrivateCustomerFactValidationError(
+                "private birth date is not canonical"
+            )
+        if self.gender is not None and canonical_gender(self.gender) != self.gender:
+            raise PrivateCustomerFactValidationError("private gender is not canonical")
         if type(self.source_turns) is not tuple or any(
             type(item) is not tuple
             or len(item) != 2
@@ -208,6 +249,8 @@ class PrivateCustomerFactSnapshot:
                 ("full_name", self.full_name),
                 ("email", self.email),
                 ("country_code", self.country_code),
+                ("birth_date", self.birth_date),
+                ("gender", self.gender),
             )
             if value is not None
         )
@@ -219,6 +262,8 @@ class PrivateCustomerFactSnapshot:
             self.full_name,
             self.email,
             self.country_code,
+            self.birth_date,
+            self.gender,
         )
         if self.content_hash != expected_hash:
             raise PrivateCustomerFactValidationError(
@@ -274,14 +319,31 @@ def _snapshot_hash(
     full_name: str | None,
     email: str | None,
     country_code: str | None,
+    birth_date: date | None,
+    gender: str | None,
 ) -> str:
+    if birth_date is None and gender is None:
+        return _domain_hash(
+            b"v2-private-customer-fact-snapshot-v1",
+            _canonical_json(
+                {
+                    "country_code": country_code,
+                    "email": email,
+                    "full_name": full_name,
+                }
+            ),
+        )
     return _domain_hash(
-        b"v2-private-customer-fact-snapshot-v1",
+        b"v2-private-customer-fact-snapshot-v2",
         _canonical_json(
             {
+                "birth_date": (
+                    None if birth_date is None else birth_date.isoformat()
+                ),
                 "country_code": country_code,
                 "email": email,
                 "full_name": full_name,
+                "gender": gender,
             }
         ),
     )
@@ -300,7 +362,7 @@ CREATE TABLE IF NOT EXISTS private_customer_fact_turns (
 ) STRICT;
 CREATE TABLE IF NOT EXISTS private_customer_facts (
     lead_id TEXT NOT NULL,
-    fact_name TEXT NOT NULL CHECK (fact_name IN ('full_name','email','country_code')),
+    fact_name TEXT NOT NULL CHECK (fact_name IN ('full_name','email','country_code','birth_date','gender')),
     private_value TEXT NOT NULL,
     value_hash TEXT NOT NULL,
     source_turn_id TEXT NOT NULL,
@@ -366,7 +428,7 @@ _EXPECTED_TABLE_SQL = {
         CREATE TABLE private_customer_facts (
             lead_id TEXT NOT NULL,
             fact_name TEXT NOT NULL
-                CHECK (fact_name IN ('full_name','email','country_code')),
+                CHECK (fact_name IN ('full_name','email','country_code','birth_date','gender')),
             private_value TEXT NOT NULL,
             value_hash TEXT NOT NULL,
             source_turn_id TEXT NOT NULL,
@@ -543,6 +605,39 @@ class SQLitePrivateCustomerFactStore:
             }
             if existing and not legacy_tables.issubset(existing):
                 raise RuntimeError("private customer schema is incompatible")
+            fact_schema_row = connection.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type='table' AND name='private_customer_facts'"
+            ).fetchone()
+            if fact_schema_row is not None and "'birth_date'" not in fact_schema_row[0]:
+                legacy_fact_schema = _EXPECTED_TABLE_SQL[
+                    "private_customer_facts"
+                ].replace(
+                    "'country_code','birth_date','gender'",
+                    "'country_code'",
+                )
+                if _normalized_schema_sql(
+                    fact_schema_row[0]
+                ) != _normalized_schema_sql(legacy_fact_schema):
+                    raise RuntimeError("private customer schema is incompatible")
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    connection.execute(
+                        "ALTER TABLE private_customer_facts "
+                        "RENAME TO private_customer_facts_legacy"
+                    )
+                    connection.execute(
+                        _EXPECTED_TABLE_SQL["private_customer_facts"]
+                    )
+                    connection.execute(
+                        "INSERT INTO private_customer_facts "
+                        "SELECT * FROM private_customer_facts_legacy"
+                    )
+                    connection.execute("DROP TABLE private_customer_facts_legacy")
+                    connection.execute("COMMIT")
+                except sqlite3.DatabaseError:
+                    connection.execute("ROLLBACK")
+                    raise
             connection.executescript(_SCHEMA)
             _validate_schema(connection)
         except (sqlite3.DatabaseError, RuntimeError):
@@ -567,8 +662,9 @@ class SQLitePrivateCustomerFactStore:
                 "FROM private_customer_facts AS f "
                 "LEFT JOIN private_customer_fact_turns AS t "
                 "ON t.lead_id=f.lead_id AND t.source_turn_id=f.source_turn_id "
-                "WHERE f.lead_id=? ORDER BY "
-                "CASE f.fact_name WHEN 'full_name' THEN 1 WHEN 'email' THEN 2 ELSE 3 END",
+                "WHERE f.lead_id=? ORDER BY CASE f.fact_name "
+                "WHEN 'full_name' THEN 1 WHEN 'email' THEN 2 "
+                "WHEN 'country_code' THEN 3 WHEN 'birth_date' THEN 4 ELSE 5 END",
                 (canonical_lead,),
             ).fetchall()
         except sqlite3.DatabaseError:
@@ -579,6 +675,8 @@ class SQLitePrivateCustomerFactStore:
             "full_name": canonical_full_name,
             "email": canonical_email,
             "country_code": canonical_country_code,
+            "birth_date": canonical_birth_date,
+            "gender": canonical_gender,
         }
         for row in rows:
             (
@@ -625,15 +723,23 @@ class SQLitePrivateCustomerFactStore:
                 raise RuntimeError("private customer store row is invalid")
             values[name] = value
             sources.append((name, source_turn_id))
+        birth_value = values.get("birth_date")
+        birth_date_value = (
+            None if birth_value is None else date.fromisoformat(birth_value)
+        )
         return PrivateCustomerFactSnapshot(
             lead_id=canonical_lead,
             full_name=values.get("full_name"),
             email=values.get("email"),
             country_code=values.get("country_code"),
+            birth_date=birth_date_value,
+            gender=values.get("gender"),
             content_hash=_snapshot_hash(
                 values.get("full_name"),
                 values.get("email"),
                 values.get("country_code"),
+                birth_date_value,
+                values.get("gender"),
             ),
             source_turns=tuple(sources),
         )
@@ -903,7 +1009,9 @@ __all__ = [
     "PrivateCustomerFactValidationError",
     "PrivateCustomerFactWriteResult",
     "SQLitePrivateCustomerFactStore",
+    "canonical_birth_date",
     "canonical_country_code",
     "canonical_email",
     "canonical_full_name",
+    "canonical_gender",
 ]

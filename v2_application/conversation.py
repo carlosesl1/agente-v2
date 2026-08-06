@@ -441,6 +441,22 @@ def resolve_effective_customer(
         if private_facts is not None and private_facts.country_code is not None
         else legacy_country
     )
+    projected_birth = facts.get("birth_date")
+    projected_gender = facts.get("gender")
+    private_birth = private_facts.birth_date if private_facts is not None else None
+    private_gender = private_facts.gender if private_facts is not None else None
+    birth_conflict = (
+        projected_birth is not None
+        and private_birth is not None
+        and projected_birth != private_birth
+    )
+    gender_conflict = (
+        projected_gender is not None
+        and private_gender is not None
+        and projected_gender != private_gender
+    )
+    birth_date_value = private_birth if private_birth is not None else projected_birth
+    gender_value = private_gender if private_gender is not None else projected_gender
 
     profile_fresh = profile.observed_at <= instant < profile.expires_at
     full_name, name_conflict = _conversation_first_field(
@@ -466,6 +482,8 @@ def resolve_effective_customer(
             ("full_name", name_conflict),
             ("email", email_conflict),
             ("country_code", country_conflict),
+            ("birth_date", birth_conflict),
+            ("gender", gender_conflict),
         )
         if conflict
     )
@@ -487,7 +505,14 @@ def resolve_effective_customer(
     assert phone is not None
     assert country is not None
     split_origin_used = any(
-        value is not None for value in (private_name, private_email, private_country)
+        value is not None
+        for value in (
+            private_name,
+            private_email,
+            private_country,
+            private_birth,
+            private_gender,
+        )
     )
     if split_origin_used:
         snapshot_hash = _private_snapshot_hash(
@@ -520,8 +545,8 @@ def resolve_effective_customer(
             email=email,
             phone_e164=phone,
             country_code=country,
-            birth_date=facts.get("birth_date"),
-            gender=facts.get("gender"),
+            birth_date=birth_date_value,
+            gender=gender_value,
             passengers=passengers,
         )
         if activity_party is not None:
