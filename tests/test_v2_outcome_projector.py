@@ -213,6 +213,58 @@ def test_single_reservation_projects_one_obligation(tmp_path: Path) -> None:
         assert payload["obligation"]["receiver_profile_id"] == (
             "stripe-account:hostel:test"
         )
+        component = command.payload.components[0]
+        assert payload["obligation"]["display_details"] == {
+            "service": "lodging",
+            "public_label": component.public_label,
+            "start_date": component.start_date.isoformat(),
+            "end_date": component.end_date.isoformat(),
+            "start_time": None,
+            "adults": component.party.adults,
+            "children": component.party.children,
+            "provider_reference": hashlib.sha256(
+                command.command_id.encode()
+            ).hexdigest(),
+            "reservation_total_minor": int(
+                component.total.amount * Decimal("100")
+            ),
+            "package_component": False,
+        }
+    finally:
+        payments.close()
+        execution.close()
+
+
+def test_single_activity_projects_non_package_display_details(tmp_path: Path) -> None:
+    execution, payments, projector = _stores(tmp_path)
+    try:
+        command = ReservationAllocator().allocate(_package_command()).commands[1]
+        _persist(execution, (command,))
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+
+        result = projector.run_once(now=NOW + timedelta(seconds=2))
+
+        assert result.inserted == 1
+        payload = json.loads(
+            payments._connection.execute(
+                "SELECT selection_json FROM payment_initiations"
+            ).fetchone()[0]
+        )
+        component = command.payload.components[0]
+        details = payload["obligation"]["display_details"]
+        assert details["service"] == "activity"
+        assert details["public_label"] == component.public_label
+        assert details["start_date"] == component.start_date.isoformat()
+        assert details["end_date"] is None
+        assert details["start_time"] == component.start_time
+        assert details["package_component"] is False
+        assert details["provider_reference"] == hashlib.sha256(
+            command.command_id.encode()
+        ).hexdigest()
     finally:
         payments.close()
         execution.close()
@@ -261,6 +313,43 @@ def test_package_projects_two_unit_specific_obligations_once(tmp_path: Path) -> 
         assert {
             item["obligation"]["amount_minor"] for item in payloads
         } == expected_amounts
+        by_unit = {
+            item["obligation"]["business_unit"]: item["obligation"]
+            for item in payloads
+        }
+        by_command_unit = {
+            (
+                "hostel"
+                if command.payload.components[0].service.value == "lodging"
+                else "agency"
+            ): command
+            for command in commands
+        }
+        for unit, obligation in by_unit.items():
+            command = by_command_unit[unit]
+            component = command.payload.components[0]
+            details = obligation["display_details"]
+            assert details == {
+                "service": component.service.value,
+                "public_label": component.public_label,
+                "start_date": component.start_date.isoformat(),
+                "end_date": (
+                    component.end_date.isoformat() if component.end_date else None
+                ),
+                "start_time": component.start_time,
+                "adults": component.party.adults,
+                "children": component.party.children,
+                "provider_reference": hashlib.sha256(
+                    command.command_id.encode()
+                ).hexdigest(),
+                "reservation_total_minor": int(
+                    component.total.amount * Decimal("100")
+                ),
+                "package_component": True,
+            }
+            serialized = json.dumps(details, ensure_ascii=False)
+            assert command.payload.customer.full_name not in serialized
+            assert command.payload.customer.email not in serialized
     finally:
         payments.close()
         execution.close()

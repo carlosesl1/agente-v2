@@ -26,7 +26,9 @@ from reservation_followup.types import (
 from v2_application.payments import SQLitePaymentInitiationStore
 from v2_contracts.payments import (
     BusinessUnit,
+    CheckoutService,
     DueKind,
+    PaymentDisplayDetails,
     PaymentObligation,
     PaymentMethod,
     PaymentSelection,
@@ -146,7 +148,13 @@ class ReservationOutcomeProjector:
                 continue
 
             selections = tuple(
-                self._selection(command, ledger, outcome, method=method)
+                self._selection(
+                    command,
+                    ledger,
+                    outcome,
+                    method=method,
+                    package_component=len(members) == 2,
+                )
                 for (command, ledger), outcome in zip(members, outcomes, strict=True)
             )
             actionable = tuple(
@@ -166,6 +174,7 @@ class ReservationOutcomeProjector:
         outcome,
         *,
         method: PaymentMethod,
+        package_component: bool,
     ) -> PaymentSelection | None:
         component = command.payload.components[0]
         unit = {
@@ -175,6 +184,20 @@ class ReservationOutcomeProjector:
         followup_unit = FollowupBusinessUnit(unit.value)
         receiver = self._receiver_profiles[unit]
         amount_minor = _minor_units(component.total.amount)
+        if type(outcome.provider_reference) is not str or not outcome.provider_reference:
+            raise RuntimeError("confirmed reservation outcome lacks provider reference")
+        display_details = PaymentDisplayDetails(
+            service=CheckoutService(component.service.value),
+            public_label=component.public_label,
+            start_date=component.start_date,
+            end_date=component.end_date,
+            start_time=component.start_time,
+            adults=component.party.adults,
+            children=component.party.children,
+            provider_reference=outcome.provider_reference,
+            reservation_total_minor=amount_minor,
+            package_component=package_component,
+        )
         anchor_id = _opaque("reservation-anchor", command.command_id)
         payment_id = _opaque("payment", command.command_id, unit.value)
         payment_target_id = _opaque("payment-target", command.command_id)
@@ -207,6 +230,7 @@ class ReservationOutcomeProjector:
             receiver_profile_id=receiver,
             guest_country_code=command.payload.customer.country_code,
             economic_version=command.draft_version,
+            display_details=display_details,
         )
         due_kind = (
             DueKind.DUE_AT_CHECKIN
@@ -225,6 +249,7 @@ class ReservationOutcomeProjector:
             due_kind=due_kind,
             economic_version=context.economic_version,
             receiver_profile_id=context.receiver_profile_id,
+            display_details=context.display_details,
         )
         return PaymentSelection(obligation, method)
 
