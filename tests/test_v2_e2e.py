@@ -195,11 +195,6 @@ def _obligation(unit: BusinessUnit, suffix: str) -> PaymentObligation:
         display_details=synthetic_payment_display_details(
             business_unit=unit,
             amount_minor=amount_minor,
-            provider_reference=(
-                "fake-cloudbeds-reference"
-                if unit is BusinessUnit.HOSTEL
-                else "fake-bokun-reference"
-            ),
             package_component=suffix.startswith("package-"),
         ),
     )

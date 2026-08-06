@@ -40,7 +40,6 @@ HOSTEL_DETAILS = PaymentDisplayDetails(
     start_time=None,
     adults=1,
     children=0,
-    provider_reference="9081281187670",
     reservation_total_minor=30000,
     package_component=False,
 )
@@ -52,7 +51,6 @@ AGENCY_DETAILS = PaymentDisplayDetails(
     start_time="08:30",
     adults=1,
     children=0,
-    provider_reference="99859093",
     reservation_total_minor=45000,
     package_component=False,
 )
@@ -302,7 +300,6 @@ ACTIVITY_DETAILS = PaymentDisplayDetails(
     start_time="08:30",
     adults=1,
     children=0,
-    provider_reference="99859093",
     reservation_total_minor=33495,
     package_component=True,
 )
@@ -327,8 +324,6 @@ def test_payment_display_details_validate_closed_service_shapes() -> None:
         )
     with pytest.raises(ValueError, match="adults"):
         replace(ACTIVITY_DETAILS, adults=0)
-    with pytest.raises(ValueError, match="provider_reference"):
-        replace(ACTIVITY_DETAILS, provider_reference="bad\x00reference")
 
 
 def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows() -> None:
@@ -352,7 +347,6 @@ def test_payment_selection_round_trips_display_details_and_decodes_legacy_rows()
         "start_time": "08:30",
         "adults": 1,
         "children": 0,
-        "provider_reference": "99859093",
         "reservation_total_minor": 33495,
         "package_component": True,
     }
@@ -376,13 +370,14 @@ def test_payment_selection_rejects_unknown_display_fields() -> None:
         ),
         PaymentMethod.STRIPE,
     )
-    payload = json.loads(_selection_bytes(selection))
-    payload["obligation"]["display_details"]["customer_name"] = "forbidden"
+    for field in ("customer_name", "provider_reference"):
+        payload = json.loads(_selection_bytes(selection))
+        payload["obligation"]["display_details"][field] = "forbidden"
 
-    with pytest.raises(RuntimeError, match="selection is corrupt"):
-        _selection_from_bytes(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        )
+        with pytest.raises(RuntimeError, match="selection is corrupt"):
+            _selection_from_bytes(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            )
 
 
 def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path) -> None:

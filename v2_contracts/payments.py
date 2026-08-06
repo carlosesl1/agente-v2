@@ -59,7 +59,6 @@ class PaymentDisplayDetails:
     start_time: str | None
     adults: int
     children: int
-    provider_reference: str
     reservation_total_minor: int
     package_component: bool
 
@@ -94,14 +93,6 @@ class PaymentDisplayDetails:
             raise ValueError("adults must be an exact integer >= 1")
         if type(self.children) is not int or self.children < 0:
             raise ValueError("children must be an exact integer >= 0")
-        reference = str(self.provider_reference or "").strip()
-        if (
-            not reference
-            or len(reference) > 128
-            or "\x00" in reference
-            or reference != self.provider_reference
-        ):
-            raise ValueError("provider_reference must be normalized NUL-free text")
         if (
             type(self.reservation_total_minor) is not int
             or self.reservation_total_minor < 1

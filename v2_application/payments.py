@@ -249,7 +249,6 @@ _DISPLAY_DETAIL_FIELDS = frozenset(
         "start_time",
         "adults",
         "children",
-        "provider_reference",
         "reservation_total_minor",
         "package_component",
     }
@@ -267,7 +266,6 @@ def _display_details_value(details: PaymentDisplayDetails | None) -> dict | None
         "start_time": details.start_time,
         "adults": details.adults,
         "children": details.children,
-        "provider_reference": details.provider_reference,
         "reservation_total_minor": details.reservation_total_minor,
         "package_component": details.package_component,
     }
@@ -290,7 +288,6 @@ def _display_details_from_value(value: object) -> PaymentDisplayDetails | None:
         start_time=value["start_time"],
         adults=value["adults"],
         children=value["children"],
-        provider_reference=value["provider_reference"],
         reservation_total_minor=value["reservation_total_minor"],
         package_component=value["package_component"],
     )

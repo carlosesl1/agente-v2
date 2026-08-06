@@ -194,7 +194,6 @@ class ReservationOutcomeProjector:
             start_time=component.start_time,
             adults=component.party.adults,
             children=component.party.children,
-            provider_reference=outcome.provider_reference,
             reservation_total_minor=amount_minor,
             package_component=package_component,
         )

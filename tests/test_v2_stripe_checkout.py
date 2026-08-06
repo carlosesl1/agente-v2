@@ -35,8 +35,7 @@ def _activity_request() -> StripeLinkRequest:
             start_time="08:30",
             adults=1,
             children=0,
-            provider_reference="99859093",
-            reservation_total_minor=33495,
+                reservation_total_minor=33495,
             package_component=True,
         ),
     )
@@ -62,8 +61,7 @@ def _lodging_request() -> StripeLinkRequest:
             start_time=None,
             adults=1,
             children=0,
-            provider_reference="9081281187670",
-            reservation_total_minor=30000,
+                reservation_total_minor=30000,
             package_component=False,
         ),
     )
@@ -75,11 +73,12 @@ def test_activity_presentation_details_package_deposit() -> None:
     assert presentation.name == "Pacote — Roteiro dos 4Ps — Sinal 20%"
     assert presentation.description == (
         "Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • "
-        "Reserva / Booking Bókun 99859093 • Total R$ 334,95 • "
-        "Pagar agora R$ 66,99 (20%)"
+        "Total R$ 334,95 • Pagar agora R$ 66,99 (20%)"
     )
     assert re.fullmatch(r"[0-9a-f]{64}", presentation.details_sha256)
     assert presentation == stripe_product_presentation(_activity_request())
+    assert "Bókun" not in presentation.description
+    assert "provider:" not in presentation.description
 
 
 def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:
@@ -89,9 +88,10 @@ def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:
     assert presentation.description == (
         "Hospedagem / Accommodation • Check-in 02/12/2026 • "
         "Check-out 04/12/2026 • 1 hóspede • "
-        "Reserva / Booking Cloudbeds 9081281187670 • Total R$ 300,00 • "
-        "Pagar agora R$ 300,00 (100%)"
+        "Total R$ 300,00 • Pagar agora R$ 300,00 (100%)"
     )
+    assert "Cloudbeds" not in presentation.description
+    assert "provider:" not in presentation.description
 
 
 def test_party_pluralization_and_missing_activity_time() -> None:

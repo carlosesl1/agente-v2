@@ -6,14 +6,14 @@
 
 ## Problem
 
-The Stripe Checkout page currently receives a generic Product name such as `V2 agency reservation payment` and the payable amount. A customer cannot identify the booked service, service date or stay period, party, reservation reference, whether the charge is a deposit or full payment, or the relationship between the charge and the reservation total.
+The Stripe Checkout page currently receives a generic Product name such as `V2 agency reservation payment` and the payable amount. A customer cannot identify the booked service, service date or stay period, party, whether the charge is a deposit or full payment, or the relationship between the charge and the reservation total.
 
-The confirmed reservation command already contains the signed commercial source of truth: service kind, public offer label, dates, optional time, party, and reservation total. The confirmed provider outcome contains the real reservation reference. These values are currently discarded when the reservation outcome is projected into a payment obligation.
+The confirmed reservation command already contains the signed commercial source of truth: service kind, public offer label, dates, optional time, party, and reservation total. These values are currently discarded when the reservation outcome is projected into a payment obligation. Provider references remain private because some adapters intentionally persist only technical fingerprints.
 
 ## Goals
 
 1. Make every new Stripe Checkout link self-explanatory for standalone lodging, standalone activity, and each component of a package.
-2. Derive presentation only from the confirmed signed command, confirmed provider outcome, and configured payment percentage.
+2. Derive presentation only from the confirmed signed command and configured payment percentage, after the provider outcome has confirmed the reservation.
 3. Exclude customer name, email, phone, country, birth date, gender, passenger manifest, and all other PII.
 4. Preserve one-shot payment effects, deterministic idempotency, durable replay, and compatibility with payment rows created before this feature.
 5. Avoid language inference. Fixed labels are compact PT/EN where useful; the signed `public_label` is preserved as the service name.
@@ -30,7 +30,7 @@ The confirmed reservation command already contains the signed commercial source 
 
 ### 1. Static labels in the Stripe adapter
 
-Changing only the generic label to `Tour payment` or `Accommodation payment` is low risk but does not carry dates, party, provider reference, package context, or total-versus-due information. Rejected as insufficient.
+Changing only the generic label to `Tour payment` or `Accommodation payment` is low risk but does not carry dates, party, package context, or total-versus-due information. Rejected as insufficient.
 
 ### 2. Immutable payment display details carried with the obligation — selected
 
@@ -52,8 +52,6 @@ Introduce an immutable `PaymentDisplayDetails` value with these non-PII fields:
 - `end_date` for lodging, otherwise absent;
 - `start_time`, optional;
 - `adults` and `children`;
-- `provider_name`: closed `Cloudbeds`/`Bókun` mapping derived from service;
-- `provider_reference`: confirmed provider reference;
 - `reservation_total_minor`;
 - `package_component`: exact boolean.
 
@@ -80,11 +78,11 @@ Names are normalized, NUL-free, and bounded to Stripe's safe Product-name limit.
 
 Activity example:
 
-`Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • Reserva / Booking Bókun 99859093 • Total R$ 334,95 • Pagar agora R$ 66,99 (20%)`
+`Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • Total R$ 334,95 • Pagar agora R$ 66,99 (20%)`
 
 Lodging example:
 
-`Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Reserva / Booking Cloudbeds 9081281187670 • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)`
+`Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)`
 
 Rules:
 
@@ -92,7 +90,7 @@ Rules:
 - correct singular/plural for adult, child, and guest;
 - omit time when unavailable;
 - include both adults and children when children are present;
-- include the component-specific provider and real provider reference;
+- omit provider references and technical fingerprints; each link remains identified by its public component label;
 - show reservation total, payable amount now, and percentage;
 - no customer identity or passenger names;
 - maximum 500 characters, fail closed rather than silently dropping required commercial facts.
@@ -133,7 +131,7 @@ Fail before Stripe traffic when:
 - lodging lacks a valid end date;
 - activity has an end date inconsistent with the contract;
 - party counts are invalid;
-- provider reference, public label, or required amounts are invalid;
+- public label or required amounts are invalid;
 - formatted name/description cannot include all required facts within limits.
 
 After any Stripe POST, retain the current ambiguity/manual-review behavior. Do not retry consumed dispatch slots.
@@ -144,8 +142,8 @@ Use TDD with causal RED witnesses before production changes.
 
 Required tests:
 
-1. Activity Product form includes service label, date/time, party, Bókun reference, reservation total, payable amount, and deposit percentage.
-2. Lodging Product form includes check-in/out, guest count, Cloudbeds reference, totals, and full-payment wording.
+1. Activity Product form includes service label, date/time, party, reservation total, payable amount, and deposit percentage, with no provider token.
+2. Lodging Product form includes check-in/out, guest count, totals, and full-payment wording, with no provider token.
 3. Package component adds `Pacote —` while preserving component details.
 4. Children and pluralization render correctly; missing activity time is omitted.
 5. No PII fields can enter the display contract; unexpected fields are rejected by strict deserialization.

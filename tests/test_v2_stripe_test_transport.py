@@ -56,7 +56,6 @@ def _request() -> StripeLinkRequest:
             start_time=None,
             adults=1,
             children=0,
-            provider_reference="4347105013175",
             reservation_total_minor=15300,
             package_component=False,
         ),

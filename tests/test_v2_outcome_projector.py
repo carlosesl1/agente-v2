@@ -222,9 +222,6 @@ def test_single_reservation_projects_one_obligation(tmp_path: Path) -> None:
             "start_time": None,
             "adults": component.party.adults,
             "children": component.party.children,
-            "provider_reference": hashlib.sha256(
-                command.command_id.encode()
-            ).hexdigest(),
             "reservation_total_minor": int(
                 component.total.amount * Decimal("100")
             ),
@@ -262,9 +259,6 @@ def test_single_activity_projects_non_package_display_details(tmp_path: Path) ->
         assert details["end_date"] is None
         assert details["start_time"] == component.start_time
         assert details["package_component"] is False
-        assert details["provider_reference"] == hashlib.sha256(
-            command.command_id.encode()
-        ).hexdigest()
     finally:
         payments.close()
         execution.close()
@@ -339,9 +333,6 @@ def test_package_projects_two_unit_specific_obligations_once(tmp_path: Path) -> 
                 "start_time": component.start_time,
                 "adults": component.party.adults,
                 "children": component.party.children,
-                "provider_reference": hashlib.sha256(
-                    command.command_id.encode()
-                ).hexdigest(),
                 "reservation_total_minor": int(
                     component.total.amount * Decimal("100")
                 ),

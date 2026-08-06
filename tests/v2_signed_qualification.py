@@ -413,11 +413,6 @@ class SignedQualificationRuntime:
                 display_details=synthetic_payment_display_details(
                     business_unit=BusinessUnit(subject.business_unit.value),
                     amount_minor=subject.amount_minor,
-                    provider_reference=(
-                        "fake-cloudbeds-reference"
-                        if subject.business_unit.value == "hostel"
-                        else "fake-bokun-reference"
-                    ),
                     package_component=self.scenario == "package_wise",
                 ),
             )

@@ -18,10 +18,6 @@ _SERVICE_LABEL = {
     CheckoutService.LODGING: "Hospedagem / Accommodation",
     CheckoutService.ACTIVITY: "Passeio / Tour",
 }
-_PROVIDER_LABEL = {
-    CheckoutService.LODGING: "Cloudbeds",
-    CheckoutService.ACTIVITY: "Bókun",
-}
 _SERVICE_UNIT = {
     CheckoutService.LODGING: BusinessUnit.HOSTEL,
     CheckoutService.ACTIVITY: BusinessUnit.AGENCY,
@@ -75,8 +71,6 @@ def stripe_product_presentation(
             schedule += f" às {details.start_time}"
     description = (
         f"{_SERVICE_LABEL[details.service]} • {schedule} • {party} • "
-        f"Reserva / Booking {_PROVIDER_LABEL[details.service]} "
-        f"{details.provider_reference} • "
         f"Total {_money_text(details.reservation_total_minor, request.currency)} • "
         f"Pagar agora {_money_text(request.amount_minor, request.currency)} "
         f"({request.payment_percentage}%)"
@@ -94,7 +88,6 @@ def stripe_product_presentation(
             "children": details.children,
             "end_date": details.end_date.isoformat() if details.end_date else None,
             "package_component": details.package_component,
-            "provider_reference": details.provider_reference,
             "public_label": details.public_label,
             "reservation_total_minor": details.reservation_total_minor,
             "service": details.service.value,

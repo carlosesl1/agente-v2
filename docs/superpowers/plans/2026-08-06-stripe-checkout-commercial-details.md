@@ -30,7 +30,7 @@
 
 **Interfaces:**
 - Produces: `CheckoutService(str, Enum)` with `LODGING` and `ACTIVITY`.
-- Produces: `PaymentDisplayDetails(service, public_label, start_date, end_date, start_time, adults, children, provider_reference, reservation_total_minor, package_component)`.
+- Produces: `PaymentDisplayDetails(service, public_label, start_date, end_date, start_time, adults, children, reservation_total_minor, package_component)`.
 - Extends: `PaymentObligation.display_details: PaymentDisplayDetails | None = None`.
 - Extends: `ReservationPaymentContext.display_details: PaymentDisplayDetails | None = None`.
 - Extends: `StripeLinkRequest.display_details: PaymentDisplayDetails | None = None`.
@@ -48,7 +48,6 @@ ACTIVITY_DETAILS = PaymentDisplayDetails(
     start_time="08:30",
     adults=1,
     children=0,
-    provider_reference="99859093",
     reservation_total_minor=33495,
     package_component=True,
 )
@@ -56,7 +55,7 @@ ACTIVITY_DETAILS = PaymentDisplayDetails(
 
 - activity forbids `end_date` and accepts optional `start_time`;
 - lodging requires `end_date > start_date` and forbids `start_time`;
-- labels/references are normalized, non-empty, NUL-free, and bounded;
+- public labels are normalized, non-empty, NUL-free, and bounded;
 - adults are at least one; children are non-negative; total minor units are positive;
 - `_selection_bytes()` writes the exact closed `display_details` object;
 - `_selection_from_bytes()` round-trips the current shape;
@@ -85,7 +84,7 @@ In `v2_application/payments.py`, serialize display details using ISO dates and e
 ```python
 {
     "service", "public_label", "start_date", "end_date", "start_time",
-    "adults", "children", "provider_reference",
+    "adults", "children",
     "reservation_total_minor", "package_component",
 }
 ```
@@ -132,7 +131,6 @@ assert lodging["display_details"] == {
     "start_time": None,
     "adults": expected.party.adults,
     "children": expected.party.children,
-    "provider_reference": expected_outcome_reference,
     "reservation_total_minor": expected_amount,
     "package_component": True,
 }
@@ -152,9 +150,9 @@ Expected: failure because `display_details` is absent.
 
 - [ ] **Step 3: Implement deterministic derivation**
 
-Pass `package_component=len(members) == 2` into `_selection()`. Derive fields only from `command.payload.components[0]` and `outcome.provider_reference`; map domain `ServiceKind` to payment `CheckoutService`. Bind `reservation_total_minor` to the same `_minor_units(component.total.amount)` used by the obligation.
+Pass `package_component=len(members) == 2` into `_selection()`. Derive display fields only from `command.payload.components[0]`; map domain `ServiceKind` to payment `CheckoutService`. Keep `outcome.provider_reference` only in the private confirmed anchor. Bind `reservation_total_minor` to the same `_minor_units(component.total.amount)` used by the obligation.
 
-Raise before enqueue if a confirmed outcome lacks a provider reference or the component shape cannot form valid details.
+Raise before enqueue if the private confirmed anchor lacks its provider reference or the component shape cannot form valid display details.
 
 - [ ] **Step 4: Run GREEN and projector regressions**
 
@@ -195,7 +193,6 @@ StripeProductPresentation(
     name="Pacote — Roteiro dos 4Ps — Sinal 20%",
     description=(
         "Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • "
-        "Reserva / Booking Bókun 99859093 • Total R$ 334,95 • "
         "Pagar agora R$ 66,99 (20%)"
     ),
     details_sha256="a" * 64,  # assertion also checks lowercase SHA-256 shape
@@ -206,7 +203,7 @@ and lodging:
 
 ```text
 Suíte Casal — Pagamento integral
-Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Reserva / Booking Cloudbeds 9081281187670 • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)
+Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)
 ```
 
 Also test:
@@ -233,10 +230,6 @@ Use only `datetime.date`, integer minor units, deterministic `Decimal`/string re
 _SERVICE_LABEL = {
     CheckoutService.LODGING: "Hospedagem / Accommodation",
     CheckoutService.ACTIVITY: "Passeio / Tour",
-}
-_PROVIDER_LABEL = {
-    CheckoutService.LODGING: "Cloudbeds",
-    CheckoutService.ACTIVITY: "Bókun",
 }
 ```
 
