@@ -15,7 +15,7 @@
 - Fixed labels are compact PT/EN; do not infer language.
 - Existing completed links remain readable and are never recreated or modified.
 - Product name maximum: 120 characters; Product description maximum: 500 characters.
-- Package components remain separate links and receive a `Pacote —` prefix.
+- Package components remain separate links and receive a `Pacote / Package —` prefix.
 - Preserve one fenced Stripe dispatch slot and existing Product → Price → Payment Link idempotency keys.
 - No network/provider calls in tests; use `httpx.MockTransport` and local SQLite only.
 
@@ -190,20 +190,20 @@ Add table-driven tests with exact expected strings for:
 
 ```python
 StripeProductPresentation(
-    name="Pacote — Roteiro dos 4Ps — Sinal 20%",
+    name="Pacote / Package — Roteiro dos 4Ps — Sinal / Deposit 20%",
     description=(
-        "Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • "
-        "Pagar agora R$ 66,99 (20%)"
+        "Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • "
+        "Total R$ 334,95 • "
+        "Pagar agora / Pay now R$ 66,99 (20%)"
     ),
-    details_sha256="a" * 64,  # assertion also checks lowercase SHA-256 shape
 )
 ```
 
 and lodging:
 
 ```text
-Suíte Casal — Pagamento integral
-Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)
+Suíte Casal — Pagamento integral / Full payment
+Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede / guest • Total R$ 300,00 • Pagar agora / Pay now R$ 300,00 (100%)
 ```
 
 Also test:

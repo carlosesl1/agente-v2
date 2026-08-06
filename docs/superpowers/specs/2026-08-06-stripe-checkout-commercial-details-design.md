@@ -68,9 +68,9 @@ The current serialization always writes `display_details` for newly projected St
 
 ### Product name
 
-- Standalone activity: `<public label> — Sinal <percentage>%` when percentage is below 100; otherwise `<public label> — Pagamento integral`.
-- Standalone lodging: `<public label> — Pagamento integral` at 100%, or `<public label> — Sinal <percentage>%` for any configured partial payment.
-- Package component: prefix `Pacote — ` before the same component-specific name.
+- Standalone activity: `<public label> — Sinal / Deposit <percentage>%` when percentage is below 100; otherwise `<public label> — Pagamento integral / Full payment`.
+- Standalone lodging: `<public label> — Pagamento integral / Full payment` at 100%, or `<public label> — Sinal / Deposit <percentage>%` for any configured partial payment.
+- Package component: prefix `Pacote / Package — ` before the same component-specific name.
 
 Names are normalized, NUL-free, and bounded to Stripe's safe Product-name limit. Truncation is deterministic and uses an ellipsis without changing the signed source value stored in the payment contract.
 
@@ -78,11 +78,11 @@ Names are normalized, NUL-free, and bounded to Stripe's safe Product-name limit.
 
 Activity example:
 
-`Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • Total R$ 334,95 • Pagar agora R$ 66,99 (20%)`
+`Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%)`
 
 Lodging example:
 
-`Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede • Total R$ 300,00 • Pagar agora R$ 300,00 (100%)`
+`Hospedagem / Accommodation • Check-in 02/12/2026 • Check-out 04/12/2026 • 1 hóspede / guest • Total R$ 300,00 • Pagar agora / Pay now R$ 300,00 (100%)`
 
 Rules:
 
@@ -95,7 +95,7 @@ Rules:
 - no customer identity or passenger names;
 - maximum 500 characters, fail closed rather than silently dropping required commercial facts.
 
-A package creates one enriched Product per confirmed component. The `Pacote —` prefix makes it clear each link pays one package component; the description identifies which service.
+A package creates one enriched Product per confirmed component. The `Pacote / Package —` prefix makes it clear each link pays one package component; the description identifies which service.
 
 ## Stripe wire behavior and verification
 
@@ -144,7 +144,7 @@ Required tests:
 
 1. Activity Product form includes service label, date/time, party, reservation total, payable amount, and deposit percentage, with no provider token.
 2. Lodging Product form includes check-in/out, guest count, totals, and full-payment wording, with no provider token.
-3. Package component adds `Pacote —` while preserving component details.
+3. Package component adds `Pacote / Package —` while preserving component details.
 4. Children and pluralization render correctly; missing activity time is omitted.
 5. No PII fields can enter the display contract; unexpected fields are rejected by strict deserialization.
 6. Product response mismatch in name, description, or display hash becomes manual review and does not continue to Price/Link creation.

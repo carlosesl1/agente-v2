@@ -35,7 +35,7 @@ def _activity_request() -> StripeLinkRequest:
             start_time="08:30",
             adults=1,
             children=0,
-                reservation_total_minor=33495,
+            reservation_total_minor=33495,
             package_component=True,
         ),
     )
@@ -61,7 +61,7 @@ def _lodging_request() -> StripeLinkRequest:
             start_time=None,
             adults=1,
             children=0,
-                reservation_total_minor=30000,
+            reservation_total_minor=30000,
             package_component=False,
         ),
     )
@@ -70,10 +70,12 @@ def _lodging_request() -> StripeLinkRequest:
 def test_activity_presentation_details_package_deposit() -> None:
     presentation = stripe_product_presentation(_activity_request())
 
-    assert presentation.name == "Pacote — Roteiro dos 4Ps — Sinal 20%"
+    assert presentation.name == (
+        "Pacote / Package — Roteiro dos 4Ps — Sinal / Deposit 20%"
+    )
     assert presentation.description == (
-        "Passeio / Tour • 03/12/2026 às 08:30 • 1 adulto • "
-        "Total R$ 334,95 • Pagar agora R$ 66,99 (20%)"
+        "Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • "
+        "Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%)"
     )
     assert re.fullmatch(r"[0-9a-f]{64}", presentation.details_sha256)
     assert presentation == stripe_product_presentation(_activity_request())
@@ -84,11 +86,11 @@ def test_activity_presentation_details_package_deposit() -> None:
 def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:
     presentation = stripe_product_presentation(_lodging_request())
 
-    assert presentation.name == "Suíte Casal — Pagamento integral"
+    assert presentation.name == "Suíte Casal — Pagamento integral / Full payment"
     assert presentation.description == (
         "Hospedagem / Accommodation • Check-in 02/12/2026 • "
-        "Check-out 04/12/2026 • 1 hóspede • "
-        "Total R$ 300,00 • Pagar agora R$ 300,00 (100%)"
+        "Check-out 04/12/2026 • 1 hóspede / guest • "
+        "Total R$ 300,00 • Pagar agora / Pay now R$ 300,00 (100%)"
     )
     assert "Cloudbeds" not in presentation.description
     assert "provider:" not in presentation.description
@@ -106,8 +108,11 @@ def test_party_pluralization_and_missing_activity_time() -> None:
         replace(_activity_request(), display_details=details)
     )
 
-    assert "03/12/2026 • 2 adultos + 1 criança •" in presentation.description
-    assert " às " not in presentation.description
+    assert (
+        "03/12/2026 • 2 adultos / adults + 1 criança / child •"
+        in presentation.description
+    )
+    assert " às / at " not in presentation.description
 
 
 def test_product_name_truncates_label_but_preserves_payment_suffix() -> None:
@@ -120,8 +125,8 @@ def test_product_name_truncates_label_but_preserves_payment_suffix() -> None:
     )
 
     assert len(presentation.name) == 120
-    assert "… — Sinal 20%" in presentation.name
-    assert presentation.name.startswith("Pacote — Passeio muito detalhado")
+    assert "… — Sinal / Deposit 20%" in presentation.name
+    assert presentation.name.startswith("Pacote / Package — Passeio muito detalhado")
 
 
 def test_presentation_fails_closed_when_required_copy_exceeds_limit() -> None:

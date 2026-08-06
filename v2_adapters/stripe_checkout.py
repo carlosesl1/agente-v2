@@ -48,11 +48,11 @@ def stripe_product_presentation(
         raise ValueError("checkout payable amount diverges from reservation percentage")
 
     suffix = (
-        " — Pagamento integral"
+        " — Pagamento integral / Full payment"
         if request.payment_percentage == 100
-        else f" — Sinal {request.payment_percentage}%"
+        else f" — Sinal / Deposit {request.payment_percentage}%"
     )
-    prefix = "Pacote — " if details.package_component else ""
+    prefix = "Pacote / Package — " if details.package_component else ""
     name = _bounded_name(prefix, details.public_label, suffix)
 
     party = _party_text(
@@ -68,11 +68,11 @@ def stripe_product_presentation(
     else:
         schedule = _date_text(details.start_date)
         if details.start_time is not None:
-            schedule += f" às {details.start_time}"
+            schedule += f" às / at {details.start_time}"
     description = (
         f"{_SERVICE_LABEL[details.service]} • {schedule} • {party} • "
         f"Total {_money_text(details.reservation_total_minor, request.currency)} • "
-        f"Pagar agora {_money_text(request.amount_minor, request.currency)} "
+        f"Pagar agora / Pay now {_money_text(request.amount_minor, request.currency)} "
         f"({request.payment_percentage}%)"
     )
     if len(description) > _DESCRIPTION_LIMIT:
@@ -125,12 +125,16 @@ def _bounded_name(prefix: str, label: str, suffix: str) -> str:
 
 def _party_text(*, service: CheckoutService, adults: int, children: int) -> str:
     if children:
-        adult_label = "adulto" if adults == 1 else "adultos"
-        child_label = "criança" if children == 1 else "crianças"
+        adult_label = "adulto / adult" if adults == 1 else "adultos / adults"
+        child_label = "criança / child" if children == 1 else "crianças / children"
         return f"{adults} {adult_label} + {children} {child_label}"
     if service is CheckoutService.LODGING:
-        return f"{adults} " + ("hóspede" if adults == 1 else "hóspedes")
-    return f"{adults} " + ("adulto" if adults == 1 else "adultos")
+        return f"{adults} " + (
+            "hóspede / guest" if adults == 1 else "hóspedes / guests"
+        )
+    return f"{adults} " + (
+        "adulto / adult" if adults == 1 else "adultos / adults"
+    )
 
 
 def _date_text(value) -> str:
