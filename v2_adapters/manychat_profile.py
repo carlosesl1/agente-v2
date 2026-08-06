@@ -58,7 +58,9 @@ def _canonical_manychat_phone(
     elif _DIGITS_RE.fullmatch(phone) is not None and not phone.startswith("0"):
         digits = phone
         if country_code == "BR" and _BR_LOCAL_RE.fullmatch(digits) is not None:
-            digits = "55" + digits
+            raise ManyChatProfilePayloadError(
+                "phone_e164 is ambiguous without an explicit country calling code"
+            )
         canonical = "+" + digits
     else:
         raise ManyChatProfilePayloadError("phone_e164 is not canonical")

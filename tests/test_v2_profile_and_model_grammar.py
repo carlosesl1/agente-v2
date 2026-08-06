@@ -121,8 +121,6 @@ def test_incomplete_profile_is_explicit_and_never_invents_values() -> None:
     ("raw_phone", "country", "expected"),
     (
         ("55" + "75" + "9" * 9, "BR", "+" + "55" + "75" + "9" * 9),
-        ("75" + "9" * 9, "BR", "+" + "55" + "75" + "9" * 9),
-        ("75" + "3" + "4" * 7, "BR", "+" + "55" + "75" + "3" + "4" * 7),
         ("44" + "7700" + "900123", "GB", "+" + "44" + "7700" + "900123"),
         ("34" + "612" + "345678", "ES", "+" + "34" + "612" + "345678"),
         ("1" + "202" + "555" + "0123", "US", "+" + "1" + "202" + "555" + "0123"),
@@ -159,6 +157,21 @@ def test_profile_adapter_canonicalizes_manychat_phone_without_plus(
         {**_complete_payload(), "phone_e164": "phone-invalid"},
         {**_complete_payload(), "phone_e164": "0" + "55" + "75" + "9" * 9},
         {**_complete_payload(), "phone_e164": "1" * 16},
+        {
+            **_complete_payload(),
+            "phone_e164": "75" + "9" * 9,
+            "country_code": "BR",
+        },
+        {
+            **_complete_payload(),
+            "phone_e164": "75" + "3" + "4" * 7,
+            "country_code": "BR",
+        },
+        {
+            **_complete_payload(),
+            "phone_e164": "34" + "912" + "345678",
+            "country_code": "BR",
+        },
     ),
 )
 def test_profile_adapter_rejects_identity_conflict_open_payload_and_bad_phone(

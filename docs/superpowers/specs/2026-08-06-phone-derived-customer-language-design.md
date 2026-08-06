@@ -27,13 +27,14 @@ Rejected alternatives:
 
 ManyChat can return a full international phone with or without a leading `+`.
 
-`ManyChatHTTPTransport.fetch_profile()` will return canonical E.164:
+`ManyChatProfileAdapter.read()` will return canonical E.164:
 
 - `+557...` remains `+557...`;
 - `557...` becomes `+557...`;
 - `447...` becomes `+447...`;
 - `346...` becomes `+346...`;
-- a digits-only local number paired with `country_code=BR` receives the `+55` prefix;
+- a digits-only Brazilian number must include `55`; a national number without DDI is ambiguous and fails closed instead of receiving an invented prefix;
+- `country_code` never changes or invents a DDI; it is used only to reject a national-looking ambiguous input;
 - whitespace, punctuation, letters, impossible length, a leading zero DDI, or ambiguous malformed input fails closed as a profile-read error.
 
 A canonical E.164 value is required before customer facts and reservation commands can exist.
@@ -159,8 +160,8 @@ Required RED→GREEN coverage:
 
 1. `+55` and digits-only `55` profile phone normalize to E.164 and select PT-BR.
 2. UK/Spain/US phones with and without `+` select English.
-3. Local BR digits with `country_code=BR` normalize to `+55` and select PT-BR.
-4. Malformed phone input fails before reservation/payment/message effects.
+3. Local BR digits without `55`, including shapes that collide with valid foreign phones, fail closed instead of silently selecting PT-BR.
+4. Malformed or ambiguous phone input fails before reservation/payment/message effects.
 5. Payment selection round-trip preserves language; legacy decode yields unknown language and fails before new Stripe HTTP.
 6. PT-BR and English Stripe names/descriptions cover activity, lodging, package, signal, full payment, children, missing time, length bounds, and privacy.
 7. Product/Payment Link read-back verifies the language-bound presentation hash.

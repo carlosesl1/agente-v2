@@ -94,9 +94,8 @@ Extend `test_v2_profile_and_model_grammar.py` with:
 @pytest.mark.parametrize(
     ("raw_phone", "country", "expected"),
     (
-        ("5575999999999", "BR", "+5575999999999"),
-        ("75999999999", "BR", "+5575999999999"),
-        ("447700900123", "GB", "+447700900123"),
+        ("55" + "75" + "9" * 9, "BR", "+" + "55" + "75" + "9" * 9),
+        ("44" + "7700" + "900123", "GB", "+" + "44" + "7700" + "900123"),
         ("34612345678", "ES", "+34612345678"),
         ("12025550123", "US", "+12025550123"),
     ),
@@ -111,7 +110,7 @@ def test_profile_adapter_canonicalizes_manychat_phone_without_plus(
     assert binding.phone_e164 == expected
 ```
 
-Move the old digits-only `11999999999` rejection into the BR normalization matrix. Add invalid cases with spaces, punctuation, letters, leading-zero DDI, and overlength.
+Keep national BR numbers without `55` in the rejection matrix because they are ambiguous with valid foreign international numbers. Add invalid cases with spaces, punctuation, letters, leading-zero DDI, and overlength.
 
 Run the new selectors. Expected: FAIL because digits-only phone is rejected by `PrivateCustomerBinding`.
 
@@ -122,6 +121,7 @@ In `v2_adapters/manychat_profile.py`, normalize country first and phone second:
 ```python
 _E164_RE = re.compile(r"^\+[1-9][0-9]{7,14}$")
 _DIGITS_RE = re.compile(r"^[0-9]{8,15}$")
+_BR_LOCAL_RE = re.compile(r"^[1-9][1-9](?:9[0-9]{8}|[2-5][0-9]{7})$")
 
 def _canonical_manychat_phone(value: object, country_code: str | None) -> str | None:
     phone = _private_value(value, "phone_e164")
@@ -131,8 +131,10 @@ def _canonical_manychat_phone(value: object, country_code: str | None) -> str | 
         canonical = phone
     elif _DIGITS_RE.fullmatch(phone) is not None:
         digits = phone
-        if country_code == "BR" and not digits.startswith("55"):
-            digits = "55" + digits
+        if country_code == "BR" and _BR_LOCAL_RE.fullmatch(digits) is not None:
+            raise ManyChatProfilePayloadError(
+                "phone_e164 is ambiguous without an explicit country calling code"
+            )
         canonical = "+" + digits
     else:
         raise ManyChatProfilePayloadError("phone_e164 is not canonical")
