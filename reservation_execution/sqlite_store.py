@@ -255,6 +255,8 @@ class SQLiteUnitOfWork:
         self._connection = connection
         self._schema_version = _schema_version
         self._phase8_reservation_fault_hook: Callable[[str], None] | None = None
+        self._boundary_genesis_cache: dict[str, State] | None = None
+        self._boundary_genesis_data_version: int | None = None
         self._closed = False
 
     @classmethod
@@ -1087,6 +1089,8 @@ class SQLiteUnitOfWork:
                     committed_at_text,
                 ),
             )
+            self._boundary_genesis_cache = None
+            self._boundary_genesis_data_version = None
             trip("after_receipt_before_commit")
             return receipt
 
@@ -1688,6 +1692,47 @@ class SQLiteUnitOfWork:
                 raise DataCorruption("released outbox projection is invalid")
             return persisted
 
+    def _boundary_relay_genesis_map(self) -> dict[str, State]:
+        if self._schema_version != SCHEMA_VERSION_V6:
+            return {}
+        from reservation_boundary.effects import ReservationRelayBundle
+
+        data_version = int(
+            self._connection.execute("PRAGMA data_version").fetchone()[0]
+        )
+        if (
+            self._boundary_genesis_cache is not None
+            and self._boundary_genesis_data_version == data_version
+        ):
+            return self._boundary_genesis_cache
+        geneses: dict[str, State] = {}
+        for (bundle_json,) in self._connection.execute(
+            "SELECT bundle_json FROM reservation_boundary_ingress_receipts"
+        ):
+            try:
+                bundle = ReservationRelayBundle.from_canonical_bytes(
+                    bundle_json.encode("utf-8")
+                )
+                if bundle.to_canonical_bytes().decode("utf-8") != bundle_json:
+                    raise ValueError("relay bundle bytes are noncanonical")
+                genesis_text = bundle.genesis_state.decode("utf-8")
+                genesis = loads_state(genesis_text)
+                if dumps_state(genesis) != genesis_text:
+                    raise ValueError("relay genesis bytes are noncanonical")
+            except (AttributeError, TypeError, UnicodeDecodeError, ValueError) as exc:
+                raise DataCorruption(
+                    "reservation ingress contains an invalid replay genesis"
+                ) from exc
+            if genesis.meta.workflow_id in geneses:
+                raise DataCorruption("workflow has multiple reservation replay geneses")
+            geneses[genesis.meta.workflow_id] = genesis
+        self._boundary_genesis_cache = geneses
+        self._boundary_genesis_data_version = data_version
+        return geneses
+
+    def _boundary_relay_genesis(self, workflow_id: str) -> State | None:
+        return self._boundary_relay_genesis_map().get(workflow_id)
+
     def _replay_workflow_history(
         self,
         workflow_id: str,
@@ -1703,10 +1748,18 @@ class SQLiteUnitOfWork:
             or not 1 <= before_revision <= current.meta.revision
         ):
             raise DataCorruption("historical target revision is outside the workflow")
-        state: State = new_workflow(
-            workflow_id=workflow_id,
-            started_at=_canonical_utc(row[5], "workflow.created_at"),
-        )
+        created_at = _canonical_utc(row[5], "workflow.created_at")
+        state = self._boundary_relay_genesis(workflow_id)
+        if state is None:
+            state = new_workflow(workflow_id=workflow_id, started_at=created_at)
+        elif (
+            state.meta.revision != 0
+            or state.meta.last_event_at != created_at
+            or state.meta.seen_event_ids
+            or state.meta.seen_event_hashes
+            or state.meta.command_ids
+        ):
+            raise DataCorruption("reservation replay genesis is not revision zero")
         rows = tuple(
             self._connection.execute(
                 "SELECT event_id, workflow_id, revision, occurred_at, event_type, "

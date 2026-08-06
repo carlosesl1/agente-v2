@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from reservation_boundary import effects
 from reservation_domain import dumps_command, dumps_event, dumps_state, reduce
@@ -166,6 +167,14 @@ class Phase8ReservationTargetIngressTests(unittest.TestCase):
         with SQLiteUnitOfWork.open_v6(self.path) as store:
             first = self._accept(store, operation_id, bundle)
             self.assertEqual(store.load_workflow(expected_state.meta.workflow_id), expected_state)
+            with mock.patch.object(
+                effects.ReservationRelayBundle,
+                "from_canonical_bytes",
+                wraps=effects.ReservationRelayBundle.from_canonical_bytes,
+            ) as decode:
+                store.assert_execution_consistency()
+                store.assert_execution_consistency()
+                self.assertEqual(decode.call_count, 1)
             self.assertEqual(first.job_kind, effects.InternalJobKind.HANDOFF)
             self.assertEqual(first.target_result_hash, bundle.expected_final_state_hash)
             self.assertEqual(

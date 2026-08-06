@@ -969,6 +969,7 @@ def test_private_binding_prepare_keeps_exact_command_payload_through_fence(
             source_turn_receipt_hash=source_hash,
             bundle=bundle,
         )
+        store.assert_execution_consistency()
         claim = store.claim_command(
             worker_id="worker:private-fenced",
             now=NOW,
@@ -984,6 +985,8 @@ def test_private_binding_prepare_keeps_exact_command_payload_through_fence(
             request,
             idempotency_key=claim.command.idempotency_key,
         )
+        store.record_outcome(permit, outcome, now=NOW + timedelta(seconds=1))
+        store.assert_execution_consistency()
 
         assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
         assert adapter._prepared_private_bindings == {}
