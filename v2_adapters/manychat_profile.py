@@ -13,6 +13,7 @@ from v2_contracts.profile import PrivateCustomerBinding
 _SUBSCRIBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _E164_RE = re.compile(r"^\+[1-9][0-9]{7,14}$")
 _DIGITS_RE = re.compile(r"^[0-9]{8,15}$")
+_BR_LOCAL_RE = re.compile(r"^[1-9][1-9](?:9[0-9]{8}|[2-5][0-9]{7})$")
 _EXPECTED_FIELDS = frozenset(
     ("subscriber_id", "full_name", "email", "phone_e164", "country_code")
 )
@@ -56,9 +57,7 @@ def _canonical_manychat_phone(
         canonical = phone
     elif _DIGITS_RE.fullmatch(phone) is not None and not phone.startswith("0"):
         digits = phone
-        if country_code == "BR" and (
-            len(digits) <= 11 or not digits.startswith("55")
-        ):
+        if country_code == "BR" and _BR_LOCAL_RE.fullmatch(digits) is not None:
             digits = "55" + digits
         canonical = "+" + digits
     else:
