@@ -78,7 +78,7 @@ Names are normalized, NUL-free, and bounded to Stripe's safe Product-name limit.
 
 Activity example:
 
-`Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%)`
+`Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%) • Saldo restante / Remaining balance R$ 267,96`
 
 Lodging example:
 
@@ -92,6 +92,7 @@ Rules:
 - include both adults and children when children are present;
 - omit provider references and technical fingerprints; each link remains identified by its public component label;
 - show reservation total, payable amount now, and percentage;
+- for partial payments, show `Saldo restante / Remaining balance`; omit it for full payment;
 - no customer identity or passenger names;
 - maximum 500 characters, fail closed rather than silently dropping required commercial facts.
 

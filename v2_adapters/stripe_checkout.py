@@ -69,11 +69,18 @@ def stripe_product_presentation(
         schedule = _date_text(details.start_date)
         if details.start_time is not None:
             schedule += f" às / at {details.start_time}"
+    remaining = ""
+    if request.payment_percentage < 100:
+        remaining_minor = details.reservation_total_minor - request.amount_minor
+        remaining = (
+            " • Saldo restante / Remaining balance "
+            f"{_money_text(remaining_minor, request.currency)}"
+        )
     description = (
         f"{_SERVICE_LABEL[details.service]} • {schedule} • {party} • "
         f"Total {_money_text(details.reservation_total_minor, request.currency)} • "
         f"Pagar agora / Pay now {_money_text(request.amount_minor, request.currency)} "
-        f"({request.payment_percentage}%)"
+        f"({request.payment_percentage}%){remaining}"
     )
     if len(description) > _DESCRIPTION_LIMIT:
         raise ValueError(

@@ -75,7 +75,8 @@ def test_activity_presentation_details_package_deposit() -> None:
     )
     assert presentation.description == (
         "Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • "
-        "Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%)"
+        "Total R$ 334,95 • Pagar agora / Pay now R$ 66,99 (20%) • "
+        "Saldo restante / Remaining balance R$ 267,96"
     )
     assert re.fullmatch(r"[0-9a-f]{64}", presentation.details_sha256)
     assert presentation == stripe_product_presentation(_activity_request())
@@ -94,6 +95,7 @@ def test_lodging_presentation_details_dates_guest_and_full_payment() -> None:
     )
     assert "Cloudbeds" not in presentation.description
     assert "provider:" not in presentation.description
+    assert "Remaining balance" not in presentation.description
 
 
 def test_party_pluralization_and_missing_activity_time() -> None:
@@ -113,6 +115,7 @@ def test_party_pluralization_and_missing_activity_time() -> None:
         in presentation.description
     )
     assert " às / at " not in presentation.description
+    assert "Saldo restante / Remaining balance R$ 267,96" in presentation.description
 
 
 def test_product_name_truncates_label_but_preserves_payment_suffix() -> None:

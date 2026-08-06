@@ -194,7 +194,8 @@ StripeProductPresentation(
     description=(
         "Passeio / Tour • 03/12/2026 às / at 08:30 • 1 adulto / adult • "
         "Total R$ 334,95 • "
-        "Pagar agora / Pay now R$ 66,99 (20%)"
+        "Pagar agora / Pay now R$ 66,99 (20%) • "
+        "Saldo restante / Remaining balance R$ 267,96"
     ),
 )
 ```
