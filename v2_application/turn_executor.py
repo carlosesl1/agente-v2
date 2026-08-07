@@ -79,7 +79,6 @@ from v2_application.passengers import (
     projection_manifest_fact,
     projection_manifest_party,
     projection_manifest_status,
-    projection_manifest_json,
 )
 from v2_application.private_customer_facts import (
     PrivateCustomerFactSnapshot,
@@ -277,7 +276,6 @@ def _structured_selection_review_required(
     children = values.get("children", 0)
     if type(adults) is not int or type(children) is not int:
         return False
-    service = values.get("service")
     commercially_complete = (
         type(values.get("product_id")) is str
         and adults >= 1
