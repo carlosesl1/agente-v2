@@ -42,8 +42,10 @@ class WorkerFailureReason(str, Enum):
     CLOUDBEDS_AUDIT_ATTEMPTS_EXHAUSTED = (
         "cloudbeds_audit_attempts_exhausted"
     )
+    CLOUDBEDS_AUDIT_UNAVAILABLE = "cloudbeds_audit_unavailable"
     BOKUN_AUDIT_DIVERGENT = "bokun_audit_divergent"
     BOKUN_AUDIT_ATTEMPTS_EXHAUSTED = "bokun_audit_attempts_exhausted"
+    BOKUN_AUDIT_UNAVAILABLE = "bokun_audit_unavailable"
     STRIPE_RECONCILIATION_UNKNOWN = "stripe_reconciliation_unknown"
 
 

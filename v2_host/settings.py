@@ -649,6 +649,7 @@ class V2Settings:
             "payment_initiation": parent / "v2-payment-initiation.sqlite3",
             "public_outbox": parent / "v2-public-outbox.sqlite3",
             "cloudbeds_audit": parent / "v2-cloudbeds-audit.sqlite3",
+            "bokun_audit": parent / "v2-bokun-audit.sqlite3",
             "private_customer": parent / "v2-private-customer.sqlite3",
         }
 

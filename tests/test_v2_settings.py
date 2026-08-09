@@ -307,6 +307,7 @@ def test_sqlite_paths_include_a_separate_deterministic_cloudbeds_audit_owner(
     paths = settings.sqlite_paths
 
     assert paths["cloudbeds_audit"] == tmp_path / "v2-cloudbeds-audit.sqlite3"
+    assert paths["bokun_audit"] == tmp_path / "v2-bokun-audit.sqlite3"
     assert paths["private_customer"] == tmp_path / "v2-private-customer.sqlite3"
     assert paths["cloudbeds_audit"] not in {
         paths["execution"],

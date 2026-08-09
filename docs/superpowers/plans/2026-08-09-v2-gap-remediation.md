@@ -194,19 +194,19 @@ git commit -m "fix(v2): expose redacted capability health"
 - Modify: `tests/test_v2_production_composition.py`
 
 **Interfaces:**
-- Bókun auditor mirrors the durable GET-only lifecycle of Cloudbeds but validates the frozen activity/date/start/party/base/fee/total/currency/status subject.
+- Bókun auditor mirrors the durable GET-only lifecycle of Cloudbeds and validates the frozen activity/date/provider start+rate/party/fee-inclusive total/currency/status subject. Base and fee are not separately persisted in the command, so the auditor must not invent them.
 - Audit statuses are independent of `ExecutionCertainty`; no auditor has a POST-capable port.
 
-- [ ] RED: confirmed Bókun outcome projects exactly one private audit task and executes exactly one GET per attempt, zero POST.
-- [ ] RED: not-visible retries with closed budget; exact match becomes matched; divergence/exhaustion becomes terminal and appears in heartbeat/capability health.
-- [ ] RED: auditor repr, logs, traceback, redirects, and heartbeat omit private booking ID and authenticated URL.
-- [ ] RED: matched/divergent audit never changes execution outcome, completion rows, or public outbox.
-- [ ] Observe failures.
-- [ ] Implement separate DTO/store/projector/worker and a capability-restricted Bókun GET transport.
-- [ ] Wire a separate SQLite owner path and run it inside reconciliation without adding a new provider write surface.
-- [ ] Propagate Cloudbeds terminal degradation to typed reconciliation health.
-- [ ] Run Bókun audit, Cloudbeds audit, production composition, monotonic submit, and completion tests.
-- [ ] Commit:
+- [x] RED: confirmed Bókun outcome projects exactly one private audit task and executes exactly one GET per attempt, zero POST.
+- [x] RED: not-visible retries with closed budget; exact match becomes matched; divergence/exhaustion becomes terminal and appears in heartbeat/capability health.
+- [x] RED: auditor repr, logs, traceback, redirects, and heartbeat omit private booking ID and authenticated URL.
+- [x] RED: matched/divergent audit never changes execution outcome, completion rows, or public outbox.
+- [x] Observe failures.
+- [x] Implement private task/store/projector/worker and a port whose public method catalog is exactly `{get_booking}`.
+- [x] Add a separately constructed HMAC GET transport; do not inject the write transport.
+- [x] Return typed terminal degradation from Cloudbeds/Bókun audit into the reconciliation queue result.
+- [x] Run focused audit, reconciliation, monotonic write, completion, and worker-health tests.
+- [x] Commit:
 ```bash
 git add v2_application/bokun_audit.py v2_adapters/provider_http.py v2_host/settings.py v2_host/production.py v2_host/worker_main.py tests/test_v2_bokun_audit.py tests/test_v2_cloudbeds_audit.py tests/test_v2_production_composition.py
 git commit -m "feat(v2): audit confirmed Bókun bookings read only"

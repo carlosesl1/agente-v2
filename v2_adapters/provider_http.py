@@ -1097,6 +1097,69 @@ class CloudbedsHTTPTransport:
         return {"description": description, "amenities": amenities[:30]}
 
 
+class BokunGETAuditTransport:
+    """Narrow signed GET-only transport for one persisted Bókun booking ID."""
+
+    def __init__(
+        self,
+        *,
+        access_key: str,
+        secret_key: str,
+        base_url: str = "https://api.bokun.io",
+        timeout_seconds: float = 10.0,
+        client: httpx.Client | None = None,
+        timestamp: Callable[[], str] | None = None,
+    ) -> None:
+        if not access_key or not secret_key:
+            raise ValueError("Bókun audit credentials are required")
+        if not base_url.startswith("https://"):
+            raise ValueError("Bókun audit base URL must use HTTPS")
+        self._access_key = access_key
+        self._secret_key = secret_key.encode("utf-8")
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout_seconds
+        self._client = client or httpx.Client(follow_redirects=False)
+        self._timestamp = timestamp or (
+            lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+    def __repr__(self) -> str:
+        return "BokunGETAuditTransport(auth=hmac-sha1,capability=get-only)"
+
+    def get_booking(self, booking_id: str) -> object:
+        if type(booking_id) is not str or re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}", booking_id
+        ) is None:
+            raise ValueError("Bókun audit booking ID is not canonical")
+        path = f"/booking.json/booking/{booking_id}?lang=en&currency=BRL"
+        timestamp = self._timestamp()
+        canonical = f"{timestamp}{self._access_key}GET{path}"
+        signature = base64.b64encode(
+            hmac.new(self._secret_key, canonical.encode(), hashlib.sha1).digest()
+        ).decode("ascii")
+        try:
+            response = self._client.get(
+                self._base_url + path,
+                headers={
+                    "X-Bokun-AccessKey": self._access_key,
+                    "X-Bokun-Date": timestamp,
+                    "X-Bokun-Signature": signature,
+                },
+                timeout=self._timeout,
+                follow_redirects=False,
+            )
+        except httpx.HTTPError:
+            raise ProviderHTTPError("Bókun audit GET failed") from None
+        if response.is_redirect:
+            raise ProviderHTTPError("Bókun audit redirects are forbidden")
+        if not 200 <= response.status_code < 300:
+            raise ProviderHTTPError("Bókun audit GET was not successful")
+        try:
+            return response.json()
+        except (json.JSONDecodeError, ValueError):
+            raise ProviderHTTPError("Bókun audit response was not JSON") from None
+
+
 class BokunHTTPTransport:
     """Call Bókun's signed read API using canonical internal product IDs."""
 

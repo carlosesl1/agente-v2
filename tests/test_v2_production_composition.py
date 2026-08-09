@@ -25,7 +25,7 @@ from v2_host.production import (
     build_worker_set,
 )
 from v2_host.settings import RuntimeMode, V2Settings
-from v2_host.worker_main import WorkerQueue, _load_worker_factory
+from v2_host.worker_main import WorkerFailureReason, WorkerQueue, _load_worker_factory
 from v2_application.payments import PaymentInitiationWorker
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.outcome_projector import ReservationOutcomeProjector
@@ -747,6 +747,47 @@ def _seed_confirmed_cloudbeds_outcome(container: V2Container, *, suffix: str) ->
     )
 
 
+def _seed_confirmed_bokun_outcome(container: V2Container, *, suffix: str) -> None:
+    execution = container.execution
+    assert execution is not None
+    workflow_id = f"workflow:composition-bokun-audit-{suffix}"
+    initial, script = workflow_events("bokun", workflow_id=workflow_id)
+    execution.create_workflow(initial)
+    persist_script(execution, workflow_id, script)
+    claim = execution.claim_command(
+        worker_id=f"worker:composition-bokun-audit-{suffix}",
+        now=T0 + timedelta(minutes=2),
+        lease_ttl=timedelta(seconds=30),
+    )
+    assert claim is not None
+    request = DispatchRequest.from_command(claim.command, dumps_command(claim.command))
+    permit = execution.fence_dispatch(
+        claim,
+        request,
+        now=T0 + timedelta(minutes=2),
+    )
+    execution.record_outcome(
+        permit,
+        claim.command.outcome(
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+            normalized_status="confirmed",
+            provider_reference=f"provider:bokun:booking-composition-{suffix}",
+            evidence=(request.payload_hash,),
+        ),
+        now=T0 + timedelta(minutes=2, seconds=1),
+    )
+
+
+class _BokunAuditGETPort:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[str] = []
+
+    def get_booking(self, booking_id: str) -> object:
+        self.calls.append(booking_id)
+        return self.payload
+
+
 class _AuditGETPort:
     def __init__(self, actions: list[object]) -> None:
         self.actions = list(actions)
@@ -770,6 +811,62 @@ class _StageRunner:
     def run_once(self, *, now: datetime) -> object:
         self.calls.append(now)
         return self.result
+
+
+def test_reconciliation_projects_bokun_get_only_audit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = replace(
+        _audit_enabled_settings(tmp_path),
+        cloudbeds_writes_enabled=False,
+        bokun_writes_enabled=True,
+    )
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    port = _BokunAuditGETPort(
+        {
+            "bookingId": "booking-composition-one",
+            "status": "CONFIRMED",
+            "totalPrice": "1300.00",
+            "currency": "BRL",
+            "activityBooking": {
+                "activityId": "913776",
+                "date": "2026-11-11",
+                "startTimeId": "3210363",
+                "rateId": "RATE1",
+                "startTime": "07:30",
+                "adults": 1,
+                "children": 0,
+            },
+        }
+    )
+    monkeypatch.setattr(
+        production,
+        "BokunGETAuditTransport",
+        lambda **_: port,
+        raising=False,
+    )
+    try:
+        _seed_confirmed_bokun_outcome(container, suffix="one")
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+
+        result = stage.run_once(now=T0 + timedelta(minutes=3))
+
+        assert result["bokun_audit"] == {
+            "status": "ok",
+            "projection": {"inserted": 1, "replayed": 0, "ignored": 0},
+            "observation": {"status": "matched", "attempts": 1},
+        }
+        assert result["cloudbeds_audit"]["status"] == "closed"
+        assert port.calls == ["booking-composition-one"]
+        assert settings.sqlite_paths["bokun_audit"].is_file()
+        assert not hasattr(port, "post")
+    finally:
+        container.close()
 
 
 def test_reconciliation_projects_one_cloudbeds_get_audit_and_owns_store_cycle(
@@ -888,6 +985,42 @@ def test_reconciliation_records_transport_failure_as_bounded_retry_without_block
         container.close()
 
 
+def test_cloudbeds_terminal_divergence_degrades_reconciliation_health(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _audit_enabled_settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    port = _AuditGETPort(
+        [{"success": True, "data": {"reservationID": "reservation-wrong"}}]
+    )
+    monkeypatch.setattr(
+        production,
+        "CloudbedsGETAuditTransport",
+        lambda **_: port,
+        raising=False,
+    )
+    try:
+        _seed_confirmed_cloudbeds_outcome(container, suffix="divergent")
+        stage = ReconciliationStage(
+            container=container,
+            reads=_ProbeReads(),
+            settings=settings,
+        )
+
+        result = stage.run_once(now=T0 + timedelta(minutes=3))
+
+        assert result.reason is WorkerFailureReason.CLOUDBEDS_AUDIT_DIVERGENT
+        assert result.result["cloudbeds_audit"]["status"] == "degraded"
+        assert result.result["cloudbeds_audit"]["observation"] == {
+            "status": "divergent",
+            "attempts": 1,
+        }
+        assert port.calls == ["reservation-composition-divergent"]
+    finally:
+        container.close()
+
+
 @pytest.mark.parametrize("owner_name", ("execution", "boundary", "private_customer"))
 def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
     tmp_path: Path,
@@ -929,7 +1062,8 @@ def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
             )
         }
 
-        assert result["cloudbeds_audit"]["status"] == "degraded"
+        assert result.reason is WorkerFailureReason.CLOUDBEDS_AUDIT_UNAVAILABLE
+        assert result.result["cloudbeds_audit"]["status"] == "degraded"
         assert port.calls == []
         assert owner_path.samefile(audit_path)
         assert tables_after == tables_before

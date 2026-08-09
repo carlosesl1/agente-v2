@@ -25,6 +25,7 @@ from v2_adapters.manychat import ManyChatFlowDeliveryAdapter
 from v2_adapters.payment_instructions import FilePaymentInstructionCatalog
 from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.provider_http import (
+    BokunGETAuditTransport,
     BokunHTTPTransport,
     CloudbedsGETAuditTransport,
     CloudbedsHTTPTransport,
@@ -34,8 +35,15 @@ from v2_adapters.provider_http import (
 from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.bokun_audit import (
+    BokunAuditProjector,
+    BokunAuditStatus,
+    BokunAuditWorker,
+    SQLiteBokunAuditStore,
+)
 from v2_application.cloudbeds_audit import (
     CloudbedsAuditProjector,
+    CloudbedsAuditStatus,
     CloudbedsAuditWorker,
     SQLiteCloudbedsAuditStore,
 )
@@ -65,7 +73,11 @@ from v2_host.composition import V2Container, V2Role
 from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
 from v2_host.public_authority import ManifestPublicAuthorityResolver
 from v2_host.settings import RuntimeMode, V2Settings
-from v2_host.worker_main import WorkerQueue
+from v2_host.worker_main import (
+    WorkerFailureReason,
+    WorkerHealthResult,
+    WorkerQueue,
+)
 
 
 class UTCClock:
@@ -170,6 +182,13 @@ class ReconciliationStage:
                 api_key=settings.cloudbeds_api_key,
                 property_id=settings.cloudbeds_property_id,
                 base_url=settings.cloudbeds_base_url,
+            )
+        self._bokun_audit_transport = None
+        if settings is not None and settings.bokun_writes_enabled:
+            self._bokun_audit_transport = BokunGETAuditTransport(
+                access_key=settings.bokun_access_key,
+                secret_key=settings.bokun_secret_key,
+                base_url=settings.bokun_base_url,
             )
         self._manual_handoff = None
         if settings is not None and settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
@@ -295,8 +314,12 @@ class ReconciliationStage:
         finally:
             if store is not None:
                 store.close()
+        terminal_degradation = observation is not None and observation.status in {
+            CloudbedsAuditStatus.DIVERGENT,
+            CloudbedsAuditStatus.ATTEMPTS_EXHAUSTED,
+        }
         return {
-            "status": "ok",
+            "status": "degraded" if terminal_degradation else "ok",
             "projection": projection_payload,
             "observation": (
                 None
@@ -308,21 +331,137 @@ class ReconciliationStage:
             ),
         }
 
-    def run_once(self, *, now: datetime) -> dict[str, object]:
+    def _run_bokun_audit(self, *, now: datetime) -> dict[str, object]:
+        empty_projection = {"inserted": 0, "replayed": 0, "ignored": 0}
+        if (
+            self._bokun_audit_transport is None
+            or self._settings is None
+            or self._container.execution is None
+        ):
+            return {
+                "status": "closed",
+                "projection": empty_projection,
+                "observation": None,
+            }
+        audit_path = self._settings.sqlite_paths["bokun_audit"]
+        owner_paths = tuple(
+            path
+            for name, path in self._settings.sqlite_paths.items()
+            if name != "bokun_audit" and path.exists()
+        )
+        if audit_path.exists():
+            try:
+                info = audit_path.stat()
+                aliased = info.st_nlink != 1 or any(
+                    audit_path.samefile(owner_path) for owner_path in owner_paths
+                )
+            except OSError:
+                aliased = True
+            if aliased:
+                return {
+                    "status": "degraded",
+                    "projection": empty_projection,
+                    "observation": {"status": "failed"},
+                }
+        store: SQLiteBokunAuditStore | None = None
+        projection_payload = empty_projection
+        try:
+            store = SQLiteBokunAuditStore(audit_path)
+            projection = BokunAuditProjector(
+                execution=self._container.execution,
+                audit_store=store,
+                max_attempts=3,
+            ).run_once()
+            projection_payload = {
+                "inserted": projection.inserted,
+                "replayed": projection.replayed,
+                "ignored": projection.ignored,
+            }
+            observation = BokunAuditWorker(
+                store=store,
+                port=self._bokun_audit_transport,
+                worker_id="worker:bokun-audit",
+                lease_ttl=timedelta(seconds=30),
+            ).run_once(now=now)
+        except Exception:
+            return {
+                "status": "degraded",
+                "projection": projection_payload,
+                "observation": {"status": "failed"},
+            }
+        finally:
+            if store is not None:
+                store.close()
+        terminal_degradation = observation is not None and observation.status in {
+            BokunAuditStatus.DIVERGENT,
+            BokunAuditStatus.ATTEMPTS_EXHAUSTED,
+        }
+        return {
+            "status": "degraded" if terminal_degradation else "ok",
+            "projection": projection_payload,
+            "observation": (
+                None
+                if observation is None
+                else {
+                    "status": observation.status.value,
+                    "attempts": observation.attempts,
+                }
+            ),
+        }
+
+    def run_once(self, *, now: datetime) -> dict[str, object] | WorkerHealthResult:
         reservation = self._reservation.run_once(now=now)
         manual_handoff = (
             None
             if self._manual_handoff is None
             else self._manual_handoff.run_once(now=now)
         )
-        return {
+        cloudbeds_audit = self._run_cloudbeds_audit(now=now)
+        bokun_audit = self._run_bokun_audit(now=now)
+        payload = {
             "status": "ok",
             "provider_reads": self._probe_reads(now=now),
             "reservation": reservation,
             "manual_handoff": manual_handoff,
             "payment": self._payment.run_once(now=now),
-            "cloudbeds_audit": self._run_cloudbeds_audit(now=now),
+            "cloudbeds_audit": cloudbeds_audit,
+            "bokun_audit": bokun_audit,
         }
+        for audit, reasons in (
+            (
+                cloudbeds_audit,
+                {
+                    "divergent": WorkerFailureReason.CLOUDBEDS_AUDIT_DIVERGENT,
+                    "attempts_exhausted": (
+                        WorkerFailureReason.CLOUDBEDS_AUDIT_ATTEMPTS_EXHAUSTED
+                    ),
+                    "failed": WorkerFailureReason.CLOUDBEDS_AUDIT_UNAVAILABLE,
+                },
+            ),
+            (
+                bokun_audit,
+                {
+                    "divergent": WorkerFailureReason.BOKUN_AUDIT_DIVERGENT,
+                    "attempts_exhausted": (
+                        WorkerFailureReason.BOKUN_AUDIT_ATTEMPTS_EXHAUSTED
+                    ),
+                    "failed": WorkerFailureReason.BOKUN_AUDIT_UNAVAILABLE,
+                },
+            ),
+        ):
+            if audit["status"] != "degraded":
+                continue
+            observation = audit.get("observation")
+            observed_status = (
+                observation.get("status")
+                if type(observation) is dict
+                else "failed"
+            )
+            return WorkerHealthResult.degraded(
+                reason=reasons.get(observed_status, reasons["failed"]),
+                result=payload,
+            )
+        return payload
 
 
 def build_read_service(settings: V2Settings) -> V2ReadService:
