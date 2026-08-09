@@ -153,6 +153,7 @@ def test_critical_action_policy_is_derived_only_from_effect_gates(
             stripe_agency_account_profile_id="stripe-account:agency:test",
             stripe_hostel_secret_key="rk_" + "test_scoped_hostel",
             stripe_agency_secret_key="rk_" + "test_scoped_agency",
+            payment_result_store_key=b"p" * 32,
             **common,
         )
     )
@@ -400,6 +401,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         stripe_agency_account_profile_id="stripe-account:agency:test",
         stripe_hostel_secret_key="rk_" + "test_scoped_hostel",
         stripe_agency_secret_key="rk_" + "test_scoped_agency",
+        payment_result_store_key=b"p" * 32,
     )
     stripe_container = V2Container.open(
         settings=stripe_enabled,
@@ -446,6 +448,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         settings,
         wise_instructions_enabled=True,
         pix_instructions_enabled=True,
+        payment_result_store_key=b"p" * 32,
         real_effects_ack=REAL_EFFECTS_ACK,
         global_kill_switch_engaged=False,
         write_window_end=datetime.now(timezone.utc) + timedelta(hours=1),
@@ -962,11 +965,7 @@ def test_confirmed_lodging_recovery_projects_completion_after_write_gate_closes(
 
         assert first.inserted == 1
         assert replay.inserted == 0
-        assert recovered.payment_initiation.completed_offers() == ()
-        payment_rows = recovered.payment_initiation._connection.execute(
-            "SELECT COUNT(*) FROM payment_initiations"
-        ).fetchone()[0]
-        assert payment_rows == 0
+        assert recovered.payment_initiation is None
         assert closed.cloudbeds_writes_enabled is False
         assert closed.enabled_payment_methods == ()
     finally:

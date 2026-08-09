@@ -74,7 +74,7 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
             "execution": 1,
             "followup": 1,
             "inbox": 1,
-            "payment_initiation": 1,
+            "payment_initiation": 0,
             "public_outbox": 1,
             "private_customer": 1,
         }
@@ -85,11 +85,14 @@ def test_container_opens_exactly_one_owner_per_store_and_closes_cleanly(
         container_owned_paths = {
             name: path
             for name, path in settings.sqlite_paths.items()
-            if name != "cloudbeds_audit"
+            if container.owner_counts().get(name) == 1
         }
-        assert set(container_owned_paths) == set(container.owner_counts())
+        assert set(container_owned_paths) == {
+            name for name, count in container.owner_counts().items() if count == 1
+        }
         assert all(path.is_file() for path in container_owned_paths.values())
         assert settings.sqlite_paths["cloudbeds_audit"].exists() is False
+        assert settings.sqlite_paths["payment_initiation"].exists() is False
     finally:
         container.close()
 

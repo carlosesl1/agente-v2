@@ -48,7 +48,7 @@ class CompletionProjector:
         self,
         *,
         execution: SQLiteUnitOfWork,
-        payment_store: SQLitePaymentInitiationStore,
+        payment_store: SQLitePaymentInitiationStore | None,
         public_store: PublicOutboxStore,
         subscriber_id: str,
         account_profiles: dict[BusinessUnit, str] | None,
@@ -56,8 +56,8 @@ class CompletionProjector:
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
-        if type(payment_store) is not SQLitePaymentInitiationStore:
-            raise TypeError("payment_store must be exact SQLitePaymentInitiationStore")
+        if payment_store is not None and type(payment_store) is not SQLitePaymentInitiationStore:
+            raise TypeError("payment_store must be exact SQLitePaymentInitiationStore or None")
         if type(public_store) is not PublicOutboxStore:
             raise TypeError("public_store must be exact PublicOutboxStore")
         if type(subscriber_id) is not str or not subscriber_id.isdecimal():
@@ -71,6 +71,8 @@ class CompletionProjector:
             raise ValueError("account_profiles must cover both business units")
         if include_payment_offers and set(profiles) != set(BusinessUnit):
             raise ValueError("payment offers require both business unit profiles")
+        if include_payment_offers and payment_store is None:
+            raise ValueError("payment offers require the payment store capability")
         if len(set(profiles.values())) != len(profiles):
             raise ValueError("business units must have distinct account profiles")
         self._execution = execution
@@ -119,6 +121,7 @@ class CompletionProjector:
             )
         if not self._include_payment_offers:
             return CompletionProjectionResult(inserted, attempted)
+        assert self._payment_store is not None
         for offer in self._payment_store.completed_offers():
             if type(offer) not in (StripePaymentLink, PaymentInstruction):
                 continue

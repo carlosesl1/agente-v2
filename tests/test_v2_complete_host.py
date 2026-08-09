@@ -130,7 +130,7 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness(
             "execution": 1,
             "followup": 1,
             "inbox": 1,
-            "payment_initiation": 1,
+            "payment_initiation": 0,
             "public_outbox": 1,
             "private_customer": 1,
         }

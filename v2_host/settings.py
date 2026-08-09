@@ -143,6 +143,16 @@ def _hex_key(raw: str) -> bytes:
     return value
 
 
+def _payment_result_store_key(raw: str) -> bytes:
+    if not raw:
+        return b""
+    try:
+        value = bytes.fromhex(raw)
+    except ValueError as exc:
+        raise ValueError("V2_PAYMENT_RESULT_STORE_KEY_HEX must be hexadecimal") from exc
+    return value
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class V2Settings:
     """Fail-closed settings for API and productive worker roles."""
@@ -203,6 +213,7 @@ class V2Settings:
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
     hermes_transcript_key: bytes = b""
+    payment_result_store_key: bytes = b""
     hermes_timeout_seconds: int = 45
     knowledge_base_path: Path | None = None
     payment_instruction_path: Path | None = None
@@ -280,6 +291,7 @@ class V2Settings:
             self.hermes_command,
             self.hermes_system_prompt,
             self.hermes_transcript_key,
+            self.payment_result_store_key,
             self.knowledge_base_path,
         )
         if self.process_role is V2ProcessRole.API and any(worker_only_values):
@@ -357,6 +369,10 @@ class V2Settings:
             ):
                 raise ValueError(
                     "payment initiation requires distinct hostel/agency receiver profiles"
+                )
+            if len(self.payment_result_store_key) != 32:
+                raise ValueError(
+                    "enabled payment methods require a dedicated 32-byte result store key"
                 )
         if owns_worker and self.stripe_links_enabled:
             keys = (
@@ -453,6 +469,8 @@ class V2Settings:
             raise ValueError("hermes_command must be an exact string tuple")
         if type(self.hermes_transcript_key) is not bytes:
             raise TypeError("hermes_transcript_key must be exact bytes")
+        if type(self.payment_result_store_key) is not bytes:
+            raise TypeError("payment_result_store_key must be exact bytes")
         if type(self.hermes_timeout_seconds) is not int or self.hermes_timeout_seconds < 1:
             raise ValueError("hermes_timeout_seconds must be positive")
         for name in (
@@ -785,6 +803,20 @@ class V2Settings:
             hermes_command=_json_command(worker_source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=_system_prompt(worker_source),
             hermes_transcript_key=_hex_key(worker_source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
+            payment_result_store_key=(
+                _payment_result_store_key(
+                    worker_source.get("V2_PAYMENT_RESULT_STORE_KEY_HEX", "")
+                )
+                if any(
+                    _env_bool(source, name, default=False)
+                    for name in (
+                        "V2_ENABLE_STRIPE_LINKS",
+                        "V2_ENABLE_WISE_INSTRUCTIONS",
+                        "V2_ENABLE_PIX_INSTRUCTIONS",
+                    )
+                )
+                else b""
+            ),
             hermes_timeout_seconds=timeout,
             knowledge_base_path=Path(knowledge_path) if knowledge_path else None,
             payment_instruction_path=(

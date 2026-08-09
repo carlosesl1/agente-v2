@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +24,107 @@ from v2_host.settings import RuntimeMode, V2Settings
 class V2Role(str, Enum):
     API = "api"
     WORKER = "worker"
+
+
+def _validate_worker_heartbeat_payload(value: object) -> None:
+    from v2_host.worker_main import WorkerFailureReason, WorkerQueue
+
+    if type(value) is not dict or set(value) != {
+        "schema",
+        "observed_at",
+        "status",
+        "failed_queues",
+        "public_ingress_ready",
+        "public_ingress_reason",
+        "public_turn_capacity",
+        "queues",
+    }:
+        raise ValueError("worker heartbeat envelope is not exact")
+    if value["schema"] != "v2-worker-heartbeat-v2":
+        raise ValueError("worker heartbeat schema is not supported")
+    try:
+        observed = datetime.fromisoformat(value["observed_at"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("worker heartbeat timestamp is invalid") from exc
+    if observed.tzinfo is None or observed.utcoffset() is None:
+        raise ValueError("worker heartbeat timestamp must be timezone-aware")
+    if type(value["public_ingress_ready"]) is not bool:
+        raise ValueError("worker public ingress readiness must be exact bool")
+    reason = value["public_ingress_reason"]
+    if reason is not None and (type(reason) is not str or not reason):
+        raise ValueError("worker public ingress reason must be closed text")
+    if (
+        type(value["public_turn_capacity"]) is not int
+        or value["public_turn_capacity"] < 0
+    ):
+        raise ValueError("worker public turn capacity is invalid")
+    queue_names = tuple(queue.value for queue in WorkerQueue)
+    queues = value["queues"]
+    if type(queues) is not dict or set(queues) != set(queue_names):
+        raise ValueError("worker heartbeat queue universe is not exact")
+    failed: list[str] = []
+    expected_queue_fields = {
+        "status",
+        "reason_code",
+        "failure_fingerprint",
+        "consecutive_failures",
+        "last_success_at",
+        "last_failure_at",
+        "backoff_seconds",
+        "next_attempt_at",
+    }
+    for queue_name in queue_names:
+        health = queues[queue_name]
+        if type(health) is not dict or set(health) != expected_queue_fields:
+            raise ValueError("worker queue health shape is not exact")
+        status = health["status"]
+        if status not in {"healthy", "failed", "backoff"}:
+            raise ValueError("worker queue health status is invalid")
+        count = health["consecutive_failures"]
+        if type(count) is not int or count < 0:
+            raise ValueError("worker queue failure count is invalid")
+        backoff = health["backoff_seconds"]
+        if type(backoff) is not float or backoff < 0:
+            raise ValueError("worker queue backoff is invalid")
+        for field in ("last_success_at", "last_failure_at", "next_attempt_at"):
+            stamp = health[field]
+            if stamp is None:
+                continue
+            try:
+                parsed = datetime.fromisoformat(stamp)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("worker queue timestamp is invalid") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("worker queue timestamp must be timezone-aware")
+        if status == "healthy":
+            if (
+                health["reason_code"] is not None
+                or health["failure_fingerprint"] is not None
+                or count != 0
+                or backoff != 0.0
+                or health["next_attempt_at"] is not None
+            ):
+                raise ValueError("healthy queue carries failure evidence")
+            continue
+        failed.append(queue_name)
+        fingerprint = health["failure_fingerprint"]
+        if (
+            health["reason_code"]
+            not in {reason.value for reason in WorkerFailureReason}
+            or type(fingerprint) is not str
+            or len(fingerprint) != 64
+            or any(char not in "0123456789abcdef" for char in fingerprint)
+            or count < 1
+            or health["last_failure_at"] is None
+            or health["next_attempt_at"] is None
+            or backoff <= 0
+        ):
+            raise ValueError("failed queue evidence is not canonical")
+    if value["failed_queues"] != failed:
+        raise ValueError("worker heartbeat failed queue projection diverged")
+    expected_status = "degraded" if failed else "healthy"
+    if value["status"] != expected_status:
+        raise ValueError("worker heartbeat aggregate status diverged")
 
 
 def _authenticate_sqlite_owner_files(paths: dict[str, Path]) -> None:
@@ -120,23 +220,25 @@ class V2Container:
         if type(role) is not V2Role:
             raise TypeError("role must be exact V2Role")
         paths = settings.sqlite_paths
-        owned_names = (
-            ("inbox",)
-            if role is V2Role.API
-            else (
+        if role is V2Role.API:
+            owned_names = ("inbox",)
+        else:
+            mutable_worker_owners = [
                 "inbox",
                 "boundary",
                 "execution",
                 "followup",
-                "payment_initiation",
                 "public_outbox",
                 "private_customer",
-            )
-        )
+            ]
+            if settings.enabled_payment_methods:
+                mutable_worker_owners.append("payment_initiation")
+            owned_names = tuple(mutable_worker_owners)
         _authenticate_sqlite_owner_files({name: paths[name] for name in owned_names})
         opened: list[object] = []
         try:
             inbox = SQLiteInbox(paths["inbox"])
+            opened.append(inbox)
             if role is V2Role.API:
                 return cls(
                     settings=settings,
@@ -159,14 +261,13 @@ class V2Container:
             opened.append(execution)
             followup = SQLiteFollowupUnitOfWork.open(paths["followup"])
             opened.append(followup)
-            payment_initiation = SQLitePaymentInitiationStore(
-                paths["payment_initiation"],
-                result_encryption_key=hashlib.sha256(
-                    b"v2-payment-result-store-v1\0"
-                    + settings.webhook_secret.encode()
-                ).digest(),
-            )
-            opened.append(payment_initiation)
+            payment_initiation = None
+            if settings.enabled_payment_methods:
+                payment_initiation = SQLitePaymentInitiationStore(
+                    paths["payment_initiation"],
+                    result_encryption_key=settings.payment_result_store_key,
+                )
+                opened.append(payment_initiation)
             public_outbox = PublicOutboxStore(paths["public_outbox"])
             opened.append(public_outbox)
             return cls(
@@ -217,7 +318,7 @@ class V2Container:
                 "execution": 1,
                 "followup": 1,
                 "inbox": 1,
-                "payment_initiation": 1,
+                "payment_initiation": int(bool(self.settings.enabled_payment_methods)),
                 "public_outbox": 1,
                 "private_customer": 1,
             },
@@ -329,10 +430,16 @@ class V2Container:
         path = self.settings.worker_heartbeat_path
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
+        except OSError:
+            return "worker_heartbeat_missing"
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return "worker_heartbeat_invalid"
+        try:
+            _validate_worker_heartbeat_payload(value)
             observed = datetime.fromisoformat(value["observed_at"])
             status = value["status"]
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return "worker_heartbeat_missing"
+        except (KeyError, TypeError, ValueError):
+            return "worker_heartbeat_invalid"
         if observed.tzinfo is None or observed.utcoffset() is None:
             return "worker_heartbeat_invalid"
         age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()

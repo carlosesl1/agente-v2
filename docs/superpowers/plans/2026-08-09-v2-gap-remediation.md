@@ -153,8 +153,10 @@ git commit -m "fix(v2): distinguish ManyChat acceptance from delivery"
 
 **Files:**
 - Modify: `v2_host/worker_main.py`
-- Modify: `v2_host/production.py`
 - Modify: `v2_host/composition.py`
+- Modify: `v2_host/settings.py`
+- Modify: `v2_application/completion_projector.py`
+- Modify: `compose.v2.yaml`
 - Modify: `tests/test_v2_worker_main.py`
 - Modify: `tests/test_v2_production_composition.py`
 - Modify: `tests/test_v2_composition.py`
@@ -163,17 +165,17 @@ git commit -m "fix(v2): distinguish ManyChat acceptance from delivery"
 - Produces per queue: status, closed reason code, HMAC/SHA fingerprint over exception class plus process-local salt/domain (never message), consecutive-failure count, last success/failure timestamps, and bounded backoff seconds.
 - Closed capability and idle are healthy typed outcomes; manual-review/divergent/exhausted outcomes degrade the relevant capability even when no exception is raised.
 
-- [ ] RED: thrown synthetic exception containing phone, secret, URL, and provider ID produces heartbeat/log without any sentinel while preserving queue and stable failure class fingerprint.
-- [ ] RED: consecutive failures increase bounded backoff; success resets count; one queue never retries twice in one cycle.
-- [ ] RED: reconciliation `DIVERGENT`/`ATTEMPTS_EXHAUSTED` result degrades heartbeat without an exception.
-- [ ] RED: process-role owner registry rejects API opening worker-owned stores and rejects same-inode aliases before schema writes.
-- [ ] Observe failures.
-- [ ] Extend cycle item/result classification, heartbeat schema v2, and backoff scheduling in main loop without logging `str(exc)` or traceback.
-- [ ] Make store ownership declarations process-role scoped; keep capability-closed stores unopened.
-- [ ] Run focused worker/composition/settings/SQLite owner tests.
-- [ ] Commit:
+- [x] RED: thrown synthetic exception containing phone, secret, URL, and provider ID produces heartbeat/log without any sentinel while preserving queue and stable failure class fingerprint.
+- [x] RED: consecutive failures increase bounded backoff; success resets count; one queue never retries twice in one cycle.
+- [x] RED: reconciliation `DIVERGENT`/`ATTEMPTS_EXHAUSTED` result degrades heartbeat without an exception.
+- [x] RED: process-role owner registry rejects API opening worker-owned stores and rejects same-inode aliases before schema writes.
+- [x] Observe failures.
+- [x] Extend cycle item/result classification, heartbeat schema v2, and backoff scheduling in main loop without logging `str(exc)` or traceback.
+- [x] Make store ownership declarations process-role scoped; keep capability-closed stores unopened; require a dedicated payment-result key when payment is enabled.
+- [x] Run focused worker/composition/settings/SQLite owner tests.
+- [x] Commit:
 ```bash
-git add v2_host/worker_main.py v2_host/production.py v2_host/composition.py tests/test_v2_worker_main.py tests/test_v2_production_composition.py tests/test_v2_composition.py
+git add compose.v2.yaml v2_host/worker_main.py v2_host/composition.py v2_host/settings.py v2_application/completion_projector.py tests/test_v2_worker_main.py tests/test_v2_settings.py tests/test_v2_production_composition.py tests/test_v2_composition.py
 git commit -m "fix(v2): expose redacted capability health"
 ```
 

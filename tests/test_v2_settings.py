@@ -148,6 +148,7 @@ def test_effect_gates_may_remain_open_without_an_auto_close_deadline(
             "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
             "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_test_hostel",
             "V2_STRIPE_AGENCY_SECRET_KEY": "rk_test_agency",
+            "V2_PAYMENT_RESULT_STORE_KEY_HEX": "cd" * 32,
             "V2_PAYMENT_INSTRUCTION_PATH": str(tmp_path / "payments.json"),
             "V2_MANYCHAT_REPLY_FIELD_ID": "101",
             "V2_MANYCHAT_REPLY_FLOW_NS": "reply-flow",
@@ -178,6 +179,7 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
             "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
             "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_" + "live_forbidden_hostel",
             "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
+            "V2_PAYMENT_RESULT_STORE_KEY_HEX": "ab" * 32,
             "V2_STRIPE_ENVIRONMENT": "test",
         }
     )
@@ -190,6 +192,10 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
         V2Settings.from_env(env)
 
     env["V2_STRIPE_ENVIRONMENT"] = "test"
+    payment_key = env.pop("V2_PAYMENT_RESULT_STORE_KEY_HEX")
+    with pytest.raises(ValueError, match="dedicated 32-byte result store key"):
+        V2Settings.from_env(env)
+    env["V2_PAYMENT_RESULT_STORE_KEY_HEX"] = payment_key
     settings = V2Settings.from_env(env)
     assert settings.stripe_links_enabled is True
     assert settings.stripe_environment is StripeEnvironment.TEST
@@ -201,6 +207,7 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
         "stripe-account:hostel:test",
         "stripe-account:agency:test",
     }
+    assert settings.payment_result_store_key == bytes.fromhex(payment_key)
     assert settings.write_window_is_open(datetime.now(timezone.utc)) is True
 
 

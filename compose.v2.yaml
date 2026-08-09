@@ -104,6 +104,7 @@ services:
       V2_HERMES_COMMAND_JSON: '["python","-m","v2_host.hermes_child","hermes","--profile","leads","-m","gpt-5.6-luna","--provider","openai-codex","--safe-mode"]'
       V2_HERMES_SYSTEM_PROMPT_PATH: /app/config/v2_luna_system_prompt.txt
       V2_HERMES_TRANSCRIPT_KEY_HEX: "${V2_HERMES_TRANSCRIPT_KEY_HEX:?set transcript HMAC key}"
+      V2_PAYMENT_RESULT_STORE_KEY_HEX: "${V2_PAYMENT_RESULT_STORE_KEY_HEX:-}"
       V2_HERMES_TIMEOUT_SECONDS: "${V2_HERMES_TIMEOUT_SECONDS:-150}"
       V2_KNOWLEDGE_BASE_PATH: /app/config/cerebro_faq.yaml
       V2_PAYMENT_INSTRUCTION_PATH: /app/config/v2_payment_instructions.json
