@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
@@ -44,7 +45,14 @@ from v2_application.turn_executor import (
     _structured_selection_review_required,
     _state_model_facts,
 )
-from v2_contracts.channel import InboundBatch, InboundEvent, PublicDeliveryUnknown
+from v2_contracts.channel import (
+    InboundBatch,
+    InboundEvent,
+    PublicAcceptanceOperation,
+    PublicAcceptanceState,
+    PublicChannelAcceptance,
+    PublicDeliveryUnknown,
+)
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
@@ -672,7 +680,14 @@ class RecordingPublicDelivery:
         self.calls.append(claim)
         if self.uncertain:
             raise PublicDeliveryUnknown("provider response lost after call")
-        return "manychat:receipt:turn-executor-001"
+        return PublicChannelAcceptance(
+            state=PublicAcceptanceState.ACCEPTED_BY_MANYCHAT,
+            operations=(PublicAcceptanceOperation.TRIGGER_FLOW,),
+            provider_request_ids=("manychat:request:turn-executor-001",),
+            dispatch_correlation_ids=(
+                "manychat-correlation:turn-executor-001",
+            ),
+        )
 
 
 class FakeAuditedModel:
@@ -1279,7 +1294,7 @@ def _committed_public_store() -> SQLiteBoundaryStore:
     return store
 
 
-def test_boundary_public_worker_fences_then_persists_delivery_receipt() -> None:
+def test_boundary_public_worker_fences_then_persists_acceptance_receipt() -> None:
     store = _committed_public_store()
     queues = SQLiteBoundaryWorkerStore(store)
     delivery = RecordingPublicDelivery()
@@ -1290,15 +1305,24 @@ def test_boundary_public_worker_fences_then_persists_delivery_receipt() -> None:
         lease_ttl=timedelta(seconds=30),
     )
     try:
-        delivered = worker.run_once(now=NOW + timedelta(seconds=1))
+        accepted = worker.run_once(now=NOW + timedelta(seconds=1))
         idle = worker.run_once(now=NOW + timedelta(seconds=2))
-        assert delivered is BoundaryPublicDisposition.DELIVERED
+        assert accepted is BoundaryPublicDisposition.ACCEPTED
         assert idle is BoundaryPublicDisposition.IDLE
         assert len(delivery.calls) == 1
         assert store._connection.execute(
             "SELECT status,dispatch_slots_consumed,delivery_receipt_hash "
             "FROM boundary_public_outbox"
         ).fetchone()[0:2] == ("delivered", 1)
+        receipt_json = store._connection.execute(
+            "SELECT delivery_receipt_json FROM boundary_public_outbox"
+        ).fetchone()[0]
+        receipt = json.loads(receipt_json)
+        assert receipt["schema"] == "phase8-public-acceptance-receipt"
+        assert receipt["data"]["acceptance"]["data"]["state"] == (
+            "accepted_by_manychat"
+        )
+        assert "delivered_at" not in receipt_json
         assert store._connection.execute(
             "SELECT state FROM boundary_dispatch_authority WHERE row_kind='allocation'"
         ).fetchone() == ("terminal",)
@@ -1348,7 +1372,8 @@ def test_public_crash_after_provider_call_recovers_to_manual_without_redispatch(
         )
         assert claim is not None
         queues.fence_public_delivery(claim, now=NOW + timedelta(seconds=1))
-        assert delivery.send(claim) == "manychat:receipt:turn-executor-001"
+        acceptance = delivery.send(claim)
+        assert acceptance.state is PublicAcceptanceState.ACCEPTED_BY_MANYCHAT
         # Simulated process death: no receipt commit and no in-process exception handler.
         worker = BoundaryPublicDeliveryWorker(
             boundary=queues,

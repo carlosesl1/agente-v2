@@ -90,7 +90,7 @@ class ManyChatTransport:
     def send_text(self, *, subscriber_id: str, text: str, idempotency_key: str):
         self.calls.append((subscriber_id, text, idempotency_key))
         return ManyChatTransportResponse(
-            provider_message_id=f"fake-manychat-message:{len(self.calls)}"
+            provider_request_id=f"fake-manychat-message:{len(self.calls)}"
         )
 
 
@@ -243,7 +243,7 @@ def _deliver(container: V2Container, message_id: str) -> ManyChatTransport:
     )
     assert (
         worker.run_once(now=NOW + timedelta(seconds=1))
-        is PublicDeliveryDisposition.DELIVERED
+        is PublicDeliveryDisposition.ACCEPTED
     )
     assert (
         worker.run_once(now=NOW + timedelta(seconds=2))

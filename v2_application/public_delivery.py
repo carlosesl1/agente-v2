@@ -7,10 +7,11 @@ from enum import Enum
 from typing import Protocol
 
 from reservation_boundary.public_dispatch import (
-    PublicDeliveryReceipt,
+    PublicAcceptanceReceipt,
     PublicDispatchClaim,
 )
 from v2_contracts.channel import (
+    PublicChannelAcceptance,
     PublicDeliveryNotCalled,
     PublicDeliveryRejected,
     PublicDeliveryUnknown,
@@ -24,7 +25,7 @@ from v2_application.completion import (
 
 class BoundaryPublicDisposition(str, Enum):
     IDLE = "idle"
-    DELIVERED = "delivered"
+    ACCEPTED = "accepted"
     RETRYABLE_FAILURE = "retryable_failure"
     MANUAL_REVIEW = "manual_review"
 
@@ -42,10 +43,10 @@ class BoundaryPublicStore(Protocol):
         self, claim: PublicDispatchClaim, *, now: datetime
     ) -> None: ...
 
-    def complete_public_delivery(
+    def complete_public_acceptance(
         self,
         claim: PublicDispatchClaim,
-        receipt: PublicDeliveryReceipt,
+        receipt: PublicAcceptanceReceipt,
         *,
         now: datetime,
     ) -> None: ...
@@ -60,7 +61,7 @@ class BoundaryPublicStore(Protocol):
 
 
 class PublicDeliveryPort(Protocol):
-    def send(self, claim: PublicDispatchClaim) -> str: ...
+    def send(self, claim: PublicDispatchClaim) -> PublicChannelAcceptance: ...
 
 
 class BoundaryPublicDeliveryWorker:
@@ -75,7 +76,7 @@ class BoundaryPublicDeliveryWorker:
         required = (
             "claim_public_delivery",
             "fence_public_delivery",
-            "complete_public_delivery",
+            "complete_public_acceptance",
             "release_public_delivery_not_called",
             "mark_public_delivery_manual_review",
         )
@@ -110,7 +111,7 @@ class BoundaryPublicDeliveryWorker:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             raise
         try:
-            provider_receipt_id = self._delivery.send(claim)
+            acceptance = self._delivery.send(claim)
         except PublicDeliveryRejected:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             return BoundaryPublicDisposition.MANUAL_REVIEW
@@ -124,17 +125,19 @@ class BoundaryPublicDeliveryWorker:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             return BoundaryPublicDisposition.MANUAL_REVIEW
         try:
-            receipt = PublicDeliveryReceipt(
+            if type(acceptance) is not PublicChannelAcceptance:
+                raise TypeError("channel returned non-canonical acceptance evidence")
+            receipt = PublicAcceptanceReceipt(
                 public_row_id=claim.public_row_id,
                 idempotency_key=claim.idempotency_key,
-                provider_receipt_id=provider_receipt_id,
-                delivered_at=now,
+                acceptance=acceptance,
+                accepted_at=now,
             )
-            self._boundary.complete_public_delivery(claim, receipt, now=now)
+            self._boundary.complete_public_acceptance(claim, receipt, now=now)
         except BaseException:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             return BoundaryPublicDisposition.MANUAL_REVIEW
-        return BoundaryPublicDisposition.DELIVERED
+        return BoundaryPublicDisposition.ACCEPTED
 
 
 class CombinedPublicDeliveryWorker:

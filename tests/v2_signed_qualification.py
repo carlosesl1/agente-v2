@@ -128,7 +128,7 @@ class ManyChatTransport:
     def send_text(self, *, subscriber_id: str, text: str, idempotency_key: str):
         self.calls.append((subscriber_id, text, idempotency_key))
         return ManyChatTransportResponse(
-            provider_message_id=f"fake-manychat-message:{len(self.calls)}"
+            provider_request_id=f"fake-manychat-message:{len(self.calls)}"
         )
 
 

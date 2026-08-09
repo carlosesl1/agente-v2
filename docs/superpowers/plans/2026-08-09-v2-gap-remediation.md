@@ -120,7 +120,7 @@ git commit -m "fix(v2): enforce phone-derived locale end to end"
 - Modify: `v2_adapters/provider_http.py`
 - Modify: `v2_contracts/channel.py`
 - Modify: `reservation_boundary/public_dispatch.py`
-- Modify: `reservation_boundary/sqlite_store.py`
+- Modify: `reservation_boundary/worker_store.py`
 - Modify: `v2_application/completion.py`
 - Modify: `v2_application/public_delivery.py`
 - Modify: `tests/test_v2_manychat_flow_delivery.py`
@@ -129,21 +129,21 @@ git commit -m "fix(v2): enforce phone-derived locale end to end"
 - Modify: `tests/test_phase8_boundary_store.py` when required by the boundary schema owner.
 
 **Interfaces:**
-- Produces: typed `ChannelAcceptanceReceipt` or equivalent with `provider_request_id: str | None`, mandatory local `dispatch_correlation_id`, and `accepted_at`; no `delivered_at` without documented downstream receipt.
-- New durable terminal status is `accepted`; legacy `delivered` rows remain readable and terminal but no new 2xx path writes that status.
+- Produces typed acceptance evidence with `provider_request_id: str | None`, mandatory local `dispatch_correlation_id`, and `accepted_at`; no `delivered_at` without documented downstream evidence.
+- Public application dispositions and receipts are `accepted`. The schema-locked internal queue token remains `delivered` for compatibility, but is never exposed as proof of WhatsApp delivery; historical terminal rows remain readable and are never resent.
 
-- [ ] RED: 200 `{"status":"success"}` without ID persists `accepted` with local correlation and never a provider delivery receipt.
-- [ ] RED: 200 with `request_id` persists `accepted`, not delivered.
-- [ ] RED: partial field mutation plus failed flow remains manual review and a second worker run makes zero HTTP calls.
-- [ ] RED: legacy delivered row remains terminal and is not resent.
-- [ ] Observe causal failures.
-- [ ] Replace synthetic `provider_message_id` with explicit request/correlation fields.
-- [ ] Migrate local outbox and boundary receipt semantics additively; preserve historical read compatibility.
-- [ ] Rename dispositions and counting APIs to accepted semantics, leaving compatibility aliases only where external history requires them.
-- [ ] Run all public-delivery, boundary, completion, ManyChat flow, handoff, and turn-executor selectors.
-- [ ] Commit:
+- [x] RED: 200 `{"status":"success"}` without ID persists `accepted` with local correlation and never a provider delivery receipt.
+- [x] RED: 200 with `request_id` persists `accepted`, not delivered.
+- [x] RED: partial field mutation plus failed flow remains manual review and a second worker run makes zero HTTP calls.
+- [x] RED: legacy delivered row remains terminal and is not resent.
+- [x] Observe causal failures.
+- [x] Replace synthetic `provider_message_id` with explicit request/correlation fields.
+- [x] Migrate local outbox and boundary receipt semantics additively; preserve historical read compatibility.
+- [x] Rename dispositions and counting APIs to accepted semantics, leaving compatibility aliases only where external history requires them.
+- [x] Run all public-delivery, boundary, completion, ManyChat flow, handoff, and turn-executor selectors.
+- [x] Commit:
 ```bash
-git add v2_adapters/manychat.py v2_adapters/provider_http.py v2_contracts/channel.py reservation_boundary/public_dispatch.py reservation_boundary/sqlite_store.py v2_application/completion.py v2_application/public_delivery.py tests/test_v2_manychat_flow_delivery.py tests/test_v2_completion.py tests/test_v2_turn_executor.py tests/test_phase8_boundary_store.py
+git add v2_adapters/manychat.py v2_adapters/provider_http.py v2_contracts/channel.py reservation_boundary/public_dispatch.py reservation_boundary/worker_store.py v2_application/completion.py v2_application/public_delivery.py tests/test_v2_manychat_flow_delivery.py tests/test_v2_completion.py tests/test_v2_turn_executor.py
 git commit -m "fix(v2): distinguish ManyChat acceptance from delivery"
 ```
 

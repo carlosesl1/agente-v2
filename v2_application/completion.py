@@ -11,6 +11,7 @@ import re
 import sqlite3
 
 from v2_contracts.channel import (
+    PublicChannelAcceptance,
     PublicDeliveryNotCalled,
     PublicDeliveryRejected,
     PublicDeliveryUnknown,
@@ -57,7 +58,7 @@ class CompletionPolicy:
     def required_receipts(self, context: CompletionContext) -> frozenset[str]:
         if type(context) is not CompletionContext:
             raise TypeError("context must be exact CompletionContext")
-        required = {"reservation", "public_delivery"}
+        required = {"reservation", "public_acceptance"}
         if context.requires_payment:
             required.add("settlement")
         if context.service_kind in (PublicServiceKind.ACTIVITY, PublicServiceKind.PACKAGE):
@@ -112,7 +113,7 @@ class PublicClaim:
 
 class PublicDeliveryDisposition(str, Enum):
     IDLE = "idle"
-    DELIVERED = "delivered"
+    ACCEPTED = "accepted"
     RETRYABLE_FAILURE = "retryable_failure"
     MANUAL_REVIEW = "manual_review"
 
@@ -130,6 +131,8 @@ CREATE TABLE public_outbox (
   fencing_token INTEGER NOT NULL DEFAULT 0,
   lease_expires_at TEXT,
   receipt_id TEXT,
+  acceptance_json TEXT,
+  acceptance_hash TEXT,
   updated_at TEXT NOT NULL,
   UNIQUE(release_id, chunk_index)
 ) STRICT
@@ -151,6 +154,8 @@ _PUBLIC_OUTBOX_COLUMNS = (
     "fencing_token",
     "lease_expires_at",
     "receipt_id",
+    "acceptance_json",
+    "acceptance_hash",
     "updated_at",
 )
 
@@ -172,30 +177,39 @@ def _migrate_checkpoint_schema(connection: sqlite3.Connection) -> None:
     row = connection.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='public_outbox'"
     ).fetchone()
-    if row is None or "'manual_review'" in row[0]:
+    if row is None:
         return
     actual_columns = tuple(
         item[1] for item in connection.execute("PRAGMA table_info(public_outbox)")
     )
+    legacy_columns = tuple(
+        item for item in _PUBLIC_OUTBOX_COLUMNS if item not in {"acceptance_json", "acceptance_hash"}
+    )
+    if "'manual_review'" not in row[0] and actual_columns == legacy_columns:
+        columns = ",".join(legacy_columns)
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "ALTER TABLE public_outbox RENAME TO public_outbox_checkpoint"
+            )
+            connection.execute(_CREATE_PUBLIC_OUTBOX)
+            connection.execute(
+                f"INSERT INTO public_outbox ({columns}) "
+                f"SELECT {columns} FROM public_outbox_checkpoint"
+            )
+            connection.execute("DROP TABLE public_outbox_checkpoint")
+            connection.execute("COMMIT")
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        return
+    if "'manual_review'" in row[0] and actual_columns == legacy_columns:
+        connection.execute("ALTER TABLE public_outbox ADD COLUMN acceptance_json TEXT")
+        connection.execute("ALTER TABLE public_outbox ADD COLUMN acceptance_hash TEXT")
+        return
     if actual_columns != _PUBLIC_OUTBOX_COLUMNS:
         raise RuntimeError("public outbox checkpoint schema is not migratable")
-    columns = ",".join(_PUBLIC_OUTBOX_COLUMNS)
-    connection.execute("BEGIN IMMEDIATE")
-    try:
-        connection.execute(
-            "ALTER TABLE public_outbox RENAME TO public_outbox_checkpoint"
-        )
-        connection.execute(_CREATE_PUBLIC_OUTBOX)
-        connection.execute(
-            f"INSERT INTO public_outbox ({columns}) "
-            f"SELECT {columns} FROM public_outbox_checkpoint"
-        )
-        connection.execute("DROP TABLE public_outbox_checkpoint")
-        connection.execute("COMMIT")
-    except BaseException:
-        if connection.in_transaction:
-            connection.execute("ROLLBACK")
-        raise
 
 
 class PublicOutboxStore:
@@ -277,14 +291,31 @@ class PublicOutboxStore:
                 self._connection.execute("ROLLBACK")
             raise
 
-    def complete(self, claim: PublicClaim, receipt_id: str, *, now: datetime) -> None:
+    def complete(
+        self,
+        claim: PublicClaim,
+        acceptance: PublicChannelAcceptance,
+        *,
+        now: datetime,
+    ) -> None:
         now_text = _utc(now, "now")
-        if type(receipt_id) is not str or _ID_RE.fullmatch(receipt_id) is None:
-            raise ValueError("receipt_id must be canonical")
+        if type(acceptance) is not PublicChannelAcceptance:
+            raise TypeError("acceptance must be exact PublicChannelAcceptance")
+        acceptance_json = acceptance.to_canonical_bytes().decode("utf-8")
+        acceptance_hash = acceptance.canonical_hash()
         cursor = self._connection.execute(
-            "UPDATE public_outbox SET status='delivered',receipt_id=?,claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
+            "UPDATE public_outbox SET status='delivered',receipt_id=?,acceptance_json=?,acceptance_hash=?,"
+            "claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
             "WHERE outbox_id=? AND status='leased' AND claim_owner=? AND fencing_token=?",
-            (receipt_id, now_text, claim.outbox_id, claim.worker_id, claim.fencing_token),
+            (
+                acceptance.acceptance_id,
+                acceptance_json,
+                acceptance_hash,
+                now_text,
+                claim.outbox_id,
+                claim.worker_id,
+                claim.fencing_token,
+            ),
         )
         if cursor.rowcount != 1:
             raise RuntimeError("public delivery claim is stale")
@@ -309,11 +340,37 @@ class PublicOutboxStore:
         if cursor.rowcount != 1:
             raise RuntimeError("public delivery claim is stale")
 
-    def delivered_count(self, release_id: str) -> int:
+    def accepted_count(self, release_id: str) -> int:
         return self._connection.execute(
             "SELECT count(*) FROM public_outbox WHERE release_id=? AND status='delivered'",
             (release_id,),
         ).fetchone()[0]
+
+    def delivered_count(self, release_id: str) -> int:
+        """Compatibility alias for the internal terminal queue count."""
+
+        return self.accepted_count(release_id)
+
+    def acceptance_evidence(
+        self,
+        release_id: str,
+    ) -> tuple[PublicChannelAcceptance, ...]:
+        rows = self._connection.execute(
+            "SELECT acceptance_json,acceptance_hash FROM public_outbox "
+            "WHERE release_id=? AND status='delivered' ORDER BY chunk_index",
+            (release_id,),
+        ).fetchall()
+        values: list[PublicChannelAcceptance] = []
+        for payload, expected_hash in rows:
+            if type(payload) is not str or type(expected_hash) is not str:
+                raise RuntimeError("accepted public row lacks canonical evidence")
+            acceptance = PublicChannelAcceptance.from_canonical_bytes(
+                payload.encode("utf-8")
+            )
+            if acceptance.canonical_hash() != expected_hash:
+                raise RuntimeError("public acceptance evidence hash mismatch")
+            values.append(acceptance)
+        return tuple(values)
 
     def pending_count(self) -> int:
         return self._connection.execute(
@@ -359,11 +416,11 @@ class PublicDeliveryWorker:
         except Exception:
             self._store.mark_manual_review(claim, now=now)
             return PublicDeliveryDisposition.MANUAL_REVIEW
-        if type(receipt) is not str or _ID_RE.fullmatch(receipt) is None:
+        if type(receipt) is not PublicChannelAcceptance:
             self._store.mark_manual_review(claim, now=now)
             return PublicDeliveryDisposition.MANUAL_REVIEW
         self._store.complete(claim, receipt, now=now)
-        return PublicDeliveryDisposition.DELIVERED
+        return PublicDeliveryDisposition.ACCEPTED
 
 
 __all__ = [

@@ -501,7 +501,8 @@ def test_manychat_transport_normalizes_profile_and_confirms_native_send() -> Non
         "phone_e164": "+5575999999999",
         "country_code": "BR",
     }
-    assert receipt.provider_message_id == "mc-123"
+    assert receipt.provider_request_id == "mc-123"
+    assert receipt.dispatch_correlation_id.startswith("manychat-correlation:")
     assert all(request.headers["Authorization"] == "Bearer manychat-secret" for request in seen)
     assert seen[0].url.path.endswith("/fb/subscriber/getInfo")
     assert seen[1].url.path.endswith("/fb/sending/sendContent")
@@ -526,7 +527,10 @@ def test_manychat_delivery_adapter_accepts_boundary_dispatch_claim_shape() -> No
 
     receipt = adapter.send(claim)
 
-    assert receipt == "provider-receipt-1"
+    assert receipt.state.value == "accepted_by_manychat"
+    assert receipt.operations == ("send_content",)
+    assert receipt.provider_request_ids == ("provider-receipt-1",)
+    assert len(receipt.dispatch_correlation_ids) == 1
     assert transport.calls == [
         {
             "subscriber_id": "1873018537",
@@ -534,3 +538,29 @@ def test_manychat_delivery_adapter_accepts_boundary_dispatch_claim_shape() -> No
             "idempotency_key": "public:message-1",
         }
     ]
+
+
+def test_manychat_success_without_external_id_keeps_only_local_correlation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"status": "success"},
+        )
+
+    transport = ManyChatHTTPTransport(
+        api_key="manychat-secret",
+        base_url="https://api.manychat.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    response = transport.set_custom_field(
+        subscriber_id="1873018537",
+        field_id=101,
+        field_value="Resposta da Maya.",
+        idempotency_key="public:message-1:field",
+    )
+
+    assert response.provider_request_id is None
+    assert response.dispatch_correlation_id.startswith("manychat-correlation:")
+    assert not hasattr(response, "provider_message_id")

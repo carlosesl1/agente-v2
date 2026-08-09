@@ -84,8 +84,8 @@ def test_reply_and_payment_use_typed_custom_fields_then_flows(tmp_path) -> None:
         lease_ttl=timedelta(seconds=30),
     )
 
-    assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "delivered"
-    assert worker.run_once(now=NOW + timedelta(seconds=2)).value == "delivered"
+    assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "accepted"
+    assert worker.run_once(now=NOW + timedelta(seconds=2)).value == "accepted"
 
     paths = tuple(item[0] for item in seen)
     assert paths == (
@@ -115,6 +115,52 @@ def test_reply_and_payment_use_typed_custom_fields_then_flows(tmp_path) -> None:
         "flow_ns": "flow:reply:v2",
     }
     assert all(item[2] for item in seen)
+    evidence = store.acceptance_evidence("release:reply:flow")
+    assert len(evidence) == 1
+    assert evidence[0].state.value == "accepted_by_manychat"
+    assert tuple(item.value for item in evidence[0].operations) == (
+        "set_custom_field",
+        "trigger_flow",
+    )
+    assert evidence[0].provider_request_ids == ("receipt-3", "receipt-4")
+    store.close()
+
+
+def test_manychat_success_without_request_ids_persists_only_correlations(tmp_path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"status": "success"},
+        )
+
+    store = PublicOutboxStore((tmp_path / "correlation-only.sqlite3").resolve())
+    store.enqueue(
+        PublicReply(
+            release_id="release:correlation-only",
+            lead_id="manychat:1873018537",
+            message_id="message:reply:correlation-only",
+            channel="manychat",
+            chunks=("Resposta sem request id externo.",),
+        ),
+        now=NOW,
+    )
+    worker = PublicDeliveryWorker(
+        store=store,
+        delivery=_adapter(_transport(handler)),
+        worker_id="worker:manychat-correlation-only",
+        lease_ttl=timedelta(seconds=30),
+    )
+
+    assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "accepted"
+    evidence = store.acceptance_evidence("release:correlation-only")
+    assert len(evidence) == 1
+    assert evidence[0].provider_request_ids == (None, None)
+    assert len(evidence[0].dispatch_correlation_ids) == 2
+    assert all(
+        item.startswith("manychat-correlation:")
+        for item in evidence[0].dispatch_correlation_ids
+    )
     store.close()
 
 

@@ -15,7 +15,7 @@ from reservation_boundary.effects import (
     target_operation_id,
 )
 from reservation_boundary.public_dispatch import (
-    PublicDeliveryReceipt,
+    PublicAcceptanceReceipt,
     PublicDispatchClaim,
 )
 from reservation_boundary.sqlite_store import (
@@ -491,25 +491,25 @@ class SQLiteBoundaryWorkerStore:
             if updated != 1:
                 raise ConcurrencyConflict("public outbox fence CAS lost")
 
-    def complete_public_delivery(
+    def complete_public_acceptance(
         self,
         claim: PublicDispatchClaim,
-        receipt: PublicDeliveryReceipt,
+        receipt: PublicAcceptanceReceipt,
         *,
         now: datetime,
     ) -> None:
         if type(claim) is not PublicDispatchClaim:
             raise TypeError("claim must be exact PublicDispatchClaim")
-        if type(receipt) is not PublicDeliveryReceipt:
-            raise TypeError("receipt must be exact PublicDeliveryReceipt")
+        if type(receipt) is not PublicAcceptanceReceipt:
+            raise TypeError("receipt must be exact PublicAcceptanceReceipt")
         now_text = _utc_text(now, "now")
         if now >= claim.lease_expires_at:
-            raise ConcurrencyConflict("public delivery lease expired before receipt commit")
+            raise ConcurrencyConflict("public acceptance lease expired before receipt commit")
         if (
             receipt.public_row_id != claim.public_row_id
             or receipt.idempotency_key != claim.idempotency_key
         ):
-            raise IdentityConflict("public delivery receipt diverged from claim")
+            raise IdentityConflict("public acceptance receipt diverged from claim")
         receipt_json = receipt.to_canonical_bytes().decode("utf-8")
         receipt_hash = receipt.canonical_hash()
         with self._boundary._transaction():
@@ -528,7 +528,7 @@ class SQLiteBoundaryWorkerStore:
                 ),
             ).rowcount
             if updated != 1:
-                raise ConcurrencyConflict("public delivery receipt CAS lost")
+                raise ConcurrencyConflict("public acceptance receipt CAS lost")
             authority = self._connection.execute(
                 "UPDATE boundary_dispatch_authority SET state='terminal',"
                 "cas_revision=cas_revision+1,updated_at=? WHERE public_row_id=? "

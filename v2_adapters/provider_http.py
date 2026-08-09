@@ -76,6 +76,25 @@ class ProviderHTTPError(RuntimeError):
     """Provider call failed without exposing credentials or raw response data."""
 
 
+def _manychat_dispatch_correlation(
+    *,
+    operation: str,
+    idempotency_key: str,
+    payload: Mapping[str, object],
+) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    material = b"\0".join(
+        (operation.encode("utf-8"), idempotency_key.encode("utf-8"), canonical)
+    )
+    return "manychat-correlation:" + hashlib.sha256(material).hexdigest()[:32]
+
+
 def _text(value: object) -> str | None:
     if isinstance(value, str):
         value = value.strip()
@@ -2945,15 +2964,19 @@ class ManyChatHTTPTransport:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise ManyChatTransportNotCalled("ManyChat connection was not established") from exc
         except httpx.HTTPError as exc:
-            raise RuntimeError("ManyChat delivery outcome is unknown") from exc
+            raise RuntimeError("ManyChat content acceptance outcome is unknown") from exc
         payload = _json_response(response, provider="ManyChat")
         if not isinstance(payload, Mapping) or payload.get("status") not in {"success", "ok"}:
-            raise RuntimeError("ManyChat did not confirm delivery")
+            raise RuntimeError("ManyChat did not accept the content request")
         provider_id = _first(payload, "request_id", "message_id", "id")
-        if provider_id is None:
-            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
-            provider_id = "manychat:" + hashlib.sha256(canonical + idempotency_key.encode()).hexdigest()[:32]
-        return ManyChatTransportResponse(provider_id)
+        return ManyChatTransportResponse(
+            provider_request_id=provider_id,
+            dispatch_correlation_id=_manychat_dispatch_correlation(
+                operation="send_content",
+                idempotency_key=idempotency_key,
+                payload=payload,
+            ),
+        )
 
     def set_custom_field(
         self,
@@ -3043,17 +3066,14 @@ class ManyChatHTTPTransport:
         ):
             raise RuntimeError("ManyChat did not confirm the requested effect")
         provider_id = _first(payload, "request_id", "message_id", "id")
-        if provider_id is None:
-            canonical = json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(",", ":"),
-                default=str,
-            ).encode()
-            provider_id = "manychat:" + hashlib.sha256(
-                canonical + idempotency_key.encode()
-            ).hexdigest()[:32]
-        return ManyChatTransportResponse(provider_id)
+        return ManyChatTransportResponse(
+            provider_request_id=provider_id,
+            dispatch_correlation_id=_manychat_dispatch_correlation(
+                operation=path,
+                idempotency_key=idempotency_key,
+                payload=payload,
+            ),
+        )
 
 
 class FileKnowledgeTransport:

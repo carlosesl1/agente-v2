@@ -10,11 +10,12 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from reservation_boundary.conversation import PublicReplyChunk
+from v2_contracts.channel import PublicChannelAcceptance
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_RECEIPT_SCHEMA = "phase8-public-delivery-receipt"
-_RECEIPT_DOMAIN = b"phase8-public-delivery-receipt-v1\0"
+_RECEIPT_SCHEMA = "phase8-public-acceptance-receipt"
+_RECEIPT_DOMAIN = b"phase8-public-acceptance-receipt-v1\0"
 
 
 def _identifier(value: object, name: str) -> str:
@@ -111,26 +112,27 @@ class PublicDispatchClaim:
 
 
 @dataclass(frozen=True, slots=True)
-class PublicDeliveryReceipt:
+class PublicAcceptanceReceipt:
     public_row_id: str
     idempotency_key: str
-    provider_receipt_id: str
-    delivered_at: datetime
+    acceptance: PublicChannelAcceptance
+    accepted_at: datetime
 
     def __post_init__(self) -> None:
-        _identifier(self.public_row_id, "PublicDeliveryReceipt.public_row_id")
-        _identifier(self.idempotency_key, "PublicDeliveryReceipt.idempotency_key")
-        _identifier(
-            self.provider_receipt_id, "PublicDeliveryReceipt.provider_receipt_id"
-        )
-        _utc(self.delivered_at, "PublicDeliveryReceipt.delivered_at")
+        _identifier(self.public_row_id, "PublicAcceptanceReceipt.public_row_id")
+        _identifier(self.idempotency_key, "PublicAcceptanceReceipt.idempotency_key")
+        if type(self.acceptance) is not PublicChannelAcceptance:
+            raise TypeError("acceptance must be exact PublicChannelAcceptance")
+        _utc(self.accepted_at, "PublicAcceptanceReceipt.accepted_at")
 
     def to_canonical_bytes(self) -> bytes:
         return _canonical(
             {
-                "delivered_at": self.delivered_at.isoformat(),
+                "acceptance": json.loads(
+                    self.acceptance.to_canonical_bytes().decode("utf-8")
+                ),
+                "accepted_at": self.accepted_at.isoformat(),
                 "idempotency_key": self.idempotency_key,
-                "provider_receipt_id": self.provider_receipt_id,
                 "public_row_id": self.public_row_id,
             }
         )
@@ -140,11 +142,11 @@ class PublicDeliveryReceipt:
 
 
 class PublicDispatchReceiptPort(Protocol):
-    def persist_delivery_receipt(self, receipt: PublicDeliveryReceipt) -> None: ...
+    def persist_acceptance_receipt(self, receipt: PublicAcceptanceReceipt) -> None: ...
 
 
 __all__ = [
-    "PublicDeliveryReceipt",
+    "PublicAcceptanceReceipt",
     "PublicDispatchClaim",
     "PublicDispatchReceiptPort",
 ]

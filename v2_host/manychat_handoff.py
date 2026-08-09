@@ -77,10 +77,14 @@ class ManyChatHandoffDeliveryAdapter:
                 "ManyChat handoff effect outcome is unknown"
             ) from exc
         digest = hashlib.sha256(
-            b"v2-manychat-handoff-receipt-v1\0"
-            + tag.provider_message_id.encode("utf-8")
+            b"v2-manychat-handoff-acceptance-v1\0"
+            + (tag.provider_request_id or "").encode("utf-8")
             + b"\0"
-            + flow.provider_message_id.encode("utf-8")
+            + tag.dispatch_correlation_id.encode("utf-8")
+            + b"\0"
+            + (flow.provider_request_id or "").encode("utf-8")
+            + b"\0"
+            + flow.dispatch_correlation_id.encode("utf-8")
         ).hexdigest()
         return HandoffReceipt.for_message(
             message,

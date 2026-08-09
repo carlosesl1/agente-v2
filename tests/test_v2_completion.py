@@ -18,6 +18,11 @@ from v2_application.completion import (
     PublicServiceKind,
     PublicDeliveryNotCalled,
 )
+from v2_contracts.channel import (
+    PublicAcceptanceOperation,
+    PublicAcceptanceState,
+    PublicChannelAcceptance,
+)
 
 
 NOW = datetime(2026, 7, 23, 17, 0, tzinfo=timezone.utc)
@@ -34,7 +39,12 @@ class Delivery:
         self.calls.append(claim)
         if self.fail:
             raise PublicDeliveryNotCalled("before send")
-        return f"receipt:{claim.message_id}"
+        return PublicChannelAcceptance(
+            state=PublicAcceptanceState.ACCEPTED_BY_MANYCHAT,
+            operations=(PublicAcceptanceOperation.SEND_CONTENT,),
+            provider_request_ids=(f"request:{claim.message_id}",),
+            dispatch_correlation_ids=(f"correlation:{claim.message_id}",),
+        )
 
 
 class ManyChatTransport:
@@ -48,13 +58,13 @@ class ManyChatTransport:
             raise ManyChatTransportNotCalled("connection refused before request")
         if self.behavior == "unknown":
             raise TimeoutError("response lost after request")
-        return ManyChatTransportResponse(provider_message_id="manychat-message:001")
+        return ManyChatTransportResponse(provider_request_id="manychat-request:001")
 
 
 def context(
     *,
     kind: PublicServiceKind = PublicServiceKind.LODGING,
-    receipts=frozenset(("reservation", "settlement", "public_delivery")),
+    receipts=frozenset(("reservation", "settlement", "public_acceptance")),
     manual_review: bool = False,
 ):
     return CompletionContext(
@@ -71,7 +81,7 @@ def test_completion_requires_only_declared_receipts_and_ignores_optional_email()
 
     assert policy.evaluate(context()) is CompletionStatus.COMPLETED
     assert policy.evaluate(
-        context(receipts=frozenset(("reservation", "settlement", "public_delivery", "optional_email_failed")))
+        context(receipts=frozenset(("reservation", "settlement", "public_acceptance", "optional_email_failed")))
     ) is CompletionStatus.COMPLETED
     assert policy.evaluate(
         context(receipts=frozenset(("reservation", "settlement")))
@@ -111,10 +121,14 @@ def test_public_outbox_delivery_receipt_is_idempotent(tmp_path) -> None:
     second = worker.run_once(now=NOW + timedelta(seconds=2))
     idle = worker.run_once(now=NOW + timedelta(seconds=3))
 
-    assert first.value == "delivered"
-    assert second.value == "delivered"
+    assert first.value == "accepted"
+    assert second.value == "accepted"
     assert idle.value == "idle"
-    assert store.delivered_count(reply.release_id) == 2
+    assert store.accepted_count(reply.release_id) == 2
+    assert all(
+        evidence.state is PublicAcceptanceState.ACCEPTED_BY_MANYCHAT
+        for evidence in store.acceptance_evidence(reply.release_id)
+    )
     assert len(delivery.calls) == 2
 
 
@@ -160,9 +174,10 @@ def test_manychat_adapter_uses_subscriber_and_stable_outbox_identity(tmp_path) -
     )
     transport = ManyChatTransport()
 
-    receipt_id = ManyChatDeliveryAdapter(transport).send(claim)
+    acceptance = ManyChatDeliveryAdapter(transport).send(claim)
 
-    assert receipt_id == "manychat-message:001"
+    assert acceptance.state is PublicAcceptanceState.ACCEPTED_BY_MANYCHAT
+    assert acceptance.provider_request_ids == ("manychat-request:001",)
     assert transport.calls == [
         ("subscriber-001", "Mensagem pública.", claim.outbox_id)
     ]
@@ -248,3 +263,63 @@ def test_public_outbox_migrates_checkpoint_schema_before_unknown_outcome(tmp_pat
 
     assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "manual_review"
     assert store.manual_review_count() == 1
+    store.close()
+
+
+def test_public_outbox_adds_acceptance_columns_to_modern_checkpoint(tmp_path) -> None:
+    path = tmp_path / "public-modern-checkpoint.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE public_outbox (
+          outbox_id TEXT PRIMARY KEY,
+          release_id TEXT NOT NULL,
+          lead_id TEXT NOT NULL,
+          source_message_id TEXT NOT NULL,
+          chunk_index INTEGER NOT NULL,
+          text TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','leased','delivered','manual_review')),
+          claim_owner TEXT,
+          fencing_token INTEGER NOT NULL DEFAULT 0,
+          lease_expires_at TEXT,
+          receipt_id TEXT,
+          updated_at TEXT NOT NULL,
+          UNIQUE(release_id, chunk_index)
+        ) STRICT;
+        """
+    )
+    connection.execute(
+        "INSERT INTO public_outbox "
+        "(outbox_id,release_id,lead_id,source_message_id,chunk_index,text,status,"
+        "claim_owner,fencing_token,lease_expires_at,receipt_id,updated_at) "
+        "VALUES (?,?,?,?,?,?,'delivered',NULL,0,NULL,?,?)",
+        (
+            "public:legacy-terminal",
+            "release:legacy-terminal",
+            "manychat:subscriber-001",
+            "message:legacy-terminal",
+            0,
+            "Mensagem histórica.",
+            "receipt:legacy-terminal",
+            NOW.isoformat(),
+        ),
+    )
+    connection.close()
+
+    store = PublicOutboxStore(path)
+    try:
+        columns = {
+            row[1] for row in store._connection.execute("PRAGMA table_info(public_outbox)")
+        }
+        assert {"acceptance_json", "acceptance_hash"}.issubset(columns)
+        delivery = Delivery()
+        worker = PublicDeliveryWorker(
+            store=store,
+            delivery=delivery,
+            worker_id="worker:legacy-terminal",
+            lease_ttl=timedelta(seconds=30),
+        )
+        assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "idle"
+        assert delivery.calls == []
+    finally:
+        store.close()

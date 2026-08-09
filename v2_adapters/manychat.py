@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 
 from v2_contracts.channel import (
     InboundEvent,
+    PublicAcceptanceOperation,
+    PublicAcceptanceState,
+    PublicChannelAcceptance,
     PublicDeliveryNotCalled,
     PublicDeliveryRejected,
     PublicDeliveryUnknown,
@@ -75,15 +78,42 @@ class ManyChatTransportNotCalled(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ManyChatTransportResponse:
-    provider_message_id: str
+    provider_request_id: str | None
+    dispatch_correlation_id: str | None = None
 
     def __post_init__(self) -> None:
-        if (
-            type(self.provider_message_id) is not str
-            or not self.provider_message_id.strip()
-            or self.provider_message_id != self.provider_message_id.strip()
+        if self.provider_request_id is not None and (
+            type(self.provider_request_id) is not str
+            or not self.provider_request_id.strip()
+            or self.provider_request_id != self.provider_request_id.strip()
         ):
-            raise ValueError("provider_message_id must be canonical non-empty text")
+            raise ValueError("provider_request_id must be canonical text when present")
+        correlation = self.dispatch_correlation_id
+        if correlation is None and self.provider_request_id is not None:
+            correlation = "manychat-correlation:" + hashlib.sha256(
+                self.provider_request_id.encode("utf-8")
+            ).hexdigest()[:32]
+            object.__setattr__(self, "dispatch_correlation_id", correlation)
+        if (
+            type(correlation) is not str
+            or not correlation.strip()
+            or correlation != correlation.strip()
+        ):
+            raise ValueError("dispatch_correlation_id must be canonical text")
+
+    def as_acceptance(
+        self,
+        operation: PublicAcceptanceOperation,
+    ) -> PublicChannelAcceptance:
+        if type(operation) is not PublicAcceptanceOperation:
+            raise TypeError("operation must be exact PublicAcceptanceOperation")
+        assert self.dispatch_correlation_id is not None
+        return PublicChannelAcceptance(
+            state=PublicAcceptanceState.ACCEPTED_BY_MANYCHAT,
+            operations=(operation,),
+            provider_request_ids=(self.provider_request_id,),
+            dispatch_correlation_ids=(self.dispatch_correlation_id,),
+        )
 
 
 class ManyChatTransport(Protocol):
@@ -110,7 +140,7 @@ class ManyChatDeliveryAdapter:
             raise TypeError("transport must expose send_text")
         self._transport = transport
 
-    def send(self, claim: PublicMessageClaim) -> str:
+    def send(self, claim: PublicMessageClaim) -> PublicChannelAcceptance:
         # The boundary-owned worker claims PublicDispatchClaim rows.  Keep the
         # former generic-outbox shape readable only for migration tests; the
         # productive path uses message_id/subscriber_id/chunk.
@@ -145,10 +175,10 @@ class ManyChatDeliveryAdapter:
         except ManyChatTransportNotCalled as exc:
             raise PublicDeliveryNotCalled(str(exc)) from exc
         except Exception as exc:
-            raise PublicDeliveryUnknown("ManyChat delivery outcome is unknown") from exc
+            raise PublicDeliveryUnknown("ManyChat dispatch outcome is unknown") from exc
         if type(response) is not ManyChatTransportResponse:
-            raise PublicDeliveryUnknown("ManyChat returned an invalid delivery response")
-        return response.provider_message_id
+            raise PublicDeliveryUnknown("ManyChat returned invalid acceptance evidence")
+        return response.as_acceptance(PublicAcceptanceOperation.SEND_CONTENT)
 
 
 class ManyChatFlowDeliveryAdapter:
@@ -194,7 +224,7 @@ class ManyChatFlowDeliveryAdapter:
         self._payment_description_field_id = payment_description_field_id
         self._payment_flow_ns = payment_flow_ns
 
-    def send(self, claim: object) -> str:
+    def send(self, claim: object) -> PublicChannelAcceptance:
         outbox_id = getattr(claim, "message_id", None)
         subscriber_id = getattr(claim, "subscriber_id", None)
         chunk = getattr(claim, "chunk", None)
@@ -260,7 +290,25 @@ class ManyChatFlowDeliveryAdapter:
             )
             if type(flow) is not ManyChatTransportResponse:
                 raise RuntimeError("ManyChat flow receipt is invalid")
-            return flow.provider_message_id
+            field_operation = (
+                PublicAcceptanceOperation.SET_CUSTOM_FIELDS
+                if payment
+                else PublicAcceptanceOperation.SET_CUSTOM_FIELD
+            )
+            assert response.dispatch_correlation_id is not None
+            assert flow.dispatch_correlation_id is not None
+            return PublicChannelAcceptance(
+                state=PublicAcceptanceState.ACCEPTED_BY_MANYCHAT,
+                operations=(field_operation, PublicAcceptanceOperation.TRIGGER_FLOW),
+                provider_request_ids=(
+                    response.provider_request_id,
+                    flow.provider_request_id,
+                ),
+                dispatch_correlation_ids=(
+                    response.dispatch_correlation_id,
+                    flow.dispatch_correlation_id,
+                ),
+            )
         except ManyChatTransportNotCalled as exc:
             if not mutated:
                 raise PublicDeliveryNotCalled(str(exc)) from exc
@@ -271,7 +319,7 @@ class ManyChatFlowDeliveryAdapter:
             raise
         except Exception as exc:
             raise PublicDeliveryUnknown(
-                "ManyChat field/flow delivery outcome is unknown"
+                "ManyChat field/flow acceptance outcome is unknown"
             ) from exc
 
     @staticmethod
