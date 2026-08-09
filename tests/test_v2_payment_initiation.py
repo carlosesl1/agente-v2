@@ -94,7 +94,7 @@ class StripeTransport:
         self.requests.append(request)
         return {
             "link_id": f"plink_{request.account_profile_id}_{request.economic_version}",
-            "url": f"https://pay.invalid/{request.payment_id}/{request.economic_version}",
+            "url": f"https://buy.stripe.com/{request.payment_id}/{request.economic_version}",
         }
 
 
@@ -401,6 +401,63 @@ def test_payment_selection_rejects_unknown_display_fields() -> None:
             )
 
 
+def test_payment_service_propagates_closed_stripe_journal_authority() -> None:
+    class JournaledStripe:
+        def __init__(self) -> None:
+            self.calls: list[tuple[PaymentObligation, dict[str, object]]] = []
+
+        def create_link_journaled(
+            self,
+            obligation: PaymentObligation,
+            **authority: object,
+        ) -> StripePaymentLink:
+            self.calls.append((obligation, authority))
+            return StripePaymentLink(
+                payment_id=obligation.payment_id,
+                reservation_anchor_id=obligation.reservation_anchor_id,
+                account_profile_id="stripe-account:hostel:test",
+                economic_version=obligation.economic_version,
+                public_url="https://buy.stripe.com/test_journal_authority",
+                provider_reference_fingerprint="a" * 64,
+                receipt_hash="b" * 64,
+                customer_language=CustomerLanguage.PT_BR,
+            )
+
+        def create_link(self, obligation: PaymentObligation) -> StripePaymentLink:
+            raise AssertionError("journaled initiation must not use legacy create")
+
+    stripe = JournaledStripe()
+    payments = PaymentService(
+        stripe=stripe,
+        wise=WiseInstructionAdapter(
+            instructions={
+                "receiver:hostel": "Transferência Wise pendente de verificação."
+            }
+        ),
+        pix=PixInstructionAdapter(knowledge=Knowledge()),
+    )
+
+    offer = payments.initiate(
+        HOSTEL,
+        PaymentMethod.STRIPE,
+        initiation_id="payment-initiation:journal:001",
+        journal_worker_id="worker:payment-journal",
+        journal_fencing_token=7,
+    )
+
+    assert offer.public_url == "https://buy.stripe.com/test_journal_authority"
+    assert stripe.calls == [
+        (
+            HOSTEL,
+            {
+                "initiation_id": "payment-initiation:journal:001",
+                "journal_worker_id": "worker:payment-journal",
+                "journal_fencing_token": 7,
+            },
+        )
+    ]
+
+
 def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path) -> None:
     payments, transport, _ = service()
     path = tmp_path / "payment-init.sqlite3"
@@ -426,7 +483,7 @@ def test_stripe_initiation_is_fenced_and_provider_is_called_once(tmp_path: Path)
         candidate.read_bytes()
         for candidate in path.parent.glob(path.name + "*")
     )
-    assert b"https://pay.invalid" not in persisted
+    assert b"https://buy.stripe.com" not in persisted
 
 
 def test_legacy_stripe_obligation_fails_before_transport() -> None:
@@ -461,7 +518,7 @@ def test_stripe_result_decodes_historical_row_without_customer_language() -> Non
         reservation_anchor_id="anchor:hostel:legacy-language",
         account_profile_id="stripe-account:hostel:test",
         economic_version=1,
-        public_url="https://pay.invalid/legacy-language",
+        public_url="https://buy.stripe.com/legacy-language",
         provider_reference_fingerprint="a" * 64,
         receipt_hash="b" * 64,
         customer_language=CustomerLanguage.PT_BR,

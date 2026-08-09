@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 import re
@@ -39,10 +39,46 @@ class PaymentMethod(str, Enum):
     PIX = "pix"
 
 
+class StripeCreationStep(str, Enum):
+    PRODUCT = "product"
+    PRICE = "price"
+    PAYMENT_LINK = "payment_link"
+
+
+class StripeStepStatus(str, Enum):
+    INTENT = "intent"
+    ACCEPTED = "accepted"
+
+
 def _id(value: object, name: str) -> str:
     if type(value) is not str or _ID_RE.fullmatch(value) is None:
         raise ValueError(f"{name} must be a canonical opaque identifier")
     return value
+
+
+def _is_canonical_stripe_link_url(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        return False
+    return (
+        parsed.scheme == "https"
+        and hostname == "buy.stripe.com"
+        and username is None
+        and password is None
+        and port in (None, 443)
+        and parsed.path.startswith("/")
+        and parsed.path != "/"
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def _money(amount_minor: object, currency: object) -> None:
@@ -200,17 +236,20 @@ class PaymentSelection:
 
 @dataclass(frozen=True, slots=True)
 class StripeLinkRequest:
-    payment_id: str
-    reservation_anchor_id: str
-    account_profile_id: str
+    payment_id: str = field(repr=False)
+    reservation_anchor_id: str = field(repr=False)
+    account_profile_id: str = field(repr=False)
     amount_minor: int
     currency: str
     economic_version: int
-    idempotency_key: str
-    subscriber_fingerprint: str = ""
+    idempotency_key: str = field(repr=False)
+    subscriber_fingerprint: str = field(default="", repr=False)
     payment_percentage: int = 100
     business_unit: BusinessUnit = BusinessUnit.HOSTEL
-    display_details: PaymentDisplayDetails | None = None
+    display_details: PaymentDisplayDetails | None = field(default=None, repr=False)
+    initiation_id: str = field(default="", repr=False)
+    journal_worker_id: str = field(default="", repr=False)
+    journal_fencing_token: int = field(default=0, repr=False)
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -239,17 +278,65 @@ class StripeLinkRequest:
             raise TypeError(
                 "display_details must be exact PaymentDisplayDetails or None"
             )
+        if self.initiation_id:
+            _id(self.initiation_id, "initiation_id")
+        has_journal_authority = bool(
+            self.journal_worker_id
+            or self.journal_fencing_token != 0
+        )
+        if has_journal_authority:
+            if not self.initiation_id:
+                raise ValueError("Stripe journal authority requires initiation_id")
+            _id(self.journal_worker_id, "journal_worker_id")
+            if type(self.journal_fencing_token) is not int or self.journal_fencing_token < 1:
+                raise ValueError("journal_fencing_token must be an exact positive integer")
+
+
+@dataclass(frozen=True, slots=True)
+class StripeStepReceipt:
+    step: StripeCreationStep
+    status: StripeStepStatus
+    account_profile_id: str = field(repr=False)
+    expected_metadata_hash: str
+    idempotency_key: str = field(repr=False)
+    provider_object_id: str | None = field(default=None, repr=False)
+    canonical_url: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.step) is not StripeCreationStep:
+            raise TypeError("step must be exact StripeCreationStep")
+        if type(self.status) is not StripeStepStatus:
+            raise TypeError("status must be exact StripeStepStatus")
+        _id(self.account_profile_id, "account_profile_id")
+        if type(self.expected_metadata_hash) is not str or _HASH_RE.fullmatch(
+            self.expected_metadata_hash
+        ) is None:
+            raise ValueError("expected_metadata_hash must be SHA-256")
+        _id(self.idempotency_key, "idempotency_key")
+        if self.status is StripeStepStatus.INTENT:
+            if self.provider_object_id is not None or self.canonical_url is not None:
+                raise ValueError("Stripe intent cannot contain accepted provider evidence")
+            return
+        if self.provider_object_id is None:
+            raise ValueError("accepted Stripe step requires provider_object_id")
+        _id(self.provider_object_id, "provider_object_id")
+        if self.step is not StripeCreationStep.PAYMENT_LINK:
+            if self.canonical_url is not None:
+                raise ValueError("only accepted Payment Link may contain canonical_url")
+            return
+        if not _is_canonical_stripe_link_url(self.canonical_url):
+            raise ValueError("accepted Payment Link requires a canonical Stripe URL")
 
 
 @dataclass(frozen=True, slots=True)
 class StripePaymentLink:
-    payment_id: str
-    reservation_anchor_id: str
-    account_profile_id: str
+    payment_id: str = field(repr=False)
+    reservation_anchor_id: str = field(repr=False)
+    account_profile_id: str = field(repr=False)
     economic_version: int
-    public_url: str
-    provider_reference_fingerprint: str
-    receipt_hash: str
+    public_url: str = field(repr=False)
+    provider_reference_fingerprint: str = field(repr=False)
+    receipt_hash: str = field(repr=False)
     customer_language: CustomerLanguage | None = None
     settled: bool = False
 
@@ -259,9 +346,8 @@ class StripePaymentLink:
         _id(self.account_profile_id, "account_profile_id")
         if type(self.economic_version) is not int or self.economic_version < 1:
             raise ValueError("economic_version must be an exact positive integer")
-        parsed = urlparse(self.public_url)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError("public_url must be an absolute HTTPS URL")
+        if not _is_canonical_stripe_link_url(self.public_url):
+            raise ValueError("public_url must be a canonical Stripe payment link")
         if type(self.provider_reference_fingerprint) is not str or _HASH_RE.fullmatch(
             self.provider_reference_fingerprint
         ) is None:
@@ -276,6 +362,20 @@ class StripePaymentLink:
             )
         if self.settled is not False:
             raise ValueError("payment initiation can never claim settlement")
+
+
+@dataclass(frozen=True, slots=True)
+class StripeReconciliationResult:
+    offer: StripePaymentLink | None = field(repr=False)
+    manual_review: bool
+
+    def __post_init__(self) -> None:
+        if self.offer is not None and type(self.offer) is not StripePaymentLink:
+            raise TypeError("reconciled offer must be exact StripePaymentLink or None")
+        if type(self.manual_review) is not bool:
+            raise TypeError("manual_review must be exact boolean")
+        if self.offer is None and not self.manual_review:
+            raise ValueError("matched Stripe reconciliation requires an offer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +433,10 @@ __all__ = [
     "PaymentPlan",
     "PaymentSelection",
     "ReservationPaymentContext",
+    "StripeCreationStep",
     "StripeLinkRequest",
     "StripePaymentLink",
+    "StripeReconciliationResult",
+    "StripeStepReceipt",
+    "StripeStepStatus",
 ]

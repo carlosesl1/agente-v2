@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -8,7 +9,11 @@ import httpx
 import pytest
 
 from v2_adapters.pix import PixInstructionAdapter
-from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
+from v2_adapters.stripe import (
+    StripeLinkAdapter,
+    StripeTestHTTPTransport,
+    StripeTestReconciliationTransport,
+)
 from v2_adapters.stripe_checkout import stripe_product_presentation
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.payments import (
@@ -27,6 +32,11 @@ from v2_contracts.payments import (
     PaymentObligation,
     PaymentSelection,
     StripeLinkRequest,
+    StripePaymentLink,
+    StripeReconciliationResult,
+    StripeCreationStep,
+    StripeStepReceipt,
+    StripeStepStatus,
 )
 
 
@@ -123,6 +133,7 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                         "economic_version": "2",
                         "display_details_sha256": presentation.details_sha256,
                     },
+                    "created": 1_722_000_000,
                 },
             )
         if request.url.path == "/v1/prices":
@@ -134,7 +145,11 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": "price_test_001", "livemode": False},
+                json={
+                    "id": "price_test_001",
+                    "livemode": False,
+                    "active": True,
+                },
             )
         if request.url.path == "/v1/payment_links":
             assert form == {
@@ -159,30 +174,19 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                     "url": "https://buy.stripe.com/test_link_001",
                     "active": True,
                     "livemode": False,
+                    "metadata": {
+                        "reservation_anchor_sha256": (
+                            "761bedf72cf75935ffe67cf434d904ace0cb355ce6af5f00748c87ce07462531"
+                        ),
+                        "subscriber_sha256": SUBSCRIBER_FINGERPRINT,
+                        "business_unit": "hostel",
+                        "economic_version": "2",
+                        "payment_percentage": "100",
+                        "display_details_sha256": presentation.details_sha256,
+                    },
                 },
             )
-        assert request.method == "GET"
-        assert request.url.path == "/v1/payment_links/plink_test_001"
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "plink_test_001",
-                "url": "https://buy.stripe.com/test_link_001",
-                "active": True,
-                "livemode": False,
-                "metadata": {
-                    "reservation_anchor_sha256": (
-                        "761bedf72cf75935ffe67cf434d904ace0cb355ce6af5f00748c87ce07462531"
-                    ),
-                    "subscriber_sha256": SUBSCRIBER_FINGERPRINT,
-                    "business_unit": "hostel",
-                    "economic_version": "2",
-                    "payment_percentage": "100",
-                    "display_details_sha256": presentation.details_sha256,
-                },
-            },
-        )
+        pytest.fail("accepted Payment Link must not trigger synchronous read-back")
 
     result = _transport(handler)(_request())
 
@@ -195,7 +199,7 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
         _request().idempotency_key + ":price",
         _request().idempotency_key + ":payment_link",
     ]
-    assert "Idempotency-Key" not in seen[3].headers
+    assert len(seen) == 3
     assert all(request.headers["Authorization"] == f"Bearer {TEST_KEY}" for request in seen)
     wire = b"&".join(request.content for request in seen).decode()
     assert _request().payment_id not in wire
@@ -240,7 +244,7 @@ def test_product_display_mismatch_stops_before_price(mismatch: str) -> None:
     assert [request.url.path for request in seen] == ["/v1/products"]
 
 
-def test_payment_link_readback_mismatch_is_unknown() -> None:
+def test_accepted_payment_link_is_monotonic_despite_later_readback_mismatch() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -280,9 +284,41 @@ def test_payment_link_readback_mismatch_is_unknown() -> None:
             },
         )
 
-    with pytest.raises(RuntimeError, match="read-back"):
+    result = _transport(handler)(_request())
+
+    assert result == {
+        "link_id": "plink_test_001",
+        "url": "https://buy.stripe.com/test_link_001",
+    }
+    assert [request.method for request in seen] == ["POST", "POST", "POST"]
+
+
+def test_authenticated_or_query_payment_link_url_fails_closed_without_echo() -> None:
+    private_query = "private-client-secret-sentinel"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/products":
+            return httpx.Response(200, request=request, json=_product_payload())
+        if request.url.path == "/v1/prices":
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "price_test_001", "livemode": False},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "plink_test_private_query",
+                "url": f"https://buy.stripe.com/test?secret={private_query}",
+                "active": True,
+                "livemode": False,
+            },
+        )
+
+    with pytest.raises(RuntimeError, match="canonical") as captured:
         _transport(handler)(_request())
-    assert [request.method for request in seen] == ["POST", "POST", "POST", "GET"]
+    assert private_query not in str(captured.value)
 
 
 def test_live_key_and_noncanonical_api_base_fail_before_http() -> None:
@@ -304,6 +340,126 @@ def test_live_key_and_noncanonical_api_base_fail_before_http() -> None:
             client=httpx.Client(transport=httpx.MockTransport(handler)),
         )
     assert calls == 0
+
+    private_origin = "private-origin-sentinel"
+    for transport_type in (
+        StripeTestHTTPTransport,
+        StripeTestReconciliationTransport,
+    ):
+        for base_url in (
+            f"https://user:{private_origin}@api.stripe.com",
+            f"https://api.stripe.com:{private_origin}",
+            "https://api.stripe.com:444",
+        ):
+            with pytest.raises(ValueError, match="canonical Stripe API") as captured:
+                transport_type(
+                    secret_keys={"stripe-account:hostel:test": TEST_KEY},
+                    base_url=base_url,
+                    client=httpx.Client(transport=httpx.MockTransport(handler)),
+                )
+            assert private_origin not in str(captured.value)
+    assert calls == 0
+
+
+def test_malformed_or_root_payment_link_url_fails_closed_without_echo() -> None:
+    private_port = "private-port-sentinel"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/products":
+            return httpx.Response(200, request=request, json=_product_payload())
+        if request.url.path == "/v1/prices":
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "price_test_001", "livemode": False},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "plink_test_private_port",
+                "url": f"https://buy.stripe.com:{private_port}/x",
+                "active": True,
+                "livemode": False,
+            },
+        )
+
+    with pytest.raises(RuntimeError, match="canonical") as captured:
+        _transport(handler)(_request())
+    assert private_port not in str(captured.value)
+
+    with pytest.raises(ValueError, match="canonical") as receipt_error:
+        StripeStepReceipt(
+            step=StripeCreationStep.PAYMENT_LINK,
+            status=StripeStepStatus.ACCEPTED,
+            account_profile_id="stripe-account:hostel:test",
+            expected_metadata_hash="a" * 64,
+            idempotency_key="stripe-link:test:payment_link",
+            provider_object_id="plink_test_private_port",
+            canonical_url=f"https://buy.stripe.com:{private_port}/x",
+        )
+    assert private_port not in str(receipt_error.value)
+
+    offer = StripePaymentLink(
+        payment_id="payment:stripe:url-contract:001",
+        reservation_anchor_id="anchor:stripe:url-contract:001",
+        account_profile_id="stripe-account:hostel:test",
+        economic_version=1,
+        public_url="https://buy.stripe.com/test_valid",
+        provider_reference_fingerprint="b" * 64,
+        receipt_hash="c" * 64,
+    )
+    with pytest.raises(ValueError, match="canonical"):
+        replace(offer, public_url="https://buy.stripe.com/")
+
+
+def test_stripe_request_offer_and_reconciliation_repr_redact_private_values() -> None:
+    request = replace(
+        _request(),
+        subscriber_fingerprint="a" * 64,
+        initiation_id="stripe-init:opaque:001",
+        journal_worker_id="journal-worker-private-sentinel",
+        journal_fencing_token=73,
+    )
+    offer = StripePaymentLink(
+        payment_id=request.payment_id,
+        reservation_anchor_id=request.reservation_anchor_id,
+        account_profile_id=request.account_profile_id,
+        economic_version=request.economic_version,
+        public_url="https://buy.stripe.com/private-link-sentinel",
+        provider_reference_fingerprint="b" * 64,
+        receipt_hash="c" * 64,
+        customer_language=CustomerLanguage.PT_BR,
+    )
+    result = StripeReconciliationResult(offer=offer, manual_review=False)
+    receipt = StripeStepReceipt(
+        step=StripeCreationStep.PRODUCT,
+        status=StripeStepStatus.INTENT,
+        account_profile_id=request.account_profile_id,
+        expected_metadata_hash="d" * 64,
+        idempotency_key="stripe-link:private-repr:product",
+    )
+    rendered = repr((request, offer, result, receipt))
+    assert "offer=" not in repr(result)
+    assert "account_profile_id=" not in repr(receipt)
+    assert "journal_fencing_token=" not in repr(request)
+
+    private_values = (
+        request.payment_id,
+        request.reservation_anchor_id,
+        request.account_profile_id,
+        request.idempotency_key,
+        request.subscriber_fingerprint,
+        request.initiation_id,
+        request.journal_worker_id,
+        request.display_details.public_label,
+        offer.public_url,
+        offer.provider_reference_fingerprint,
+        offer.receipt_hash,
+    )
+    assert len(private_values) == len(set(private_values))
+    for private_value in private_values:
+        assert private_value not in rendered
 
 
 def test_partial_creation_is_manual_review_and_never_recreates_product(

@@ -32,7 +32,12 @@ from v2_adapters.provider_http import (
     FileKnowledgeTransport,
     ManyChatHTTPTransport,
 )
-from v2_adapters.stripe import StripeLinkAdapter, StripeTestHTTPTransport
+from v2_adapters.stripe import (
+    StripeLinkAdapter,
+    StripeLinkReconciliationAdapter,
+    StripeTestHTTPTransport,
+    StripeTestReconciliationTransport,
+)
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
 from v2_application.bokun_audit import (
@@ -655,6 +660,7 @@ def _build_payment_worker(
         raise ValueError("payment worker requires at least one explicit method gate")
     if len(settings.allowed_subscriber_ids) != 1:
         raise ValueError("payment worker requires one allowlisted subscriber")
+    clock = UTCClock()
     profiles = {
         BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
         BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
@@ -663,14 +669,26 @@ def _build_payment_worker(
         BusinessUnit.HOSTEL: settings.hostel_payment_percentage,
         BusinessUnit.AGENCY: settings.agency_payment_percentage,
     }
+    stripe_reconciler: object | None = None
     if settings.stripe_links_enabled:
         stripe: object = StripeLinkAdapter(
             transport=StripeTestHTTPTransport(
                 secret_keys=settings.stripe_test_secret_keys,
                 base_url=settings.stripe_base_url,
+                journal=container.payment_initiation,
+                clock=clock.now,
             ),
             account_profiles=profiles,
             enabled=True,
+            subscriber_id=settings.allowed_subscriber_ids[0],
+            payment_percentages=percentages_by_unit,
+        )
+        stripe_reconciler = StripeLinkReconciliationAdapter(
+            transport=StripeTestReconciliationTransport(
+                secret_keys=settings.stripe_test_secret_keys,
+                base_url=settings.stripe_base_url,
+            ),
+            account_profiles=profiles,
             subscriber_id=settings.allowed_subscriber_ids[0],
             payment_percentages=percentages_by_unit,
         )
@@ -706,7 +724,8 @@ def _build_payment_worker(
         payments=PaymentService(stripe=stripe, wise=wise, pix=pix),
         worker_id="worker:payment-initiation",
         lease_ttl=timedelta(seconds=30),
-        effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
+        effect_guard=ControlledEffectGuard(settings=settings, clock=clock),
+        stripe_reconciler=stripe_reconciler,
     )
 
 

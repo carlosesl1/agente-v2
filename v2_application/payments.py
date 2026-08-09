@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -32,7 +33,11 @@ from v2_contracts.payments import (
     PaymentPlan,
     PaymentSelection,
     ReservationPaymentContext,
+    StripeCreationStep,
     StripePaymentLink,
+    StripeReconciliationResult,
+    StripeStepReceipt,
+    StripeStepStatus,
 )
 
 
@@ -79,6 +84,10 @@ class PaymentService:
         self,
         obligation: PaymentObligation,
         method: PaymentMethod,
+        *,
+        initiation_id: str = "",
+        journal_worker_id: str = "",
+        journal_fencing_token: int = 0,
     ) -> PaymentMethodOffer:
         if type(obligation) is not PaymentObligation:
             raise TypeError("obligation must be exact PaymentObligation")
@@ -87,6 +96,19 @@ class PaymentService:
         if obligation.due_kind is DueKind.DUE_AT_CHECKIN:
             raise ValueError("due-at-checkin obligation has no initiation effect")
         if method is PaymentMethod.STRIPE:
+            if initiation_id:
+                journaled_create = getattr(
+                    self._stripe,
+                    "create_link_journaled",
+                    None,
+                )
+                if callable(journaled_create):
+                    return journaled_create(
+                        obligation,
+                        initiation_id=initiation_id,
+                        journal_worker_id=journal_worker_id,
+                        journal_fencing_token=journal_fencing_token,
+                    )
             return self._stripe.create_link(obligation)
         if method is PaymentMethod.WISE:
             return self._wise.instruction(obligation)
@@ -213,6 +235,17 @@ class PaymentInitiationClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class StripeReconciliationClaim:
+    initiation_id: str
+    selection: PaymentSelection = field(repr=False)
+    worker_id: str
+    fencing_token: int
+    lease_expires_at: datetime
+    already_completed: bool
+    receipts: tuple[StripeStepReceipt, ...] = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class PaymentInitiationResult:
     disposition: PaymentInitiationDisposition
     offer: PaymentMethodOffer | None = None
@@ -231,6 +264,29 @@ CREATE TABLE IF NOT EXISTS payment_initiations (
   result_json BLOB,
   result_hash TEXT,
   updated_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS stripe_step_receipts (
+  initiation_id TEXT NOT NULL,
+  step TEXT NOT NULL CHECK(step IN ('product','price','payment_link')),
+  status TEXT NOT NULL CHECK(status IN ('intent','accepted')),
+  journal_owner TEXT NOT NULL,
+  journal_fencing_token INTEGER NOT NULL CHECK(journal_fencing_token>=1),
+  receipt_json BLOB NOT NULL,
+  receipt_hash TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(initiation_id,step),
+  FOREIGN KEY(initiation_id) REFERENCES payment_initiations(initiation_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS stripe_reconciliations (
+  initiation_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK(status IN ('pending','claimed','matched','manual_review')),
+  claim_owner TEXT,
+  fencing_token INTEGER NOT NULL DEFAULT 0,
+  lease_expires_at TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts IN (0,1)),
+  recovery_pending INTEGER NOT NULL DEFAULT 0 CHECK(recovery_pending IN (0,1)),
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(initiation_id) REFERENCES payment_initiations(initiation_id)
 ) STRICT;
 """
 
@@ -463,6 +519,53 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
 
 
 _RESULT_CIPHERTEXT_PREFIX = b"v2-payment-result-aesgcm-v1\0"
+_STRIPE_RECEIPT_CIPHERTEXT_PREFIX = b"v2-stripe-step-aesgcm-v1\0"
+
+
+def _stripe_receipt_bytes(receipt: StripeStepReceipt) -> bytes:
+    if type(receipt) is not StripeStepReceipt:
+        raise TypeError("receipt must be exact StripeStepReceipt")
+    return json.dumps(
+        {
+            "step": receipt.step.value,
+            "status": receipt.status.value,
+            "account_profile_id": receipt.account_profile_id,
+            "expected_metadata_hash": receipt.expected_metadata_hash,
+            "idempotency_key": receipt.idempotency_key,
+            "provider_object_id": receipt.provider_object_id,
+            "canonical_url": receipt.canonical_url,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def _stripe_receipt_from_bytes(raw: bytes) -> StripeStepReceipt:
+    if type(raw) is not bytes:
+        raise RuntimeError("Stripe receipt has invalid private bytes")
+    try:
+        value = json.loads(raw)
+        if set(value) != {
+            "step",
+            "status",
+            "account_profile_id",
+            "expected_metadata_hash",
+            "idempotency_key",
+            "provider_object_id",
+            "canonical_url",
+        }:
+            raise ValueError("Stripe receipt fields mismatch")
+        return StripeStepReceipt(
+            step=StripeCreationStep(value["step"]),
+            status=StripeStepStatus(value["status"]),
+            account_profile_id=value["account_profile_id"],
+            expected_metadata_hash=value["expected_metadata_hash"],
+            idempotency_key=value["idempotency_key"],
+            provider_object_id=value["provider_object_id"],
+            canonical_url=value["canonical_url"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Stripe step receipt is corrupt") from exc
 
 
 class SQLitePaymentInitiationStore:
@@ -481,6 +584,441 @@ class SQLitePaymentInitiationStore:
 
     def close(self) -> None:
         self._connection.close()
+
+    @staticmethod
+    def _stripe_receipt_aad(initiation_id: str, step: StripeCreationStep) -> bytes:
+        return f"{initiation_id}\0{step.value}".encode()
+
+    def _encrypted_stripe_receipt(
+        self,
+        initiation_id: str,
+        receipt: StripeStepReceipt,
+    ) -> bytes:
+        nonce = os.urandom(12)
+        return (
+            _STRIPE_RECEIPT_CIPHERTEXT_PREFIX
+            + nonce
+            + self._result_cipher.encrypt(
+                nonce,
+                _stripe_receipt_bytes(receipt),
+                self._stripe_receipt_aad(initiation_id, receipt.step),
+            )
+        )
+
+    def _decrypted_stripe_receipt(
+        self,
+        initiation_id: str,
+        step: str,
+        raw: object,
+        digest: object,
+    ) -> StripeStepReceipt:
+        if (
+            type(raw) is not bytes
+            or not raw.startswith(_STRIPE_RECEIPT_CIPHERTEXT_PREFIX)
+            or type(digest) is not str
+            or hashlib.sha256(raw).hexdigest() != digest
+        ):
+            raise RuntimeError("Stripe step receipt ciphertext is invalid")
+        encrypted = raw[len(_STRIPE_RECEIPT_CIPHERTEXT_PREFIX) :]
+        if len(encrypted) <= 12:
+            raise RuntimeError("Stripe step receipt ciphertext is truncated")
+        nonce, ciphertext = encrypted[:12], encrypted[12:]
+        try:
+            plaintext = self._result_cipher.decrypt(
+                nonce,
+                ciphertext,
+                self._stripe_receipt_aad(initiation_id, StripeCreationStep(step)),
+            )
+        except Exception:
+            raise RuntimeError("Stripe step receipt ciphertext is invalid") from None
+        receipt = _stripe_receipt_from_bytes(plaintext)
+        if receipt.step.value != step:
+            raise RuntimeError("Stripe step receipt identity diverged")
+        return receipt
+
+    def _stripe_receipts_for_id(
+        self, initiation_id: str
+    ) -> tuple[StripeStepReceipt, ...]:
+        rows = self._connection.execute(
+            "SELECT step,receipt_json,receipt_hash FROM stripe_step_receipts "
+            "WHERE initiation_id=? ORDER BY CASE step "
+            "WHEN 'product' THEN 1 WHEN 'price' THEN 2 ELSE 3 END",
+            (initiation_id,),
+        ).fetchall()
+        return tuple(
+            self._decrypted_stripe_receipt(initiation_id, step, raw, digest)
+            for step, raw, digest in rows
+        )
+
+    def stripe_step_receipts(
+        self, selection: PaymentSelection
+    ) -> tuple[StripeStepReceipt, ...]:
+        return self._stripe_receipts_for_id(_initiation_id(selection))
+
+    def _record_stripe_step(
+        self,
+        initiation_id: str,
+        receipt: StripeStepReceipt,
+        *,
+        expected_status: StripeStepStatus,
+        worker_id: str,
+        fencing_token: int,
+        now: datetime,
+    ) -> None:
+        if type(receipt) is not StripeStepReceipt or receipt.status is not expected_status:
+            raise TypeError("Stripe journal received the wrong receipt status")
+        if type(worker_id) is not str or not worker_id:
+            raise ValueError("Stripe journal worker_id must be non-empty exact text")
+        if type(fencing_token) is not int or fencing_token < 1:
+            raise ValueError("Stripe journal fencing_token must be a positive exact integer")
+        now_text = _utc_text(now, "now")
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            initiation = self._connection.execute(
+                "SELECT selection_json,status,claim_owner,fencing_token,lease_expires_at "
+                "FROM payment_initiations WHERE initiation_id=?",
+                (initiation_id,),
+            ).fetchone()
+            if initiation is None:
+                raise RuntimeError("Stripe journal initiation is unknown")
+            selection = _selection_from_bytes(initiation[0])
+            if selection.method is not PaymentMethod.STRIPE:
+                raise RuntimeError("Stripe journal initiation method diverged")
+            row = self._connection.execute(
+                "SELECT status,receipt_json,receipt_hash,journal_owner,"
+                "journal_fencing_token FROM stripe_step_receipts "
+                "WHERE initiation_id=? AND step=?",
+                (initiation_id, receipt.step.value),
+            ).fetchone()
+            if expected_status is StripeStepStatus.INTENT:
+                if initiation[1] != "fenced":
+                    raise RuntimeError("Stripe journal requires a fenced Stripe initiation")
+                if initiation[2:4] != (worker_id, fencing_token):
+                    raise RuntimeError("stale Stripe journal authority")
+                if initiation[4] <= now_text:
+                    raise RuntimeError("expired Stripe journal authority")
+                if row is not None:
+                    raise RuntimeError(
+                        "Stripe step was already dispatched; reconciliation is required"
+                    )
+                predecessor = {
+                    StripeCreationStep.PRODUCT: None,
+                    StripeCreationStep.PRICE: StripeCreationStep.PRODUCT,
+                    StripeCreationStep.PAYMENT_LINK: StripeCreationStep.PRICE,
+                }[receipt.step]
+                if predecessor is not None:
+                    previous = self._connection.execute(
+                        "SELECT status FROM stripe_step_receipts "
+                        "WHERE initiation_id=? AND step=?",
+                        (initiation_id, predecessor.value),
+                    ).fetchone()
+                    if previous != (StripeStepStatus.ACCEPTED.value,):
+                        raise RuntimeError("Stripe step predecessor is not accepted")
+                raw = self._encrypted_stripe_receipt(initiation_id, receipt)
+                self._connection.execute(
+                    "INSERT INTO stripe_step_receipts "
+                    "(initiation_id,step,status,journal_owner,journal_fencing_token,"
+                    "receipt_json,receipt_hash,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    (
+                        initiation_id,
+                        receipt.step.value,
+                        receipt.status.value,
+                        worker_id,
+                        fencing_token,
+                        raw,
+                        hashlib.sha256(raw).hexdigest(),
+                    ),
+                )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO stripe_reconciliations "
+                    "(initiation_id,status,updated_at) "
+                    "VALUES (?,'pending',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    (initiation_id,),
+                )
+            else:
+                if row is None:
+                    raise RuntimeError("Stripe accepted receipt lacks matching intent")
+                if row[3:5] != (worker_id, fencing_token):
+                    raise RuntimeError("stale Stripe accepted receipt authority")
+                if row[0] != StripeStepStatus.INTENT.value:
+                    current = self._decrypted_stripe_receipt(
+                        initiation_id,
+                        receipt.step.value,
+                        row[1],
+                        row[2],
+                    )
+                    if current == receipt:
+                        self._connection.execute("COMMIT")
+                        return
+                    raise RuntimeError("Stripe accepted receipt lacks matching intent")
+                current = self._decrypted_stripe_receipt(
+                    initiation_id,
+                    receipt.step.value,
+                    row[1],
+                    row[2],
+                )
+                if (
+                    current.expected_metadata_hash != receipt.expected_metadata_hash
+                    or current.idempotency_key != receipt.idempotency_key
+                ):
+                    raise RuntimeError("Stripe accepted receipt diverges from intent")
+                raw = self._encrypted_stripe_receipt(initiation_id, receipt)
+                self._connection.execute(
+                    "UPDATE stripe_step_receipts SET status=?,receipt_json=?,receipt_hash=?,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE initiation_id=? AND step=?",
+                    (
+                        receipt.status.value,
+                        raw,
+                        hashlib.sha256(raw).hexdigest(),
+                        initiation_id,
+                        receipt.step.value,
+                    ),
+                )
+                if receipt.step is StripeCreationStep.PAYMENT_LINK:
+                    reconciliation = self._connection.execute(
+                        "SELECT status FROM stripe_reconciliations WHERE initiation_id=?",
+                        (initiation_id,),
+                    ).fetchone()
+                    if reconciliation in {("manual_review",), ("matched",)}:
+                        self._connection.execute(
+                            "UPDATE stripe_reconciliations SET status='pending',"
+                            "claim_owner=NULL,lease_expires_at=NULL,attempts=0,"
+                            "recovery_pending=0,updated_at=? WHERE initiation_id=?",
+                            (now_text, initiation_id),
+                        )
+                    elif reconciliation == ("claimed",):
+                        self._connection.execute(
+                            "UPDATE stripe_reconciliations SET recovery_pending=1,"
+                            "updated_at=? WHERE initiation_id=?",
+                            (now_text, initiation_id),
+                        )
+            self._connection.execute("COMMIT")
+        except BaseException:
+            if self._connection.in_transaction:
+                self._connection.execute("ROLLBACK")
+            raise
+
+    def record_stripe_step_intent(
+        self,
+        initiation_id: str,
+        receipt: StripeStepReceipt,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        now: datetime,
+    ) -> None:
+        self._record_stripe_step(
+            initiation_id,
+            receipt,
+            expected_status=StripeStepStatus.INTENT,
+            worker_id=worker_id,
+            fencing_token=fencing_token,
+            now=now,
+        )
+
+    def record_stripe_step_accepted(
+        self,
+        initiation_id: str,
+        receipt: StripeStepReceipt,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        now: datetime,
+    ) -> None:
+        self._record_stripe_step(
+            initiation_id,
+            receipt,
+            expected_status=StripeStepStatus.ACCEPTED,
+            worker_id=worker_id,
+            fencing_token=fencing_token,
+            now=now,
+        )
+
+    def claim_stripe_reconciliation(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_ttl: timedelta,
+    ) -> StripeReconciliationClaim | None:
+        if type(worker_id) is not str or not worker_id:
+            raise ValueError("worker_id must be non-empty exact text")
+        if type(lease_ttl) is not timedelta or lease_ttl <= timedelta(0):
+            raise ValueError("lease_ttl must be a positive exact timedelta")
+        now_text = _utc_text(now, "now")
+        expires = now + lease_ttl
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._connection.execute(
+                "UPDATE payment_initiations SET status='manual_review',"
+                "claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
+                "WHERE status='fenced' AND dispatch_slots=1 "
+                "AND lease_expires_at<=? AND EXISTS (SELECT 1 FROM "
+                "stripe_reconciliations AS r WHERE r.initiation_id="
+                "payment_initiations.initiation_id AND r.status='pending')",
+                (now_text, now_text),
+            )
+            self._connection.execute(
+                "UPDATE stripe_reconciliations SET status='pending',claim_owner=NULL,"
+                "lease_expires_at=NULL,attempts=0,recovery_pending=0,updated_at=? "
+                "WHERE status='claimed' AND attempts>=1 AND lease_expires_at<=? "
+                "AND recovery_pending=1",
+                (now_text, now_text),
+            )
+            self._connection.execute(
+                "UPDATE stripe_reconciliations SET status='manual_review',"
+                "claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
+                "WHERE status='claimed' AND attempts>=1 AND lease_expires_at<=? "
+                "AND recovery_pending=0",
+                (now_text, now_text),
+            )
+            row = self._connection.execute(
+                "SELECT r.initiation_id,p.selection_json,p.status,r.fencing_token "
+                "FROM stripe_reconciliations AS r "
+                "JOIN payment_initiations AS p USING(initiation_id) "
+                "WHERE r.status='pending' AND r.attempts=0 "
+                "AND (r.claim_owner IS NULL OR r.lease_expires_at<=?) "
+                "AND p.status IN ('completed','manual_review') "
+                "ORDER BY r.updated_at,r.initiation_id LIMIT 1",
+                (now_text,),
+            ).fetchone()
+            if row is None:
+                self._connection.execute("COMMIT")
+                return None
+            token = row[3] + 1
+            expires_text = _utc_text(expires, "lease_expires_at")
+            self._connection.execute(
+                "UPDATE stripe_reconciliations SET status='claimed',claim_owner=?,"
+                "fencing_token=?,lease_expires_at=?,attempts=1,updated_at=? "
+                "WHERE initiation_id=?",
+                (worker_id, token, expires_text, now_text, row[0]),
+            )
+            receipts = self._stripe_receipts_for_id(row[0])
+            self._connection.execute("COMMIT")
+            return StripeReconciliationClaim(
+                initiation_id=row[0],
+                selection=_selection_from_bytes(row[1]),
+                worker_id=worker_id,
+                fencing_token=token,
+                lease_expires_at=expires,
+                already_completed=row[2] == "completed",
+                receipts=receipts,
+            )
+        except BaseException:
+            if self._connection.in_transaction:
+                self._connection.execute("ROLLBACK")
+            raise
+
+    def finish_stripe_reconciliation(
+        self,
+        claim: StripeReconciliationClaim,
+        result: StripeReconciliationResult,
+        *,
+        now: datetime,
+    ) -> None:
+        if type(claim) is not StripeReconciliationClaim:
+            raise TypeError("claim must be exact StripeReconciliationClaim")
+        if type(result) is not StripeReconciliationResult:
+            raise TypeError("result must be exact StripeReconciliationResult")
+        offer = result.offer
+        now_text = _utc_text(now, "now")
+        raw = None
+        digest = None
+        if offer is not None and not claim.already_completed:
+            plaintext = _offer_bytes(offer)
+            nonce = os.urandom(12)
+            raw = (
+                _RESULT_CIPHERTEXT_PREFIX
+                + nonce
+                + self._result_cipher.encrypt(
+                    nonce,
+                    plaintext,
+                    claim.initiation_id.encode(),
+                )
+            )
+            digest = hashlib.sha256(raw).hexdigest()
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._connection.execute(
+                "SELECT status,claim_owner,fencing_token,attempts,recovery_pending FROM "
+                "stripe_reconciliations WHERE initiation_id=?",
+                (claim.initiation_id,),
+            ).fetchone()
+            if row is None or row[:4] != (
+                "claimed",
+                claim.worker_id,
+                claim.fencing_token,
+                1,
+            ):
+                raise RuntimeError("stale Stripe reconciliation claim")
+            payment = self._connection.execute(
+                "SELECT status,result_json,result_hash FROM payment_initiations "
+                "WHERE initiation_id=?",
+                (claim.initiation_id,),
+            ).fetchone()
+            expected_payment_status = "completed" if claim.already_completed else "manual_review"
+            if payment is None or payment[0] != expected_payment_status:
+                raise RuntimeError("Stripe reconciliation payment state diverged")
+            offer = result.offer
+            offer_diverged = False
+            if claim.already_completed and offer is not None:
+                result_blob, result_hash = payment[1], payment[2]
+                if type(result_blob) is not bytes or not result_blob.startswith(
+                    _RESULT_CIPHERTEXT_PREFIX
+                ):
+                    raise RuntimeError("Stripe completed result is not private ciphertext")
+                if not hmac.compare_digest(
+                    hashlib.sha256(result_blob).hexdigest(),
+                    str(result_hash),
+                ):
+                    raise RuntimeError("Stripe completed result integrity check failed")
+                encrypted = result_blob[len(_RESULT_CIPHERTEXT_PREFIX) :]
+                if len(encrypted) <= 12:
+                    raise RuntimeError("Stripe completed result is truncated")
+                nonce, ciphertext = encrypted[:12], encrypted[12:]
+                try:
+                    current_offer = _offer_from_bytes(
+                        self._result_cipher.decrypt(
+                            nonce,
+                            ciphertext,
+                            claim.initiation_id.encode(),
+                        )
+                    )
+                except Exception as exc:
+                    raise RuntimeError("Stripe completed result is invalid") from exc
+                offer_diverged = current_offer != offer
+            if offer is not None and not claim.already_completed:
+                self._connection.execute(
+                    "UPDATE payment_initiations SET status='completed',result_json=?,"
+                    "result_hash=?,updated_at=? WHERE initiation_id=?",
+                    (raw, digest, now_text, claim.initiation_id),
+                )
+            if row[4] == 1:
+                self._connection.execute(
+                    "UPDATE stripe_reconciliations SET status='pending',"
+                    "claim_owner=NULL,lease_expires_at=NULL,attempts=0,"
+                    "recovery_pending=0,updated_at=? WHERE initiation_id=?",
+                    (now_text, claim.initiation_id),
+                )
+            else:
+                effective_manual_review = result.manual_review or offer_diverged
+                self._connection.execute(
+                    "UPDATE stripe_reconciliations SET status=?,claim_owner=NULL,"
+                    "lease_expires_at=NULL,recovery_pending=0,updated_at=? "
+                    "WHERE initiation_id=?",
+                    (
+                        "manual_review" if effective_manual_review else "matched",
+                        now_text,
+                        claim.initiation_id,
+                    ),
+                )
+            self._connection.execute("COMMIT")
+        except BaseException:
+            if self._connection.in_transaction:
+                self._connection.execute("ROLLBACK")
+            raise
 
     def completed_offers(self) -> tuple[PaymentMethodOffer, ...]:
         rows = self._connection.execute(
@@ -592,6 +1130,12 @@ class SQLitePaymentInitiationStore:
                 "UPDATE payment_initiations SET status='fenced',dispatch_slots=1,updated_at=? WHERE initiation_id=?",
                 (now_text, claim.initiation_id),
             )
+            if claim.selection.method is PaymentMethod.STRIPE:
+                self._connection.execute(
+                    "INSERT INTO stripe_reconciliations "
+                    "(initiation_id,status,updated_at) VALUES (?,'pending',?)",
+                    (claim.initiation_id, now_text),
+                )
             self._connection.execute("COMMIT")
         except BaseException:
             if self._connection.in_transaction:
@@ -671,6 +1215,7 @@ class PaymentInitiationWorker:
         worker_id: str,
         lease_ttl: timedelta,
         effect_guard: object | None = None,
+        stripe_reconciler: object | None = None,
     ) -> None:
         if type(store) is not SQLitePaymentInitiationStore:
             raise TypeError("store must be exact SQLitePaymentInitiationStore")
@@ -685,8 +1230,46 @@ class PaymentInitiationWorker:
         ):
             raise TypeError("effect_guard must expose allows_workflow")
         self._effect_guard = effect_guard
+        if stripe_reconciler is not None and not callable(
+            getattr(stripe_reconciler, "reconcile", None)
+        ):
+            raise TypeError("stripe_reconciler must expose reconcile")
+        self._stripe_reconciler = stripe_reconciler
 
     def run_once(self, *, now: datetime) -> PaymentInitiationResult:
+        if self._stripe_reconciler is not None:
+            reconciliation = self._store.claim_stripe_reconciliation(
+                worker_id=self._worker_id,
+                now=now,
+                lease_ttl=self._lease_ttl,
+            )
+            if reconciliation is not None:
+                try:
+                    reconciled = self._stripe_reconciler.reconcile(
+                        reconciliation.selection,
+                        reconciliation.receipts,
+                        initiation_id=reconciliation.initiation_id,
+                    )
+                    if type(reconciled) is not StripeReconciliationResult:
+                        raise TypeError("Stripe reconciler returned the wrong contract")
+                except Exception:
+                    reconciled = StripeReconciliationResult(
+                        offer=None,
+                        manual_review=True,
+                    )
+                self._store.finish_stripe_reconciliation(
+                    reconciliation,
+                    reconciled,
+                    now=now,
+                )
+                if reconciled.manual_review:
+                    return PaymentInitiationResult(
+                        PaymentInitiationDisposition.MANUAL_REVIEW
+                    )
+                return PaymentInitiationResult(
+                    PaymentInitiationDisposition.COMPLETED,
+                    reconciled.offer,
+                )
         if self._effect_guard is not None and not self._effect_guard.allows_workflow(
             "stripe-payment-initiation"
         ):
@@ -703,6 +1286,9 @@ class PaymentInitiationWorker:
             offer = self._payments.initiate(
                 claim.selection.obligation,
                 claim.selection.method,
+                initiation_id=claim.initiation_id,
+                journal_worker_id=claim.worker_id,
+                journal_fencing_token=claim.fencing_token,
             )
         except Exception:
             self._store.mark_unknown(claim, now=now)
