@@ -97,15 +97,15 @@ git commit -m "fix(v2): isolate runtime credentials by process role"
 - Consumes: `CustomerLanguage.PT_BR | EN` already projected before first `ModelRequest`.
 - Produces: closed Bókun locale mapping (`pt-BR` → provider-supported Portuguese locale; `en` → provider-supported English locale), with no phone on the wire solely for locale selection.
 
-- [ ] RED: inspect the exact first and recursive model requests and assert prompt text cannot authorize the current-message language to override phone-derived locale.
-- [ ] RED: send otherwise identical Bókun commands in `pt-BR` and `en`; assert checkout/main-contact locale fields differ exactly and no unsupported raw locale crosses the transport.
-- [ ] RED: pass two relevant same-domain offers and assert public grounding renders both in deterministic provider-observation order rather than silently selecting the first.
-- [ ] Observe causal failures.
-- [ ] Replace contradictory prompt language with the authenticated-phone contract and explicit prohibition on conversational phone override.
-- [ ] Thread only closed locale into Bókun payload construction and map it at the adapter boundary.
-- [ ] Render every positive observation group that the proposal actually grounds; retain fail-closed domain/amount/date anchors.
-- [ ] Run affected turn, Bókun, public-reply, checkout, and completion projector tests.
-- [ ] Commit:
+- [x] RED: inspect the exact first and recursive model requests and assert prompt text cannot authorize the current-message language to override phone-derived locale.
+- [x] RED: send otherwise identical Bókun commands in `pt-BR` and `en`; assert checkout/main-contact locale fields differ exactly and no unsupported raw locale crosses the transport.
+- [x] RED: pass two relevant same-domain offers and assert public grounding renders both in deterministic provider-observation order rather than silently selecting the first.
+- [x] Observe causal failures.
+- [x] Replace contradictory prompt language with the authenticated-phone contract and explicit prohibition on conversational phone override.
+- [x] Thread only closed locale into Bókun payload construction and map it at the adapter boundary.
+- [x] Render every positive observation group that the proposal actually grounds; retain fail-closed domain/amount/date anchors.
+- [x] Run affected turn, Bókun, public-reply, checkout, and completion projector tests.
+- [x] Commit:
 ```bash
 git add config/v2_luna_system_prompt.txt v2_adapters/provider_http.py v2_application/public_reply.py tests/test_v2_bokun_write_transport.py tests/test_v2_public_reply.py tests/test_v2_turn_executor.py
 git commit -m "fix(v2): enforce phone-derived locale end to end"

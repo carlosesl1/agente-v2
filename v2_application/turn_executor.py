@@ -744,6 +744,28 @@ def _authoritative_phone_locale_projection(
     )
 
 
+def _authoritative_read_locales(
+    requests: tuple[ReadRequest, ...],
+    *,
+    locale: str,
+) -> tuple[ReadRequest, ...]:
+    if type(requests) is not tuple or any(
+        type(item) is not ReadRequest for item in requests
+    ):
+        raise TypeError("read locale authority requires exact read requests")
+    if locale not in {"pt-BR", "en"}:
+        raise ValueError("read locale authority requires a closed phone locale")
+    localized_kinds = {
+        ReadKind.KNOWLEDGE,
+        ReadKind.ACTIVITY,
+        ReadKind.ACTIVITY_DESCRIPTION,
+    }
+    return tuple(
+        replace(item, locale=locale) if item.kind in localized_kinds else item
+        for item in requests
+    )
+
+
 def _collection_reply(
     locale: str,
     *,
@@ -1513,6 +1535,13 @@ class V2TurnExecutor:
         first_proposal = validate_productive_proposal(first_audited.proposal)
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        first_proposal = replace(
+            first_proposal,
+            read_requests=_authoritative_read_locales(
+                first_proposal.read_requests,
+                locale=projection.locale,
+            ),
+        )
         (
             first_private_facts,
             first_public_facts,
@@ -1753,6 +1782,10 @@ class V2TurnExecutor:
                     projection,
                     first_proposal,
                 )
+        read_requests = _authoritative_read_locales(
+            read_requests,
+            locale=projection.locale,
+        )
         authenticated_phone_ready = (
             profile.phone_e164 is not None
             and profile.observed_at <= now < profile.expires_at

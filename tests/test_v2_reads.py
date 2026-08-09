@@ -277,6 +277,36 @@ def test_bokun_private_reread_resolves_raw_id_and_rejects_changed_terms() -> Non
         resolver.resolve(component, now=NOW)
 
 
+def test_activity_read_carries_parent_owned_locale_to_bokun_transport() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(operation, payload):
+        calls.append((operation, payload))
+        return {
+            "product_id": payload["product_id"],
+            "bokun_product_id": "912303",
+            "start_time_id": "start-4ps",
+            "rate_id": "rate-4ps",
+            "adult_pricing_category_id": "857489",
+            "product_public_name": "4Ps Tour",
+            "base_amount": "330.00",
+            "booking_fee_amount": "4.95",
+            "total_amount": "334.95",
+            "price_includes_booking_fee": True,
+            "currency": "BRL",
+            "available": True,
+        }
+
+    request = replace(ACTIVITY_REQUEST, locale="en")
+    BokunReadAdapter(
+        transport=transport,
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    ).read(request)
+
+    assert calls[0][1]["locale"] == "en"
+
+
 def test_bokun_read_exposes_only_fee_inclusive_total_and_binds_quote_scope() -> None:
     calls = []
 

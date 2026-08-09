@@ -132,7 +132,12 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
 
     result = transport(
         "activity",
-        {"product_id": "tour:buracao", "activity_date": "2026-08-10", "participants": 2},
+        {
+            "product_id": "tour:buracao",
+            "activity_date": "2026-08-10",
+            "participants": 2,
+            "locale": "en",
+        },
     )
 
     assert result == {
@@ -152,6 +157,7 @@ def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map
     assert all(request.headers["X-Bokun-Signature"] for request in seen)
     assert seen[0].url.path == "/activity.json/913372"
     assert seen[1].url.path == "/activity.json/913372/availabilities"
+    assert parse_qs(seen[0].url.query.decode())["lang"] == ["en"]
 
 
 def test_bokun_transport_quotes_fee_inclusive_checkout_before_offering() -> None:

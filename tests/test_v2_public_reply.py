@@ -350,3 +350,45 @@ def test_amount_anchor_rejects_an_intervening_foreign_domain_in_same_clause() ->
         )
         is False
     )
+
+
+def test_multiple_positive_options_are_all_grounded_in_provider_order() -> None:
+    lodging = _observation(
+        "cloudbeds",
+        {
+            "options": [
+                {
+                    "offer_id": "offer:" + "d" * 64,
+                    "room_public_name": "Suíte Serra",
+                    "check_in": "2026-09-10",
+                    "check_out": "2026-09-12",
+                    "total_amount": "440.00",
+                    "currency": "BRL",
+                    "available_units": 1,
+                },
+                {
+                    "offer_id": "offer:" + "e" * 64,
+                    "room_public_name": "Dormitório Vale",
+                    "check_in": "2026-09-10",
+                    "check_out": "2026-09-12",
+                    "total_amount": "180.00",
+                    "currency": "BRL",
+                    "available_units": 2,
+                },
+            ]
+        },
+        "d",
+    )
+
+    rendered = grounded_positive_reply((lodging,), locale="en")
+
+    assert rendered == (
+        "I found Suíte Serra available from 2026-09-10 to 2026-09-12 for "
+        "BRL 440.00. Nothing was booked.\n"
+        "I found Dormitório Vale available from 2026-09-10 to 2026-09-12 for "
+        "BRL 180.00. Nothing was booked.",
+    )
+    assert not proposal_grounds_positive_observation(
+        _proposal("Suíte Serra is available for BRL 440.00."),
+        (lodging,),
+    )

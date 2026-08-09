@@ -26,6 +26,7 @@ import yaml
 
 from v2_adapters._provider_common import binding_hash
 from v2_adapters.manychat import ManyChatTransportResponse, ManyChatTransportNotCalled
+from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.providers import (
     ReadKind,
     ReadRequest,
@@ -223,6 +224,16 @@ def _currency(value: object) -> str:
     if re.fullmatch(r"[A-Z]{3}", candidate) is None:
         raise ProviderHTTPError("provider returned a non-canonical currency")
     return candidate
+
+
+def _bokun_languages(locale: object) -> tuple[str, str]:
+    """Map the closed public locale to Bókun query/contact language values."""
+
+    if locale is None or locale == "pt-BR":
+        return "pt_BR", "pt"
+    if locale == "en":
+        return "en", "en"
+    raise ProviderHTTPError("Bókun locale is not supported")
 
 
 def _items(payload: object) -> list[dict[str, object]]:
@@ -1185,7 +1196,10 @@ class BokunHTTPTransport:
         provider_id = self._products.get(canonical_id)
         if provider_id is None:
             raise ProviderHTTPError("Bókun canonical product ID is not configured")
-        meta_path = f"/activity.json/{provider_id}?lang=pt_BR&currency=BRL"
+        provider_locale, _ = _bokun_languages(payload.get("locale"))
+        meta_path = (
+            f"/activity.json/{provider_id}?lang={provider_locale}&currency=BRL"
+        )
         metadata = self._get(meta_path)
         meta = dict(metadata) if isinstance(metadata, Mapping) else (_items(metadata)[0] if _items(metadata) else {})
         if operation == "activity_description":
@@ -1266,6 +1280,7 @@ class BokunHTTPTransport:
             raise ProviderHTTPError("Bókun quote scope is invalid")
         total = self._quote_checkout_total(
             quote_scope=quote_scope,
+            provider_locale=provider_locale,
             product_id=provider_id,
             activity_date=activity_date,
             adults=adults,
@@ -1287,6 +1302,7 @@ class BokunHTTPTransport:
         self,
         *,
         quote_scope: str,
+        provider_locale: str,
         product_id: str,
         activity_date: str,
         adults: int,
@@ -1300,7 +1316,7 @@ class BokunHTTPTransport:
         quote_key = "quote:" + quote_scope
         cart_session_path = (
             f"/shopping-cart.json/session/{session_id}"
-            "?lang=pt_BR&currency=BRL"
+            f"?lang={provider_locale}&currency=BRL"
         )
         status, cart_payload = self._write_request(
             method="GET",
@@ -1317,7 +1333,7 @@ class BokunHTTPTransport:
         ):
             cart_path = (
                 f"/shopping-cart.json/session/{session_id}/activity"
-                "?lang=pt_BR&currency=BRL"
+                f"?lang={provider_locale}&currency=BRL"
             )
             cart_body = {
                 "activityId": product_id,
@@ -1356,7 +1372,7 @@ class BokunHTTPTransport:
         )
         checkout_path = (
             f"/checkout.json/options/shopping-cart/{session_id}"
-            "?lang=pt_BR&currency=BRL"
+            f"?lang={provider_locale}&currency=BRL"
         )
         _, checkout_payload = self._write_request(
             method="GET",
@@ -1645,6 +1661,11 @@ class BokunHTTPTransport:
             or re.fullmatch(r"[A-Z]{2}", country) is None
         ):
             raise ProviderHTTPError("Bókun customer v2 fields are invalid")
+        assert phone is not None
+        customer_language = customer_language_from_phone(phone)
+        provider_locale, contact_language = _bokun_languages(
+            customer_language.value
+        )
         passenger_values = customer["passengers"]
         if not isinstance(passenger_values, list):
             raise ProviderHTTPError("Bókun passenger manifest is invalid")
@@ -1730,7 +1751,7 @@ class BokunHTTPTransport:
         ]
         cart_path = (
             f"/shopping-cart.json/session/{session_id}/activity"
-            "?lang=pt_BR&currency=BRL"
+            f"?lang={provider_locale}&currency=BRL"
         )
         cart_status, cart_payload = self._write_request(
             method="POST",
@@ -1761,7 +1782,7 @@ class BokunHTTPTransport:
             return {"status": "no_effect"}
         checkout_path = (
             f"/checkout.json/options/shopping-cart/{session_id}"
-            "?lang=pt_BR&currency=BRL"
+            f"?lang={provider_locale}&currency=BRL"
         )
         checkout_status, checkout_payload = self._write_request(
             method="GET",
@@ -1780,7 +1801,7 @@ class BokunHTTPTransport:
             "email": email,
             "phoneNumber": phone,
             "nationality": country,
-            "language": "pt",
+            "language": contact_language,
         }
         if passengers[0]["full_name"] == main_name:
             main_contact.update(
@@ -1803,7 +1824,7 @@ class BokunHTTPTransport:
             return {"status": "no_effect"}
         status, submit_payload = self._write_request(
             method="POST",
-            path="/checkout.json/submit?lang=pt_BR&currency=BRL",
+            path=f"/checkout.json/submit?lang={provider_locale}&currency=BRL",
             idempotency_key=idempotency_key + ":submit",
             json_body=submit_body,
             allow_rejection=True,

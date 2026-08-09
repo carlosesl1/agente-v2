@@ -171,6 +171,8 @@ class BokunReadAdapter:
             "children": children,
             "quote_scope": request.query_hash(),
         }
+        if request.locale is not None:
+            query["locale"] = request.locale
         response = exact_dict(self._transport("activity", query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
@@ -225,8 +227,11 @@ class BokunReadAdapter:
         )
 
     def _description(self, request: ReadRequest) -> ReadObservation:
+        query = {"product_id": request.product_id}
+        if request.locale is not None:
+            query["locale"] = request.locale
         response = exact_dict(
-            self._transport("activity_description", {"product_id": request.product_id}),
+            self._transport("activity_description", query),
             "Bókun description",
         )
         provider_product_id = text(response.get("bokun_product_id"), "bokun_product_id")

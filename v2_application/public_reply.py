@@ -169,7 +169,7 @@ def proposal_grounds_positive_observation(
         return False
 
     def group_is_grounded(payloads: tuple[dict[str, object], ...]) -> bool:
-        return any(
+        return all(
             anchors_text(payload) or amount_grounds_payload(payload)
             for payload in payloads
         )
@@ -224,10 +224,13 @@ def grounded_positive_reply(
         return ()
     chunks: list[str] = []
     for payloads in groups:
-        chunk = _render_positive_payload(payloads[0], locale=locale)
-        if chunk is None:
-            return ()
-        chunks.append(chunk)
+        rendered_group: list[str] = []
+        for payload in payloads:
+            chunk = _render_positive_payload(payload, locale=locale)
+            if chunk is None:
+                return ()
+            rendered_group.append(chunk)
+        chunks.append("\n".join(rendered_group))
     return tuple(chunks)
 
 

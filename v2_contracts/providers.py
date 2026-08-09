@@ -137,6 +137,7 @@ class ReadRequest:
             )
         elif self.kind is ReadKind.ACTIVITY:
             self._require_product()
+            self._validate_optional_locale()
             if type(self.activity_date) is not date:
                 raise InvalidReadRequest("activity_date must be an exact date")
             legacy = self.participants is not None
@@ -161,7 +162,6 @@ class ReadRequest:
                 )
             self._require_none(
                 "query",
-                "locale",
                 "check_in",
                 "check_out",
                 "offer_id",
@@ -179,11 +179,11 @@ class ReadRequest:
                 "activity_date",
                 "participants",
             )
-        else:
+        elif self.kind is ReadKind.ACTIVITY_DESCRIPTION:
             self._require_product()
+            self._validate_optional_locale()
             self._require_none(
                 "query",
-                "locale",
                 "check_in",
                 "check_out",
                 "adults",
@@ -192,11 +192,20 @@ class ReadRequest:
                 "participants",
                 "offer_id",
             )
+        else:
+            raise InvalidReadRequest("read kind is unsupported")
 
     def _require_product(self) -> None:
         product_id = _text(self.product_id, "product_id")
         if _PRODUCT_ID_RE.fullmatch(product_id) is None:
             raise InvalidReadRequest("product_id must be a canonical product ID")
+
+    def _validate_optional_locale(self) -> None:
+        if self.locale is None:
+            return
+        locale = _text(self.locale, "locale")
+        if _LOCALE_RE.fullmatch(locale) is None:
+            raise InvalidReadRequest("locale must be canonical")
 
     def _require_none(self, *names: str) -> None:
         populated = [name for name in names if getattr(self, name) is not None]

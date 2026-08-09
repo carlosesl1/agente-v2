@@ -3050,7 +3050,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
             "BRL 1300.00. Nada foi reservado.",
         )
         assert lodging_port.calls == [lodging]
-        assert activity_port.calls == [activity]
+        assert activity_port.calls == [replace(activity, locale="pt-BR")]
         assert len(model.calls) == 3
         assert model.calls[2].selection_review_required is True
         assert tuple(item.provider for item in model.calls[2].observations) == (
@@ -3128,7 +3128,7 @@ def test_authenticated_phone_allows_read_only_package_without_country() -> None:
             "Encontrei Suíte Casal e Buracão disponíveis.",
         )
         assert lodging_port.calls == [lodging]
-        assert activity_port.calls == [activity]
+        assert activity_port.calls == [replace(activity, locale="en")]
         assert len(result.receipt.read_observations) == 2
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
@@ -4600,3 +4600,20 @@ def test_first_model_request_and_committed_language_follow_authenticated_phone()
         ] == "en"
     finally:
         store.close()
+
+
+def test_parent_overrides_model_read_locale_before_provider_dispatch() -> None:
+    from v2_application import turn_executor as module
+
+    request = ReadRequest(
+        request_id="read:locale-authority",
+        kind=ReadKind.ACTIVITY,
+        locale="pt-BR",
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 11),
+        participants=1,
+    )
+
+    localized = module._authoritative_read_locales((request,), locale="en")
+
+    assert localized == (replace(request, locale="en"),)
