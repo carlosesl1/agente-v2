@@ -88,7 +88,7 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
     private_name = "Pessoa E2E Silva"
     private_email = "split.origin@example.invalid"
     private_country_name = "Brasil"
-    authenticated_phone = "".join(("+1", "202", "555", "0199"))
+    authenticated_phone = "".join(("+55", "75", "99999", "0199"))
 
     collect_batch = _batch(
         suffix="collect",
@@ -857,7 +857,7 @@ def test_manychat_change_after_confirmation_decision_is_source_aware(
     )
     try:
         summary = executor.execute(summary_batch)
-        assert "Só para confirmar" in summary.reply_chunks[0]
+        assert "Just to confirm" in summary.reply_chunks[0]
         if mutation_timing == "decision":
             profile.mutate_before_second_next_read()
 

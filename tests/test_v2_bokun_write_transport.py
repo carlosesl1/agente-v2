@@ -1506,3 +1506,39 @@ def test_bokun_submit_uses_fee_inclusive_invoice_due_not_activity_subtotal() -> 
 
     assert result == {"status": "confirmed", "booking_id": "booking-fee-123"}
     assert len(seen) == 3
+
+
+def test_bokun_readback_accepts_distinct_component_booking_ids_below_principal() -> (
+    None
+):
+    readback = {
+        "bookingId": "booking-primary",
+        "status": "PENDING",
+        "totalPrice": 300.0,
+        "totalDue": 304.5,
+        "currency": "BRL",
+        "activityBookings": [
+            {
+                "bookingId": "activity-booking-1",
+                "activityId": "913372",
+                "date": "2026-08-11",
+                "pricingCategoryBookings": [
+                    {
+                        "bookingId": "passenger-booking-1",
+                        "pricingCategoryId": "adult-1",
+                    }
+                ],
+            }
+        ],
+    }
+
+    BokunHTTPTransport._validate_booking_readback_v2(
+        readback,
+        booking_id="booking-primary",
+        product_id="913372",
+        activity_date="2026-08-11",
+        category_ids=("adult-1",),
+        expected_base_amount=Decimal("300.00"),
+        expected_amount=Decimal("304.50"),
+        expected_currency="BRL",
+    )

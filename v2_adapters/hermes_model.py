@@ -223,6 +223,13 @@ FRESH CONSULTATION REUSE:
   reserve, confirm, or change scope, say a fresh check will be required for that action.
 """.strip()
 
+_ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX: Final = """
+KNOWN ACTIVITY INFORMATION ROUTING:
+- When the customer asks about a known activity's difficulty, duration, preparation, or what to bring, request activity_description in the initial frame.
+- Use knowledge in that initial frame only for non-catalog context. If both are relevant, request both before observations are returned; never defer activity_description to a recursive read.
+- A request not to check availability forbids availability reads, not the read-only activity_description needed to answer the product question.
+""".strip()
+
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
@@ -331,6 +338,8 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _ACTIVE_EXECUTION_SYSTEM_SUFFIX
                 + "\n\n"
                 + _RECAP_REUSE_SYSTEM_SUFFIX
+                + "\n\n"
+                + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
             ),
             "messages": [["user", _canonical(user_payload).decode("utf-8")]],
         }
@@ -801,7 +810,7 @@ class HermesModelAdapter:
             session_hash = hashlib.sha256(stdin_bytes).hexdigest()[:32]
             return (
                 AuditedModelTurn.from_frames(
-                    proposal=self._recursive_read_fallback(request),
+                    proposal=self._recursive_read_fallback(request, proposal),
                     frames=(frame,),
                     ephemeral_session_id=(
                         f"deterministic:recursive-read-fallback:{session_hash}"
@@ -838,7 +847,10 @@ class HermesModelAdapter:
         )
 
     @staticmethod
-    def _recursive_read_fallback(request: ModelRequest) -> ModelProposal:
+    def _recursive_read_fallback(
+        request: ModelRequest,
+        proposal: ModelProposal,
+    ) -> ModelProposal:
         negative_providers = {
             observation.provider
             for observation in request.observations
@@ -869,8 +881,25 @@ class HermesModelAdapter:
                 else "A hospedagem solicitada não está disponível para as datas consultadas. "
                 "Nada foi reservado. Posso consultar outras datas."
             )
+        elif ReadKind.ACTIVITY_DESCRIPTION in {
+            item.kind for item in proposal.read_requests
+        }:
+            text = (
+                "I did not find enough verified detail to answer safely. I can check "
+                "the activity's official description in a new lookup."
+                if english
+                else "Não encontrei detalhes verificados suficientes para responder com "
+                "segurança. Posso verificar a descrição oficial do passeio em uma nova "
+                "consulta."
+            )
         else:
-            return HermesModelAdapter._fallback_proposal(request)
+            text = (
+                "I couldn't safely complete that response from the verified information. "
+                "Please ask me to check it again."
+                if english
+                else "Não consegui concluir essa resposta com segurança a partir das "
+                "informações verificadas. Peça para eu consultar novamente."
+            )
         return ModelProposal(
             source_event_id=request.source_event_id,
             intent="inform",

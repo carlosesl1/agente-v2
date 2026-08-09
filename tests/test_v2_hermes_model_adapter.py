@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 import unicodedata
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -859,3 +859,106 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
     assert turn.closure.ephemeral_session_id.startswith(
         "deterministic:recursive-read-fallback:"
     )
+
+
+def test_prompt_routes_known_activity_difficulty_questions_to_activity_description() -> (
+    None
+):
+    request = ModelRequest(
+        request_id="request:activity-information-routing",
+        lead_id="manychat:activity-information-routing",
+        source_event_id="batch:activity-information-routing",
+        message=(
+            "A Cachoeira do Sossego é adequada para quem não é atleta? "
+            "O que devemos levar? Não consulte disponibilidade."
+        ),
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    prompt = envelope["system_prompt"]
+
+    assert "KNOWN ACTIVITY INFORMATION ROUTING" in prompt
+    assert "difficulty, duration, preparation, or what to bring" in prompt
+    assert "activity_description in the initial frame" in prompt
+
+
+def test_incomplete_informational_observation_fails_honestly_without_repeat_request() -> (
+    None
+):
+    observed_at = datetime(2026, 8, 6, 19, 25, tzinfo=timezone.utc)
+    request = ModelRequest(
+        request_id="request:sossego-information-followup",
+        lead_id="manychat:sossego-information-followup",
+        source_event_id="batch:sossego-information-followup",
+        message=(
+            "A Cachoeira do Sossego é adequada para quem não é atleta? "
+            "O que devemos levar?"
+        ),
+        locale="pt-BR",
+        state_version=0,
+        observations=(
+            ReadObservation(
+                request_hash="a" * 64,
+                provider="cerebro",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "answer": "Conteúdo geral sem a descrição específica do passeio.",
+                    "sources": ["general"],
+                },
+                private_binding_hash="b" * 64,
+            ),
+        ),
+    )
+    recursive = {
+        "schema": "v2-model-proposal-v6",
+        "source_event_id": request.source_event_id,
+        "intent": "inform",
+        "reply_chunks": ["Vou consultar a descrição específica do passeio."],
+        "facts": [{"name": "product_id", "value": "product:sossego"}],
+        "read_requests": [
+            {
+                "request_id": "read:sossego-description",
+                "kind": "activity_description",
+                "product_id": "product:sossego",
+            }
+        ],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "selection_requested": False,
+        "pending_disposition": None,
+        "passengers": [],
+    }
+    payload = json.dumps(recursive, ensure_ascii=False).encode()
+
+    def run(command, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + payload,
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"recursive-information-fallback-key-001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert turn.proposal.reply_chunks == (
+        "Não encontrei detalhes verificados suficientes para responder com segurança. "
+        "Posso verificar a descrição oficial do passeio em uma nova consulta.",
+    )
+    assert "repita" not in " ".join(turn.proposal.reply_chunks).casefold()
+    assert turn.proposal.read_requests == ()
+    assert turn.proposal.effect_proposals == ()

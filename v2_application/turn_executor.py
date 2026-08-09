@@ -106,6 +106,7 @@ from v2_application.turn_plan import (
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
+from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.model import (
     AuditedModelTurn,
     ConsultationHistoryEntry,
@@ -709,6 +710,38 @@ def _partition_private_customer_facts(
         if name in invalid
     )
     return tuple(private), tuple(public), invalid_names, phone_proposed
+
+
+def _authoritative_language_facts(
+    facts: tuple[ModelFact, ...],
+    locale: str,
+) -> tuple[ModelFact, ...]:
+    if type(facts) is not tuple or any(type(item) is not ModelFact for item in facts):
+        raise TypeError("language authority requires exact model facts")
+    if not any(item.name == "language" for item in facts):
+        return facts
+    return (
+        *(item for item in facts if item.name != "language"),
+        ModelFact("language", locale),
+    )
+
+
+def _authoritative_phone_locale_projection(
+    projection: ConversationProjection,
+    locale: str,
+) -> ConversationProjection:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("phone locale authority requires an exact projection")
+    language_facts = tuple(
+        fact for fact in projection.facts if fact.name == "language"
+    )
+    if len(language_facts) == 1 and language_facts[0].value.value == locale:
+        return replace(projection, locale=locale)
+    return replace(
+        projection,
+        locale=locale,
+        facts=tuple(fact for fact in projection.facts if fact.name != "language"),
+    )
 
 
 def _collection_reply(
@@ -1414,6 +1447,14 @@ class V2TurnExecutor:
         profile = self._profile.read(batch.lead_id, now=now)
         if type(profile) is not PrivateCustomerBinding:
             raise TypeError("profile port must return exact PrivateCustomerBinding")
+        if (
+            profile.phone_e164 is not None
+            and profile.observed_at <= now < profile.expires_at
+        ):
+            projection = _authoritative_phone_locale_projection(
+                projection,
+                customer_language_from_phone(profile.phone_e164).value,
+            )
         private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")
@@ -1449,7 +1490,10 @@ class V2TurnExecutor:
             locale=projection.locale,
             state_version=current.version,
             consultation_history=consultation_history,
-            state_facts=_state_model_facts(projection),
+            state_facts=_authoritative_language_facts(
+                _state_model_facts(projection),
+                projection.locale,
+            ),
             private_customer_fact_names=_private_customer_fact_names(
                 projection,
                 private_facts=private_facts,
@@ -1475,6 +1519,10 @@ class V2TurnExecutor:
             first_invalid_private_facts,
             _first_phone_proposed,
         ) = _partition_private_customer_facts(first_proposal)
+        first_public_facts = _authoritative_language_facts(
+            first_public_facts,
+            projection.locale,
+        )
         if first_private_facts:
             private_facts = _persist_private_collection(
                 self._private_customer_facts,
@@ -1534,7 +1582,10 @@ class V2TurnExecutor:
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
             and _structured_selection_review_required(
-                _state_model_facts(projection),
+                _authoritative_language_facts(
+                    _state_model_facts(projection),
+                    projection.locale,
+                ),
                 first_proposal.facts,
                 private_profile_complete=effective_profile_complete,
                 passenger_manifest_complete=_passenger_manifest_complete(
@@ -1587,6 +1638,10 @@ class V2TurnExecutor:
                 review_invalid_private_facts,
                 _review_phone_proposed,
             ) = _partition_private_customer_facts(review_proposal)
+            review_public_facts = _authoritative_language_facts(
+                review_public_facts,
+                projection.locale,
+            )
             if review_private_facts:
                 private_facts = _persist_private_collection(
                     self._private_customer_facts,
@@ -1822,7 +1877,10 @@ class V2TurnExecutor:
                 state_version=current.version,
                 observations=v2_observations,
                 consultation_history=consultation_history,
-                state_facts=_state_model_facts(projection),
+                state_facts=_authoritative_language_facts(
+                    _state_model_facts(projection),
+                    projection.locale,
+                ),
                 private_customer_fact_names=_private_customer_fact_names(
                     projection,
                     private_facts=private_facts,
@@ -1866,6 +1924,10 @@ class V2TurnExecutor:
                 second_invalid_private_facts,
                 _second_phone_proposed,
             ) = _partition_private_customer_facts(proposal)
+            second_public_facts = _authoritative_language_facts(
+                second_public_facts,
+                projection.locale,
+            )
             if second_private_facts:
                 private_facts = _persist_private_collection(
                     self._private_customer_facts,
@@ -1971,7 +2033,10 @@ class V2TurnExecutor:
                 proposal = _repair_requested_activity_selection(
                     first_proposal,
                     proposal,
-                    state_facts=_state_model_facts(projection),
+                    state_facts=_authoritative_language_facts(
+                        _state_model_facts(projection),
+                        projection.locale,
+                    ),
                     observations=v2_observations,
                     private_profile_complete=effective_profile_complete,
                     passenger_manifest_complete=_passenger_manifest_complete(

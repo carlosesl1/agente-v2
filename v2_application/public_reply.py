@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadObservation
@@ -67,32 +69,110 @@ def proposal_grounds_positive_observation(
     if not groups:
         return False
     text = _fold_public_text(" ".join(proposal.reply_chunks))
-    negative_markers = (" nao ", " not ", "indisponivel", "unavailable")
-    if any(marker in f" {text} " for marker in negative_markers):
+    availability_contradictions = (
+        r"\bnao\s+(?:esta\s+)?disponivel\b",
+        r"\bnao\s+ha\s+disponibilidade\b",
+        r"\bindisponivel\b",
+        r"\bsem\s+disponibilidade\b",
+        r"\besgotad[oa]s?\b",
+        r"\bnot\s+available\b",
+        r"\bno\s+availability\b",
+        r"\bunavailable\b",
+        r"\bsold\s+out\b",
+    )
+    if any(re.search(pattern, text) for pattern in availability_contradictions):
         return False
-    positive_markers = ("disponivel", "available")
-    if len(groups) == 1 and any(marker in text for marker in positive_markers):
-        return True
+    positive_markers = ("disponivel", "disponiveis", "available")
+    if not any(marker in text for marker in positive_markers):
+        return False
+
+    def anchors_text(payload: dict[str, object]) -> bool:
+        anchors = (
+            payload.get("room_public_name"),
+            payload.get("product_public_name"),
+        )
+        for anchor in anchors:
+            if type(anchor) is not str or not anchor:
+                continue
+            folded_anchor = _fold_public_text(anchor)
+            if folded_anchor in text:
+                return True
+            if any(
+                len(token) >= 4
+                and re.search(rf"(?<!\\w){re.escape(token)}(?!\\w)", text)
+                for token in folded_anchor.split()
+            ):
+                return True
+        return False
+
+    def amount_grounds_payload(payload: dict[str, object]) -> bool:
+        if type(payload.get("room_public_name")) is str:
+            domain_pattern = re.compile(
+                r"\b(?:accommodations?|lodgings?|hostels?|rooms?|hospedagem|"
+                r"quartos?|suites?|dorms?|dormitorios?)\b"
+            )
+            competing_pattern = re.compile(
+                r"\b(?:activities|activity|tours?|passeios?|roteiros?|cachoeiras?|"
+                r"trilhas?|transfers?|transportes?|traslados?)\b"
+            )
+        elif type(payload.get("product_public_name")) is str:
+            domain_pattern = re.compile(
+                r"\b(?:activities|activity|tours?|passeios?|roteiros?|cachoeiras?|"
+                r"trilhas?)\b"
+            )
+            competing_pattern = re.compile(
+                r"\b(?:accommodations?|lodgings?|hostels?|rooms?|hospedagem|"
+                r"quartos?|suites?|dorms?|dormitorios?|transfers?|transportes?|"
+                r"traslados?)\b"
+            )
+        else:
+            return False
+        amount = payload.get("total_amount")
+        currency = payload.get("currency")
+        if not isinstance(amount, str) or not isinstance(currency, str):
+            return False
+        try:
+            decimal_amount = Decimal(amount)
+        except InvalidOperation:
+            return False
+        fixed = f"{decimal_amount:.2f}"
+        compact = format(decimal_amount.normalize(), "f")
+        anchors = (
+            f"{currency} {fixed}",
+            f"{currency} {fixed.replace('.', ',')}",
+            f"{currency} {compact}",
+            f"{currency} {compact.replace('.', ',')}",
+        )
+        price_connector = re.compile(
+            r"\b(?:from|for|por|a\s+partir\s+de|at|"
+            r"total(?:\s+(?:de|of))?|valor(?:\s+de)?|price(?:\s+of)?)\s*$"
+        )
+        for anchor in anchors:
+            folded_anchor = _fold_public_text(anchor)
+            pattern = re.compile(
+                rf"(?<![\d.,]){re.escape(folded_anchor)}(?!\d|[.,]\d)"
+            )
+            for match in pattern.finditer(text):
+                clause_start = max(
+                    text.rfind(delimiter, 0, match.start())
+                    for delimiter in (".", "!", "?", ";", "\n")
+                )
+                prefix = text[clause_start + 1 : match.start()]
+                domain_matches = tuple(domain_pattern.finditer(prefix))
+                if not domain_matches:
+                    continue
+                relation = prefix[domain_matches[-1].end() :]
+                if competing_pattern.search(relation) is not None:
+                    continue
+                if price_connector.search(relation) is not None:
+                    return True
+        return False
 
     def group_is_grounded(payloads: tuple[dict[str, object], ...]) -> bool:
-        for payload in payloads:
-            anchors = (
-                payload.get("room_public_name"),
-                payload.get("product_public_name"),
-                payload.get("total_amount"),
-            )
-            for anchor in anchors:
-                if type(anchor) is not str or not anchor:
-                    continue
-                folded_anchor = _fold_public_text(anchor)
-                if folded_anchor in text:
-                    return True
-                if any(
-                    len(token) >= 4 and token in text
-                    for token in folded_anchor.split()
-                ):
-                    return True
-        return False
+        return any(
+            anchors_text(payload) or amount_grounds_payload(payload)
+            for payload in payloads
+        )
 
     return all(group_is_grounded(payloads) for payloads in groups)
 

@@ -31,6 +31,7 @@ from v2_application.public_delivery import (
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
+    _authoritative_phone_locale_projection,
     _critical_confirmation_bound,
     _critical_outcome,
     _critical_model_reads_allowed,
@@ -84,6 +85,24 @@ def test_critical_outcome_is_separate_from_material_state_facts() -> None:
 
     assert _critical_outcome(projection) == "proposal_revoked_after_refresh"
     assert _state_model_facts(projection) == ()
+
+
+def test_phone_locale_authority_removes_a_stale_model_language_fact() -> None:
+    projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(
+            TypedFact("language", StringSlot("pt-BR"), "d" * 64),
+            TypedFact("service", StringSlot("hostel"), "e" * 64),
+        ),
+        reservation_execution_projection=None,
+    )
+
+    authoritative = _authoritative_phone_locale_projection(projection, "en")
+
+    assert authoritative.locale == "en"
+    assert tuple(fact.name for fact in authoritative.facts) == ("service",)
 
 
 def test_parent_does_not_promote_birth_or_gender_from_raw_customer_text(
@@ -597,12 +616,18 @@ class PhoneOnlyManyChatContact:
             content_hash="8" * 64,
             full_name=None,
             email=None,
-            phone_e164="".join(("+1", "202", "555", "0199")),
+            phone_e164="".join(("+55", "75", "99999", "0199")),
             country_code=None,
             observed_at=now,
             expires_at=now + timedelta(minutes=5),
             complete=False,
         )
+
+
+class ForeignPhoneOnlyManyChatContact(PhoneOnlyManyChatContact):
+    def read(self, lead_id: str, *, now: datetime) -> PrivateCustomerBinding:
+        value = super().read(lead_id, now=now)
+        return replace(value, phone_e164="".join(("+1", "202", "555", "0199")))
 
 
 class UnusableManyChatPhone:
@@ -1210,7 +1235,10 @@ def test_executor_accepts_observation_stamped_after_turn_start() -> None:
     try:
         result = executor.execute(BATCH)
 
-        assert result.reply_chunks == ("Temos uma opção disponível.",)
+        assert result.reply_chunks == (
+            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
+            "por BRL 480.00. Nada foi reservado.",
+        )
         assert len(port.calls) == 1
         assert len(model.calls) == 2
     finally:
@@ -2806,7 +2834,7 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
         assert type(state.workflow) is AwaitingConfirmationState
-        assert state.workflow.draft.customer.phone_e164 == "+" + "12025550199"
+        assert state.workflow.draft.customer.phone_e164 == "+" + "5575999990199"
         assert state.workflow.draft.customer.phone_e164 != typed_phone
         reopened = SQLiteBoundaryStore.open_readonly_v8(boundary_path)
         reopened.close()
@@ -4349,11 +4377,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert confirmed.receipt.committed_state_version == 2
         assert replayed.replayed is True
         assert replayed.receipt == confirmed.receipt
-        expected_confirmation_reply = (
-            "Perfect — I’ll process your booking now."
-            if selection_language == "en"
-            else "Perfeito — vou processar sua reserva agora."
-        )
+        expected_confirmation_reply = "Perfeito — vou processar sua reserva agora."
         assert confirmed.reply_chunks == (expected_confirmation_reply,)
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
@@ -4540,5 +4564,39 @@ def test_executor_rejects_model_source_identity_before_any_turn_commit() -> None
             "SELECT state FROM boundary_dispatch_authority WHERE allocation_id=?",
             (AUTHORITY.allocation_ids[0],),
         ).fetchone() == ("available",)
+    finally:
+        store.close()
+
+
+def test_first_model_request_and_committed_language_follow_authenticated_phone() -> (
+    None
+):
+    proposal = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Hello. How can I help?",),
+        facts=(ModelFact("language", "pt-BR"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=ForeignPhoneOnlyManyChatContact(store),
+    )
+    try:
+        result = executor.execute(BATCH)
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+
+        assert model.calls[0].locale == "en"
+        assert result.reply_chunks == proposal.reply_chunks
+        assert projection is not None
+        assert projection.locale == "en"
+        assert {fact.name: fact.value.value for fact in projection.facts}[
+            "language"
+        ] == "en"
     finally:
         store.close()
