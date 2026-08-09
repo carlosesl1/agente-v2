@@ -17,7 +17,7 @@ from v2_application.financial_webhooks import (
 )
 from v2_host.app import create_app
 from v2_host.composition import V2Container, V2Role
-from v2_host.settings import V2Settings
+from v2_host.settings import V2ProcessRole, V2Settings
 
 
 def build_api_app(
@@ -27,39 +27,39 @@ def build_api_app(
 ) -> FastAPI:
     if type(settings) is not V2Settings:
         raise TypeError("settings must be exact V2Settings")
-    if not settings.financial_webhooks_configured:
-        raise ValueError("API role requires complete financial webhook configuration")
     container = V2Container.open(settings=settings, role=V2Role.API)
     try:
-        trust = PaymentEvidenceTrust(
-            pix_receiver_profile_id=settings.pix_receiver_profile_id,
-            wise_signer_profile_id=settings.wise_signer_profile_id,
-            wise_account_profile_id=settings.wise_account_profile_id,
-            stripe_account_profile_id=settings.stripe_account_profile_id,
-        )
-        secrets = {
-            FinancialProvider.STRIPE: settings.stripe_webhook_secret,
-            FinancialProvider.WISE: settings.wise_webhook_secret,
-            FinancialProvider.PIX: settings.pix_webhook_secret,
-        }
-        verifiers = {
-            provider: HmacFinancialWebhookVerifier(
-                provider=provider,
-                secret=secret,
-                trust=trust,
+        verifiers = None
+        acceptor = None
+        if settings.financial_webhooks_configured:
+            trust = PaymentEvidenceTrust(
+                pix_receiver_profile_id=settings.pix_receiver_profile_id,
+                wise_signer_profile_id=settings.wise_signer_profile_id,
+                wise_account_profile_id=settings.wise_account_profile_id,
+                stripe_account_profile_id=settings.stripe_account_profile_id,
             )
-            for provider, secret in secrets.items()
-        }
+            secrets = {
+                FinancialProvider.STRIPE: settings.stripe_webhook_secret,
+                FinancialProvider.WISE: settings.wise_webhook_secret,
+                FinancialProvider.PIX: settings.pix_webhook_secret,
+            }
+            verifiers = {
+                provider: HmacFinancialWebhookVerifier(
+                    provider=provider,
+                    secret=secret,
+                    trust=trust,
+                )
+                for provider, secret in secrets.items()
+            }
+            acceptor = FinancialEvidenceAcceptor(settings.sqlite_paths["followup"])
         app = create_app(
             settings,
             container.inbox,
             clock=clock,
             financial_verifiers=verifiers,
-            financial_evidence_acceptor=FinancialEvidenceAcceptor(
-                settings.sqlite_paths["followup"]
-            ),
+            financial_evidence_acceptor=acceptor,
             readiness=container.readiness,
-            require_financial_webhooks=True,
+            require_financial_webhooks=False,
         )
     except BaseException:
         container.close()
@@ -79,7 +79,9 @@ def build_api_app(
 
 
 def app_from_env(environ: Mapping[str, str] | None = None) -> FastAPI:
-    return build_api_app(V2Settings.from_env(environ))
+    return build_api_app(
+        V2Settings.from_env(environ, process_role=V2ProcessRole.API)
+    )
 
 
 def main() -> None:

@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.title="Chapada Agente V2" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$VCS_REF" \
       org.opencontainers.image.created="$BUILD_DATE" \
-      org.opencontainers.image.source="https://github.com/nesquena/agente-v2"
+      org.opencontainers.image.source="https://github.com/carlosesl1/agente-v2"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

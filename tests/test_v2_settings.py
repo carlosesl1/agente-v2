@@ -227,6 +227,41 @@ def test_manychat_action_configuration_is_closed_and_strict(tmp_path: Path) -> N
         V2Settings.from_env(env)
 
 
+def test_settings_repr_redacts_every_secret_and_private_value(tmp_path: Path) -> None:
+    env = _controlled_env(tmp_path)
+    sentinels = {
+        "V2_MANYCHAT_WEBHOOK_SECRET": "SENTINEL_WEBHOOK_PRIVATE",
+        "V2_STRIPE_WEBHOOK_SECRET": "SENTINEL_STRIPE_WEBHOOK_PRIVATE",
+        "V2_WISE_WEBHOOK_SECRET": "SENTINEL_WISE_WEBHOOK_PRIVATE",
+        "V2_PIX_WEBHOOK_SECRET": "SENTINEL_PIX_WEBHOOK_PRIVATE",
+        "V2_PIX_RECEIVER_PROFILE_ID": "SENTINEL_PIX_PROFILE_PRIVATE",
+        "V2_WISE_SIGNER_PROFILE_ID": "SENTINEL_WISE_SIGNER_PRIVATE",
+        "V2_WISE_ACCOUNT_PROFILE_ID": "SENTINEL_WISE_ACCOUNT_PRIVATE",
+        "V2_STRIPE_ACCOUNT_PROFILE_ID": "SENTINEL_STRIPE_ACCOUNT_PRIVATE",
+        "V2_CLOUDBEDS_API_KEY": "SENTINEL_CLOUDBEDS_PRIVATE",
+        "V2_CLOUDBEDS_PROPERTY_ID": "SENTINEL_PROPERTY_PRIVATE",
+        "V2_BOKUN_ACCESS_KEY": "SENTINEL_BOKUN_ACCESS_PRIVATE",
+        "V2_BOKUN_SECRET_KEY": "SENTINEL_BOKUN_SECRET_PRIVATE",
+        "V2_BOKUN_PRODUCT_MAP_JSON": (
+            '{"product:buracao":"SENTINEL_BOKUN_PRODUCT_PRIVATE"}'
+        ),
+        "V2_MANYCHAT_API_KEY": "SENTINEL_MANYCHAT_API_PRIVATE",
+        "V2_STRIPE_SECRET_KEY": "SENTINEL_STRIPE_LEGACY_PRIVATE",
+        "V2_STRIPE_HOSTEL_SECRET_KEY": "SENTINEL_STRIPE_HOSTEL_PRIVATE",
+        "V2_STRIPE_AGENCY_SECRET_KEY": "SENTINEL_STRIPE_AGENCY_PRIVATE",
+        "V2_HERMES_SYSTEM_PROMPT": "SENTINEL_SYSTEM_PROMPT_PRIVATE",
+    }
+    env.update(sentinels)
+
+    rendered = repr(V2Settings.from_env(env))
+
+    assert rendered.startswith("V2Settings(")
+    assert "process_role=" in rendered
+    assert "runtime_mode=controlled_write" in rendered
+    assert all(value not in rendered for value in sentinels.values())
+    assert "SENTINEL_" not in rendered
+
+
 def test_versioned_hermes_system_prompt_can_be_loaded_by_absolute_path(
     tmp_path: Path,
 ) -> None:

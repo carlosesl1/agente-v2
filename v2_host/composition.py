@@ -227,7 +227,7 @@ class V2Container:
         if self.role is V2Role.API:
             capabilities = {
                 "financial_webhooks": (
-                    "ready" if self.settings.financial_webhooks_configured else "missing"
+                    "ready" if self.settings.financial_webhooks_configured else "closed"
                 ),
                 "manychat_ingress": "ready",
             }
@@ -259,13 +259,7 @@ class V2Container:
             )
         if counts != expected:
             reasons.append("durable_owner_count_mismatch")
-        if not self.settings.financial_webhooks_configured:
-            reasons.append("financial_webhooks_not_configured")
-        ready = (
-            counts == expected
-            and self.settings.financial_webhooks_configured
-            and not reasons
-        )
+        ready = counts == expected and not reasons
         return V2Readiness(
             status="ready" if ready else "not_ready",
             role=self.role,

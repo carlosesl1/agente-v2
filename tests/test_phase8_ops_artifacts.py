@@ -18,11 +18,22 @@ def _environment() -> dict[str, object]:
     assert set(services) == {"api", "worker"}
     api = services["api"]
     worker = services["worker"]
-    assert worker["environment"] == api["environment"] | {
-        "V2_WORKER_FACTORY": "v2_host.production:build_worker_set",
-        "V2_WORKER_INTERVAL_SECONDS": "${V2_WORKER_INTERVAL_SECONDS:-0.25}",
-    }
-    return api["environment"]
+    api_environment = api["environment"]
+    worker_environment = worker["environment"]
+    assert api_environment["V2_PROCESS_ROLE"] == "api"
+    assert worker_environment["V2_PROCESS_ROLE"] == "worker"
+    for name in (
+        "V2_RUNTIME_MODE",
+        "V2_CANDIDATE_GIT_SHA",
+        "V2_CANDIDATE_IMAGE_DIGEST",
+        "V2_ALLOWED_SUBSCRIBER_IDS",
+        "V2_GLOBAL_KILL_SWITCH",
+        "V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX",
+    ):
+        assert api_environment[name] == worker_environment[name]
+    assert "V2_MANYCHAT_WEBHOOK_SECRET" not in worker_environment
+    assert "V2_CLOUDBEDS_API_KEY" not in api_environment
+    return worker_environment
 
 
 def test_compose_pins_image_and_runtime_identity() -> None:
@@ -33,13 +44,18 @@ def test_compose_pins_image_and_runtime_identity() -> None:
         )
         assert service["user"] == "${V2_RUNTIME_UID:-1001}:${V2_RUNTIME_GID:-1001}"
         assert "${V2_STATE_DIR:?set V2_STATE_DIR}:/data" in service["volumes"]
-        assert "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes" in service[
-            "volumes"
-        ]
         assert (
             "${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}:"
             "/run/v2/public-authority.json:ro"
         ) in service["volumes"]
+    api = payload["services"]["api"]
+    worker = payload["services"]["worker"]
+    assert "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes" not in api[
+        "volumes"
+    ]
+    assert "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes" in worker[
+        "volumes"
+    ]
 
 
 def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:

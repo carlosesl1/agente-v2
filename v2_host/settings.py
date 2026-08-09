@@ -30,6 +30,14 @@ class StripeEnvironment(str, Enum):
     LIVE = "live"
 
 
+class V2ProcessRole(str, Enum):
+    """Closed process roles used to scope runtime configuration."""
+
+    API = "api"
+    WORKER = "worker"
+    COMBINED = "combined"
+
+
 def _env_bool(source: Mapping[str, str], name: str, *, default: bool = False) -> bool:
     raw = source.get(name, "true" if default else "false").strip().casefold()
     if raw in {"false", "0"}:
@@ -135,12 +143,13 @@ def _hex_key(raw: str) -> bytes:
     return value
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class V2Settings:
     """Fail-closed settings for API and productive worker roles."""
 
     webhook_secret: str
     sqlite_path: Path
+    process_role: V2ProcessRole = V2ProcessRole.COMBINED
     stripe_webhook_secret: str = ""
     wise_webhook_secret: str = ""
     pix_webhook_secret: str = ""
@@ -207,11 +216,38 @@ class V2Settings:
     read_probe_product_id: str = ""
     read_probe_interval_seconds: int = 60
 
+    def __repr__(self) -> str:
+        enabled_gates = tuple(
+            name for name, enabled in self.real_effect_gates.items() if enabled
+        )
+        candidate_sha = self.candidate_git_sha[:12] or "unset"
+        candidate_digest = self.candidate_image_digest[:19] or "unset"
+        return (
+            "V2Settings("
+            f"process_role={self.process_role.value},"
+            f"runtime_mode={self.runtime_mode.value},"
+            f"sqlite_configured={bool(self.sqlite_path)},"
+            f"candidate_git_sha={candidate_sha},"
+            f"candidate_image_digest={candidate_digest},"
+            f"enabled_effect_gates={enabled_gates!r}"
+            ")"
+        )
+
     def __post_init__(self) -> None:
-        if type(self.webhook_secret) is not str or not self.webhook_secret.strip():
-            raise ValueError("webhook_secret is required")
-        if "\x00" in self.webhook_secret:
+        if type(self.process_role) is not V2ProcessRole:
+            raise TypeError("process_role must be exact V2ProcessRole")
+        owns_api = self.process_role in {
+            V2ProcessRole.API,
+            V2ProcessRole.COMBINED,
+        }
+        owns_worker = self.process_role in {
+            V2ProcessRole.WORKER,
+            V2ProcessRole.COMBINED,
+        }
+        if type(self.webhook_secret) is not str or "\x00" in self.webhook_secret:
             raise ValueError("webhook_secret may not contain NUL")
+        if owns_api and not self.webhook_secret.strip():
+            raise ValueError("webhook_secret is required")
         financial_values = (
             self.stripe_webhook_secret,
             self.wise_webhook_secret,
@@ -223,10 +259,31 @@ class V2Settings:
         )
         if any(type(value) is not str or "\x00" in value for value in financial_values):
             raise ValueError("financial webhook settings must be NUL-free exact text")
-        if any(bool(value) for value in financial_values) and not all(
+        if owns_api and any(bool(value) for value in financial_values) and not all(
             bool(value) for value in financial_values
         ):
             raise ValueError("financial webhook secrets and trust profiles are all-or-none")
+        if self.process_role is V2ProcessRole.WORKER and (
+            self.webhook_secret or any(financial_values)
+        ):
+            raise ValueError("worker role may not contain ingress credentials")
+        worker_only_values = (
+            self.cloudbeds_api_key,
+            self.cloudbeds_property_id,
+            self.cloudbeds_source_id,
+            self.bokun_access_key,
+            self.bokun_secret_key,
+            self.manychat_api_key,
+            self.stripe_secret_key,
+            self.stripe_hostel_secret_key,
+            self.stripe_agency_secret_key,
+            self.hermes_command,
+            self.hermes_system_prompt,
+            self.hermes_transcript_key,
+            self.knowledge_base_path,
+        )
+        if self.process_role is V2ProcessRole.API and any(worker_only_values):
+            raise ValueError("api role may not contain worker credentials or model state")
         if not isinstance(self.sqlite_path, Path) or not self.sqlite_path.is_absolute():
             raise ValueError("sqlite_path must be an absolute pathlib.Path")
         if type(self.max_body_bytes) is not int or self.max_body_bytes < 1:
@@ -266,7 +323,7 @@ class V2Settings:
         if self.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
             if len(self.allowed_subscriber_ids) != 1:
                 raise ValueError("controlled_write requires exactly one subscriber")
-            if self.hermes_model != _CONTROLLED_MODEL:
+            if owns_worker and self.hermes_model != _CONTROLLED_MODEL:
                 raise ValueError("controlled_write requires openai-codex/gpt-5.6-luna")
             if not _GIT_SHA_RE.fullmatch(self.candidate_git_sha):
                 raise ValueError("candidate git sha must be an immutable 40-character lowercase hex sha")
@@ -282,7 +339,7 @@ class V2Settings:
                 and self.write_window_end <= datetime.now(timezone.utc)
             ):
                 raise ValueError("write window must end in the future")
-        if (
+        if owns_worker and (
             self.stripe_links_enabled
             or self.wise_instructions_enabled
             or self.pix_instructions_enabled
@@ -301,7 +358,7 @@ class V2Settings:
                 raise ValueError(
                     "payment initiation requires distinct hostel/agency receiver profiles"
                 )
-        if self.stripe_links_enabled:
+        if owns_worker and self.stripe_links_enabled:
             keys = (
                 self.stripe_hostel_secret_key,
                 self.stripe_agency_secret_key,
@@ -315,7 +372,7 @@ class V2Settings:
                 raise ValueError(
                     "Stripe link creation requires two test Stripe keys"
                 )
-        if (
+        if owns_worker and (
             self.wise_instructions_enabled or self.pix_instructions_enabled
         ) and self.payment_instruction_path is None:
             raise ValueError(
@@ -339,9 +396,9 @@ class V2Settings:
             raise ValueError(
                 "critical_approval_ttl_seconds must be an exact integer from 1 to 86400"
             )
-        if self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
+        if owns_worker and self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
-        if self.manychat_delivery_enabled and (
+        if owns_worker and self.manychat_delivery_enabled and (
             not self.manychat_api_key
             or self.manychat_reply_field_id is None
             or not self.manychat_reply_flow_ns
@@ -352,7 +409,7 @@ class V2Settings:
             raise ValueError(
                 "ManyChat delivery requires reply/payment fields and flows"
             )
-        if self.manychat_handoff_enabled and (
+        if owns_worker and self.manychat_handoff_enabled and (
             not self.manychat_api_key
             or self.manychat_handoff_tag_id is None
             or not self.manychat_handoff_flow_ns
@@ -423,7 +480,7 @@ class V2Settings:
             or self.read_probe_interval_seconds > 3_600
         ):
             raise ValueError("read probe interval must be between 10 and 3600 seconds")
-        if self.runtime_mode in {
+        if owns_worker and self.runtime_mode in {
             RuntimeMode.DARK_READ_ONLY,
             RuntimeMode.SHADOW,
             RuntimeMode.CONTROLLED_WRITE,
@@ -456,12 +513,13 @@ class V2Settings:
                 raise ValueError("read runtime requires " + ", ".join(missing))
         if self.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}:
             missing = []
-            if not self.manychat_api_key:
-                missing.append("ManyChat profile credential")
-            if not self.hermes_command or not self.hermes_system_prompt or len(self.hermes_transcript_key) < 32:
-                missing.append("Hermes model command/prompt/transcript key")
-            if self.knowledge_base_path is None:
-                missing.append("knowledge base")
+            if owns_worker:
+                if not self.manychat_api_key:
+                    missing.append("ManyChat profile credential")
+                if not self.hermes_command or not self.hermes_system_prompt or len(self.hermes_transcript_key) < 32:
+                    missing.append("Hermes model command/prompt/transcript key")
+                if self.knowledge_base_path is None:
+                    missing.append("knowledge base")
             if self.public_authority_manifest_path is None or len(self.public_authority_hmac_key) < 32:
                 missing.append("authenticated public authority manifest")
             if missing:
@@ -581,24 +639,44 @@ class V2Settings:
         return self.sqlite_path.parent / "v2-worker-heartbeat.json"
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> "V2Settings":
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        process_role: V2ProcessRole = V2ProcessRole.COMBINED,
+    ) -> "V2Settings":
+        if type(process_role) is not V2ProcessRole:
+            raise TypeError("process_role must be exact V2ProcessRole")
         source = os.environ if environ is None else environ
+        declared_role = source.get("V2_PROCESS_ROLE", "")
+        if declared_role and declared_role != process_role.value:
+            raise ValueError("V2_PROCESS_ROLE does not match entrypoint process role")
+        api_source: Mapping[str, str] = (
+            source
+            if process_role in {V2ProcessRole.API, V2ProcessRole.COMBINED}
+            else {}
+        )
+        worker_source: Mapping[str, str] = (
+            source
+            if process_role in {V2ProcessRole.WORKER, V2ProcessRole.COMBINED}
+            else {}
+        )
         raw_path = source.get("V2_SQLITE_PATH", "")
         if not raw_path:
             raise ValueError("V2_SQLITE_PATH is required and must be absolute")
         try:
-            limit = int(source.get("V2_MAX_WEBHOOK_BODY_BYTES", "65536"))
-            timeout = int(source.get("V2_HERMES_TIMEOUT_SECONDS", "45"))
+            limit = int(api_source.get("V2_MAX_WEBHOOK_BODY_BYTES", "65536"))
+            timeout = int(worker_source.get("V2_HERMES_TIMEOUT_SECONDS", "45"))
             heartbeat_age = int(source.get("V2_WORKER_HEARTBEAT_MAX_AGE_SECONDS", "10"))
-            read_probe_interval = int(source.get("V2_READ_PROBE_INTERVAL_SECONDS", "60"))
+            read_probe_interval = int(worker_source.get("V2_READ_PROBE_INTERVAL_SECONDS", "60"))
             hostel_payment_percentage = int(
-                source.get("V2_HOSTEL_PAYMENT_PERCENTAGE", "100")
+                worker_source.get("V2_HOSTEL_PAYMENT_PERCENTAGE", "100")
             )
             agency_payment_percentage = int(
-                source.get("V2_AGENCY_PAYMENT_PERCENTAGE", "20")
+                worker_source.get("V2_AGENCY_PAYMENT_PERCENTAGE", "20")
             )
             critical_approval_ttl_seconds = int(
-                source.get("V2_CRITICAL_APPROVAL_TTL_SECONDS", "1800")
+                worker_source.get("V2_CRITICAL_APPROVAL_TTL_SECONDS", "1800")
             )
         except ValueError as exc:
             raise ValueError("numeric V2 settings must be integers") from exc
@@ -613,18 +691,19 @@ class V2Settings:
         except ValueError as exc:
             raise ValueError("V2_STRIPE_ENVIRONMENT is outside the closed catalog") from exc
         authority_path = source.get("V2_PUBLIC_AUTHORITY_MANIFEST_PATH", "")
-        knowledge_path = source.get("V2_KNOWLEDGE_BASE_PATH", "")
-        payment_instruction_path = source.get("V2_PAYMENT_INSTRUCTION_PATH", "")
+        knowledge_path = worker_source.get("V2_KNOWLEDGE_BASE_PATH", "")
+        payment_instruction_path = worker_source.get("V2_PAYMENT_INSTRUCTION_PATH", "")
         return cls(
-            webhook_secret=source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
+            webhook_secret=api_source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
             sqlite_path=Path(raw_path),
-            stripe_webhook_secret=source.get("V2_STRIPE_WEBHOOK_SECRET", ""),
-            wise_webhook_secret=source.get("V2_WISE_WEBHOOK_SECRET", ""),
-            pix_webhook_secret=source.get("V2_PIX_WEBHOOK_SECRET", ""),
-            pix_receiver_profile_id=source.get("V2_PIX_RECEIVER_PROFILE_ID", ""),
-            wise_signer_profile_id=source.get("V2_WISE_SIGNER_PROFILE_ID", ""),
-            wise_account_profile_id=source.get("V2_WISE_ACCOUNT_PROFILE_ID", ""),
-            stripe_account_profile_id=source.get("V2_STRIPE_ACCOUNT_PROFILE_ID", ""),
+            process_role=process_role,
+            stripe_webhook_secret=api_source.get("V2_STRIPE_WEBHOOK_SECRET", ""),
+            wise_webhook_secret=api_source.get("V2_WISE_WEBHOOK_SECRET", ""),
+            pix_webhook_secret=api_source.get("V2_PIX_WEBHOOK_SECRET", ""),
+            pix_receiver_profile_id=api_source.get("V2_PIX_RECEIVER_PROFILE_ID", ""),
+            wise_signer_profile_id=api_source.get("V2_WISE_SIGNER_PROFILE_ID", ""),
+            wise_account_profile_id=api_source.get("V2_WISE_ACCOUNT_PROFILE_ID", ""),
+            stripe_account_profile_id=api_source.get("V2_STRIPE_ACCOUNT_PROFILE_ID", ""),
             max_body_bytes=limit,
             cloudbeds_writes_enabled=_env_bool(source, "V2_ENABLE_CLOUDBEDS_WRITES"),
             bokun_writes_enabled=_env_bool(source, "V2_ENABLE_BOKUN_WRITES"),
@@ -648,64 +727,64 @@ class V2Settings:
             allowed_subscriber_ids=_subscriber_ids(
                 source.get("V2_ALLOWED_SUBSCRIBER_IDS", "")
             ),
-            hermes_model=source.get("V2_HERMES_MODEL", ""),
+            hermes_model=worker_source.get("V2_HERMES_MODEL", ""),
             candidate_git_sha=source.get("V2_CANDIDATE_GIT_SHA", ""),
             candidate_image_digest=source.get("V2_CANDIDATE_IMAGE_DIGEST", ""),
-            cloudbeds_api_key=source.get("V2_CLOUDBEDS_API_KEY", ""),
-            cloudbeds_property_id=source.get("V2_CLOUDBEDS_PROPERTY_ID", ""),
-            cloudbeds_source_id=source.get("V2_CLOUDBEDS_SOURCE_ID", ""),
-            cloudbeds_base_url=source.get("V2_CLOUDBEDS_BASE_URL", "https://api.cloudbeds.com"),
-            bokun_access_key=source.get("V2_BOKUN_ACCESS_KEY", ""),
-            bokun_secret_key=source.get("V2_BOKUN_SECRET_KEY", ""),
+            cloudbeds_api_key=worker_source.get("V2_CLOUDBEDS_API_KEY", ""),
+            cloudbeds_property_id=worker_source.get("V2_CLOUDBEDS_PROPERTY_ID", ""),
+            cloudbeds_source_id=worker_source.get("V2_CLOUDBEDS_SOURCE_ID", ""),
+            cloudbeds_base_url=worker_source.get("V2_CLOUDBEDS_BASE_URL", "https://api.cloudbeds.com"),
+            bokun_access_key=worker_source.get("V2_BOKUN_ACCESS_KEY", ""),
+            bokun_secret_key=worker_source.get("V2_BOKUN_SECRET_KEY", ""),
             bokun_product_map=_json_string_map(
-                source.get("V2_BOKUN_PRODUCT_MAP_JSON", ""),
+                worker_source.get("V2_BOKUN_PRODUCT_MAP_JSON", ""),
                 "V2_BOKUN_PRODUCT_MAP_JSON",
             ),
-            bokun_base_url=source.get("V2_BOKUN_BASE_URL", "https://api.bokun.io"),
-            manychat_api_key=source.get("V2_MANYCHAT_API_KEY", ""),
-            manychat_base_url=source.get("V2_MANYCHAT_BASE_URL", "https://api.manychat.com"),
+            bokun_base_url=worker_source.get("V2_BOKUN_BASE_URL", "https://api.bokun.io"),
+            manychat_api_key=worker_source.get("V2_MANYCHAT_API_KEY", ""),
+            manychat_base_url=worker_source.get("V2_MANYCHAT_BASE_URL", "https://api.manychat.com"),
             manychat_reply_field_id=_optional_positive_int(
-                source.get("V2_MANYCHAT_REPLY_FIELD_ID", ""),
+                worker_source.get("V2_MANYCHAT_REPLY_FIELD_ID", ""),
                 "V2_MANYCHAT_REPLY_FIELD_ID",
             ),
-            manychat_reply_flow_ns=source.get("V2_MANYCHAT_REPLY_FLOW_NS", ""),
+            manychat_reply_flow_ns=worker_source.get("V2_MANYCHAT_REPLY_FLOW_NS", ""),
             manychat_payment_link_field_id=_optional_positive_int(
-                source.get("V2_MANYCHAT_PAYMENT_LINK_FIELD_ID", ""),
+                worker_source.get("V2_MANYCHAT_PAYMENT_LINK_FIELD_ID", ""),
                 "V2_MANYCHAT_PAYMENT_LINK_FIELD_ID",
             ),
             manychat_payment_description_field_id=_optional_positive_int(
-                source.get("V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID", ""),
+                worker_source.get("V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID", ""),
                 "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID",
             ),
-            manychat_payment_flow_ns=source.get("V2_MANYCHAT_PAYMENT_FLOW_NS", ""),
+            manychat_payment_flow_ns=worker_source.get("V2_MANYCHAT_PAYMENT_FLOW_NS", ""),
             manychat_handoff_tag_id=_optional_positive_int(
-                source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
+                worker_source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
                 "V2_MANYCHAT_HANDOFF_TAG_ID",
             ),
-            manychat_handoff_flow_ns=source.get(
+            manychat_handoff_flow_ns=worker_source.get(
                 "V2_MANYCHAT_HANDOFF_FLOW_NS", ""
             ),
             stripe_environment=stripe_environment,
-            stripe_secret_key=source.get("V2_STRIPE_SECRET_KEY", ""),
-            stripe_hostel_account_profile_id=source.get(
+            stripe_secret_key=worker_source.get("V2_STRIPE_SECRET_KEY", ""),
+            stripe_hostel_account_profile_id=worker_source.get(
                 "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID", ""
             ),
-            stripe_agency_account_profile_id=source.get(
+            stripe_agency_account_profile_id=worker_source.get(
                 "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID", ""
             ),
-            stripe_hostel_secret_key=source.get(
+            stripe_hostel_secret_key=worker_source.get(
                 "V2_STRIPE_HOSTEL_SECRET_KEY", ""
             ),
-            stripe_agency_secret_key=source.get(
+            stripe_agency_secret_key=worker_source.get(
                 "V2_STRIPE_AGENCY_SECRET_KEY", ""
             ),
             hostel_payment_percentage=hostel_payment_percentage,
             agency_payment_percentage=agency_payment_percentage,
             critical_approval_ttl_seconds=critical_approval_ttl_seconds,
-            stripe_base_url=source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
-            hermes_command=_json_command(source.get("V2_HERMES_COMMAND_JSON", "")),
-            hermes_system_prompt=_system_prompt(source),
-            hermes_transcript_key=_hex_key(source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
+            stripe_base_url=worker_source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
+            hermes_command=_json_command(worker_source.get("V2_HERMES_COMMAND_JSON", "")),
+            hermes_system_prompt=_system_prompt(worker_source),
+            hermes_transcript_key=_hex_key(worker_source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
             hermes_timeout_seconds=timeout,
             knowledge_base_path=Path(knowledge_path) if knowledge_path else None,
             payment_instruction_path=(
@@ -721,12 +800,12 @@ class V2Settings:
                 default=mode is not RuntimeMode.API_ONLY,
             ),
             worker_heartbeat_max_age_seconds=heartbeat_age,
-            read_probe_check_in=source.get("V2_READ_PROBE_CHECK_IN", ""),
-            read_probe_check_out=source.get("V2_READ_PROBE_CHECK_OUT", ""),
-            read_probe_activity_date=source.get("V2_READ_PROBE_ACTIVITY_DATE", ""),
-            read_probe_product_id=source.get("V2_READ_PROBE_PRODUCT_ID", ""),
+            read_probe_check_in=worker_source.get("V2_READ_PROBE_CHECK_IN", ""),
+            read_probe_check_out=worker_source.get("V2_READ_PROBE_CHECK_OUT", ""),
+            read_probe_activity_date=worker_source.get("V2_READ_PROBE_ACTIVITY_DATE", ""),
+            read_probe_product_id=worker_source.get("V2_READ_PROBE_PRODUCT_ID", ""),
             read_probe_interval_seconds=read_probe_interval,
         )
 
 
-__all__ = ["RuntimeMode", "StripeEnvironment", "V2Settings"]
+__all__ = ["RuntimeMode", "StripeEnvironment", "V2ProcessRole", "V2Settings"]

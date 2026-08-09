@@ -181,9 +181,9 @@ def _log_cycle_failures(report: WorkerCycleReport) -> None:
 
 def main() -> None:
     from v2_host.composition import V2Container, V2Role
-    from v2_host.settings import V2Settings
+    from v2_host.settings import V2ProcessRole, V2Settings
 
-    settings = V2Settings.from_env()
+    settings = V2Settings.from_env(process_role=V2ProcessRole.WORKER)
     factory_path = os.environ.get("V2_WORKER_FACTORY", "")
     factory = _load_worker_factory(factory_path)
     container = V2Container.open(settings=settings, role=V2Role.WORKER)

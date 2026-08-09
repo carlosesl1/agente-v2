@@ -39,7 +39,7 @@
 
 - [x] Verify branch parent, tree, remote parent, and clean status.
 - [x] Run the official clean-environment suite and record `1587 passed, 7 deselected, 2940 subtests passed`.
-- [ ] Commit only this plan before production edits.
+- [x] Commit only this plan before production edits.
 
 Run:
 ```bash
@@ -66,15 +66,15 @@ git commit -m "docs(v2): plan preproduction gap remediation"
 - API role may boot without model/provider/payment-write credentials and must reject effect/provider secrets in its parsed object.
 - Worker role retains existing controlled-write validation and provider capabilities.
 
-- [ ] RED: assert synthetic sentinels for webhook, provider, Stripe, ManyChat, transcript, authority, and financial secrets never occur in `repr(settings)`.
-- [ ] RED: assert API settings parse a controlled-write API environment without provider/model secrets and leave every worker-only field empty.
-- [ ] RED: assert worker settings still fail closed when required controlled-write provider/model material is missing.
-- [ ] RED: parse rendered Compose and assert API environment does not contain names for Cloudbeds/Bókun/Stripe link/ManyChat API/model/transcript/authority secrets; worker contains only required worker names.
-- [ ] Run the three RED selectors and confirm failures are semantic.
-- [ ] Add exact process-role enum and role-aware parsing/validation. Mark every secret/private dataclass field `repr=False`; implement a closed custom repr with role, runtime mode, SQLite base path name, candidate SHA/digest fingerprints, gate names, and no values.
-- [ ] Split Compose anchors into common/API/worker; do not add router secrets to API/worker.
-- [ ] Correct `org.opencontainers.image.source` to the canonical repository URL while retaining `revision=$VCS_REF`.
-- [ ] Run focused settings/composition/package tests and `git diff --check`.
+- [x] RED: assert synthetic sentinels for webhook, provider, Stripe, ManyChat, transcript, authority, and financial secrets never occur in `repr(settings)`.
+- [x] RED: assert API settings parse a controlled-write API environment without provider/model secrets and leave every worker-only field empty.
+- [x] RED: assert worker settings still fail closed when required controlled-write provider/model material is missing.
+- [x] RED: parse rendered Compose and assert API environment does not contain names for Cloudbeds/Bókun/Stripe link/ManyChat API/model/transcript secrets; the API retains only the authority HMAC required to verify controlled ingress; worker contains only required worker names.
+- [x] Run the three RED selectors and confirm failures are semantic.
+- [x] Add exact process-role enum and role-aware parsing/validation. Mark every secret/private dataclass field `repr=False`; implement a closed custom repr with role, runtime mode, SQLite base path name, candidate SHA/digest fingerprints, gate names, and no values.
+- [x] Split Compose anchors into common/API/worker; do not add router secrets to API/worker.
+- [x] Correct `org.opencontainers.image.source` to the canonical repository URL while retaining `revision=$VCS_REF`.
+- [x] Run focused settings/composition/package tests and `git diff --check`.
 - [ ] Commit:
 ```bash
 git add v2_host/settings.py v2_host/api_main.py v2_host/worker_main.py compose.v2.yaml Dockerfile.v2 tests/test_v2_settings.py tests/test_v2_production_composition.py tests/test_v2_role_scoped_settings.py
