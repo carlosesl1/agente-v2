@@ -249,10 +249,17 @@ class _PrivateValueCorpus:
         ):
             raise TypeError("private value corpus requires an exact string tuple")
         self.values = tuple(dict.fromkeys((*self.values, *values)))
+
+    def extend_full_names(self, values: tuple[str, ...]) -> None:
+        if type(values) is not tuple or any(
+            type(value) is not str or not value for value in values
+        ):
+            raise TypeError("private name corpus requires an exact string tuple")
+        self.extend(values)
         first_name_components = tuple(
             parts[0]
             for value in values
-            if len(parts := value.split()) > 1 and len(parts[0]) > 3
+            if len(parts := value.split()) > 1 and len(parts[0]) > 1
         )
         self.bounded_values = tuple(
             dict.fromkeys((*self.bounded_values, *first_name_components))
@@ -1017,6 +1024,27 @@ def _accepted_private_fact_values(
     )
 
 
+def _accepted_private_full_names(
+    proposed: tuple[ModelFact, ...],
+    accepted: tuple[ModelFact, ...],
+) -> tuple[str, ...]:
+    if (
+        type(proposed) is not tuple
+        or type(accepted) is not tuple
+        or any(type(item) is not ModelFact for item in (*proposed, *accepted))
+    ):
+        raise TypeError("accepted private name guard requires exact facts")
+    if not any(item.name == "full_name" for item in accepted):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            item.value
+            for item in (*proposed, *accepted)
+            if item.name == "full_name" and type(item.value) is str and item.value
+        )
+    )
+
+
 def _passenger_input_private_values(
     passengers: tuple[PassengerInput, ...],
 ) -> tuple[str, ...]:
@@ -1036,9 +1064,23 @@ def _passenger_input_private_values(
     return tuple(values)
 
 
-def _projection_passenger_private_values(
-    projection: ConversationProjection,
+def _passenger_input_full_names(
+    passengers: tuple[PassengerInput, ...],
 ) -> tuple[str, ...]:
+    if type(passengers) is not tuple or any(
+        type(passenger) is not PassengerInput for passenger in passengers
+    ):
+        raise TypeError("passenger name guard requires exact inputs")
+    return tuple(
+        passenger.full_name
+        for passenger in passengers
+        if passenger.full_name is not None
+    )
+
+
+def _projection_passenger_private_rows(
+    projection: ConversationProjection,
+) -> tuple[dict[str, object], ...]:
     if type(projection) is not ConversationProjection:
         raise TypeError("passenger exposure guard requires an exact projection")
     manifest = projection_manifest_fact(projection)
@@ -1053,10 +1095,16 @@ def _projection_passenger_private_values(
         raise TurnExecutionError("passenger manifest private values are invalid") from exc
     if type(decoded) is not dict or type(decoded.get("passengers")) is not list:
         raise TurnExecutionError("passenger manifest private values are invalid")
+    if any(type(passenger) is not dict for passenger in decoded["passengers"]):
+        raise TurnExecutionError("passenger manifest private values are invalid")
+    return tuple(decoded["passengers"])
+
+
+def _projection_passenger_private_values(
+    projection: ConversationProjection,
+) -> tuple[str, ...]:
     values: list[str] = []
-    for passenger in decoded["passengers"]:
-        if type(passenger) is not dict:
-            raise TurnExecutionError("passenger manifest private values are invalid")
+    for passenger in _projection_passenger_private_rows(projection):
         for name in PASSENGER_FIELD_ORDER:
             value = passenger.get(name)
             if value is None:
@@ -1067,6 +1115,20 @@ def _projection_passenger_private_values(
             if name == "country_code":
                 values.extend(_private_country_values(value))
     return tuple(values)
+
+
+def _projection_passenger_full_names(
+    projection: ConversationProjection,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for passenger in _projection_passenger_private_rows(projection):
+        value = passenger.get("full_name")
+        if value is None:
+            continue
+        if type(value) is not str or not value:
+            raise TurnExecutionError("passenger manifest private values are invalid")
+        names.append(value)
+    return tuple(names)
 
 
 def _reply_chunk_contains_literal_value(chunk: str, private_value: str) -> bool:
@@ -1875,6 +1937,18 @@ class V2TurnExecutor:
                 *_projection_passenger_private_values(projection),
             )
         )
+        private_value_corpus.extend_full_names(
+            (
+                *((private_facts.full_name,) if private_facts.full_name else ()),
+                *(
+                    (profile.full_name,)
+                    if profile.full_name is not None
+                    and profile.observed_at <= now < profile.expires_at
+                    else ()
+                ),
+                *_projection_passenger_full_names(projection),
+            )
+        )
 
         def request_public_reply_correction(
             expected: ModelProposal,
@@ -1938,8 +2012,17 @@ class V2TurnExecutor:
                 first_private_facts,
             )
         )
+        private_value_corpus.extend_full_names(
+            _accepted_private_full_names(
+                first_proposal.facts,
+                first_private_facts,
+            )
+        )
         private_value_corpus.extend(
             _passenger_input_private_values(first_proposal.passengers)
+        )
+        private_value_corpus.extend_full_names(
+            _passenger_input_full_names(first_proposal.passengers)
         )
         if first_private_facts:
             private_facts = _persist_private_collection(
@@ -2079,8 +2162,17 @@ class V2TurnExecutor:
                     review_private_facts,
                 )
             )
+            private_value_corpus.extend_full_names(
+                _accepted_private_full_names(
+                    review_proposal.facts,
+                    review_private_facts,
+                )
+            )
             private_value_corpus.extend(
                 _passenger_input_private_values(review_proposal.passengers)
+            )
+            private_value_corpus.extend_full_names(
+                _passenger_input_full_names(review_proposal.passengers)
             )
             if review_private_facts:
                 private_facts = _persist_private_collection(
@@ -2422,8 +2514,17 @@ class V2TurnExecutor:
                     second_private_facts,
                 )
             )
+            private_value_corpus.extend_full_names(
+                _accepted_private_full_names(
+                    proposal.facts,
+                    second_private_facts,
+                )
+            )
             private_value_corpus.extend(
                 _passenger_input_private_values(proposal.passengers)
+            )
+            private_value_corpus.extend_full_names(
+                _passenger_input_full_names(proposal.passengers)
             )
             if second_private_facts:
                 private_facts = _persist_private_collection(
@@ -2536,8 +2637,19 @@ class V2TurnExecutor:
                             selection_review_private_facts,
                         )
                     )
+                    private_value_corpus.extend_full_names(
+                        _accepted_private_full_names(
+                            selection_review_proposal.facts,
+                            selection_review_private_facts,
+                        )
+                    )
                     private_value_corpus.extend(
                         _passenger_input_private_values(
+                            selection_review_proposal.passengers
+                        )
+                    )
+                    private_value_corpus.extend_full_names(
+                        _passenger_input_full_names(
                             selection_review_proposal.passengers
                         )
                     )
@@ -2614,6 +2726,9 @@ class V2TurnExecutor:
 
         private_value_corpus.extend(
             _projection_passenger_private_values(projection)
+        )
+        private_value_corpus.extend_full_names(
+            _projection_passenger_full_names(projection)
         )
         if private_update_turn and not collection_only:
             proposal = _private_update_no_command_proposal(

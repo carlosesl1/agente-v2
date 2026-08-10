@@ -5388,13 +5388,27 @@ def test_previously_persisted_private_value_still_requires_model_correction(
         store.close()
 
 
+@pytest.mark.parametrize(
+    ("private_name", "leaked_text"),
+    (
+        (
+            "Bruno Exemplo",
+            "Entendi: Bruno continua como titular da hospedagem.",
+        ),
+        (
+            "Ana dos Santos",
+            "Entendi: Ana continua como titular da hospedagem.",
+        ),
+    ),
+)
 def test_persisted_full_name_component_requires_model_owned_correction(
     tmp_path,
+    private_name: str,
+    leaked_text: str,
 ) -> None:
-    private_name = "Bruno Exemplo"
     store = SQLiteBoundaryStore.open_memory_v8()
     private_store = SQLitePrivateCustomerFactStore(
-        tmp_path / "persisted-private-first-name-reply.sqlite3"
+        tmp_path / f"persisted-private-first-name-{private_name.split()[0]}.sqlite3"
     )
     private_store.persist_turn(
         lead_id=BATCH.lead_id,
@@ -5403,7 +5417,7 @@ def test_persisted_full_name_component_requires_model_owned_correction(
         facts=(ModelFact("full_name", private_name),),
         persisted_at=NOW,
     )
-    leaked = _proposal("Entendi: Bruno continua como titular da hospedagem.")
+    leaked = _proposal(leaked_text)
     corrected_text = "Entendi: o acompanhante continua como titular da hospedagem."
     corrected = _proposal(corrected_text)
     model = FakeAuditedModel(store, [leaked, corrected])
