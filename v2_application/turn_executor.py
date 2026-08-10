@@ -2472,10 +2472,57 @@ class V2TurnExecutor:
                     in ("inform", "select", "request_handoff")
                     and not selection_review_proposal.read_requests
                 ):
-                    proposal = replace(
-                        selection_review_proposal,
-                        facts=proposal.facts,
-                        passengers=(),
+                    (
+                        selection_review_private_facts,
+                        selection_review_public_facts,
+                        selection_review_invalid_private_facts,
+                        _selection_review_phone_proposed,
+                    ) = _partition_private_customer_facts(selection_review_proposal)
+                    if selection_review_invalid_private_facts:
+                        raise TurnExecutionError(
+                            "post-read selection review private facts are invalid"
+                        )
+                    selection_review_public_facts = _authoritative_language_facts(
+                        selection_review_public_facts,
+                        projection.locale,
+                    )
+                    private_value_corpus.extend(
+                        _accepted_private_fact_values(
+                            selection_review_proposal.facts,
+                            selection_review_private_facts,
+                        )
+                    )
+                    private_value_corpus.extend(
+                        _passenger_input_private_values(
+                            selection_review_proposal.passengers
+                        )
+                    )
+                    if selection_review_private_facts:
+                        private_facts = _persist_private_collection(
+                            self._private_customer_facts,
+                            lead_id=batch.lead_id,
+                            source_turn_id=batch.batch_id,
+                            source_event_hash=event_hash,
+                            facts=selection_review_private_facts,
+                            persisted_at=now,
+                        )
+                        private_update_turn = private_update_turn or any(
+                            item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
+                            for item in selection_review_private_facts
+                        )
+                        effective_profile_complete = reservation_profile_ready(
+                            profile,
+                            projection,
+                            now,
+                            private_facts=private_facts,
+                        )
+                    proposal = preserve_initial_facts(
+                        proposal,
+                        replace(
+                            selection_review_proposal,
+                            facts=selection_review_public_facts,
+                            passengers=(),
+                        ),
                     )
                 selection_review_audited = AuditedModelTurn.from_frames(
                     proposal=proposal,

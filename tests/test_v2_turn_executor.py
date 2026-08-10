@@ -3487,6 +3487,246 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         store.close()
 
 
+def test_post_read_selection_review_private_fact_is_owned_and_never_published() -> None:
+    raw_email = "Hybrid@Example.INVALID"
+    canonical_email = "hybrid@example.invalid"
+    package_event = replace(
+        EVENT,
+        text=(
+            "Quero hostel de 10/08/2026 a 12/08/2026 e Buracão em "
+            "12/08/2026 para 2 adultos e nenhuma criança. Consulte os dois."
+        ),
+        payload_hash="6" * 64,
+    )
+    package_batch = replace(
+        BATCH,
+        events=(package_event,),
+        combined_text=package_event.text,
+    )
+    lodging = ReadRequest(
+        request_id="read:review-private-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    activity = ReadRequest(
+        request_id="read:review-private-activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(lodging, activity),
+        effect_proposals=(),
+    )
+    final = _proposal("Encontrei opções de hospedagem e Buracão.")
+    unsafe_review = replace(
+        final,
+        reply_chunks=(f"As opções foram separadas para {raw_email}.",),
+        facts=(ModelFact("email", raw_email),),
+    )
+    corrected_review = replace(
+        final,
+        reply_chunks=("Encontrei as opções sem repetir dados privados.",),
+        facts=(ModelFact("service", "package"),),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    model = FakeAuditedModel(
+        store,
+        [first, final, unsafe_review, corrected_review],
+    )
+    lodging_port = FakeLodgingReadPort(store)
+    activity_port = FakeActivityReadPort(store)
+    package_authority = replace(
+        AUTHORITY,
+        allocation_ids=("allocation:review-private:0",),
+        allocation_manifest_hash="6" * 64,
+    )
+    _install_public_authority(store, package_authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService(
+            {
+                ReadKind.LODGING: lodging_port,
+                ReadKind.ACTIVITY: activity_port,
+            }
+        ),
+        profile=FakeProfile(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(
+            {package_batch.batch_id: package_authority}
+        ),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        result = executor.execute(package_batch)
+
+        assert result.reply_chunks == corrected_review.reply_chunks
+        assert len(model.calls) == 4
+        assert model.calls[2].selection_review_required is True
+        assert model.calls[3].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+        assert private_store.load(BATCH.lead_id).email == canonical_email
+        assert raw_email not in result.receipt.to_canonical_bytes().decode("utf-8")
+        public_rows = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT chunk_json FROM boundary_public_outbox"
+            ).fetchall()
+        )
+        artifact_rows = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts"
+            ).fetchall()
+        )
+        assert raw_email not in public_rows
+        assert raw_email not in artifact_rows
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_post_read_selection_review_discarded_passenger_never_leaks() -> None:
+    private_name = "Pessoa Passageira Privada"
+    package_event = replace(
+        EVENT,
+        text=(
+            "Quero hostel de 10/08/2026 a 12/08/2026 e Buracão em "
+            "12/08/2026 para 2 adultos e nenhuma criança. Consulte os dois."
+        ),
+        payload_hash="7" * 64,
+    )
+    package_batch = replace(
+        BATCH,
+        events=(package_event,),
+        combined_text=package_event.text,
+    )
+    lodging = ReadRequest(
+        request_id="read:review-passenger-lodging",
+        kind=ReadKind.LODGING,
+        check_in=date(2026, 8, 10),
+        check_out=date(2026, 8, 12),
+        adults=2,
+        children=0,
+    )
+    activity = ReadRequest(
+        request_id="read:review-passenger-activity",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 8, 12),
+        participants=2,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(),
+        facts=(ModelFact("service", "package"),),
+        read_requests=(lodging, activity),
+        effect_proposals=(),
+    )
+    final = _proposal("Encontrei opções de hospedagem e Buracão.")
+    unsafe_review = replace(
+        final,
+        reply_chunks=(f"Separei as opções para {private_name}.",),
+        passengers=(
+            PassengerInput(
+                position=1,
+                participant_type="adult",
+                full_name=private_name,
+                birth_date=None,
+                gender=None,
+                country_code=None,
+            ),
+        ),
+    )
+    corrected_review = replace(
+        final,
+        reply_chunks=("Encontrei as opções sem repetir dados privados.",),
+        facts=(ModelFact("service", "package"),),
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    model = FakeAuditedModel(
+        store,
+        [first, final, unsafe_review, corrected_review],
+    )
+    lodging_port = FakeLodgingReadPort(store)
+    activity_port = FakeActivityReadPort(store)
+    package_authority = replace(
+        AUTHORITY,
+        allocation_ids=("allocation:review-passenger:0",),
+        allocation_manifest_hash="7" * 64,
+    )
+    _install_public_authority(store, package_authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService(
+            {
+                ReadKind.LODGING: lodging_port,
+                ReadKind.ACTIVITY: activity_port,
+            }
+        ),
+        profile=FakeProfile(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(
+            {package_batch.batch_id: package_authority}
+        ),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        result = executor.execute(package_batch)
+
+        assert result.reply_chunks == corrected_review.reply_chunks
+        assert len(model.calls) == 4
+        assert model.calls[2].selection_review_required is True
+        assert model.calls[3].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+        assert private_store.load_passenger_manifest(BATCH.lead_id) is None
+        assert private_name not in result.receipt.to_canonical_bytes().decode("utf-8")
+        public_rows = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT chunk_json FROM boundary_public_outbox"
+            ).fetchall()
+        )
+        artifact_rows = "\n".join(
+            row[0]
+            for row in store._connection.execute(
+                "SELECT artifact_json FROM boundary_turn_artifacts"
+            ).fetchall()
+        )
+        assert private_name not in public_rows
+        assert private_name not in artifact_rows
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        private_store.close()
+        store.close()
+
+
 def test_authenticated_phone_allows_read_only_package_without_country() -> None:
     lodging = ReadRequest(
         request_id="read:incomplete-country-package-lodging",
