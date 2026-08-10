@@ -18,8 +18,12 @@
 
 - Branch: `maya-v2-context-stability`
 - Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-context-stability`
-- Design: `docs/superpowers/specs/2026-08-10-maya-v2-context-stability-design.md`
-- Plan: `docs/superpowers/plans/2026-08-10-maya-v2-context-stability.md`
+- Design: `docs/superpowers/specs/2026-08-10-maya-model-owned-public-text-design.md`
+- Plan: `docs/superpowers/plans/2026-08-10-maya-model-owned-public-text.md`
+- Pre-qualification implementation candidate: `1977494d820f6963dd65cb37ad71d85d77186259`
+- Candidate tree: `66831dc989d185db14a940f0de04e3831815a9f9`
+- Causal REDs closed: controller replacement of Maya questions; private values lost across retry/review; post-read semantic-review PII; reducer copy substitution; approval-expiry false confirmation; async authorship omission; adapter NFKC/strip mutation.
+- Exact next gate: canonical full suite, mechanical audit, immutable local image, and isolated real-model/fake-provider qualification. Promotion remains unauthorized.
 
 ## Required invariants
 
