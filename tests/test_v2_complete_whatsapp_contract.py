@@ -72,6 +72,7 @@ def test_each_real_effect_gate_is_independent(tmp_path: Path) -> None:
                     "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
                     "V2_STRIPE_HOSTEL_SECRET_KEY": "rk_" + "test_scoped_hostel",
                     "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
+                    "V2_PAYMENT_RESULT_STORE_KEY_HEX": "33" * 32,
                 }
             )
         settings = V2Settings.from_env(env)
@@ -85,6 +86,10 @@ def test_each_real_effect_gate_is_independent(tmp_path: Path) -> None:
                 "V2_ENABLE_MANYCHAT_HANDOFF": "manychat_handoff",
             }[selected]
         ] is True
+        if selected == "V2_ENABLE_STRIPE_LINKS":
+            assert settings.payment_result_store_key == bytes.fromhex("33" * 32)
+        else:
+            assert settings.payment_result_store_key == b""
 
 
 def test_closed_gates_do_not_require_an_open_window(tmp_path: Path) -> None:
