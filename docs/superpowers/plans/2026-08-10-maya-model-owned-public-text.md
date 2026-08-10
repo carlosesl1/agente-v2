@@ -130,10 +130,10 @@ Leave `ModelProposal` to accept an exact matching chunk or reject the frame. Do 
 - [ ] **Step 4: Run focused tests and commit**
 
 ```bash
-pytest -q tests/test_v2_model_contract.py tests/test_v2_hermes_model_adapter.py
+pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py
 ruff check v2_adapters/hermes_model.py tests/test_v2_hermes_model_adapter.py
 
-git add v2_adapters/hermes_model.py tests/test_v2_hermes_model_adapter.py tests/test_v2_model_contract.py
+git add v2_adapters/hermes_model.py tests/test_v2_hermes_model_adapter.py tests/test_v2_profile_and_model_grammar.py
 git commit -m "fix: preserve exact model reply chunks in parser"
 ```
 
@@ -205,10 +205,10 @@ In adapter tests, make the first correction response invalid and assert there is
 - [ ] **Step 5: Run focused tests and commit**
 
 ```bash
-pytest -q tests/test_v2_model_contract.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
+pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
 ruff check v2_contracts/model.py v2_adapters/hermes_model.py scripts/phase8_hermes_child.py
 
-git add v2_contracts/model.py v2_adapters/hermes_model.py scripts/phase8_hermes_child.py config/v2_luna_system_prompt.txt tests/test_v2_model_contract.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
+git add v2_contracts/model.py v2_adapters/hermes_model.py scripts/phase8_hermes_child.py config/v2_luna_system_prompt.txt tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
 git commit -m "feat: add bounded model-owned public reply correction"
 ```
 
@@ -491,7 +491,7 @@ ruff check \
   v2_application/completion.py \
   v2_application/completion_projector.py
 pytest -q \
-  tests/test_v2_model_contract.py \
+  tests/test_v2_profile_and_model_grammar.py \
   tests/test_v2_hermes_model_adapter.py \
   tests/test_v2_public_reply.py \
   tests/test_v2_turn_plan.py \
