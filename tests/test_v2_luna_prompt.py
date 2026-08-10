@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PROMPT = (
     Path(__file__).resolve().parents[1] / "config" / "v2_luna_system_prompt.txt"
 ).read_text(encoding="utf-8")
@@ -46,6 +45,35 @@ def test_holder_ambiguity_never_blocks_a_complete_read_only_consultation() -> No
     assert "Ambiguidade sobre qual acompanhante será o titular nunca bloqueia" in PROMPT
     assert "identidade do titular é requisito para selecionar/reservar" in PROMPT
     assert "não para consultar" in PROMPT
+
+
+def test_adult_count_never_implies_zero_children_for_lodging_read() -> None:
+    assert "Uma contagem de adultos nunca informa a quantidade de crianças" in PROMPT
+    assert "inclusive “somos 2 adultos” ou “para dois adultos”" in PROMPT
+    assert (
+        "Somente uma afirmação explícita de que não há crianças autoriza children=0"
+        in PROMPT
+    )
+
+
+def test_every_public_missing_data_question_is_typed_byte_exact() -> None:
+    assert (
+        "Toda pergunta pública para obter um dado faltante deve aparecer byte a byte "
+        "em clarification_question"
+    ) in PROMPT
+    assert (
+        "clarification_question=null é inválido quando reply_chunks pede um dado"
+        in PROMPT
+    )
+
+
+def test_payer_correction_preserves_private_holder_and_commercial_gate() -> None:
+    assert "Quem paga não substitui semanticamente quem é o titular" in PROMPT
+    assert "não repita nomes nem e-mail do corpus privado" in PROMPT
+    assert (
+        "continue perguntando apenas o dado comercial faltante antes de qualquer novo read"
+        in PROMPT
+    )
 
 
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
