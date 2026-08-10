@@ -98,8 +98,10 @@ def test_multiple_activity_passengers_use_complete_private_manifest() -> None:
     assert "passenger_manifest_status" in PROMPT
     assert "posição" in PROMPT
     assert "campos ainda não fornecidos são null" in PROMPT
-    assert "`handoff_active: bool`" in PROMPT
-    assert "não use request_handoff novamente" in PROMPT
+    assert "`handoff_status`" in PROMPT
+    assert "acknowledgement_pending" in PROMPT
+    assert "nunca diga que uma pessoa recebeu" in PROMPT
+    assert "Não use request_handoff novamente" in PROMPT
 
 
 def test_select_prepares_summary_without_executing() -> None:
@@ -130,8 +132,9 @@ def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
 
 
-def test_luna_prompt_requires_contextual_v6_critical_approval() -> None:
-    assert "v2-model-proposal-v6" in PROMPT
+def test_luna_prompt_requires_contextual_v7_critical_approval() -> None:
+    assert "v2-model-proposal-v7" in PROMPT
+    assert "v2-model-proposal-v6" not in PROMPT
     assert "v2-model-proposal-v5" not in PROMPT
     assert "v2-model-proposal-v4" not in PROMPT
     assert "v2-model-proposal-v3" not in PROMPT
@@ -143,6 +146,8 @@ def test_luna_prompt_requires_contextual_v6_critical_approval() -> None:
     assert "Uma confirmação afirmativa curta é válida" in PROMPT
     assert "`confirmation_review_required: bool`" in PROMPT
     assert "`selection_review_required: bool`" in PROMPT
+    assert "`progress_review_required: bool`" in PROMPT
+    assert "clarification_question" in PROMPT
     assert "pending_disposition" in PROMPT
     assert '"preserve"' in PROMPT
     assert '"revoke"' in PROMPT

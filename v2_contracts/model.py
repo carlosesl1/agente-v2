@@ -54,6 +54,21 @@ PRIVATE_CUSTOMER_FACT_ORDER: Final = (
     "gender",
 )
 _PRIVATE_CUSTOMER_FACTS: Final = frozenset(PRIVATE_CUSTOMER_FACT_ORDER)
+_MAX_DIALOGUE_EXCHANGES: Final = 4
+_MAX_DIALOGUE_MESSAGE_BYTES: Final = 16_384
+_MAX_DIALOGUE_REPLY_BYTES: Final = 16_384
+_MAX_DIALOGUE_CONTEXT_BYTES: Final = 64 * 1024
+_HANDOFF_STATUSES: Final = frozenset(
+    {
+        "requested",
+        "active",
+        "acknowledgement_pending",
+        "acknowledged",
+        "manual_review",
+        "completed",
+        "cancelled",
+    }
+)
 
 
 class InvalidModelProposal(ValueError):
@@ -167,6 +182,40 @@ class ConsultationHistoryEntry:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class ConversationExchange:
+    """One committed public exchange retained only for private model context."""
+
+    customer_message: str
+    assistant_reply_chunks: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        customer_message = _text(
+            self.customer_message,
+            "conversation customer_message",
+        )
+        if len(customer_message.encode("utf-8")) > _MAX_DIALOGUE_MESSAGE_BYTES:
+            raise InvalidModelProposal("conversation customer_message exceeds the bound")
+        if (
+            type(self.assistant_reply_chunks) is not tuple
+            or not 1 <= len(self.assistant_reply_chunks) <= 4
+            or any(
+                type(item) is not str or not item or item != item.strip()
+                for item in self.assistant_reply_chunks
+            )
+        ):
+            raise InvalidModelProposal(
+                "conversation assistant_reply_chunks must be a bounded exact tuple"
+            )
+        reply_bytes = sum(
+            len(item.encode("utf-8")) for item in self.assistant_reply_chunks
+        )
+        if reply_bytes > _MAX_DIALOGUE_REPLY_BYTES:
+            raise InvalidModelProposal(
+                "conversation assistant_reply_chunks exceed the bound"
+            )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class ModelFact:
     name: str
     value: str | int | date
@@ -237,6 +286,7 @@ class ModelRequest:
     message: str
     locale: str
     state_version: int
+    recent_dialogue: tuple[ConversationExchange, ...] = ()
     observations: tuple[ReadObservation, ...] = ()
     consultation_history: tuple[ConsultationHistoryEntry, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
@@ -245,9 +295,10 @@ class ModelRequest:
     critical_outcome: str | None = None
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
-    handoff_active: bool = False
+    handoff_status: str | None = None
     confirmation_review_required: bool = False
     selection_review_required: bool = False
+    progress_review_required: bool = False
     active_execution_status: str | None = None
     recap_reuse_required: bool = False
 
@@ -261,6 +312,24 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "state_version must be a non-negative exact integer"
             )
+        if type(self.recent_dialogue) is not tuple or any(
+            type(item) is not ConversationExchange for item in self.recent_dialogue
+        ):
+            raise InvalidModelProposal(
+                "recent_dialogue must contain exact ConversationExchange values"
+            )
+        if len(self.recent_dialogue) > _MAX_DIALOGUE_EXCHANGES:
+            raise InvalidModelProposal("recent_dialogue exceeds the four-exchange bound")
+        dialogue_bytes = sum(
+            len(item.customer_message.encode("utf-8"))
+            + sum(
+                len(chunk.encode("utf-8"))
+                for chunk in item.assistant_reply_chunks
+            )
+            for item in self.recent_dialogue
+        )
+        if dialogue_bytes > _MAX_DIALOGUE_CONTEXT_BYTES:
+            raise InvalidModelProposal("recent_dialogue exceeds the aggregate byte bound")
         if type(self.observations) is not tuple or any(
             type(item) is not ReadObservation for item in self.observations
         ):
@@ -339,8 +408,10 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "private_profile_complete must be an exact boolean"
             )
-        if type(self.handoff_active) is not bool:
-            raise InvalidModelProposal("handoff_active must be an exact boolean")
+        if self.handoff_status is not None and self.handoff_status not in _HANDOFF_STATUSES:
+            raise InvalidModelProposal(
+                "handoff_status is outside the closed request catalog"
+            )
         if type(self.confirmation_review_required) is not bool:
             raise InvalidModelProposal(
                 "confirmation_review_required must be an exact boolean"
@@ -363,6 +434,19 @@ class ModelRequest:
             )
         if self.selection_review_required and self.confirmation_review_required:
             raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
+        if type(self.progress_review_required) is not bool:
+            raise InvalidModelProposal(
+                "progress_review_required must be an exact boolean"
+            )
+        if self.progress_review_required and (
+            self.pending_action is not None
+            or self.observations
+            or self.confirmation_review_required
+            or self.selection_review_required
+        ):
+            raise InvalidModelProposal(
+                "progress review must be initial and mutually exclusive"
+            )
         if self.active_execution_status not in (None, "queued", "executing"):
             raise InvalidModelProposal(
                 "active_execution_status is outside the closed request catalog"
@@ -397,6 +481,7 @@ class ModelProposal:
     selection_requested: bool = False
     pending_disposition: str | None = None
     passengers: tuple[PassengerInput, ...] = ()
+    clarification_question: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.source_event_id, "source_event_id", identifier=True)
@@ -409,6 +494,19 @@ class ModelProposal:
             raise InvalidModelProposal(
                 "reply_chunks must contain non-empty exact strings"
             )
+        if self.clarification_question is not None:
+            _text(self.clarification_question, "clarification_question")
+            if (
+                self.clarification_question != self.clarification_question.strip()
+                or len(self.clarification_question.encode("utf-8")) > 1024
+            ):
+                raise InvalidModelProposal(
+                    "clarification_question must be trimmed and at most 1024 bytes"
+                )
+            if self.clarification_question not in self.reply_chunks:
+                raise InvalidModelProposal(
+                    "clarification_question must be an exact reply chunk"
+                )
         if type(self.facts) is not tuple or any(
             type(item) is not ModelFact for item in self.facts
         ):
@@ -546,6 +644,23 @@ class ModelProposal:
             raise InvalidModelProposal(
                 "approval assertion fields are allowed only for confirm"
             )
+
+
+def proposal_requires_progress_review(proposal: ModelProposal) -> bool:
+    """Detect a structural no-op without inspecting any natural-language text."""
+
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    material_facts = tuple(fact for fact in proposal.facts if fact.name != "language")
+    return (
+        proposal.intent == "inform"
+        and not material_facts
+        and not proposal.read_requests
+        and not proposal.effect_proposals
+        and not proposal.selection_requested
+        and not proposal.passengers
+        and proposal.clarification_question is None
+    )
 
 
 @dataclass(frozen=True, slots=True)

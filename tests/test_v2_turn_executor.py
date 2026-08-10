@@ -61,9 +61,11 @@ from v2_contracts.critical_actions import (
 from v2_contracts.model import (
     AuditedModelTurn,
     AuditedTranscriptFrame,
+    ConversationExchange,
     ModelFact,
     ModelProposal,
     ModelRequest,
+    proposal_requires_progress_review,
 )
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.passengers import PassengerInput
@@ -74,6 +76,168 @@ TRANSCRIPT_KEY = b"t" * 32
 CAPABILITY_DIGEST = "a" * 64
 EFFECT_DIGEST = "b" * 64
 TARGET_DIGEST = "c" * 64
+
+
+def test_committed_dialogue_reaches_next_turn_and_replay_repairs_private_row(
+    tmp_path,
+) -> None:
+    first_event = replace(
+        EVENT,
+        event_id="event:dialogue-context-001",
+        text="I need a private room for two nights.",
+        payload_hash="2" * 64,
+    )
+    first_batch = InboundBatch(
+        batch_id="batch:dialogue-context-001",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(first_event,),
+        combined_text=first_event.text,
+    )
+    second_event = replace(
+        EVENT,
+        event_id="event:dialogue-context-002",
+        text="Can I pay that with Wise?",
+        payload_hash="3" * 64,
+    )
+    second_batch = InboundBatch(
+        batch_id="batch:dialogue-context-002",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(second_event,),
+        combined_text=second_event.text,
+    )
+    first_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:dialogue-context-001",
+        allocation_ids=("allocation:dialogue-context-001",),
+        allocation_manifest_hash="2" * 64,
+    )
+    second_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:dialogue-context-002",
+        allocation_ids=("allocation:dialogue-context-002",),
+        allocation_manifest_hash="3" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "dialogue-context.sqlite3"
+    )
+    model = FakeAuditedModel(
+        store,
+        [
+            ModelProposal(
+                source_event_id=first_batch.batch_id,
+                intent="inform",
+                reply_chunks=("Which dates should I check?",),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            ),
+            ModelProposal(
+                source_event_id=second_batch.batch_id,
+                intent="inform",
+                reply_chunks=("Wise is available for eligible agency payments.",),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            ),
+        ],
+    )
+    for authority in (first_authority, second_authority):
+        _install_public_authority(store, authority)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=ForeignPhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=MappingAuthority(
+            {
+                first_batch.batch_id: first_authority,
+                second_batch.batch_id: second_authority,
+            }
+        ),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=1,
+    )
+    try:
+        first = executor.execute(first_batch)
+        assert private_store.load_recent_dialogue(first_batch.lead_id) == (
+            ConversationExchange(first_batch.combined_text, first.reply_chunks),
+        )
+
+        private_store._connection.execute(
+            "DELETE FROM private_dialogue_turns WHERE lead_id=?",
+            (first_batch.lead_id,),
+        )
+        replay = executor.execute(first_batch)
+        assert replay.replayed is True
+        assert len(model.calls) == 1
+        assert private_store.load_recent_dialogue(first_batch.lead_id) == (
+            ConversationExchange(first_batch.combined_text, first.reply_chunks),
+        )
+
+        executor.execute(second_batch)
+
+        assert model.calls[1].message == second_batch.combined_text
+        assert model.calls[1].recent_dialogue == (
+            ConversationExchange(first_batch.combined_text, first.reply_chunks),
+        )
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_progress_review_gate_is_structural_and_ignores_reply_words() -> None:
+    keyword_rich = ModelProposal(
+        source_event_id="batch:progress-review-001",
+        intent="inform",
+        reply_chunks=("availability price reserve package",),
+        facts=(ModelFact("language", "en"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    unrelated = replace(
+        keyword_rich,
+        reply_chunks=("Completely unrelated prose.",),
+    )
+
+    assert proposal_requires_progress_review(keyword_rich) is True
+    assert proposal_requires_progress_review(unrelated) is True
+
+
+def test_explicit_typed_clarification_or_structured_read_skips_progress_review() -> None:
+    empty = ModelProposal(
+        source_event_id="batch:progress-review-002",
+        intent="inform",
+        reply_chunks=(
+            "I need one detail.",
+            "Which check-in date should I use?",
+        ),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        clarification_question="Which check-in date should I use?",
+    )
+    with_read = replace(
+        empty,
+        clarification_question=None,
+        read_requests=(
+            ReadRequest(
+                request_id="read:progress-review-knowledge-001",
+                kind=ReadKind.KNOWLEDGE,
+                query="payment options",
+                locale="en",
+            ),
+        ),
+    )
+
+    assert proposal_requires_progress_review(empty) is False
+    assert proposal_requires_progress_review(with_read) is False
 
 
 def test_critical_outcome_is_separate_from_material_state_facts() -> None:
@@ -2024,7 +2188,9 @@ def test_consultation_expiry_during_model_is_refreshed_or_fails_closed(
             assert current_port.calls == [repeated_read]
             assert model.calls[-1].recap_reuse_required is False
             assert len(model.calls[-1].observations) == 1
-            assert "Atualizei" in " ".join(result.reply_chunks)
+            assert "Encontrei Suíte Casal disponível" in " ".join(
+                result.reply_chunks
+            )
             assert result.receipt.command_rows == ()
             assert result.receipt.relay_rows == ()
         else:
@@ -3047,7 +3213,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
     activity_port = FakeActivityReadPort(store)
     package_authority = replace(
         AUTHORITY,
-        allocation_ids=("allocation:package:0", "allocation:package:1"),
+        allocation_ids=("allocation:package:0",),
         allocation_manifest_hash="5" * 64,
     )
     _install_public_authority(store, package_authority)
@@ -3070,7 +3236,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
 
         assert result.reply_chunks == (
             "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
-            "por BRL 480.00. Nada foi reservado.",
+            "por BRL 480.00. Nada foi reservado.\n"
             "Encontrei Cachoeira do Buracão disponível em 12/08/2026 por "
             "BRL 1300.00. Nada foi reservado.",
         )
@@ -3150,7 +3316,9 @@ def test_authenticated_phone_allows_read_only_package_without_country() -> None:
         assert model.calls[1].private_profile_complete is False
         assert len(model.calls[1].observations) == 2
         assert result.reply_chunks == (
-            "Encontrei Suíte Casal e Buracão disponíveis.",
+            "I found Suíte Casal available from 2026-08-10 to 2026-08-12 for "
+            "BRL 480.00. Nothing was booked.\nI found Cachoeira do Buracão "
+            "available on 2026-08-12 for BRL 1300.00. Nothing was booked.",
         )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [replace(activity, locale="en")]

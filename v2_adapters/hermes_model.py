@@ -8,6 +8,7 @@ import os
 import subprocess
 import unicodedata
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from typing import Final
 
@@ -25,6 +26,7 @@ from v2_contracts.model import (
     ModelFact,
     ModelProposal,
     ModelRequest,
+    proposal_requires_progress_review,
 )
 from v2_contracts.providers import ReadKind, ReadRequest
 from v2_contracts.passengers import PassengerInput
@@ -71,6 +73,9 @@ _RESPONSE_FIELDS_V3: Final = frozenset(
 _RESPONSE_FIELDS_V4: Final = frozenset((*_RESPONSE_FIELDS_V3, "selection_requested"))
 _RESPONSE_FIELDS_V5: Final = frozenset((*_RESPONSE_FIELDS_V4, "pending_disposition"))
 _RESPONSE_FIELDS_V6: Final = frozenset((*_RESPONSE_FIELDS_V5, "passengers"))
+_RESPONSE_FIELDS_V7: Final = frozenset(
+    (*_RESPONSE_FIELDS_V6, "clarification_question")
+)
 _CONFIRMATION_REVIEW_FIELDS: Final = frozenset(
     ("schema", "source_event_id", "decision")
 )
@@ -102,7 +107,7 @@ reply, Markdown, or extra field.
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v6 JSON object and no commentary. reply_chunks
+Return exactly one v2-model-proposal-v7 JSON object and no commentary. reply_chunks
 must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
 effects, IDs, or facts that are not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
@@ -112,6 +117,8 @@ the current message unambiguously asks to prepare or reserve the current option.
 false for questions, hypotheticals, uncertainty or informational availability checks.
 pending_disposition must be null except for adjust: preserve keeps an unchanged pending
 summary during questions or recap requests; revoke is for refusal or material change.
+clarification_question must be null unless you need one explicit customer answer to
+continue. When non-null, copy that exact question into customer-facing reply_chunks.
 When pending_action is present, classify the latest message in relation to that exact
 public summary. Uma confirmação semântica curta como “Sim”, “Pode reservar”,
 “Confirmado” ou “Isso mesmo” pode usar intent=confirm; copy summary_version and
@@ -181,6 +188,28 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
   exact commercial facts required by the select contract. Emit no passenger updates, new
   reads, or effects, and never choose by list position unless the customer requested that
   criterion.
+""".strip()
+
+
+_TURN_COMPLETION_SYSTEM_SUFFIX: Final = """
+FINAL TURN COMPLETION RULES (highest salience):
+- recent committed dialogue, when present, is private context for continuity. Use it to
+  resolve references, the last open question, and what the customer is continuing now.
+- Never route by a word, substring, regex, alias list, or fixed phrase. Interpret the
+  complete current message semantically against dialogue, state facts and observations.
+- If the current message already completes a safe informational query, emit all typed facts
+  and the required read_requests now. Do not answer with readiness or ask for the same data.
+- If exactly one customer answer is missing, set clarification_question to that exact
+  customer-facing question and include it in reply_chunks. Otherwise set it to null.
+- handoff_status is verified operational state, not a generic active flag. requested,
+  active and acknowledgement_pending prove only internal/pending relay; never claim a human
+  received or is following. acknowledged proves the external handoff operation was accepted,
+  not that a person read it. completed may be described as completed; manual_review and
+  cancelled must be stated without inventing delivery.
+- When progress_review_required=true, the preceding valid proposal had no structured
+  progression and no typed clarification. Reinterpret once. Advance now, ask the one
+  necessary clarification, or give a conclusive grounded answer. Never fabricate a read,
+  fact, effect, delivery or human acknowledgement.
 """.strip()
 
 
@@ -287,9 +316,10 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "state_version": request.state_version,
         "critical_outcome": request.critical_outcome,
         "private_profile_complete": request.private_profile_complete,
-        "handoff_active": request.handoff_active,
+        "handoff_status": request.handoff_status,
         "confirmation_review_required": request.confirmation_review_required,
         "selection_review_required": request.selection_review_required,
+        "progress_review_required": request.progress_review_required,
         "active_execution_status": request.active_execution_status,
         "recap_reuse_required": request.recap_reuse_required,
         "observations": observations,
@@ -324,6 +354,15 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
             "public_summary": request.pending_action.public_summary,
             "expires_at": request.pending_action.expires_at.isoformat(),
         }
+    messages: list[list[str]] = []
+    for exchange in request.recent_dialogue:
+        messages.extend(
+            (
+                ["user", exchange.customer_message],
+                ["assistant", "\n\n".join(exchange.assistant_reply_chunks)],
+            )
+        )
+    messages.append(["user", _canonical(user_payload).decode("utf-8")])
     return _canonical(
         {
             "system_prompt": (
@@ -340,8 +379,10 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _RECAP_REUSE_SYSTEM_SUFFIX
                 + "\n\n"
                 + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
+                + "\n\n"
+                + _TURN_COMPLETION_SYSTEM_SUFFIX
             ),
-            "messages": [["user", _canonical(user_payload).decode("utf-8")]],
+            "messages": messages,
         }
     )
 
@@ -492,6 +533,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         expected_fields = _RESPONSE_FIELDS_V5
     elif schema == "v2-model-proposal-v6":
         expected_fields = _RESPONSE_FIELDS_V6
+    elif schema == "v2-model-proposal-v7":
+        expected_fields = _RESPONSE_FIELDS_V7
     else:
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
@@ -500,7 +543,12 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         raise InvalidModelProposal("model response source event mismatch")
     pending_disposition = (
         decoded["pending_disposition"]
-        if schema in ("v2-model-proposal-v5", "v2-model-proposal-v6")
+        if schema
+        in (
+            "v2-model-proposal-v5",
+            "v2-model-proposal-v6",
+            "v2-model-proposal-v7",
+        )
         else None
     )
     if decoded["intent"] == "inform" and pending_disposition == "preserve":
@@ -541,6 +589,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
                     "v2-model-proposal-v6",
+                    "v2-model-proposal-v7",
                 )
                 else ()
             ),
@@ -552,6 +601,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
                     "v2-model-proposal-v6",
+                    "v2-model-proposal-v7",
                 )
                 else ()
             ),
@@ -563,6 +613,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
                     "v2-model-proposal-v6",
+                    "v2-model-proposal-v7",
                 )
                 else None
             ),
@@ -573,6 +624,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     "v2-model-proposal-v4",
                     "v2-model-proposal-v5",
                     "v2-model-proposal-v6",
+                    "v2-model-proposal-v7",
                 )
                 else False
             ),
@@ -582,8 +634,18 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                     _passenger(item)
                     for item in _tuple_items(decoded["passengers"], "passengers")
                 )
-                if schema == "v2-model-proposal-v6"
+                if schema in ("v2-model-proposal-v6", "v2-model-proposal-v7")
                 else ()
+            ),
+            clarification_question=(
+                unicodedata.normalize(
+                    "NFKC", decoded["clarification_question"]
+                ).strip()
+                if schema == "v2-model-proposal-v7"
+                and type(decoded["clarification_question"]) is str
+                else decoded["clarification_question"]
+                if schema == "v2-model-proposal-v7"
+                else None
             ),
         )
     except (TypeError, ValueError) as exc:
@@ -909,6 +971,38 @@ class HermesModelAdapter:
             effect_proposals=(),
         )
 
+    def _maybe_progress_review(
+        self,
+        request: ModelRequest,
+        turn: AuditedModelTurn,
+    ) -> AuditedModelTurn:
+        if (
+            request.progress_review_required
+            or request.observations
+            or request.pending_action is not None
+            or request.handoff_status is not None
+            or request.confirmation_review_required
+            or request.selection_review_required
+            or request.active_execution_status is not None
+            or request.recap_reuse_required
+            or not proposal_requires_progress_review(turn.proposal)
+        ):
+            return turn
+        review_request = replace(
+            request,
+            request_id=(
+                "progress-review:"
+                + hashlib.sha256(request.request_id.encode("utf-8")).hexdigest()
+            ),
+            progress_review_required=True,
+        )
+        reviewed = self.complete_audited(review_request)
+        return AuditedModelTurn.from_frames(
+            proposal=reviewed.proposal,
+            frames=(*turn.frames, *reviewed.frames),
+            ephemeral_session_id=reviewed.closure.ephemeral_session_id,
+        )
+
     def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
         if type(request) is not ModelRequest:
             raise TypeError("request must be an exact ModelRequest")
@@ -944,13 +1038,13 @@ class HermesModelAdapter:
                 decode=decode,
             )
             if turn is not None:
-                if not attempted_frames:
-                    return turn
-                return AuditedModelTurn.from_frames(
-                    proposal=turn.proposal,
-                    frames=(*attempted_frames, *turn.frames),
-                    ephemeral_session_id=turn.closure.ephemeral_session_id,
-                )
+                if attempted_frames:
+                    turn = AuditedModelTurn.from_frames(
+                        proposal=turn.proposal,
+                        frames=(*attempted_frames, *turn.frames),
+                        ephemeral_session_id=turn.closure.ephemeral_session_id,
+                    )
+                return self._maybe_progress_review(request, turn)
             attempted_frames.append(frame)
 
         proposal = self._fallback_proposal(request)

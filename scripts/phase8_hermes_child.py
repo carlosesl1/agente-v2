@@ -36,8 +36,8 @@ def _load_input() -> tuple[str, list[dict[str, str]], str]:
     messages = value["messages"]
     if type(system_prompt) is not str or not system_prompt:
         raise ValueError("system_prompt must be a non-empty string")
-    if type(messages) is not list or not messages:
-        raise ValueError("messages must be a non-empty array")
+    if type(messages) is not list or not 1 <= len(messages) <= 9 or len(messages) % 2 != 1:
+        raise ValueError("messages must contain at most four alternating exchanges")
     history: list[dict[str, str]] = []
     expected = "user"
     for index, item in enumerate(messages):

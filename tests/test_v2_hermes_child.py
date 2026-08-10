@@ -72,3 +72,61 @@ def test_child_rejects_commentary_after_json() -> None:
 
     with pytest.raises(ValueError, match="one closed JSON"):
         run(("hermes",), _wire(), execute=execute)
+
+
+def test_child_accepts_four_private_exchanges_and_keeps_current_request_last() -> None:
+    messages = []
+    for index in range(4):
+        messages.extend(
+            (["user", f"customer {index}"], ["assistant", f"assistant {index}"])
+        )
+    messages.append(["user", '{"message":"current"}'])
+    wire = json.dumps(
+        {"system_prompt": "Return V2 JSON.", "messages": messages},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    captured = {}
+
+    def execute(command, **kwargs):
+        captured["prompt"] = command[-1]
+        return Result(b'{"schema":"v2-model-proposal-v1"}')
+
+    run(("hermes",), wire, execute=execute)
+
+    prompt = captured["prompt"]
+    assert "PRIVATE COMMITTED DIALOGUE" in prompt
+    assert "customer 0" in prompt
+    assert "assistant 3" in prompt
+    assert prompt.rfind('{"message":"current"}') > prompt.rfind("assistant 3")
+
+
+@pytest.mark.parametrize(
+    "messages",
+    (
+        [["assistant", "wrong first role"], ["user", "current"]],
+        [["user", "history"], ["user", "current"]],
+        [
+            *sum(
+                (
+                    [
+                        ["user", f"customer {index}"],
+                        ["assistant", f"assistant {index}"],
+                    ]
+                    for index in range(5)
+                ),
+                [],
+            ),
+            ["user", "current"],
+        ],
+    ),
+)
+def test_child_rejects_noncanonical_or_unbounded_dialogue(messages) -> None:
+    wire = json.dumps(
+        {"system_prompt": "Return V2 JSON.", "messages": messages},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+
+    with pytest.raises(ValueError, match="messages wire is invalid"):
+        run(("hermes",), wire, execute=lambda *args, **kwargs: None)

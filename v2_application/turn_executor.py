@@ -1315,7 +1315,9 @@ class V2TurnExecutor:
                 raise TypeError(f"{name} must expose {method}")
         for method in (
             "load",
+            "load_recent_dialogue",
             "persist_turn",
+            "record_dialogue_turn",
             "turn_supplied_fact_names",
             "load_passenger_manifest",
             "persist_passenger_manifest",
@@ -1344,6 +1346,23 @@ class V2TurnExecutor:
         self._turn_timeout = turn_timeout
         self._max_commit_attempts = max_commit_attempts
 
+    def _record_committed_dialogue(
+        self,
+        batch: InboundBatch,
+        *,
+        event_hash: str,
+        reply_chunks: tuple[str, ...],
+        committed_at: datetime,
+    ) -> None:
+        self._private_customer_facts.record_dialogue_turn(
+            lead_id=batch.lead_id,
+            source_turn_id=batch.batch_id,
+            source_event_hash=event_hash,
+            customer_message=batch.combined_text,
+            assistant_reply_chunks=reply_chunks,
+            committed_at=committed_at,
+        )
+
     def execute(self, batch: InboundBatch) -> V2TurnExecutionResult:
         if type(batch) is not InboundBatch:
             raise TypeError("batch must be an exact InboundBatch")
@@ -1353,7 +1372,14 @@ class V2TurnExecutor:
         if replay is not None:
             if replay.event_hash != event_hash or replay.source_events != sources:
                 raise TurnExecutionError("aggregate turn replay identity diverged")
-            return V2TurnExecutionResult(replay, _reply_from_receipt(replay), True)
+            reply_chunks = _reply_from_receipt(replay)
+            self._record_committed_dialogue(
+                batch,
+                event_hash=event_hash,
+                reply_chunks=reply_chunks,
+                committed_at=replay.committed_at,
+            )
+            return V2TurnExecutionResult(replay, reply_chunks, True)
 
         last_conflict: ConcurrencyConflict | None = None
         for _ in range(self._max_commit_attempts):
@@ -1414,6 +1440,12 @@ class V2TurnExecutor:
                     public_rows=prepared.public_rows,
                     committed_at=prepared.receipt.committed_at,
                 )
+                self._record_committed_dialogue(
+                    batch,
+                    event_hash=event_hash,
+                    reply_chunks=prepared.reply_chunks,
+                    committed_at=prepared.receipt.committed_at,
+                )
                 return V2TurnExecutionResult(
                     prepared.receipt,
                     prepared.reply_chunks,
@@ -1430,11 +1462,14 @@ class V2TurnExecutor:
                         raise TurnExecutionError(
                             "concurrent aggregate turn identity diverged"
                         ) from exc
-                    return V2TurnExecutionResult(
-                        replay,
-                        _reply_from_receipt(replay),
-                        True,
+                    reply_chunks = _reply_from_receipt(replay)
+                    self._record_committed_dialogue(
+                        batch,
+                        event_hash=event_hash,
+                        reply_chunks=reply_chunks,
+                        committed_at=replay.committed_at,
                     )
+                    return V2TurnExecutionResult(replay, reply_chunks, True)
         raise ConcurrencyConflict(
             "turn commit attempts were exhausted"
         ) from last_conflict
@@ -1464,6 +1499,9 @@ class V2TurnExecutor:
             self._store,
             batch.lead_id,
             now=now,
+        )
+        recent_dialogue = self._private_customer_facts.load_recent_dialogue(
+            batch.lead_id
         )
 
         profile = self._profile.read(batch.lead_id, now=now)
@@ -1511,6 +1549,7 @@ class V2TurnExecutor:
             message=batch.combined_text,
             locale=projection.locale,
             state_version=current.version,
+            recent_dialogue=recent_dialogue,
             consultation_history=consultation_history,
             state_facts=_authoritative_language_facts(
                 _state_model_facts(projection),
@@ -1526,7 +1565,11 @@ class V2TurnExecutor:
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
             private_profile_complete=effective_profile_complete,
-            handoff_active=current.state.handoff is not None,
+            handoff_status=(
+                current.state.handoff.status.value
+                if current.state.handoff is not None
+                else None
+            ),
             active_execution_status=active_execution_status(current.state),
         )
         first_audited = self._model.complete_audited(request)
@@ -1908,6 +1951,7 @@ class V2TurnExecutor:
                 message=batch.combined_text,
                 locale=projection.locale,
                 state_version=current.version,
+                recent_dialogue=recent_dialogue,
                 observations=v2_observations,
                 consultation_history=consultation_history,
                 state_facts=_authoritative_language_facts(
@@ -1927,7 +1971,11 @@ class V2TurnExecutor:
                 critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
                 private_profile_complete=effective_profile_complete,
-                handoff_active=current.state.handoff is not None,
+                handoff_status=(
+                    current.state.handoff.status.value
+                    if current.state.handoff is not None
+                    else None
+                ),
                 active_execution_status=active_execution_status(current.state),
                 recap_reuse_required=reused_consultation,
             )

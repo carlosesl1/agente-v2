@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from v2_application.public_reply import (
-    apply_positive_grounding,
-    grounded_positive_reply,
-    proposal_grounds_positive_observation,
-)
+from v2_application.public_reply import apply_positive_grounding, grounded_positive_reply
 from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadObservation
 
@@ -24,19 +20,28 @@ def _observation(provider: str, payload: dict[str, object], seed: str) -> ReadOb
     )
 
 
-def _proposal(text: str) -> ModelProposal:
+def _proposal(
+    text: str,
+    *,
+    clarification_question: str | None = None,
+) -> ModelProposal:
     return ModelProposal(
         source_event_id="batch:public-reply-grounding",
         intent="inform",
-        reply_chunks=(text,),
+        reply_chunks=(
+            (text, clarification_question)
+            if clarification_question is not None
+            else (text,)
+        ),
         facts=(),
         read_requests=(),
         effect_proposals=(),
+        clarification_question=clarification_question,
     )
 
 
-def test_real_cloudbeds_options_use_available_units_without_available_boolean() -> None:
-    lodging = _observation(
+def _lodging() -> ReadObservation:
+    return _observation(
         "cloudbeds",
         {
             "options": [
@@ -56,339 +61,88 @@ def test_real_cloudbeds_options_use_available_units_without_available_boolean() 
         "1",
     )
 
-    assert grounded_positive_reply((lodging,), locale="pt-BR") == (
+
+def _activity() -> ReadObservation:
+    return _observation(
+        "bokun",
+        {
+            "offer_id": "offer:" + "2" * 64,
+            "product_id": "product:buracao",
+            "product_public_name": "Cachoeira do Buracão",
+            "activity_date": "2026-09-12",
+            "adults": 1,
+            "children": 0,
+            "total_amount": "350.00",
+            "currency": "BRL",
+            "available": True,
+        },
+        "2",
+    )
+
+
+def test_real_cloudbeds_options_use_available_units_without_available_boolean() -> None:
+    assert grounded_positive_reply((_lodging(),), locale="pt-BR") == (
         "Encontrei Suíte Real disponível de 10/09/2026 a 12/09/2026 "
         "por BRL 440.00. Nada foi reservado.",
     )
 
 
-def test_negative_claim_never_counts_as_positive_grounding_even_with_offer_name() -> None:
-    lodging = _observation(
-        "cloudbeds",
-        {
-            "offer_id": "offer:" + "2" * 64,
-            "room_public_name": "Suíte Contradição",
-            "check_in": "2026-09-10",
-            "check_out": "2026-09-12",
-            "adults": 1,
-            "children": 0,
-            "total_amount": "440.00",
-            "currency": "BRL",
-            "available_units": 1,
-        },
-        "2",
-    )
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal("A Suíte Contradição não está disponível."),
-            (lodging,),
-        )
-        is False
+def test_package_grounding_renders_each_provider_group_in_provider_order() -> None:
+    assert grounded_positive_reply((_lodging(), _activity()), locale="en") == (
+        "I found Suíte Real available from 2026-09-10 to 2026-09-12 "
+        "for BRL 440.00. Nothing was booked.\n"
+        "I found Cachoeira do Buracão available on 2026-09-12 for "
+        "BRL 350.00. Nothing was booked.",
     )
 
 
-def test_package_grounding_requires_every_positive_observation() -> None:
-    lodging = _observation(
-        "cloudbeds",
-        {
-            "options": [
-                {
-                    "offer_id": "offer:" + "3" * 64,
-                    "room_public_name": "Quarto privativo",
-                    "check_in": "2026-09-10",
-                    "check_out": "2026-09-12",
-                    "adults": 2,
-                    "children": 0,
-                    "total_amount": "580.00",
-                    "currency": "BRL",
-                    "available_units": 2,
-                }
-            ]
-        },
-        "3",
-    )
-    activity = _observation(
-        "bokun",
-        {
-            "offer_id": "offer:" + "4" * 64,
-            "product_id": "product:buracao",
-            "product_public_name": "Cachoeira do Buracão",
-            "activity_date": "2026-09-12",
-            "adults": 2,
-            "children": 0,
-            "total_amount": "700.00",
-            "currency": "BRL",
-            "available": True,
-        },
-        "4",
-    )
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal("O Buracão está disponível por BRL 700.00."),
-            (lodging, activity),
-        )
-        is False
-    )
-    assert grounded_positive_reply((lodging, activity), locale="pt-BR") == (
-        "Encontrei Quarto privativo disponível de 10/09/2026 a 12/09/2026 "
-        "por BRL 580.00. Nada foi reservado.",
-        "Encontrei Cachoeira do Buracão disponível em 12/09/2026 por "
-        "BRL 700.00. Nada foi reservado.",
-    )
-
-
-def test_historical_english_package_reply_is_preserved_when_it_grounds_both_reads() -> (
-    None
-):
-    lodging = _observation(
-        "cloudbeds",
-        {
-            "options": [
-                {
-                    "offer_id": "offer:" + "5" * 64,
-                    "room_public_name": "Compartilhado Misto",
-                    "check_in": "2026-12-16",
-                    "check_out": "2026-12-18",
-                    "adults": 1,
-                    "children": 0,
-                    "total_amount": "90.00",
-                    "currency": "BRL",
-                    "available_units": 1,
-                },
-                {
-                    "offer_id": "offer:" + "6" * 64,
-                    "room_public_name": "Suíte Casal",
-                    "check_in": "2026-12-16",
-                    "check_out": "2026-12-18",
-                    "adults": 1,
-                    "children": 0,
-                    "total_amount": "200.00",
-                    "currency": "BRL",
-                    "available_units": 1,
-                },
-            ]
-        },
-        "5",
-    )
-    activity = _observation(
-        "bokun",
-        {
-            "offer_id": "offer:" + "7" * 64,
-            "product_id": "product:tour-4ps",
-            "product_public_name": "Roteiro dos 4Ps",
-            "activity_date": "2026-12-17",
-            "adults": 1,
-            "children": 0,
-            "total_amount": "334.95",
-            "currency": "BRL",
-            "available": True,
-        },
-        "7",
-    )
+def test_grounding_replaces_untrusted_commercial_draft_but_preserves_typed_question() -> None:
     proposal = _proposal(
-        "The 4Ps tour is available on December 17 for BRL 334.95. "
-        "Accommodation is available from December 16 to 18, with shared "
-        "rooms from BRL 90 and private rooms from BRL 200. Nothing was booked."
+        "Everything is sold out and a human is already following this.",
+        clarification_question="Will you be the reservation holder?",
     )
 
     grounded = apply_positive_grounding(
         proposal,
-        (lodging, activity),
+        (_lodging(),),
         locale="en",
         force=False,
     )
 
-    assert grounded.reply_chunks == proposal.reply_chunks
-
-
-def test_no_booking_notice_is_not_misread_as_portuguese_unavailability() -> None:
-    activity = _observation(
-        "bokun",
-        {
-            "offer_id": "offer:" + "8" * 64,
-            "product_id": "product:tour-4ps",
-            "product_public_name": "Roteiro dos 4Ps",
-            "activity_date": "2026-12-03",
-            "adults": 1,
-            "children": 0,
-            "total_amount": "334.95",
-            "currency": "BRL",
-            "available": True,
-        },
-        "8",
+    assert grounded.reply_chunks == (
+        "I found Suíte Real available from 2026-09-10 to 2026-09-12 "
+        "for BRL 440.00. Nothing was booked.",
+        "Will you be the reservation holder?",
     )
-    proposal = _proposal(
-        "O Roteiro dos 4Ps está disponível em 03/12/2026 por BRL 334,95. "
-        "Ainda não fiz nenhuma reserva."
-    )
+    assert grounded.clarification_question == proposal.clarification_question
 
-    grounded = apply_positive_grounding(
-        proposal,
-        (activity,),
-        locale="pt-BR",
+
+def test_grounding_decision_does_not_depend_on_draft_words_or_force_flag() -> None:
+    first = apply_positive_grounding(
+        _proposal("available Suíte Real BRL 440.00"),
+        (_lodging(),),
+        locale="en",
         force=False,
     )
-
-    assert grounded.reply_chunks == proposal.reply_chunks
-
-
-def test_unrelated_same_amount_does_not_ground_an_omitted_package_component() -> None:
-    lodging = _observation(
-        "cloudbeds",
-        {
-            "offer_id": "offer:" + "9" * 64,
-            "room_public_name": "Suíte Alpha",
-            "check_in": "2026-12-16",
-            "check_out": "2026-12-18",
-            "total_amount": "90.00",
-            "currency": "BRL",
-            "available_units": 1,
-        },
-        "9",
+    second = apply_positive_grounding(
+        _proposal("semantically unrelated text"),
+        (_lodging(),),
+        locale="en",
+        force=True,
     )
-    activity = _observation(
+
+    assert first.reply_chunks == second.reply_chunks
+
+
+def test_no_positive_observation_leaves_proposal_unchanged() -> None:
+    proposal = _proposal("I need one more detail.")
+    negative = _observation(
         "bokun",
-        {
-            "offer_id": "offer:" + "a" * 64,
-            "product_public_name": "Roteiro dos 4Ps",
-            "activity_date": "2026-12-17",
-            "total_amount": "334.95",
-            "currency": "BRL",
-            "available": True,
-        },
-        "a",
+        {"available": False, "product_public_name": "Cachoeira do Buracão"},
+        "3",
     )
 
     assert (
-        proposal_grounds_positive_observation(
-            _proposal(
-                "The 4Ps tour is available for BRL 334.95. "
-                "The unrelated transfer costs BRL 90. Nothing was booked."
-            ),
-            (lodging, activity),
-        )
-        is False
-    )
-
-
-def test_single_positive_group_still_requires_a_bound_offer_anchor() -> None:
-    activity = _observation(
-        "bokun",
-        {
-            "offer_id": "offer:" + "b" * 64,
-            "product_public_name": "Roteiro dos 4Ps",
-            "activity_date": "2026-12-17",
-            "total_amount": "334.95",
-            "currency": "BRL",
-            "available": True,
-        },
-        "b",
-    )
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal("Another tour is available. Nothing was booked."),
-            (activity,),
-        )
-        is False
-    )
-
-
-def _single_lodging_for_amount_grounding() -> ReadObservation:
-    return _observation(
-        "cloudbeds",
-        {
-            "offer_id": "offer:" + "c" * 64,
-            "room_public_name": "Suíte Alpha",
-            "check_in": "2026-12-16",
-            "check_out": "2026-12-18",
-            "total_amount": "90.00",
-            "currency": "BRL",
-            "available_units": 1,
-        },
-        "c",
-    )
-
-
-def test_amount_anchor_must_share_a_clause_with_its_domain() -> None:
-    lodging = _single_lodging_for_amount_grounding()
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal(
-                "Accommodation is available. The unrelated transfer costs BRL 90."
-            ),
-            (lodging,),
-        )
-        is False
-    )
-
-
-def test_amount_anchor_rejects_numeric_substrings() -> None:
-    lodging = _single_lodging_for_amount_grounding()
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal("Accommodation is available for BRL 190.00."),
-            (lodging,),
-        )
-        is False
-    )
-
-
-def test_amount_anchor_rejects_an_intervening_foreign_domain_in_same_clause() -> None:
-    lodging = _single_lodging_for_amount_grounding()
-
-    assert (
-        proposal_grounds_positive_observation(
-            _proposal(
-                "Accommodation is available, and the unrelated transfer costs BRL 90."
-            ),
-            (lodging,),
-        )
-        is False
-    )
-
-
-def test_multiple_positive_options_are_all_grounded_in_provider_order() -> None:
-    lodging = _observation(
-        "cloudbeds",
-        {
-            "options": [
-                {
-                    "offer_id": "offer:" + "d" * 64,
-                    "room_public_name": "Suíte Serra",
-                    "check_in": "2026-09-10",
-                    "check_out": "2026-09-12",
-                    "total_amount": "440.00",
-                    "currency": "BRL",
-                    "available_units": 1,
-                },
-                {
-                    "offer_id": "offer:" + "e" * 64,
-                    "room_public_name": "Dormitório Vale",
-                    "check_in": "2026-09-10",
-                    "check_out": "2026-09-12",
-                    "total_amount": "180.00",
-                    "currency": "BRL",
-                    "available_units": 2,
-                },
-            ]
-        },
-        "d",
-    )
-
-    rendered = grounded_positive_reply((lodging,), locale="en")
-
-    assert rendered == (
-        "I found Suíte Serra available from 2026-09-10 to 2026-09-12 for "
-        "BRL 440.00. Nothing was booked.\n"
-        "I found Dormitório Vale available from 2026-09-10 to 2026-09-12 for "
-        "BRL 180.00. Nothing was booked.",
-    )
-    assert not proposal_grounds_positive_observation(
-        _proposal("Suíte Serra is available for BRL 440.00."),
-        (lodging,),
+        apply_positive_grounding(proposal, (negative,), locale="en", force=False)
+        == proposal
     )

@@ -18,7 +18,7 @@ import sqlite3
 import unicodedata
 
 from reservation_boundary.types import StringSlot, TypedFact
-from v2_contracts.model import ModelFact
+from v2_contracts.model import ConversationExchange, ModelFact
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -381,6 +381,16 @@ CREATE TABLE IF NOT EXISTS private_passenger_manifests (
     revision INTEGER NOT NULL CHECK (revision >= 1),
     persisted_at TEXT NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS private_dialogue_turns (
+    lead_id TEXT NOT NULL,
+    source_turn_id TEXT NOT NULL,
+    source_event_hash TEXT NOT NULL,
+    customer_message TEXT NOT NULL,
+    assistant_reply_chunks_json TEXT NOT NULL,
+    private_content_hash TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    PRIMARY KEY (lead_id, source_turn_id)
+) STRICT;
 """
 
 _EXPECTED_SCHEMA = {
@@ -410,6 +420,15 @@ _EXPECTED_SCHEMA = {
         ("source_event_hash", "TEXT", 1, 0),
         ("revision", "INTEGER", 1, 0),
         ("persisted_at", "TEXT", 1, 0),
+    ),
+    "private_dialogue_turns": (
+        ("lead_id", "TEXT", 1, 1),
+        ("source_turn_id", "TEXT", 1, 2),
+        ("source_event_hash", "TEXT", 1, 0),
+        ("customer_message", "TEXT", 1, 0),
+        ("assistant_reply_chunks_json", "TEXT", 1, 0),
+        ("private_content_hash", "TEXT", 1, 0),
+        ("committed_at", "TEXT", 1, 0),
     ),
 }
 
@@ -448,6 +467,18 @@ _EXPECTED_TABLE_SQL = {
             source_event_hash TEXT NOT NULL,
             revision INTEGER NOT NULL CHECK (revision >= 1),
             persisted_at TEXT NOT NULL
+        ) STRICT
+    """,
+    "private_dialogue_turns": """
+        CREATE TABLE private_dialogue_turns (
+            lead_id TEXT NOT NULL,
+            source_turn_id TEXT NOT NULL,
+            source_event_hash TEXT NOT NULL,
+            customer_message TEXT NOT NULL,
+            assistant_reply_chunks_json TEXT NOT NULL,
+            private_content_hash TEXT NOT NULL,
+            committed_at TEXT NOT NULL,
+            PRIMARY KEY (lead_id, source_turn_id)
         ) STRICT
     """,
 }
@@ -561,6 +592,30 @@ def _turn_content_hash(
                     {"name": name, "value_hash": value_hash}
                     for name, value_hash in fact_material
                 ],
+                "lead_id": lead_id,
+                "source_event_hash": source_event_hash,
+                "source_turn_id": source_turn_id,
+            }
+        ),
+    )
+
+
+def _dialogue_content_hash(
+    *,
+    lead_id: str,
+    source_turn_id: str,
+    source_event_hash: str,
+    customer_message: str,
+    assistant_reply_chunks: tuple[str, ...],
+    committed_at: datetime,
+) -> str:
+    return _domain_hash(
+        b"v2-private-dialogue-turn-v1",
+        _canonical_json(
+            {
+                "assistant_reply_chunks": list(assistant_reply_chunks),
+                "committed_at": committed_at.isoformat(),
+                "customer_message": customer_message,
                 "lead_id": lead_id,
                 "source_event_hash": source_event_hash,
                 "source_turn_id": source_turn_id,
@@ -749,6 +804,136 @@ class SQLitePrivateCustomerFactStore:
             ),
             source_turns=tuple(sources),
         )
+
+    def load_recent_dialogue(
+        self,
+        lead_id: str,
+    ) -> tuple[ConversationExchange, ...]:
+        self._require_open()
+        canonical_lead = _identifier(lead_id, "lead_id")
+        try:
+            rows = self._connection.execute(
+                "SELECT source_turn_id,source_event_hash,customer_message,"
+                "assistant_reply_chunks_json,private_content_hash,committed_at "
+                "FROM private_dialogue_turns WHERE lead_id=? "
+                "ORDER BY committed_at DESC,source_turn_id DESC LIMIT 4",
+                (canonical_lead,),
+            ).fetchall()
+        except sqlite3.DatabaseError:
+            raise RuntimeError("private dialogue read failed") from None
+        exchanges: list[ConversationExchange] = []
+        for row in reversed(rows):
+            (
+                source_turn_id,
+                source_event_hash,
+                customer_message,
+                reply_json,
+                content_hash,
+                committed_at,
+            ) = row
+            try:
+                canonical_turn = _identifier(source_turn_id, "source_turn_id")
+                canonical_event_hash = _hash(source_event_hash, "source_event_hash")
+                canonical_content_hash = _hash(content_hash, "private_content_hash")
+                instant = _utc(datetime.fromisoformat(committed_at), "committed_at")
+                decoded = json.loads(reply_json, object_pairs_hook=_unique_object)
+                if type(decoded) is not list:
+                    raise ValueError("dialogue reply chunks are not a list")
+                exchange = ConversationExchange(
+                    customer_message=customer_message,
+                    assistant_reply_chunks=tuple(decoded),
+                )
+                expected_json = _canonical_json(decoded).decode("utf-8")
+                expected_hash = _dialogue_content_hash(
+                    lead_id=canonical_lead,
+                    source_turn_id=canonical_turn,
+                    source_event_hash=canonical_event_hash,
+                    customer_message=exchange.customer_message,
+                    assistant_reply_chunks=exchange.assistant_reply_chunks,
+                    committed_at=instant,
+                )
+            except (TypeError, ValueError, PrivateCustomerFactValidationError):
+                raise RuntimeError("private dialogue row is invalid") from None
+            if (
+                reply_json != expected_json
+                or committed_at != instant.isoformat()
+                or canonical_content_hash != expected_hash
+            ):
+                raise RuntimeError("private dialogue row is invalid")
+            exchanges.append(exchange)
+        return tuple(exchanges)
+
+    def record_dialogue_turn(
+        self,
+        *,
+        lead_id: str,
+        source_turn_id: str,
+        source_event_hash: str,
+        customer_message: str,
+        assistant_reply_chunks: tuple[str, ...],
+        committed_at: datetime,
+    ) -> bool:
+        self._require_open()
+        canonical_lead = _identifier(lead_id, "lead_id")
+        canonical_turn = _identifier(source_turn_id, "source_turn_id")
+        canonical_event_hash = _hash(source_event_hash, "source_event_hash")
+        instant = _utc(committed_at, "committed_at")
+        exchange = ConversationExchange(customer_message, assistant_reply_chunks)
+        reply_json = _canonical_json(list(exchange.assistant_reply_chunks)).decode("utf-8")
+        content_hash = _dialogue_content_hash(
+            lead_id=canonical_lead,
+            source_turn_id=canonical_turn,
+            source_event_hash=canonical_event_hash,
+            customer_message=exchange.customer_message,
+            assistant_reply_chunks=exchange.assistant_reply_chunks,
+            committed_at=instant,
+        )
+        material = (
+            canonical_event_hash,
+            exchange.customer_message,
+            reply_json,
+            content_hash,
+            instant.isoformat(),
+        )
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            existing = self._connection.execute(
+                "SELECT source_event_hash,customer_message,"
+                "assistant_reply_chunks_json,private_content_hash,committed_at "
+                "FROM private_dialogue_turns WHERE lead_id=? AND source_turn_id=?",
+                (canonical_lead, canonical_turn),
+            ).fetchone()
+            if existing is not None:
+                if existing != material:
+                    raise PrivateCustomerFactIdentityConflict(
+                        "private dialogue source turn conflicts"
+                    )
+                self._connection.execute("COMMIT")
+                return False
+            self._connection.execute(
+                "INSERT INTO private_dialogue_turns "
+                "(lead_id,source_turn_id,source_event_hash,customer_message,"
+                "assistant_reply_chunks_json,private_content_hash,committed_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (canonical_lead, canonical_turn, *material),
+            )
+            self._connection.execute(
+                "DELETE FROM private_dialogue_turns WHERE lead_id=? AND source_turn_id "
+                "NOT IN (SELECT source_turn_id FROM private_dialogue_turns "
+                "WHERE lead_id=? ORDER BY committed_at DESC,source_turn_id DESC LIMIT 4)",
+                (canonical_lead, canonical_lead),
+            )
+            self._connection.execute("COMMIT")
+        except PrivateCustomerFactIdentityConflict:
+            self._connection.execute("ROLLBACK")
+            raise
+        except sqlite3.DatabaseError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.DatabaseError:
+                pass
+            raise RuntimeError("private dialogue write failed") from None
+        return True
 
     def load_passenger_manifest(self, lead_id: str) -> TypedFact | None:
         self._require_open()

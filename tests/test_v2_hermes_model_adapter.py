@@ -28,6 +28,7 @@ from v2_contracts.critical_actions import (
 )
 from v2_contracts.model import (
     ConsultationHistoryEntry,
+    ConversationExchange,
     InvalidModelProposal,
     ModelFact,
     ModelRequest,
@@ -62,6 +63,37 @@ def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validatio
     assert proposal.reply_chunks[0] == unicodedata.normalize(
         "NFKC", proposal.reply_chunks[0]
     )
+
+
+def test_v7_parser_requires_and_normalizes_typed_clarification_question() -> None:
+    payload = {
+        "schema": "v2-model-proposal-v7",
+        "source_event_id": "batch:typed-question-001",
+        "intent": "inform",
+        "reply_chunks": [
+            "I found one option.",
+            "Who will be the reservation holder?",
+        ],
+        "facts": [],
+        "read_requests": [],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "selection_requested": False,
+        "pending_disposition": None,
+        "passengers": [],
+        "clarification_question": "  Who will be the reservation holder?  ",
+    }
+
+    parsed = _proposal(
+        json.dumps(payload).encode(),
+        "batch:typed-question-001",
+    )
+
+    assert parsed.clarification_question == "Who will be the reservation holder?"
 
 
 def _pending_action() -> PendingCriticalActionContext:
@@ -147,7 +179,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     ]
     assert "CURRENT-TURN COMMERCIAL PROGRESSION" in envelope["system_prompt"]
     assert '"one adult" or "1 adulto"' in envelope["system_prompt"]
-    assert user["handoff_active"] is False
+    assert user["handoff_status"] is None
     assert user["confirmation_review_required"] is False
     assert user["selection_review_required"] is False
     assert user["active_execution_status"] is None
@@ -162,6 +194,76 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         "content_hash",
     ):
         assert forbidden not in serialized
+
+
+def test_recent_dialogue_is_transport_only_context_before_complete_current_request() -> None:
+    request = ModelRequest(
+        request_id="request:recent-dialogue-wire",
+        lead_id="manychat:recent-dialogue-wire",
+        source_event_id="batch:recent-dialogue-wire",
+        message="And can I pay with Wise?",
+        locale="en-US",
+        state_version=2,
+        recent_dialogue=(
+            ConversationExchange(
+                "I need a private room from 18 to 20 November for one adult.",
+                ("I found a private room.", "Would you like its details?"),
+            ),
+            ConversationExchange(
+                "Yes, and I am not Brazilian.",
+                ("I can continue in English.",),
+            ),
+        ),
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+
+    assert envelope["messages"][:-1] == [
+        [
+            "user",
+            "I need a private room from 18 to 20 November for one adult.",
+        ],
+        [
+            "assistant",
+            "I found a private room.\n\nWould you like its details?",
+        ],
+        ["user", "Yes, and I am not Brazilian."],
+        ["assistant", "I can continue in English."],
+    ]
+    current = json.loads(envelope["messages"][-1][1])
+    assert envelope["messages"][-1][0] == "user"
+    assert current["message"] == "And can I pay with Wise?"
+    assert "recent_dialogue" not in current
+
+
+def test_handoff_status_wire_preserves_receipt_aware_state() -> None:
+    request = ModelRequest(
+        request_id="request:handoff-status-wire",
+        lead_id="manychat:handoff-status-wire",
+        source_event_id="batch:handoff-status-wire",
+        message="Has the team received it?",
+        locale="en",
+        state_version=3,
+        handoff_status="acknowledgement_pending",
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    current = json.loads(envelope["messages"][-1][1])
+
+    assert current["handoff_status"] == "acknowledgement_pending"
+
+
+def test_handoff_status_rejects_unverified_free_form_state() -> None:
+    with pytest.raises(InvalidModelProposal, match="handoff_status"):
+        ModelRequest(
+            request_id="request:handoff-status-invalid",
+            lead_id="manychat:handoff-status-invalid",
+            source_event_id="batch:handoff-status-invalid",
+            message="Has the team received it?",
+            locale="en",
+            state_version=3,
+            handoff_status="human_is_following",
+        )
 
 
 def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
@@ -529,7 +631,7 @@ def _confirmation_review_request() -> ModelRequest:
         state_facts=(ModelFact("language", "pt-BR"),),
         private_customer_fact_names=("full_name", "email"),
         private_profile_complete=True,
-        handoff_active=False,
+        handoff_status=None,
         pending_action=_pending_action(),
         confirmation_review_required=True,
     )
@@ -576,7 +678,7 @@ def test_confirmation_review_wire_is_minimal_and_public_only() -> None:
         "state_facts",
         "private_customer_fact_names",
         "private_profile_complete",
-        "handoff_active",
+        "handoff_status",
         "observations",
         "passenger_manifest_status",
         "offer:",
@@ -735,6 +837,78 @@ def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
     assert turn.closure.ephemeral_session_id.startswith(
         "deterministic:protocol-fallback:"
     )
+
+
+def test_adapter_revises_structural_noop_once_with_same_complete_context() -> None:
+    request = ModelRequest(
+        request_id="request:progress-review-runtime",
+        lead_id="manychat:progress-review-runtime",
+        source_event_id="batch:progress-review-runtime",
+        message="I need a private room from 18 to 20 November for one adult.",
+        locale="en",
+        state_version=0,
+    )
+
+    def payload(*, reply: str, question: str | None) -> bytes:
+        return json.dumps(
+            {
+                "schema": "v2-model-proposal-v7",
+                "source_event_id": request.source_event_id,
+                "intent": "inform",
+                "reply_chunks": [reply],
+                "facts": [],
+                "read_requests": [],
+                "effect_proposals": [],
+                "target_offer_id": None,
+                "target_offer_ids": [],
+                "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+                "selection_requested": False,
+                "pending_disposition": None,
+                "passengers": [],
+                "clarification_question": question,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
+    responses = [
+        payload(reply="I am ready to help.", question=None),
+        payload(
+            reply="Which year should I use for those November dates?",
+            question="Which year should I use for those November dates?",
+        ),
+    ]
+    seen = []
+
+    def run(command, **kwargs):
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append(current)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"progress-review-transcript-key-001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert [item["progress_review_required"] for item in seen] == [False, True]
+    assert [item["message"] for item in seen] == [request.message, request.message]
+    assert turn.proposal.clarification_question == (
+        "Which year should I use for those November dates?"
+    )
+    assert len(turn.frames) == 2
 
 
 def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
