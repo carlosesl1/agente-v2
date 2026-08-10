@@ -189,6 +189,7 @@ class StripeTestHTTPTransport:
         client: httpx.Client | None = None,
         journal: object | None = None,
         clock: Callable[[], datetime] | None = None,
+        effect_guard: object | None = None,
     ) -> None:
         if type(secret_keys) is not dict or not secret_keys:
             raise ValueError("Stripe test secret keys must be a non-empty exact map")
@@ -217,6 +218,11 @@ class StripeTestHTTPTransport:
         if clock is not None and not callable(clock):
             raise TypeError("Stripe transport clock must be callable")
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        if effect_guard is not None and not callable(
+            getattr(effect_guard, "allows_workflow", None)
+        ):
+            raise TypeError("Stripe effect guard must expose allows_workflow")
+        self._effect_guard = effect_guard
 
     def __repr__(self) -> str:
         return f"StripeTestHTTPTransport(accounts={len(self._keys)},mode=test)"
@@ -232,6 +238,10 @@ class StripeTestHTTPTransport:
         key = self._keys.get(profile)
         if key is None:
             raise ValueError("Stripe account profile is outside the closed map")
+        if self._effect_guard is not None and not self._effect_guard.allows_workflow(
+            "stripe-payment-initiation"
+        ):
+            raise RuntimeError("Stripe write authority is closed")
         try:
             response = self._client.post(
                 self._base_url + path,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import sqlite3
 
+from reservation_boundary.public_dispatch import PublicAcceptanceReceipt
 from v2_adapters.manychat import (
     ManyChatDeliveryAdapter,
     ManyChatTransportNotCalled,
@@ -45,6 +46,29 @@ class Delivery:
             provider_request_ids=(f"request:{claim.message_id}",),
             dispatch_correlation_ids=(f"correlation:{claim.message_id}",),
         )
+
+
+def test_public_acceptance_private_references_are_absent_from_nested_repr() -> None:
+    provider_reference = "manychat-request:private-001"
+    dispatch_reference = "dispatch:private-001"
+    acceptance = PublicChannelAcceptance(
+        state=PublicAcceptanceState.ACCEPTED_BY_MANYCHAT,
+        operations=(PublicAcceptanceOperation.SEND_CONTENT,),
+        provider_request_ids=(provider_reference,),
+        dispatch_correlation_ids=(dispatch_reference,),
+    )
+    receipt = PublicAcceptanceReceipt(
+        public_row_id="public-row:001",
+        idempotency_key="message:001",
+        acceptance=acceptance,
+        accepted_at=NOW,
+    )
+
+    rendered = repr((acceptance, receipt))
+    assert provider_reference not in rendered
+    assert dispatch_reference not in rendered
+    assert provider_reference.encode() in acceptance.to_canonical_bytes()
+    assert dispatch_reference.encode() in acceptance.to_canonical_bytes()
 
 
 class ManyChatTransport:

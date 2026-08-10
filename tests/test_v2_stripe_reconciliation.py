@@ -118,6 +118,7 @@ def _build_worker(
     write_handler,
     read_handler,
     clock=None,
+    effect_guard=None,
 ) -> tuple[PaymentInitiationWorker, SQLitePaymentInitiationStore, list[httpx.Request]]:
     seen: list[httpx.Request] = []
 
@@ -139,6 +140,7 @@ def _build_worker(
         client=httpx.Client(transport=httpx.MockTransport(capture_write)),
         journal=store,
         clock=clock or (lambda: NOW + timedelta(seconds=1)),
+        effect_guard=effect_guard,
     )
     read_transport = stripe_module.StripeTestReconciliationTransport(
         secret_keys={PROFILE: TEST_KEY},
@@ -179,9 +181,67 @@ def _build_worker(
         payments=payments,
         worker_id="worker:stripe-reconciliation",
         lease_ttl=timedelta(seconds=30),
+        effect_guard=effect_guard,
         stripe_reconciler=reconciler,
     )
     return worker, store, seen
+
+
+def test_write_authority_is_rechecked_immediately_before_every_stripe_post(
+    tmp_path: Path,
+) -> None:
+    class MutableClock:
+        current = NOW + timedelta(seconds=1)
+
+        def now(self) -> datetime:
+            return self.current
+
+    class DeadlineGuard:
+        def __init__(self, clock: MutableClock) -> None:
+            self.clock = clock
+            self.calls: list[datetime] = []
+
+        def allows_workflow(self, workflow_id: str) -> bool:
+            assert workflow_id == "stripe-payment-initiation"
+            self.calls.append(self.clock.now())
+            return self.clock.now() < NOW + timedelta(seconds=2)
+
+    clock = MutableClock()
+    guard = DeadlineGuard(clock)
+
+    def write_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/products"
+        response = httpx.Response(200, request=request, json=_product_payload())
+        clock.current = NOW + timedelta(seconds=3)
+        return response
+
+    def read_handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected reconciliation read: {request.url.path}")
+
+    worker, store, seen = _build_worker(
+        tmp_path,
+        write_handler=write_handler,
+        read_handler=read_handler,
+        clock=clock.now,
+        effect_guard=guard,
+    )
+
+    result = worker.run_once(now=NOW + timedelta(seconds=1))
+
+    assert result.disposition is PaymentInitiationDisposition.MANUAL_REVIEW
+    assert [request.url.path for request in seen] == ["/v1/products"]
+    assert guard.calls == [
+        NOW + timedelta(seconds=1),
+        NOW + timedelta(seconds=1),
+        NOW + timedelta(seconds=3),
+    ]
+    assert [
+        (receipt.step, receipt.status)
+        for receipt in store.stripe_step_receipts(SELECTION)
+    ] == [
+        (StripeCreationStep.PRODUCT, StripeStepStatus.ACCEPTED),
+        (StripeCreationStep.PRICE, StripeStepStatus.INTENT),
+    ]
 
 
 def test_timeout_after_accepted_product_persists_receipt_and_reconciles_get_only(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
 
@@ -115,7 +115,7 @@ class PublicDispatchClaim:
 class PublicAcceptanceReceipt:
     public_row_id: str
     idempotency_key: str
-    acceptance: PublicChannelAcceptance
+    acceptance: PublicChannelAcceptance = field(repr=False)
     accepted_at: datetime
 
     def __post_init__(self) -> None:

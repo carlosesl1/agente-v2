@@ -39,9 +39,9 @@ class BokunAuditIdentityConflict(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class BokunAuditExpectedFacts:
-    product_id: str
-    provider_start_time_id: str
-    provider_rate_id: str
+    product_id: str = field(repr=False)
+    provider_start_time_id: str = field(repr=False)
+    provider_rate_id: str = field(repr=False)
     activity_date: str
     start_time: str
     adults: int
@@ -78,7 +78,7 @@ class BokunAuditTask:
     task_id: str
     command_id: str
     booking_id: str = field(repr=False)
-    expected: BokunAuditExpectedFacts
+    expected: BokunAuditExpectedFacts = field(repr=False)
     max_attempts: int
 
     def __post_init__(self) -> None:
@@ -101,7 +101,7 @@ class BokunAuditLease:
 
 @dataclass(frozen=True, slots=True)
 class BokunAuditSnapshot:
-    task: BokunAuditTask
+    task: BokunAuditTask = field(repr=False)
     status: BokunAuditStatus
     attempts: int
     lease: BokunAuditLease | None

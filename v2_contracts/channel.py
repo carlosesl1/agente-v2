@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 import hashlib
@@ -83,8 +83,8 @@ class PublicChannelAcceptance:
 
     state: PublicAcceptanceState
     operations: tuple[PublicAcceptanceOperation, ...]
-    provider_request_ids: tuple[str | None, ...]
-    dispatch_correlation_ids: tuple[str, ...]
+    provider_request_ids: tuple[str | None, ...] = field(repr=False)
+    dispatch_correlation_ids: tuple[str, ...] = field(repr=False)
 
     def __post_init__(self) -> None:
         if type(self.state) is not PublicAcceptanceState:

@@ -90,7 +90,14 @@ def test_confirmed_bokun_projects_once_and_audits_with_exactly_one_get(
         assert len(rows) == 1
         snapshot = rows[0]
         assert snapshot.task.command_id == command.command_id
-        assert snapshot.task.booking_id not in repr(snapshot.task)
+        rendered = repr(snapshot)
+        for private_reference in (
+            snapshot.task.booking_id,
+            snapshot.task.expected.product_id,
+            snapshot.task.expected.provider_start_time_id,
+            snapshot.task.expected.provider_rate_id,
+        ):
+            assert private_reference not in rendered
         assert snapshot.task.expected.total == "1300.00"
 
         port = ScriptedGET([_matching(snapshot)])

@@ -669,6 +669,7 @@ def _build_payment_worker(
         BusinessUnit.HOSTEL: settings.hostel_payment_percentage,
         BusinessUnit.AGENCY: settings.agency_payment_percentage,
     }
+    effect_guard = ControlledEffectGuard(settings=settings, clock=clock)
     stripe_reconciler: object | None = None
     if settings.stripe_links_enabled:
         stripe: object = StripeLinkAdapter(
@@ -677,6 +678,7 @@ def _build_payment_worker(
                 base_url=settings.stripe_base_url,
                 journal=container.payment_initiation,
                 clock=clock.now,
+                effect_guard=effect_guard,
             ),
             account_profiles=profiles,
             enabled=True,
@@ -724,7 +726,7 @@ def _build_payment_worker(
         payments=PaymentService(stripe=stripe, wise=wise, pix=pix),
         worker_id="worker:payment-initiation",
         lease_ttl=timedelta(seconds=30),
-        effect_guard=ControlledEffectGuard(settings=settings, clock=clock),
+        effect_guard=effect_guard,
         stripe_reconciler=stripe_reconciler,
     )
 

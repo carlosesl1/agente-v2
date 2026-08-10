@@ -412,9 +412,12 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             container=stripe_container,
             settings=stripe_enabled,
         )
-        assert type(
-            stripe_workers[WorkerQueue.PAYMENT_INITIATION]
-        ) is PaymentInitiationWorker
+        stripe_worker = stripe_workers[WorkerQueue.PAYMENT_INITIATION]
+        assert type(stripe_worker) is PaymentInitiationWorker
+        assert (
+            stripe_worker._payments._stripe._transport._effect_guard
+            is stripe_worker._effect_guard
+        )
         assert type(
             stripe_workers[WorkerQueue.OUTCOME_PROJECTOR]
         ) is ReservationOutcomeProjector
