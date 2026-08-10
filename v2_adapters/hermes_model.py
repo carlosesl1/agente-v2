@@ -887,6 +887,8 @@ class HermesModelAdapter:
         except InvalidModelProposal:
             return None, frame
         if request.observations and proposal.read_requests:
+            if request.public_reply_correction_reasons:
+                return None, frame
             session_hash = hashlib.sha256(stdin_bytes).hexdigest()[:32]
             return (
                 AuditedModelTurn.from_frames(
@@ -1081,6 +1083,10 @@ class HermesModelAdapter:
                 return self._maybe_progress_review(request, turn)
             attempted_frames.append(frame)
 
+        if request.public_reply_correction_reasons:
+            raise InvalidModelProposal(
+                "model proposal remained invalid after bounded attempts"
+            )
         proposal = self._fallback_proposal(request)
         fallback_response = _canonical(
             {

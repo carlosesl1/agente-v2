@@ -129,11 +129,26 @@ def test_child_transports_public_reply_correction_without_changing_current_reque
     run(("hermes", "--profile", "leads"), wire, execute=execute)
 
     prompt = captured["command"][-1]
+    correction_suffix = """PUBLIC REPLY CORRECTION
+The previous candidate could not be published for the listed closed reasons.
+You, Maya, must write the corrected customer-facing reply.
+Do not repeat private values. Do not request another read after observations.
+Do not strengthen operational status beyond exact receipts.
+Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
+    child_wrapper = (
+        "\n\nYou are running as a tool-free child. Do not call tools or perform effects. "
+        "Return exactly one JSON object matching the supplied system contract, with no "
+        "Markdown fence, preface, or trailing commentary. The parent validates every field."
+    )
+    current_request_delimiter = "\n\nCURRENT REQUEST JSON:\n"
     assert set(envelope) == {"system_prompt", "messages"}
     assert json.loads(current_request)["public_reply_correction_reasons"] == [
         "private_value_exposure"
     ]
-    assert "PUBLIC REPLY CORRECTION" in envelope["system_prompt"]
+    assert envelope["system_prompt"].endswith(correction_suffix)
+    assert prompt.startswith(envelope["system_prompt"] + child_wrapper)
+    assert prompt.count(correction_suffix) == 1
+    assert prompt.index(correction_suffix) < prompt.index(current_request_delimiter)
     assert prompt.endswith(current_request)
     assert prompt.count(current_request) == 1
     assert captured["command"][3:5] == ("--toolsets", "")

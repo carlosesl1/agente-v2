@@ -1253,6 +1253,197 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
         assert current["recap_reuse_required"] is False
 
 
+def test_public_reply_correction_repairs_recursive_read_after_observation() -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    repeated_read = ReadRequest(
+        request_id="read:child-correction-repeat",
+        kind=ReadKind.ACTIVITY_DESCRIPTION,
+        product_id="product:sossego",
+    )
+    observed_at = datetime.fromisoformat("2026-08-10T15:00:00+00:00")
+    request = ModelRequest(
+        request_id="request:child-correction-recursive-read",
+        lead_id="manychat:child-correction-recursive-read",
+        source_event_id="batch:child-correction-recursive-read",
+        message="Corrija a resposta usando somente a observação existente.",
+        locale="pt-BR",
+        state_version=6,
+        observations=(
+            ReadObservation(
+                request_hash=repeated_read.canonical_hash(),
+                provider="cerebro",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "answer": "A trilha exige preparo e acompanhamento de guia.",
+                    "sources": ["activity_description"],
+                },
+                private_binding_hash="a" * 64,
+            ),
+        ),
+        public_reply_correction_reasons=(
+            reason_type.RECURSIVE_READ_AFTER_OBSERVATION,
+        ),
+    )
+
+    def payload(
+        *,
+        reply_chunks: tuple[str, ...],
+        read_requests: list[dict[str, object]],
+    ) -> bytes:
+        return json.dumps(
+            {
+                "schema": "v2-model-proposal-v7",
+                "source_event_id": request.source_event_id,
+                "intent": "inform",
+                "reply_chunks": list(reply_chunks),
+                "facts": [],
+                "read_requests": read_requests,
+                "effect_proposals": [],
+                "target_offer_id": None,
+                "target_offer_ids": [],
+                "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+                "selection_requested": False,
+                "pending_disposition": None,
+                "passengers": [],
+                "clarification_question": None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
+    recursive = payload(
+        reply_chunks=("Vou consultar novamente a descrição do passeio.",),
+        read_requests=[
+            {
+                "request_id": repeated_read.request_id,
+                "kind": repeated_read.kind.value,
+                "product_id": repeated_read.product_id,
+            }
+        ],
+    )
+    repaired_chunks = (
+        "A trilha exige preparo e acompanhamento de guia.",
+        "Posso ajudar com outra dúvida sobre o passeio.",
+    )
+    repaired = payload(reply_chunks=repaired_chunks, read_requests=[])
+    responses = [recursive, repaired]
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("public reply correction attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"recursive-correction-transcript-key-01",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert len(seen) == 2, (
+        f"expected one repair call, got {len(seen)} child call(s); "
+        f"session={turn.closure.ephemeral_session_id}; "
+        f"chunks={turn.proposal.reply_chunks!r}"
+    )
+    assert responses == []
+    assert len(turn.frames) == 2
+    assert [frame.response_bytes for frame in turn.frames] == [recursive, repaired]
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+    assert not turn.closure.ephemeral_session_id.startswith("deterministic:")
+    assert turn.proposal.reply_chunks == repaired_chunks
+    assert turn.proposal.read_requests == ()
+    assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
+    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
+        ["recursive_read_after_observation"],
+        ["recursive_read_after_observation"],
+    ]
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
+
+
+def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = ModelRequest(
+        request_id="request:child-correction-invalid-frames",
+        lead_id="manychat:child-correction-invalid-frames",
+        source_event_id="batch:child-correction-invalid-frames",
+        message="Corrija a resposta sem substituir a voz da Maya.",
+        locale="pt-BR",
+        state_version=6,
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    responses = [b"{}", b"{}"]
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("public reply correction attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"invalid-correction-transcript-key-001",
+        run=run,
+        environ={},
+    )
+
+    published = None
+    failure: InvalidModelProposal | None = None
+    try:
+        published = adapter.complete_audited(request)
+    except InvalidModelProposal as exc:
+        failure = exc
+
+    assert len(seen) == 2
+    assert responses == []
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
+    assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
+    assert published is None or (
+        not published.closure.ephemeral_session_id.startswith("deterministic:")
+        and all(
+            not frame.stdout_bytes.startswith(b"V2_DETERMINISTIC_FALLBACK")
+            for frame in published.frames
+        )
+    )
+    assert published is None
+    assert type(failure) is InvalidModelProposal
+    assert str(failure) == "model proposal remained invalid after bounded attempts"
+
+
 def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
     lodging_read = ReadRequest(
         request_id="batch:negative-package:read:lodging",
