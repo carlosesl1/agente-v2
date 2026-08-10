@@ -345,15 +345,18 @@ git commit -m "fix: keep Maya text immutable through turn execution"
 
 **Interfaces:**
 - Consumes: a final corrected `ModelProposal` whose text already reflects typed state.
-- Produces: `V2ConversationDecision.public_reply.chunks == proposal.reply_chunks` for every synchronous branch.
+- Produces: `V2ConversationDecision` branches preserve `proposal.reply_chunks` for Maya-authored conversational output; canonical transactional summaries remain separate authenticated-system artifacts and never replace Maya chunks.
 
 - [ ] **Step 1: Add table-driven RED coverage for every reducer branch**
 
-For handoff guard, post-command guard, incomplete profile, preserved/revoked summary, denied/stale/expired confirmation, refresh mismatch, command authorization, package summary, and single-offer summary, use unique Maya sentinels. Assert:
+For handoff guard, post-command guard, incomplete profile, preserved/revoked state, denied/stale/expired confirmation, refresh mismatch, and command authorization, use unique Maya sentinels and assert the conversational output preserves them:
 
 ```python
+assert decision.public_reply.author is PublicMessageAuthor.MAYA
 assert decision.public_reply.chunks == proposal.reply_chunks
 ```
+
+For package and single-offer canonical summaries, assert they are separate `AUTHENTICATED_SYSTEM` artifacts bound to the exact critical context and do not claim Maya authorship.
 
 Separately assert commands, transitions, receipt requirements, canonical critical context, and idempotency are unchanged.
 
@@ -368,11 +371,11 @@ def _model_owned_reply(kind: str, proposal: ModelProposal) -> ConversationReply:
     return ConversationReply(kind, proposal.reply_chunks)
 ```
 
-Use it in every reducer return that currently calls a copy helper or embeds a literal. Delete unused conversational copy helpers. Keep `critical_context.public_summary` as canonical typed material for hashes and confirmation binding, but do not substitute it for Maya chunks.
+Use it in every conversational reducer return that currently calls a copy helper or embeds a literal. Delete unused conversational copy helpers. Keep `critical_context.public_summary` as canonical typed material and emit it only as a distinct `AUTHENTICATED_SYSTEM` artifact; it must never replace or impersonate Maya chunks.
 
 - [ ] **Step 3: Bind transactional summary material independently of prose**
 
-Persist/hash the canonical critical material exactly as before. Add an assertion in executor preparation that the model correction request received the canonical pending action context before Maya's final summary wording was committed. Confirmation remains bound to summary version, action kinds, approval basis, and canonical subject signature—not to free prose alone.
+Persist/hash the canonical critical material exactly as before as an `AUTHENTICATED_SYSTEM` artifact. Confirmation remains bound to summary version, action kinds, approval basis, subject signature, and canonical material. If the same turn also contains Maya conversational chunks, preserve them as a separate `MAYA`-authored output rather than replacing either authored stream.
 
 - [ ] **Step 4: Run reducer/domain gates and commit**
 

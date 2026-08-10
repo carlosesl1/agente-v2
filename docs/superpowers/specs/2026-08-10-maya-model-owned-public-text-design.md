@@ -139,9 +139,11 @@ The reviewer has no tools and cannot authorize effects. An invalid reviewer resu
 
 Handoff, command execution, reservation/payment outcomes, confirmation state, and delivery receipts remain exact typed fields. Maya writes the wording. The reviewer checks that the wording does not strengthen the authenticated status. The controller does not translate status into prose.
 
-### 6.3 Transactional summaries
+### 6.3 Transactional system artifacts
 
-Parent code continues to compute canonical commercial material, hashes, versions, permissions, and command inputs. Maya verbalizes that exact material. Confirmation binds to the exact committed model-authored summary and the parent-owned canonical material/version. Maya cannot change economic or operational material through prose.
+Canonical reservation summaries, provider-issued payment links/Pix instructions, and receipt-confirmed completion notices are not Maya conversational prose. They are separate `authenticated_system` artifacts with explicit authorship. The controller may construct these only from canonical domain material or exact provider/receipt payloads; it may not present them as Maya-authored chunks or silently replace a Maya frame with them.
+
+When a turn produces both a Maya explanation and a canonical transactional artifact, both are preserved as distinct authored outputs. Confirmation binds only to the authenticated system summary version, action kinds, subject signature, and canonical material. Maya cannot change economic or operational material through prose.
 
 ## 7. Controller transformations
 
