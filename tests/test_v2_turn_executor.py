@@ -5388,6 +5388,77 @@ def test_previously_persisted_private_value_still_requires_model_correction(
         store.close()
 
 
+def test_persisted_full_name_component_requires_model_owned_correction(
+    tmp_path,
+) -> None:
+    private_name = "Bruno Exemplo"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "persisted-private-first-name-reply.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=BATCH.lead_id,
+        source_turn_id="batch:prior-private-holder",
+        source_event_hash="2" * 64,
+        facts=(ModelFact("full_name", private_name),),
+        persisted_at=NOW,
+    )
+    leaked = _proposal("Entendi: Bruno continua como titular da hospedagem.")
+    corrected_text = "Entendi: o acompanhante continua como titular da hospedagem."
+    corrected = _proposal(corrected_text)
+    model = FakeAuditedModel(store, [leaked, corrected])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_short_full_name_particle_does_not_block_common_public_word(tmp_path) -> None:
+    private_name = "Ana dos Santos"
+    public_text = "A hospedagem dos dois adultos ainda não foi reservada."
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "short-private-name-particle.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=BATCH.lead_id,
+        source_turn_id="batch:prior-private-holder-particle",
+        source_event_hash="3" * 64,
+        facts=(ModelFact("full_name", private_name),),
+        persisted_at=NOW,
+    )
+    model = FakeAuditedModel(store, [_proposal(public_text)])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (public_text,)
+        assert len(model.calls) == 1
+    finally:
+        private_store.close()
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("fact_name", "accepted_value", "public_text"),
     (

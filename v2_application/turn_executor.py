@@ -241,6 +241,7 @@ class _PublicReplyCorrectionBudget:
 @dataclass(slots=True, repr=False)
 class _PrivateValueCorpus:
     values: tuple[str, ...] = ()
+    bounded_values: tuple[str, ...] = ()
 
     def extend(self, values: tuple[str, ...]) -> None:
         if type(values) is not tuple or any(
@@ -248,6 +249,14 @@ class _PrivateValueCorpus:
         ):
             raise TypeError("private value corpus requires an exact string tuple")
         self.values = tuple(dict.fromkeys((*self.values, *values)))
+        first_name_components = tuple(
+            parts[0]
+            for value in values
+            if len(parts := value.split()) > 1 and len(parts[0]) > 3
+        )
+        self.bounded_values = tuple(
+            dict.fromkeys((*self.bounded_values, *first_name_components))
+        )
 
 
 def _canonical(schema: str, data: object) -> bytes:
@@ -1078,20 +1087,46 @@ def _reply_chunk_contains_literal_value(chunk: str, private_value: str) -> bool:
         cursor = position + 1
 
 
+def _reply_chunk_contains_bounded_value(chunk: str, private_value: str) -> bool:
+    if type(chunk) is not str or type(private_value) is not str or not private_value:
+        raise TypeError("bounded private literal check requires exact strings")
+    cursor = 0
+    while True:
+        position = chunk.find(private_value, cursor)
+        if position < 0:
+            return False
+        end = position + len(private_value)
+        left_is_boundary = position == 0 or not chunk[position - 1].isalnum()
+        right_is_boundary = end == len(chunk) or not chunk[end].isalnum()
+        if left_is_boundary and right_is_boundary:
+            return True
+        cursor = position + 1
+
+
 def _proposal_exposes_private_values(
     proposal: ModelProposal,
     private_values: tuple[str, ...],
+    bounded_private_values: tuple[str, ...] = (),
 ) -> bool:
     if (
         type(proposal) is not ModelProposal
         or type(private_values) is not tuple
+        or type(bounded_private_values) is not tuple
         or any(type(item) is not str or not item for item in private_values)
+        or any(type(item) is not str or not item for item in bounded_private_values)
     ):
         raise TypeError("private-value exposure check requires exact contracts")
-    return any(
-        _reply_chunk_contains_literal_value(chunk, private_value)
-        for private_value in private_values
-        for chunk in proposal.reply_chunks
+    return (
+        any(
+            _reply_chunk_contains_literal_value(chunk, private_value)
+            for private_value in private_values
+            for chunk in proposal.reply_chunks
+        )
+        or any(
+            _reply_chunk_contains_bounded_value(chunk, private_value)
+            for private_value in bounded_private_values
+            for chunk in proposal.reply_chunks
+        )
     )
 
 
@@ -1129,6 +1164,7 @@ def _request_public_reply_correction(
     expected: ModelProposal,
     reason: PublicReplyCorrectionReason,
     private_values: tuple[str, ...],
+    bounded_private_values: tuple[str, ...] = (),
 ) -> tuple[ModelProposal, AuditedModelTurn]:
     if (
         type(request) is not ModelRequest
@@ -1136,7 +1172,9 @@ def _request_public_reply_correction(
         or type(expected) is not ModelProposal
         or type(reason) is not PublicReplyCorrectionReason
         or type(private_values) is not tuple
+        or type(bounded_private_values) is not tuple
         or any(type(item) is not str or not item for item in private_values)
+        or any(type(item) is not str or not item for item in bounded_private_values)
     ):
         raise TypeError("public reply correction requires exact contracts")
     correction_request = replace(
@@ -1162,7 +1200,11 @@ def _request_public_reply_correction(
         raise TurnExecutionError("public reply correction remained invalid") from exc
     if (
         not _same_terminal_structure(expected, corrected)
-        or _proposal_exposes_private_values(corrected, private_values)
+        or _proposal_exposes_private_values(
+            corrected,
+            private_values,
+            bounded_private_values,
+        )
     ):
         raise TurnExecutionError("public reply correction remained invalid")
     return corrected, AuditedModelTurn.combine((audited, corrected_audited))
@@ -1863,6 +1905,7 @@ class V2TurnExecutor:
                 expected=expected,
                 reason=reason,
                 private_values=private_value_corpus.values,
+                bounded_private_values=private_value_corpus.bounded_values,
             )
             return corrected
 
@@ -2194,6 +2237,7 @@ class V2TurnExecutor:
         if _proposal_exposes_private_values(
             first_proposal,
             private_value_corpus.values,
+            private_value_corpus.bounded_values,
         ):
             read_requests = ()
             derived_confirmation_reads = False
@@ -2599,6 +2643,7 @@ class V2TurnExecutor:
         if _proposal_exposes_private_values(
             proposal,
             private_value_corpus.values,
+            private_value_corpus.bounded_values,
         ):
             proposal, audited = request_public_reply_correction(
                 proposal,
