@@ -13,6 +13,11 @@ PRODUCTION_ROOTS = (
     ROOT / "v2_contracts",
     ROOT / "reservation_boundary",
 )
+LEGACY_PUBLIC_COPY_HELPERS = {
+    "_render_positive_payload",
+    "execution_in_progress_reply",
+    "grounded_positive_reply",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,12 @@ class _AuthorityScanner(ast.NodeVisitor):
         self.owners.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if node.name in LEGACY_PUBLIC_COPY_HELPERS:
+            self._record(
+                "legacy-public-copy-helper",
+                node,
+                "legacy controller-authored public copy helper must not exist",
+            )
         self.owners.append(node.name)
         self.generic_visit(node)
         self.owners.pop()
@@ -219,11 +230,15 @@ def bad(value):
     PublicReplyChunk("turn", 0, "unowned", "a" * 64)
     value.reply_chunks = ("canonicalized",)
     return value.reply_chunks or ("fallback",)
+
+def execution_in_progress_reply(locale):
+    return ("controller status copy",)
 """
     codes = {item.code for item in _scan("v2_application/bad.py", source)}
 
     assert codes == {
         "conversation-reply-owner",
+        "legacy-public-copy-helper",
         "literal-model-proposal",
         "literal-text-fallback",
         "public-chunk-author",

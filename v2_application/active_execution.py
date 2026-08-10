@@ -17,12 +17,6 @@ def active_execution_status(state: BoundaryState) -> str | None:
     return None
 
 
-def execution_in_progress_reply(locale: str) -> tuple[str, ...]:
-    if locale.casefold().startswith("en"):
-        return ("That booking is already being processed. I won’t submit it again.",)
-    return ("Essa reserva já está em processamento. Não vou enviá-la novamente.",)
-
-
 def blocks_active_commercial_progression(
     state: BoundaryState,
     proposal: ModelProposal,
