@@ -2531,6 +2531,86 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
         store.close()
 
 
+def test_private_holder_update_preserves_exact_model_owned_clarification(
+    tmp_path,
+) -> None:
+    question = "Haverá alguma criança no grupo?"
+    batch = replace(BATCH, batch_id="event:holder-clarification")
+    authority = replace(
+        AUTHORITY,
+        authorization_id="auth:holder-clarification",
+        allocation_ids=("allocation:holder-clarification",),
+        allocation_manifest_hash="1" * 64,
+    )
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "holder-clarification.sqlite3"
+    )
+    model = FakeAuditedModel(
+        store,
+        [
+            ModelProposal(
+                source_event_id="event:holder-clarification",
+                intent="inform",
+                reply_chunks=(question,),
+                clarification_question=question,
+                facts=(
+                    ModelFact("full_name", "Bruno Exemplo"),
+                    ModelFact("email", "bruno@example.invalid"),
+                    ModelFact("country_code", "BR"),
+                ),
+                read_requests=(),
+                effect_proposals=(),
+            )
+        ],
+    )
+    _install_public_authority(store, authority)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        public_authority=MappingAuthority({batch.batch_id: authority}),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(batch)
+        snapshot = private_store.load(batch.lead_id)
+        projection = store.load_latest_conversation_projection(batch.lead_id)
+
+        assert result.reply_chunks == (question,)
+        assert tuple(
+            json.loads(payload.decode("utf-8"))["data"]["text"]
+            for _, _, payload, _ in result.receipt.public_chunks
+        ) == (question,)
+        assert not result.receipt.command_rows
+        assert not result.receipt.relay_rows
+        assert not result.receipt.internal_outbox_rows
+        assert (
+            "bruno@example.invalid"
+            not in result.receipt.to_canonical_bytes().decode("utf-8")
+        )
+        assert (snapshot.full_name, snapshot.email, snapshot.country_code) == (
+            "Bruno Exemplo",
+            "bruno@example.invalid",
+            "BR",
+        )
+        assert projection is not None
+        assert not {"full_name", "email", "country_code", "phone_e164"} & {
+            fact.name for fact in projection.facts
+        }
+        for table in (
+            "boundary_commands",
+            "boundary_command_relays",
+            "boundary_outbox",
+        ):
+            assert store._connection.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone() == (0,)
+    finally:
+        private_store.close()
+        store.close()
+
+
 def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts(
     tmp_path,
 ) -> None:
