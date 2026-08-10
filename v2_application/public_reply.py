@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date
 
 from v2_contracts.model import ModelProposal
@@ -112,16 +111,14 @@ def apply_positive_grounding(
     locale: str,
     force: bool,
 ) -> ModelProposal:
-    """Render provider claims and preserve only the model's typed clarification."""
+    """Validate grounding inputs without rewriting model-owned public text."""
 
-    if type(proposal) is not ModelProposal or type(force) is not bool:
+    if (
+        type(proposal) is not ModelProposal
+        or type(observations) is not tuple
+        or any(type(item) is not ReadObservation for item in observations)
+        or type(locale) is not str
+        or type(force) is not bool
+    ):
         raise TypeError("positive grounding requires exact contracts")
-    grounded = grounded_positive_reply(observations, locale=locale)
-    if not grounded or proposal.intent not in {"inform", "adjust"}:
-        return proposal
-    clarification = (
-        (proposal.clarification_question,)
-        if proposal.clarification_question is not None
-        else ()
-    )
-    return replace(proposal, reply_chunks=(*grounded, *clarification))
+    return proposal

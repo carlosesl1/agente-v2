@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from v2_application.public_reply import apply_positive_grounding, grounded_positive_reply
+import pytest
+
+from v2_application.public_reply import apply_positive_grounding
 from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadObservation
 
@@ -80,23 +82,7 @@ def _activity() -> ReadObservation:
     )
 
 
-def test_real_cloudbeds_options_use_available_units_without_available_boolean() -> None:
-    assert grounded_positive_reply((_lodging(),), locale="pt-BR") == (
-        "Encontrei Suíte Real disponível de 10/09/2026 a 12/09/2026 "
-        "por BRL 440.00. Nada foi reservado.",
-    )
-
-
-def test_package_grounding_renders_each_provider_group_in_provider_order() -> None:
-    assert grounded_positive_reply((_lodging(), _activity()), locale="en") == (
-        "I found Suíte Real available from 2026-09-10 to 2026-09-12 "
-        "for BRL 440.00. Nothing was booked.\n"
-        "I found Cachoeira do Buracão available on 2026-09-12 for "
-        "BRL 350.00. Nothing was booked.",
-    )
-
-
-def test_grounding_replaces_untrusted_commercial_draft_but_preserves_typed_question() -> None:
+def test_positive_grounding_preserves_exact_model_owned_chunks_and_question() -> None:
     proposal = _proposal(
         "Everything is sold out and a human is already following this.",
         clarification_question="Will you be the reservation holder?",
@@ -109,29 +95,24 @@ def test_grounding_replaces_untrusted_commercial_draft_but_preserves_typed_quest
         force=False,
     )
 
-    assert grounded.reply_chunks == (
-        "I found Suíte Real available from 2026-09-10 to 2026-09-12 "
-        "for BRL 440.00. Nothing was booked.",
-        "Will you be the reservation holder?",
-    )
+    assert grounded is proposal
+    assert grounded.reply_chunks == proposal.reply_chunks
     assert grounded.clarification_question == proposal.clarification_question
 
 
-def test_grounding_decision_does_not_depend_on_draft_words_or_force_flag() -> None:
-    first = apply_positive_grounding(
-        _proposal("available Suíte Real BRL 440.00"),
-        (_lodging(),),
-        locale="en",
-        force=False,
-    )
-    second = apply_positive_grounding(
-        _proposal("semantically unrelated text"),
-        (_lodging(),),
-        locale="en",
-        force=True,
-    )
+@pytest.mark.parametrize("force", (False, True))
+def test_positive_grounding_returns_each_distinct_proposal_unchanged(force: bool) -> None:
+    proposal = _proposal("Maya sentinel: semantically unrelated text")
 
-    assert first.reply_chunks == second.reply_chunks
+    assert (
+        apply_positive_grounding(
+            proposal,
+            (_lodging(), _activity()),
+            locale="en",
+            force=force,
+        )
+        is proposal
+    )
 
 
 def test_no_positive_observation_leaves_proposal_unchanged() -> None:
@@ -144,5 +125,28 @@ def test_no_positive_observation_leaves_proposal_unchanged() -> None:
 
     assert (
         apply_positive_grounding(proposal, (negative,), locale="en", force=False)
-        == proposal
+        is proposal
     )
+
+
+@pytest.mark.parametrize(
+    ("proposal", "observations", "force"),
+    (
+        (object(), (), False),
+        (_proposal("Exact type guard."), [], False),
+        (_proposal("Exact type guard."), (object(),), False),
+        (_proposal("Exact type guard."), (), 1),
+    ),
+)
+def test_positive_grounding_requires_exact_contract_types(
+    proposal: object,
+    observations: object,
+    force: object,
+) -> None:
+    with pytest.raises(TypeError, match="positive grounding requires exact contracts"):
+        apply_positive_grounding(
+            proposal,
+            observations,
+            locale="en",
+            force=force,
+        )

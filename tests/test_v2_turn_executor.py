@@ -32,7 +32,9 @@ from v2_application.public_delivery import (
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
+    _active_execution_guard_proposal,
     _authoritative_phone_locale_projection,
+    _collection_only_proposal,
     _critical_confirmation_bound,
     _critical_outcome,
     _critical_model_reads_allowed,
@@ -41,7 +43,9 @@ from v2_application.turn_executor import (
     V2TurnExecutor,
     _confirmation_read_requests,
     _intent,
+    _private_update_no_command_proposal,
     _repair_requested_activity_selection,
+    _selection_binding_failure_proposal,
     _structured_selection_review_required,
     _state_model_facts,
 )
@@ -65,6 +69,7 @@ from v2_contracts.model import (
     ModelFact,
     ModelProposal,
     ModelRequest,
+    PublicReplyCorrectionReason,
     proposal_requires_progress_review,
 )
 from v2_contracts.profile import PrivateCustomerBinding
@@ -238,6 +243,48 @@ def test_explicit_typed_clarification_or_structured_read_skips_progress_review()
 
     assert proposal_requires_progress_review(empty) is False
     assert proposal_requires_progress_review(with_read) is False
+
+
+def test_task5_structural_guards_never_replace_maya_chunks_or_typed_question() -> None:
+    question = "Maya sentinel: qual opção deve permanecer?"
+    selected = ModelProposal(
+        source_event_id="batch:task5-structural-guards",
+        intent="select",
+        reply_chunks=("Maya sentinel: contexto exato.", question),
+        clarification_question=question,
+        facts=(ModelFact("service", "hostel"),),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "7" * 64,
+    )
+
+    selection_guard = _selection_binding_failure_proposal(selected, locale="pt-BR")
+    active_guard = _active_execution_guard_proposal(selected, locale="pt-BR")
+    collection_guard = _collection_only_proposal(
+        selected,
+        public_facts=(ModelFact("service", "hostel"),),
+        locale="pt-BR",
+        invalid_fact_names=("full_name",),
+    )
+    private_guard = _private_update_no_command_proposal(
+        replace(selected, intent="inform", target_offer_id=None),
+        pending_action=None,
+        locale="pt-BR",
+    )
+
+    for guarded in (
+        selection_guard,
+        active_guard,
+        collection_guard,
+        private_guard,
+    ):
+        assert guarded.reply_chunks == selected.reply_chunks
+        assert guarded.clarification_question == selected.clarification_question
+        assert guarded.read_requests == ()
+        assert guarded.effect_proposals == ()
+        assert guarded.target_offer_id is None
+        assert guarded.target_offer_ids == ()
+        assert guarded.selection_requested is False
 
 
 def test_critical_outcome_is_separate_from_material_state_facts() -> None:
@@ -1414,10 +1461,7 @@ def test_executor_accepts_observation_stamped_after_turn_start() -> None:
     try:
         result = executor.execute(BATCH)
 
-        assert result.reply_chunks == (
-            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
-            "por BRL 480.00. Nada foi reservado.",
-        )
+        assert result.reply_chunks == ("Temos uma opção disponível.",)
         assert len(port.calls) == 1
         assert len(model.calls) == 2
     finally:
@@ -1668,8 +1712,7 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert result.receipt.uds_final_seq == 2
         assert len(result.receipt.read_observations) == 1
         assert result.reply_chunks == (
-            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
-            "por BRL 480.00. Nada foi reservado.",
+            "I’m here to help. What would you like to check next?",
         )
         row = store._connection.execute(
             "SELECT artifact_kind,frame_sequence,frame_reference "
@@ -1823,7 +1866,9 @@ def test_ambiguous_holder_does_not_block_complete_commercial_read(tmp_path) -> N
         assert len(model.calls) == 2
         assert private_store.load(batch.lead_id).present_fact_names == ()
         public_text = " ".join(result.reply_chunks)
-        assert "Suíte Casal" in public_text
+        assert public_text == (
+            "Há disponibilidade; antes de reservar, confirmaremos o titular."
+        )
         assert "Laura Pessoa Teste" not in public_text
         assert "laura.pessoa@example.invalid" not in public_text
         assert result.receipt.command_rows == ()
@@ -1884,8 +1929,17 @@ def test_incomplete_selection_without_read_fails_closed_without_reducer_error() 
         effect_proposals=(),
         target_offer_id="offer:" + "7" * 64,
     )
+    corrected_text = "Maya corrigiu: preciso das datas e da ocupação para consultar."
+    corrected = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(corrected_text,),
+        facts=first.facts,
+        read_requests=(),
+        effect_proposals=(),
+    )
     store = SQLiteBoundaryStore.open_memory_v8()
-    model = FakeAuditedModel(store, [first])
+    model = FakeAuditedModel(store, [first, corrected])
     port = FakeLodgingReadPort(store)
     _install_public_authority(store)
     executor = _executor(
@@ -1898,7 +1952,11 @@ def test_incomplete_selection_without_read_fails_closed_without_reducer_error() 
         result = executor.execute(BATCH)
 
         assert port.calls == []
-        assert "datas" in " ".join(result.reply_chunks).casefold()
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY,
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert store.load_state(BATCH.lead_id).state.workflow is None
@@ -1940,8 +1998,17 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         effect_proposals=(),
         target_offer_id="offer:" + "8" * 64,
     )
+    corrected_text = "Maya corrigiu: não consegui vincular essa opção; nada foi reservado."
+    corrected = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(corrected_text,),
+        facts=facts,
+        read_requests=(),
+        effect_proposals=(),
+    )
     store = SQLiteBoundaryStore.open_memory_v8()
-    model = FakeAuditedModel(store, [first, final])
+    model = FakeAuditedModel(store, [first, final, corrected])
     port = FakeLodgingReadPort(store)
     _install_public_authority(store)
     executor = _executor(
@@ -1954,7 +2021,11 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         result = executor.execute(BATCH)
 
         assert len(port.calls) == 1
-        assert "vincular" in " ".join(result.reply_chunks).casefold()
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 3
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.SELECTION_BINDING_FAILURE,
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert not isinstance(
@@ -2011,16 +2082,28 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
         read_requests=(repeated_read,),
         effect_proposals=(),
     )
-    reused_reply = ModelProposal(
+    invalid_reused_reply = ModelProposal(
         source_event_id=followup_batch.batch_id,
         intent="inform",
-        reply_chunks=("A consulta continua fresca; para avançar, falta escolher o pagamento.",),
+        reply_chunks=("Vou alterar o pagamento durante a recapitulação.",),
+        facts=(ModelFact("payment_method", "pix"),),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    corrected_text = "Maya corrigiu: a consulta anterior continua fresca e nada foi reservado."
+    corrected_reuse = ModelProposal(
+        source_event_id=followup_batch.batch_id,
+        intent="inform",
+        reply_chunks=(corrected_text,),
         facts=(),
         read_requests=(),
         effect_proposals=(),
     )
     store = SQLiteBoundaryStore.open_memory_v8()
-    model = FakeAuditedModel(store, [first, first_final, repeated, reused_reply])
+    model = FakeAuditedModel(
+        store,
+        [first, first_final, repeated, invalid_reused_reply, corrected_reuse],
+    )
     port = FakeLodgingReadPort(store)
     _install_public_authority(store)
     _install_public_authority(store, followup_authority)
@@ -2041,9 +2124,12 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
         followup = executor.execute(followup_batch)
 
         assert port.calls == [first_read]
-        assert len(model.calls) == 4
+        assert len(model.calls) == 5
         assert model.calls[-1].observations == ()
-        assert followup.reply_chunks == reused_reply.reply_chunks
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.STALE_CONSULTATION_REUSE,
+        )
+        assert followup.reply_chunks == (corrected_text,)
         assert followup.receipt.command_rows == ()
         assert followup.receipt.relay_rows == ()
     finally:
@@ -2188,8 +2274,8 @@ def test_consultation_expiry_during_model_is_refreshed_or_fails_closed(
             assert current_port.calls == [repeated_read]
             assert model.calls[-1].recap_reuse_required is False
             assert len(model.calls[-1].observations) == 1
-            assert "Encontrei Suíte Casal disponível" in " ".join(
-                result.reply_chunks
+            assert result.reply_chunks == (
+                "Atualizei: a suíte continua disponível por BRL 480.00.",
             )
             assert result.receipt.command_rows == ()
             assert result.receipt.relay_rows == ()
@@ -2242,9 +2328,11 @@ def test_private_update_with_positive_read_keeps_commercial_reply_without_privat
         read_requests=(),
         effect_proposals=(),
     )
+    corrected_text = "Encontrei uma suíte disponível."
+    corrected = replace(followup, reply_chunks=(corrected_text,))
     store = SQLiteBoundaryStore.open_memory_v8()
     private_store = SQLitePrivateCustomerFactStore(tmp_path / "private-reply.sqlite3")
-    model = FakeAuditedModel(store, [first, followup])
+    model = FakeAuditedModel(store, [first, followup, corrected])
     port = FakeLodgingReadPort(store)
     _install_public_authority(store)
     executor = V2TurnExecutor(
@@ -2264,8 +2352,11 @@ def test_private_update_with_positive_read_keeps_commercial_reply_without_privat
         result = executor.execute(BATCH)
 
         public_text = " ".join(result.reply_chunks)
-        assert "Suíte Casal" in public_text
-        assert "BRL 480.00" in public_text
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 3
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
         assert private_name not in public_text
         assert private_email not in public_text
         assert "Guardei esses dados" not in public_text
@@ -2473,7 +2564,13 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
         read_requests=(),
         effect_proposals=(),
     )
-    model = FakeAuditedModel(store, [proposal])
+    corrected_text = "Maya corrigiu a resposta sem expor os dados privados."
+    corrected = replace(
+        proposal,
+        reply_chunks=(corrected_text,),
+        facts=(),
+    )
+    model = FakeAuditedModel(store, [proposal, corrected])
     _install_public_authority(store)
     executor = V2TurnExecutor(
         store=store,
@@ -2499,8 +2596,10 @@ def test_maya_private_facts_are_durable_and_absent_from_public_artifacts(
             ).fetchall()
         )
 
-        assert result.reply_chunks == (
-            "Obrigado. Guardei esses dados para continuar a reserva.",
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
         )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
@@ -2611,8 +2710,10 @@ def test_private_holder_update_preserves_exact_model_owned_clarification(
         store.close()
 
 
-def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts(
+@pytest.mark.parametrize("correction_case", ("safe", "repeated_exposure", "invalid_structure"))
+def test_private_value_exposure_gets_one_terminal_model_owned_correction(
     tmp_path,
+    correction_case: str,
 ) -> None:
     private_name = "Pessoa Parcial Silva"
     read_request = ReadRequest(
@@ -2631,11 +2732,28 @@ def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts
         read_requests=(read_request,),
         effect_proposals=(),
     )
+    corrected_text = (
+        f"Ainda vou expor {private_name}."
+        if correction_case == "repeated_exposure"
+        else "Maya corrigiu sem repetir nenhum dado privado."
+    )
+    corrected = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(corrected_text,),
+        facts=(
+            (ModelFact("service", "hostel"),)
+            if correction_case == "invalid_structure"
+            else ()
+        ),
+        read_requests=(),
+        effect_proposals=(),
+    )
     store = SQLiteBoundaryStore.open_memory_v8()
     private_store = SQLitePrivateCustomerFactStore(
-        tmp_path / "filtered-private-echo.sqlite3"
+        tmp_path / f"filtered-private-echo-{correction_case}.sqlite3"
     )
-    model = FakeAuditedModel(store, [proposal])
+    model = FakeAuditedModel(store, [proposal, corrected])
     read_port = FakeLodgingReadPort(store)
     _install_public_authority(store)
     executor = V2TurnExecutor(
@@ -2652,26 +2770,40 @@ def test_filtered_provider_read_cannot_preserve_private_echo_in_public_artifacts
         max_commit_attempts=2,
     )
     try:
-        result = executor.execute(BATCH)
-        snapshot = private_store.load(BATCH.lead_id)
-        artifact_json = "\n".join(
-            row[0]
-            for row in store._connection.execute(
-                "SELECT artifact_json FROM boundary_turn_artifacts "
-                "ORDER BY artifact_index"
-            ).fetchall()
-        )
+        if correction_case == "safe":
+            result = executor.execute(BATCH)
+            artifact_json = "\n".join(
+                row[0]
+                for row in store._connection.execute(
+                    "SELECT artifact_json FROM boundary_turn_artifacts "
+                    "ORDER BY artifact_index"
+                ).fetchall()
+            )
+            assert result.reply_chunks == (corrected_text,)
+            assert private_name not in artifact_json
+            assert result.receipt.command_rows == ()
+            assert result.receipt.relay_rows == ()
+        else:
+            with pytest.raises(TurnExecutionError, match="public reply correction"):
+                executor.execute(BATCH)
+            assert store.turn_receipt_count(BATCH.batch_id) == 0
+            for table in (
+                "boundary_commands",
+                "boundary_command_relays",
+                "boundary_outbox",
+            ):
+                assert store._connection.execute(
+                    f"SELECT count(*) FROM {table}"
+                ).fetchone() == (0,)
 
+        snapshot = private_store.load(BATCH.lead_id)
         assert snapshot.full_name == private_name
         assert read_port.calls == []
-        assert len(model.calls) == 1
-        assert result.reply_chunks == (
-            "Obrigado. Guardei esses dados para continuar a reserva.",
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
         )
-        assert private_name not in "\n".join(result.reply_chunks)
-        assert private_name not in artifact_json
-        assert result.receipt.command_rows == ()
-        assert result.receipt.relay_rows == ()
+        assert model.proposals == []
     finally:
         private_store.close()
         store.close()
@@ -2779,13 +2911,7 @@ def test_maya_semantics_assign_holder_without_parent_regex(
 
         assert model.calls[0].message == message
         assert (snapshot.full_name, snapshot.email, snapshot.country_code) == expected
-        assert result.reply_chunks == (
-            (
-                "Obrigado. Guardei esses dados para continuar a reserva."
-                if maya_facts
-                else reply
-            ),
-        )
+        assert result.reply_chunks == (reply,)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert projection is not None
@@ -2931,15 +3057,16 @@ def test_unusable_manychat_phone_blocks_two_stage_selection_probe(tmp_path) -> N
         store.close()
 
 
-def test_invalid_model_private_facts_are_collection_only_and_request_correction(
+def test_invalid_model_private_facts_are_collection_only_without_controller_prose(
     tmp_path,
 ) -> None:
     store = SQLiteBoundaryStore.open_memory_v8()
     private_store = SQLitePrivateCustomerFactStore(
         tmp_path / "invalid-model-private.sqlite3"
     )
+    maya_text = "Maya sentinel: preciso que você reenvie os dados do titular."
     proposal = replace(
-        _proposal("Resumo pronto."),
+        _proposal(maya_text),
         facts=(
             ModelFact("full_name", "Mononym"),
             ModelFact("email", "@example.invalid"),
@@ -2968,10 +3095,8 @@ def test_invalid_model_private_facts_are_collection_only_and_request_correction(
 
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
-        assert result.reply_chunks == (
-            "Por favor, envie novamente nome completo, e-mail válido, país "
-            "para eu continuar.",
-        )
+        assert result.reply_chunks == (maya_text,)
+        assert len(model.calls) == 1
         assert snapshot.present_fact_names == ()
     finally:
         private_store.close()
@@ -3048,12 +3173,16 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         effect_proposals=(),
         target_offer_id="offer:" + "7" * 64,
     )
+    corrected_selection = replace(
+        selection,
+        reply_chunks=("Vou preparar o resumo sem repetir dados privados.",),
+    )
     boundary_path = tmp_path / "private-prompt-boundary.sqlite3"
     store = SQLiteBoundaryStore.open_path_v8(boundary_path)
     private_store = SQLitePrivateCustomerFactStore(
         tmp_path / "private-prompt-redaction.sqlite3"
     )
-    model = FakeAuditedModel(store, [first, selection])
+    model = FakeAuditedModel(store, [first, selection, corrected_selection])
     read_port = FakeLodgingReadPort(store)
     _install_public_authority(store, authority)
     executor = V2TurnExecutor(
@@ -3086,13 +3215,16 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert read_port.calls == [read_request]
-        assert len(model.calls) == 2
+        assert len(model.calls) == 3
         assert model.calls[0].private_customer_fact_names == ("phone_e164",)
         assert model.calls[1].private_customer_fact_names == (
             "full_name",
             "email",
             "phone_e164",
             "country_code",
+        )
+        assert model.calls[2].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
         )
         assert model.calls[0].message == message
         assert model.calls[1].message == message
@@ -3160,9 +3292,7 @@ def test_private_update_journal_survives_crash_without_becoming_progress_gate(
 
         result = build(store).execute(BATCH)
 
-        assert result.reply_chunks == (
-            "Obrigado. Guardei esses dados para continuar a reserva.",
-        )
+        assert result.reply_chunks == ("Continuação autenticada.",)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(model.calls) == 2
@@ -3315,10 +3445,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         result = executor.execute(package_batch)
 
         assert result.reply_chunks == (
-            "Encontrei Suíte Casal disponível de 10/08/2026 a 12/08/2026 "
-            "por BRL 480.00. Nada foi reservado.\n"
-            "Encontrei Cachoeira do Buracão disponível em 12/08/2026 por "
-            "BRL 1300.00. Nada foi reservado.",
+            "Encontrei opções de hospedagem e Buracão.",
         )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [replace(activity, locale="pt-BR")]
@@ -3396,9 +3523,7 @@ def test_authenticated_phone_allows_read_only_package_without_country() -> None:
         assert model.calls[1].private_profile_complete is False
         assert len(model.calls[1].observations) == 2
         assert result.reply_chunks == (
-            "I found Suíte Casal available from 2026-08-10 to 2026-08-12 for "
-            "BRL 480.00. Nothing was booked.\nI found Cachoeira do Buracão "
-            "available on 2026-08-12 for BRL 1300.00. Nothing was booked.",
+            "Encontrei Suíte Casal e Buracão disponíveis.",
         )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [replace(activity, locale="en")]
@@ -4077,7 +4202,7 @@ def test_adjustment_revokes_pending_summary_and_reads_new_scope_in_same_turn() -
             request_id=adjusted_read.request_id,
         ) == adjusted_read
         assert len(read_port.calls) == 2
-        assert "disponível" in " ".join(result.reply_chunks).casefold()
+        assert result.reply_chunks == ("As novas datas estão disponíveis.",)
         assert type(store.load_state(BATCH.lead_id).state.workflow) is AwaitingAdjustmentState
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
@@ -4124,6 +4249,7 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
             adults=2,
             children=0,
         )
+        corrected_status = "Maya: a reserva existente continua em processamento."
         model.proposals[:] = [
             ModelProposal(
                 source_event_id=duplicate_batch.batch_id,
@@ -4137,7 +4263,7 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
             ModelProposal(
                 source_event_id=duplicate_batch.batch_id,
                 intent="inform",
-                reply_chunks=("Qual quarto você prefere?",),
+                reply_chunks=(corrected_status,),
                 facts=(),
                 read_requests=(),
                 effect_proposals=(),
@@ -4147,7 +4273,10 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
         duplicate = executor.execute(duplicate_batch)
 
         assert len(read_port.calls) == reads_after_confirmation
-        assert "processamento" in " ".join(duplicate.reply_chunks).casefold()
+        assert duplicate.reply_chunks == (corrected_status,)
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
+        )
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (1,)
@@ -4190,20 +4319,31 @@ def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow
             adults=2,
             children=0,
         )
-        model.proposals.append(
-            ModelProposal(
-                source_event_id=new_batch.batch_id,
-                intent="inform",
-                reply_chunks=("Vou consultar essa outra hospedagem.",),
-                facts=(
-                    ModelFact("service", "hostel"),
-                    ModelFact("start_date", date(2026, 8, 13)),
-                    ModelFact("end_date", date(2026, 8, 15)),
-                    ModelFact("adults", 2),
-                    ModelFact("children", 0),
+        corrected_status = "Maya: a reserva existente continua em processamento."
+        model.proposals.extend(
+            (
+                ModelProposal(
+                    source_event_id=new_batch.batch_id,
+                    intent="inform",
+                    reply_chunks=("Vou consultar essa outra hospedagem.",),
+                    facts=(
+                        ModelFact("service", "hostel"),
+                        ModelFact("start_date", date(2026, 8, 13)),
+                        ModelFact("end_date", date(2026, 8, 15)),
+                        ModelFact("adults", 2),
+                        ModelFact("children", 0),
+                    ),
+                    read_requests=(new_request,),
+                    effect_proposals=(),
                 ),
-                read_requests=(new_request,),
-                effect_proposals=(),
+                ModelProposal(
+                    source_event_id=new_batch.batch_id,
+                    intent="inform",
+                    reply_chunks=(corrected_status,),
+                    facts=(),
+                    read_requests=(),
+                    effect_proposals=(),
+                ),
             )
         )
         new_authority = replace(
@@ -4229,7 +4369,10 @@ def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
-        assert "processamento" in " ".join(result.reply_chunks).casefold()
+        assert result.reply_chunks == (corrected_status,)
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []
@@ -4265,29 +4408,40 @@ def test_active_execution_blocks_material_facts_without_read_or_projection_drift
             events=(material_event,),
             combined_text=material_event.text,
         )
-        model.proposals.append(
-            ModelProposal(
-                source_event_id=material_batch.batch_id,
-                intent="inform",
-                reply_chunks=("Atualizei as datas e a ocupação.",),
-                facts=(
-                    ModelFact("service", "hostel"),
-                    ModelFact("start_date", date(2026, 8, 16)),
-                    ModelFact("end_date", date(2026, 8, 18)),
-                    ModelFact("adults", 3),
-                    ModelFact("children", 0),
-                ),
-                read_requests=(),
-                effect_proposals=(),
-                passengers=(
-                    PassengerInput(
-                        position=1,
-                        participant_type="adult",
-                        full_name="Pessoa Passageira Fictícia",
-                        birth_date=None,
-                        gender=None,
-                        country_code=None,
+        corrected_status = "Maya: a reserva existente continua em processamento."
+        model.proposals.extend(
+            (
+                ModelProposal(
+                    source_event_id=material_batch.batch_id,
+                    intent="inform",
+                    reply_chunks=("Atualizei as datas e a ocupação.",),
+                    facts=(
+                        ModelFact("service", "hostel"),
+                        ModelFact("start_date", date(2026, 8, 16)),
+                        ModelFact("end_date", date(2026, 8, 18)),
+                        ModelFact("adults", 3),
+                        ModelFact("children", 0),
                     ),
+                    read_requests=(),
+                    effect_proposals=(),
+                    passengers=(
+                        PassengerInput(
+                            position=1,
+                            participant_type="adult",
+                            full_name="Pessoa Passageira Fictícia",
+                            birth_date=None,
+                            gender=None,
+                            country_code=None,
+                        ),
+                    ),
+                ),
+                ModelProposal(
+                    source_event_id=material_batch.batch_id,
+                    intent="inform",
+                    reply_chunks=(corrected_status,),
+                    facts=(),
+                    read_requests=(),
+                    effect_proposals=(),
                 ),
             )
         )
@@ -4318,7 +4472,10 @@ def test_active_execution_blocks_material_facts_without_read_or_projection_drift
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
-        assert "processamento" in " ".join(result.reply_chunks).casefold()
+        assert result.reply_chunks == (corrected_status,)
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []
@@ -4360,6 +4517,7 @@ def test_short_inert_reaffirmation_after_queue_reports_existing_processing() -> 
         executor._public_authority.values[
             reaffirmation_batch.batch_id
         ] = reaffirmation_authority
+        corrected_status = "Maya: a reserva existente continua em processamento."
         model.proposals[:] = [
             ModelProposal(
                 source_event_id=reaffirmation_batch.batch_id,
@@ -4371,14 +4529,24 @@ def test_short_inert_reaffirmation_after_queue_reports_existing_processing() -> 
                 clarification_question=(
                     "Qual opção você prefere: dormitório ou quarto privativo?"
                 ),
-            )
+            ),
+            ModelProposal(
+                source_event_id=reaffirmation_batch.batch_id,
+                intent="inform",
+                reply_chunks=(corrected_status,),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            ),
         ]
 
         reaffirmation = executor.execute(reaffirmation_batch)
 
         assert len(read_port.calls) == reads_after_confirmation
-        assert "processamento" in " ".join(reaffirmation.reply_chunks).casefold()
-        assert "qual opção" not in " ".join(reaffirmation.reply_chunks).casefold()
+        assert reaffirmation.reply_chunks == (corrected_status,)
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
+        )
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (1,)

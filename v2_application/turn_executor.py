@@ -62,7 +62,6 @@ from reservation_followup import HandoffRequested
 from v2_application.active_execution import (
     active_execution_status,
     blocks_active_commercial_progression,
-    execution_in_progress_reply,
     is_regressive_post_command_reply,
 )
 from v2_application.conversation import (
@@ -110,10 +109,12 @@ from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.model import (
     AuditedModelTurn,
     ConsultationHistoryEntry,
+    InvalidModelProposal,
     ModelFact,
     ModelProposal,
     ModelRequest,
     PRIVATE_CUSTOMER_FACT_ORDER,
+    PublicReplyCorrectionReason,
 )
 from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
@@ -766,64 +767,27 @@ def _authoritative_read_locales(
     )
 
 
-def _collection_reply(
-    locale: str,
-    *,
-    invalid_fact_names: tuple[str, ...] = (),
-) -> str:
-    if invalid_fact_names:
-        labels_pt = {
-            "full_name": "nome completo",
-            "email": "e-mail válido",
-            "country_code": "país",
-        }
-        labels_en = {
-            "full_name": "full name",
-            "email": "valid email",
-            "country_code": "country",
-        }
-        labels = labels_en if locale.startswith("en") else labels_pt
-        requested = ", ".join(labels[name] for name in invalid_fact_names)
-        if locale.startswith("en"):
-            return f"Please send your {requested} again so I can continue."
-        return f"Por favor, envie novamente {requested} para eu continuar."
-    if locale.startswith("en"):
-        return "Thank you. I saved those details so we can continue the reservation."
-    return "Obrigado. Guardei esses dados para continuar a reserva."
-
-
-def _consultation_reuse_fallback(locale: str) -> tuple[str, ...]:
-    if locale.startswith("en"):
-        return (
-            "The earlier lookup for this same scope is still fresh. I can recap it, but selecting or booking requires the normal fresh-action checks.",
-        )
-    return (
-        "A consulta anterior para esse mesmo escopo ainda está válida. Posso recapitulá-la, mas selecionar ou reservar exige as verificações normais da ação.",
-    )
-
-
 def _selection_binding_failure_proposal(
     proposal: ModelProposal,
     *,
     locale: str,
 ) -> ModelProposal:
+    if type(proposal) is not ModelProposal or type(locale) is not str:
+        raise TypeError("selection binding guard requires exact contracts")
     if proposal.intent != "select":
-        raise ValueError("selection binding fallback requires select intent")
-    reply = (
-        "I couldn’t bind that choice to exactly one current option. Nothing was "
-        "reserved; I’ll refresh it before preparing a summary."
-        if locale.casefold().startswith("en")
-        else "Não consegui vincular essa escolha a uma única opção atual. Nada foi "
-        "reservado; vou atualizá-la antes de preparar um resumo."
-    )
+        raise ValueError("selection binding guard requires select intent")
     return replace(
         proposal,
         intent="inform",
-        reply_chunks=(reply,),
-        clarification_question=None,
+        read_requests=(),
+        effect_proposals=(),
         target_offer_id=None,
         target_offer_ids=(),
+        confirmed_summary_version=None,
+        confirmed_action_kinds=(),
+        approval_basis=None,
         selection_requested=False,
+        pending_disposition=None,
     )
 
 
@@ -832,11 +796,11 @@ def _active_execution_guard_proposal(
     *,
     locale: str,
 ) -> ModelProposal:
+    if type(proposal) is not ModelProposal or type(locale) is not str:
+        raise TypeError("active execution guard requires exact contracts")
     return replace(
         proposal,
         intent="inform",
-        reply_chunks=execution_in_progress_reply(locale),
-        clarification_question=None,
         facts=(),
         read_requests=(),
         effect_proposals=(),
@@ -859,17 +823,28 @@ def _collection_only_proposal(
     invalid_fact_names: tuple[str, ...] = (),
     revoke_pending: bool = False,
 ) -> ModelProposal:
-    if type(revoke_pending) is not bool:
-        raise TypeError("revoke_pending must be exact bool")
-    return ModelProposal(
-        source_event_id=proposal.source_event_id,
+    if (
+        type(proposal) is not ModelProposal
+        or type(public_facts) is not tuple
+        or any(type(item) is not ModelFact for item in public_facts)
+        or type(locale) is not str
+        or type(invalid_fact_names) is not tuple
+        or any(type(item) is not str for item in invalid_fact_names)
+        or type(revoke_pending) is not bool
+    ):
+        raise TypeError("collection-only guard requires exact contracts")
+    return replace(
+        proposal,
         intent="adjust" if revoke_pending else "inform",
-        reply_chunks=(
-            _collection_reply(locale, invalid_fact_names=invalid_fact_names),
-        ),
         facts=public_facts,
         read_requests=(),
         effect_proposals=(),
+        target_offer_id=None,
+        target_offer_ids=(),
+        confirmed_summary_version=None,
+        confirmed_action_kinds=(),
+        approval_basis=None,
+        selection_requested=False,
         pending_disposition="revoke" if revoke_pending else None,
         passengers=(),
     )
@@ -881,49 +856,161 @@ def _private_update_no_command_proposal(
     pending_action: PendingCriticalActionContext | None,
     locale: str,
 ) -> ModelProposal:
+    if (
+        type(proposal) is not ModelProposal
+        or (
+            pending_action is not None
+            and type(pending_action) is not PendingCriticalActionContext
+        )
+        or type(locale) is not str
+    ):
+        raise TypeError("private-update guard requires exact contracts")
     if proposal.intent == "select" or (
         proposal.intent == "inform" and proposal.read_requests
     ):
         return proposal
     if proposal.intent == "request_handoff":
-        reply = (
-            "I'll connect you with a person."
-            if locale.startswith("en")
-            else "Vou encaminhar seu atendimento para uma pessoa."
-        )
-        return ModelProposal(
-            source_event_id=proposal.source_event_id,
-            intent="request_handoff",
-            reply_chunks=(reply,),
-            facts=proposal.facts,
+        return replace(
+            proposal,
             read_requests=(),
             effect_proposals=(),
+            target_offer_id=None,
+            target_offer_ids=(),
+            selection_requested=False,
         )
     if pending_action is not None:
-        reply = (
-            "I updated your details. I'll present a new summary before asking for confirmation."
-            if locale.startswith("en")
-            else "Atualizei seus dados. Vou apresentar um novo resumo antes de pedir confirmação."
-        )
-        return ModelProposal(
-            source_event_id=proposal.source_event_id,
+        return replace(
+            proposal,
             intent="adjust",
-            reply_chunks=(reply,),
-            facts=proposal.facts,
             read_requests=(),
             effect_proposals=(),
+            target_offer_id=None,
+            target_offer_ids=(),
+            confirmed_summary_version=None,
+            confirmed_action_kinds=(),
+            approval_basis=None,
+            selection_requested=False,
             pending_disposition="revoke",
-            passengers=proposal.passengers,
         )
-    return ModelProposal(
-        source_event_id=proposal.source_event_id,
+    return replace(
+        proposal,
         intent="inform",
-        reply_chunks=(_collection_reply(locale),),
-        facts=proposal.facts,
         read_requests=(),
         effect_proposals=(),
-        passengers=proposal.passengers,
+        target_offer_id=None,
+        target_offer_ids=(),
+        confirmed_summary_version=None,
+        confirmed_action_kinds=(),
+        approval_basis=None,
+        selection_requested=False,
+        pending_disposition=None,
     )
+
+
+def _reply_chunk_contains_literal_value(chunk: str, private_value: str) -> bool:
+    if type(chunk) is not str or type(private_value) is not str or not private_value:
+        raise TypeError("private literal check requires exact strings")
+    cursor = 0
+    while True:
+        position = chunk.find(private_value, cursor)
+        if position < 0:
+            return False
+        end = position + len(private_value)
+        left_is_boundary = position == 0 or not chunk[position - 1].isalnum()
+        right_is_boundary = end == len(chunk) or not chunk[end].isalnum()
+        if left_is_boundary and right_is_boundary:
+            return True
+        cursor = position + 1
+
+
+def _proposal_exposes_private_values(
+    proposal: ModelProposal,
+    private_values: tuple[str, ...],
+) -> bool:
+    if (
+        type(proposal) is not ModelProposal
+        or type(private_values) is not tuple
+        or any(type(item) is not str or not item for item in private_values)
+    ):
+        raise TypeError("private-value exposure check requires exact contracts")
+    return any(
+        _reply_chunk_contains_literal_value(chunk, private_value)
+        for private_value in private_values
+        for chunk in proposal.reply_chunks
+    )
+
+
+def _same_terminal_structure(
+    expected: ModelProposal,
+    corrected: ModelProposal,
+) -> bool:
+    if type(expected) is not ModelProposal or type(corrected) is not ModelProposal:
+        raise TypeError("public reply correction requires exact proposals")
+    return all(
+        getattr(corrected, name) == getattr(expected, name)
+        for name in (
+            "source_event_id",
+            "intent",
+            "facts",
+            "read_requests",
+            "effect_proposals",
+            "target_offer_id",
+            "confirmed_summary_version",
+            "target_offer_ids",
+            "confirmed_action_kinds",
+            "approval_basis",
+            "selection_requested",
+            "pending_disposition",
+            "passengers",
+        )
+    )
+
+
+def _request_public_reply_correction(
+    model: AuditedModelPort,
+    *,
+    request: ModelRequest,
+    audited: AuditedModelTurn,
+    expected: ModelProposal,
+    reason: PublicReplyCorrectionReason,
+    private_values: tuple[str, ...],
+) -> tuple[ModelProposal, AuditedModelTurn]:
+    if (
+        type(request) is not ModelRequest
+        or type(audited) is not AuditedModelTurn
+        or type(expected) is not ModelProposal
+        or type(reason) is not PublicReplyCorrectionReason
+        or type(private_values) is not tuple
+        or any(type(item) is not str or not item for item in private_values)
+    ):
+        raise TypeError("public reply correction requires exact contracts")
+    correction_request = replace(
+        request,
+        request_id=_opaque(
+            "model-public-reply-correction",
+            request.request_id,
+            reason.value,
+        ),
+        observations=(),
+        confirmation_review_required=False,
+        selection_review_required=False,
+        progress_review_required=False,
+        recap_reuse_required=False,
+        public_reply_correction_reasons=(reason,),
+    )
+    try:
+        corrected_audited = model.complete_audited(correction_request)
+    except InvalidModelProposal as exc:
+        raise TurnExecutionError("public reply correction remained invalid") from exc
+    if type(corrected_audited) is not AuditedModelTurn:
+        raise TypeError("model must return exact AuditedModelTurn")
+    corrected = validate_productive_proposal(corrected_audited.proposal)
+    if (
+        not _same_terminal_structure(expected, corrected)
+        or _proposal_exposes_private_values(corrected, private_values)
+    ):
+        raise TurnExecutionError("public reply correction remained invalid")
+    return corrected, AuditedModelTurn.combine((audited, corrected_audited))
 
 
 def _persist_private_collection(
@@ -1574,6 +1661,42 @@ class V2TurnExecutor:
             ),
             active_execution_status=active_execution_status(current.state),
         )
+        correction_used = False
+        accepted_private_values: list[str] = []
+
+        def request_public_reply_correction(
+            expected: ModelProposal,
+            audited: AuditedModelTurn,
+            reason: PublicReplyCorrectionReason,
+        ) -> tuple[ModelProposal, AuditedModelTurn]:
+            nonlocal correction_used
+            if correction_used:
+                raise TurnExecutionError("public reply correction was already consumed")
+            corrected = _request_public_reply_correction(
+                self._model,
+                request=replace(
+                    request,
+                    private_customer_fact_names=_private_customer_fact_names(
+                        projection,
+                        private_facts=private_facts,
+                        profile=profile,
+                        now=now,
+                    ),
+                    private_profile_complete=reservation_profile_ready(
+                        profile,
+                        projection,
+                        now,
+                        private_facts=private_facts,
+                    ),
+                ),
+                audited=audited,
+                expected=expected,
+                reason=reason,
+                private_values=tuple(dict.fromkeys(accepted_private_values)),
+            )
+            correction_used = True
+            return corrected
+
         first_audited = self._model.complete_audited(request)
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
@@ -1597,6 +1720,9 @@ class V2TurnExecutor:
             first_public_facts,
             projection.locale,
         )
+        accepted_private_values.extend(
+            item.value for item in first_private_facts if type(item.value) is str
+        )
         if first_private_facts:
             private_facts = _persist_private_collection(
                 self._private_customer_facts,
@@ -1618,6 +1744,7 @@ class V2TurnExecutor:
             )
         collection_only = bool(first_invalid_private_facts)
         first_proposal = replace(first_proposal, facts=first_public_facts)
+        correction_reason: PublicReplyCorrectionReason | None = None
         if collection_only:
             first_proposal = _collection_only_proposal(
                 first_proposal,
@@ -1626,16 +1753,28 @@ class V2TurnExecutor:
                 invalid_fact_names=first_invalid_private_facts,
                 revoke_pending=pending_action is not None,
             )
-        else:
-            first_proposal = (
-                normalize_initial_commercial_plan(first_proposal)
-                if pending_action is None
-                else first_proposal
-            )
+        elif pending_action is None:
+            normalized = normalize_initial_commercial_plan(first_proposal)
+            if (
+                first_proposal.intent == "select"
+                and normalized.intent == "inform"
+                and not normalized.read_requests
+            ):
+                correction_reason = (
+                    PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY
+                )
+            first_proposal = normalized
         if blocks_active_commercial_progression(current.state, first_proposal):
             first_proposal = _active_execution_guard_proposal(
                 first_proposal,
                 locale=projection.locale,
+            )
+            correction_reason = PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT
+        if correction_reason is not None:
+            first_proposal, first_audited = request_public_reply_correction(
+                first_proposal,
+                first_audited,
+                correction_reason,
             )
         first_audited = AuditedModelTurn.from_frames(
             proposal=first_proposal,
@@ -1716,6 +1855,9 @@ class V2TurnExecutor:
                 review_public_facts,
                 projection.locale,
             )
+            accepted_private_values.extend(
+                item.value for item in review_private_facts if type(item.value) is str
+            )
             if review_private_facts:
                 private_facts = _persist_private_collection(
                     self._private_customer_facts,
@@ -1770,7 +1912,18 @@ class V2TurnExecutor:
                 ephemeral_session_id=review_audited.closure.ephemeral_session_id,
             )
         if not collection_only and pending_action is None:
-            first_proposal = normalize_initial_commercial_plan(first_proposal)
+            normalized = normalize_initial_commercial_plan(first_proposal)
+            if (
+                first_proposal.intent == "select"
+                and normalized.intent == "inform"
+                and not normalized.read_requests
+            ):
+                normalized, first_audited = request_public_reply_correction(
+                    normalized,
+                    first_audited,
+                    PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY,
+                )
+            first_proposal = normalized
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
                 frames=first_audited.frames,
@@ -1846,6 +1999,32 @@ class V2TurnExecutor:
             first_proposal = _active_execution_guard_proposal(
                 first_proposal,
                 locale=projection.locale,
+            )
+            first_proposal, first_audited = request_public_reply_correction(
+                first_proposal,
+                first_audited,
+                PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
+            )
+            first_audited = AuditedModelTurn.from_frames(
+                proposal=first_proposal,
+                frames=first_audited.frames,
+                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
+            )
+        if _proposal_exposes_private_values(
+            first_proposal,
+            tuple(dict.fromkeys(accepted_private_values)),
+        ):
+            read_requests = ()
+            derived_confirmation_reads = False
+            first_proposal = replace(
+                first_proposal,
+                read_requests=(),
+                selection_requested=False,
+            )
+            first_proposal, first_audited = request_public_reply_correction(
+                first_proposal,
+                first_audited,
+                PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
             )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
@@ -1997,10 +2176,10 @@ class V2TurnExecutor:
                 or proposal.selection_requested
                 or proposal.passengers
             ):
-                proposal = replace(
+                proposal, second_audited = request_public_reply_correction(
                     first_proposal,
-                    reply_chunks=_consultation_reuse_fallback(projection.locale),
-                    clarification_question=None,
+                    second_audited,
+                    PublicReplyCorrectionReason.STALE_CONSULTATION_REUSE,
                 )
             (
                 second_private_facts,
@@ -2011,6 +2190,9 @@ class V2TurnExecutor:
             second_public_facts = _authoritative_language_facts(
                 second_public_facts,
                 projection.locale,
+            )
+            accepted_private_values.extend(
+                item.value for item in second_private_facts if type(item.value) is str
             )
             if second_private_facts:
                 private_facts = _persist_private_collection(
@@ -2045,6 +2227,11 @@ class V2TurnExecutor:
                 proposal = _active_execution_guard_proposal(
                     proposal,
                     locale=projection.locale,
+                )
+                proposal, second_audited = request_public_reply_correction(
+                    proposal,
+                    second_audited,
+                    PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
                 )
             second_audited = AuditedModelTurn.from_frames(
                 proposal=proposal,
@@ -2159,20 +2346,39 @@ class V2TurnExecutor:
                 proposal,
                 locale=projection.locale,
             )
+            proposal, audited = request_public_reply_correction(
+                proposal,
+                audited,
+                PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
+            )
         elif is_regressive_post_command_reply(
             current.state,
             proposal,
         ):
-            proposal = replace(
+            proposal, audited = request_public_reply_correction(
                 proposal,
-                reply_chunks=execution_in_progress_reply(projection.locale),
-                clarification_question=None,
+                audited,
+                PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
+            )
+        if _proposal_exposes_private_values(
+            proposal,
+            tuple(dict.fromkeys(accepted_private_values)),
+        ):
+            proposal, audited = request_public_reply_correction(
+                proposal,
+                audited,
+                PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
             )
         proposal = apply_positive_grounding(
             proposal,
             v2_observations,
             locale=projection.locale,
             force=private_update_turn,
+        )
+        audited = AuditedModelTurn.from_frames(
+            proposal=proposal,
+            frames=audited.frames,
+            ephemeral_session_id=audited.closure.ephemeral_session_id,
         )
 
         decision_now = self._clock.now()
@@ -2261,11 +2467,19 @@ class V2TurnExecutor:
                 proposal,
                 locale=projection.locale,
             )
+            proposal, audited = request_public_reply_correction(
+                proposal,
+                audited,
+                PublicReplyCorrectionReason.SELECTION_BINDING_FAILURE,
+            )
             audited = AuditedModelTurn.from_frames(
                 proposal=proposal,
                 frames=audited.frames,
                 ephemeral_session_id=audited.closure.ephemeral_session_id,
             )
+            frames = _frame_commitments(audited)
+            final_frame_hash = frames[-1].canonical_hash()
+            fact_commitment_hash = final_frame_hash
             decision = self._reducer.reduce(
                 state=current.state,
                 projection=projection,

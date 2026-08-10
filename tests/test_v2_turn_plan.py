@@ -128,6 +128,32 @@ def test_complete_inform_plan_without_model_read_stays_read_free() -> None:
     assert normalize_initial_commercial_plan(proposal) == proposal
 
 
+def test_incomplete_selection_clears_unbound_structure_without_rewriting_maya_text() -> None:
+    proposal = ModelProposal(
+        source_event_id="batch:turn-plan-incomplete-selection",
+        intent="select",
+        reply_chunks=(
+            "Maya sentinel: preciso confirmar os dados que ainda faltam.",
+            "Quais datas você prefere?",
+        ),
+        clarification_question="Quais datas você prefere?",
+        facts=(ModelFact("service", "hostel"),),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "3" * 64,
+    )
+
+    normalized = normalize_initial_commercial_plan(proposal)
+
+    assert normalized.intent == "inform"
+    assert normalized.read_requests == ()
+    assert normalized.target_offer_id is None
+    assert normalized.target_offer_ids == ()
+    assert normalized.selection_requested is False
+    assert normalized.reply_chunks == proposal.reply_chunks
+    assert normalized.clarification_question == proposal.clarification_question
+
+
 def test_consultation_reuse_requires_exact_fresh_scope_and_recap_only_plan() -> None:
     request = _lodging_read()
     proposal = _proposal(facts=(), reads=(request,))

@@ -151,19 +151,9 @@ def normalize_initial_commercial_plan(
             selection_requested=True,
         )
 
-    language = next(
-        (item.value for item in proposal.facts if item.name == "language"),
-        None,
-    )
-    reply = (
-        "I need the complete dates and party before I can refresh availability safely."
-        if type(language) is str and language.casefold().startswith("en")
-        else "Preciso das datas e da ocupação completas para atualizar a disponibilidade com segurança."
-    )
     return replace(
         proposal,
         intent="inform",
-        reply_chunks=(reply,),
         target_offer_id=None,
         target_offer_ids=(),
         selection_requested=False,
