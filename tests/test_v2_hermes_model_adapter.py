@@ -10,18 +10,13 @@ import pytest
 import v2_adapters.hermes_model as hermes_model_module
 import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import (
+    _CONFIRMATION_REVIEW_REPAIR_SUFFIX,
     _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
     _PROTOCOL_REPAIR_SUFFIX,
-    _confirmation_review,
     _confirmation_review_wire,
     _proposal,
-    _proposal_from_confirmation_review,
     _request_wire,
     HermesModelAdapter,
-)
-from v2_contracts.confirmation_review import (
-    ContextualConfirmationDecision,
-    ContextualConfirmationReview,
 )
 from v2_contracts.critical_actions import (
     ApprovalBasis,
@@ -839,7 +834,40 @@ def _confirmation_review_request() -> ModelRequest:
     )
 
 
-def _review_payload(decision: str = "approve") -> bytes:
+def _confirmation_proposal_payload(**overrides: object) -> bytes:
+    payload: dict[str, object] = {
+        "schema": "v2-model-proposal-v7",
+        "source_event_id": "batch:contextual-confirmation-review",
+        "intent": "confirm",
+        "reply_chunks": [
+            "Confirmação entendida exatamente como você descreveu.",
+            "Vou seguir somente com o resumo pendente.",
+        ],
+        "facts": [],
+        "read_requests": [],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": 1,
+        "confirmed_action_kinds": ["book_activity", "initiate_payment"],
+        "approval_basis": "contextual_reference",
+        "selection_requested": False,
+        "pending_disposition": None,
+        "passengers": [],
+        "clarification_question": None,
+    }
+    payload.update(overrides)
+    if payload["schema"] == "v2-model-proposal-v6":
+        payload.pop("clarification_question")
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def _decision_only_review_payload(decision: str = "approve") -> bytes:
     return json.dumps(
         {
             "schema": "v2-contextual-confirmation-review-v1",
@@ -852,7 +880,7 @@ def _review_payload(decision: str = "approve") -> bytes:
     ).encode()
 
 
-def test_confirmation_review_wire_is_minimal_and_public_only() -> None:
+def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() -> None:
     envelope = json.loads(
         _confirmation_review_wire(
             _confirmation_review_request(),
@@ -874,6 +902,9 @@ def test_confirmation_review_wire_is_minimal_and_public_only() -> None:
         "public_summary": _pending_action().public_summary,
         "expires_at": "2026-07-28T06:30:00+00:00",
     }
+    assert "v2-model-proposal-v7" in envelope["system_prompt"]
+    assert "reply_chunks" in envelope["system_prompt"]
+    assert "v2-contextual-confirmation-review-v1" not in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
         "private-lead-should-not-cross-review-wire",
@@ -890,86 +921,67 @@ def test_confirmation_review_wire_is_minimal_and_public_only() -> None:
         assert forbidden not in serialized
 
 
-def test_confirmation_review_parser_requires_exact_closed_schema_and_source() -> None:
-    review = _confirmation_review(
-        _review_payload(),
-        "batch:contextual-confirmation-review",
-    )
-    assert review == ContextualConfirmationReview(
-        source_event_id="batch:contextual-confirmation-review",
-        decision=ContextualConfirmationDecision.APPROVE,
-    )
-
-    invalid_payloads = (
-        b'{"schema":"v2-contextual-confirmation-review-v1",'
-        b'"source_event_id":"batch:contextual-confirmation-review",'
-        b'"decision":"approve","decision":"uncertain"}',
-        _review_payload("unknown"),
-        _review_payload().replace(
-            b"batch:contextual-confirmation-review",
-            b"batch:wrong-source",
-        ),
-        _review_payload().replace(
-            b"v2-contextual-confirmation-review-v1",
-            b"v2-contextual-confirmation-review-v2",
-        ),
-        _review_payload()[:-1] + b',"extra":true}',
-    )
-    for payload in invalid_payloads:
-        with pytest.raises(InvalidModelProposal):
-            _confirmation_review(payload, "batch:contextual-confirmation-review")
-
-
 @pytest.mark.parametrize(
-    ("decision", "intent", "pending_disposition"),
+    ("overrides", "reply_chunks", "expected_intent", "expected_disposition"),
     (
-        (ContextualConfirmationDecision.APPROVE, "confirm", None),
-        (ContextualConfirmationDecision.REJECT, "adjust", "revoke"),
-        (ContextualConfirmationDecision.ADJUST, "adjust", "revoke"),
-        (ContextualConfirmationDecision.UNCERTAIN, "inform", None),
+        (
+            {},
+            (
+                "Confirmação entendida exatamente como você descreveu.",
+                "Vou seguir somente com o resumo pendente.",
+            ),
+            "confirm",
+            None,
+        ),
+        (
+            {
+                "intent": "adjust",
+                "reply_chunks": [
+                    "Entendi a mudança e não vou usar o resumo anterior.",
+                ],
+                "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+                "pending_disposition": "revoke",
+            },
+            ("Entendi a mudança e não vou usar o resumo anterior.",),
+            "adjust",
+            "revoke",
+        ),
+        (
+            {
+                "intent": "inform",
+                "reply_chunks": [
+                    "Ainda preciso que você esclareça se aprova todo o resumo.",
+                ],
+                "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+            },
+            ("Ainda preciso que você esclareça se aprova todo o resumo.",),
+            "inform",
+            None,
+        ),
     ),
 )
-def test_parent_owns_confirmation_binding(
-    decision: ContextualConfirmationDecision,
-    intent: str,
-    pending_disposition: str | None,
+def test_confirmation_review_returns_exact_maya_authored_bound_v7_proposal(
+    overrides: dict[str, object],
+    reply_chunks: tuple[str, ...],
+    expected_intent: str,
+    expected_disposition: str | None,
 ) -> None:
-    request = _confirmation_review_request()
-    proposal = _proposal_from_confirmation_review(
-        request,
-        ContextualConfirmationReview(
-            source_event_id=request.source_event_id,
-            decision=decision,
-        ),
-    )
-
-    assert proposal.intent == intent
-    assert proposal.pending_disposition == pending_disposition
-    assert proposal.facts == ()
-    assert proposal.read_requests == ()
-    assert proposal.effect_proposals == ()
-    assert proposal.passengers == ()
-    assert proposal.target_offer_id is None
-    assert proposal.target_offer_ids == ()
-    if decision is ContextualConfirmationDecision.APPROVE:
-        assert proposal.confirmed_summary_version == request.pending_action.summary_version
-        assert proposal.confirmed_action_kinds == request.pending_action.action_kinds
-        assert proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
-    else:
-        assert proposal.confirmed_summary_version is None
-        assert proposal.confirmed_action_kinds == ()
-        assert proposal.approval_basis is None
-
-
-def test_adapter_routes_confirmation_review_through_narrow_audited_wire() -> None:
+    response = _confirmation_proposal_payload(**overrides)
+    responses = [response]
     captured: list[bytes] = []
 
     def run(command, **kwargs):
+        if not responses:
+            pytest.fail("confirmation review attempted an unexpected additional child call")
         assert command == ("python", "-m", "v2_host.hermes_child")
         captured.append(kwargs["input"])
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + _review_payload(),
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
             stderr=b"",
         )
 
@@ -985,12 +997,31 @@ def test_adapter_routes_confirmation_review_through_narrow_audited_wire() -> Non
 
     turn = adapter.complete_audited(request)
 
-    assert turn.proposal.intent == "confirm"
-    assert turn.proposal.confirmed_summary_version == request.pending_action.summary_version
-    assert turn.proposal.confirmed_action_kinds == request.pending_action.action_kinds
-    assert turn.proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    assert responses == []
+    assert turn.proposal.intent == expected_intent
+    assert turn.proposal.reply_chunks == reply_chunks
+    assert turn.proposal.pending_disposition == expected_disposition
+    assert turn.proposal.facts == ()
+    assert turn.proposal.read_requests == ()
+    assert turn.proposal.effect_proposals == ()
+    assert turn.proposal.target_offer_id is None
+    assert turn.proposal.target_offer_ids == ()
+    assert turn.proposal.selection_requested is False
+    assert turn.proposal.passengers == ()
+    if expected_intent == "confirm":
+        assert turn.proposal.confirmed_summary_version == (
+            request.pending_action.summary_version
+        )
+        assert turn.proposal.confirmed_action_kinds == request.pending_action.action_kinds
+        assert turn.proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    else:
+        assert turn.proposal.confirmed_summary_version is None
+        assert turn.proposal.confirmed_action_kinds == ()
+        assert turn.proposal.approval_basis is None
     assert len(turn.frames) == 1
+    assert turn.frames[0].response_bytes == response
     assert turn.frames[0].stdin_bytes == captured[0]
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
     envelope = json.loads(captured[0])
     assert envelope["system_prompt"] == _CONFIRMATION_REVIEW_SYSTEM_PROMPT
     serialized = captured[0].decode()
@@ -999,26 +1030,157 @@ def test_adapter_routes_confirmation_review_through_narrow_audited_wire() -> Non
     assert "must-not-cross" not in serialized
 
 
-def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
-    attempts = 0
+@pytest.mark.parametrize(
+    "invalid_overrides",
+    (
+        {"source_event_id": "batch:wrong-source"},
+        {"schema": "v2-model-proposal-v6"},
+        {
+            "intent": "request_handoff",
+            "confirmed_summary_version": None,
+            "confirmed_action_kinds": [],
+            "approval_basis": None,
+        },
+        {"confirmed_summary_version": 2},
+        {"confirmed_action_kinds": ["book_activity", "cancel_reservation"]},
+        {"approval_basis": None},
+        {
+            "intent": "adjust",
+            "confirmed_summary_version": None,
+            "confirmed_action_kinds": [],
+            "approval_basis": None,
+            "pending_disposition": "preserve",
+        },
+    ),
+    ids=(
+        "source",
+        "legacy-schema",
+        "intent",
+        "summary-version",
+        "action-kinds",
+        "approval-basis",
+        "pending-disposition",
+    ),
+)
+def test_confirmation_review_repairs_structurally_unbound_proposal_once(
+    invalid_overrides: dict[str, object],
+) -> None:
+    invalid = _confirmation_proposal_payload(**invalid_overrides)
+    repaired_chunks = (
+        "Aprovação compreendida pela Maya para o resumo exato.",
+        "Vou seguir apenas com essas ações.",
+    )
+    repaired = _confirmation_proposal_payload(reply_chunks=list(repaired_chunks))
+    responses = [invalid, repaired]
+    prompts: list[str] = []
 
     def run(command, **kwargs):
-        nonlocal attempts
-        attempts += 1
-        response = (
-            b'{"schema":"v2-contextual-confirmation-review-v1",'
-            b'"source_event_id":"batch:wrong-source","decision":"approve"}'
-            if attempts == 1
-            else b'{"schema":"v2-contextual-confirmation-review-v1",'
-            b'"source_event_id":"batch:contextual-confirmation-review",'
-            b'"decision":"unknown"}'
-        )
+        if not responses:
+            pytest.fail("confirmation review attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        prompts.append(envelope["system_prompt"])
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + response,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
             stderr=b"",
         )
 
+    request = _confirmation_review_request()
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="unused-general-prompt",
+        timeout=10,
+        transcript_key=b"review-binding-repair-key-00000001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert responses == []
+    assert len(prompts) == 2
+    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX not in prompts[0]
+    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX in prompts[1]
+    assert len(turn.frames) == 2
+    assert [frame.response_bytes for frame in turn.frames] == [invalid, repaired]
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+    assert turn.proposal.reply_chunks == repaired_chunks
+    assert turn.proposal.confirmed_summary_version == request.pending_action.summary_version
+    assert turn.proposal.confirmed_action_kinds == request.pending_action.action_kinds
+    assert turn.proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+    assert turn.proposal.pending_disposition is None
+
+
+def test_decision_only_confirmation_review_cannot_bypass_full_v7_validation() -> None:
+    legacy = _decision_only_review_payload()
+    repaired_chunks = ("A Maya confirmou o resumo integral sem alterar seus termos.",)
+    repaired = _confirmation_proposal_payload(reply_chunks=list(repaired_chunks))
+    responses = [legacy, repaired]
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("confirmation review attempted an unexpected third child call")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="unused-general-prompt",
+        timeout=10,
+        transcript_key=b"review-legacy-bypass-key-000000001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(_confirmation_review_request())
+
+    assert responses == []
+    assert [frame.response_bytes for frame in turn.frames] == [legacy, repaired]
+    assert turn.proposal.reply_chunks == repaired_chunks
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+
+
+def test_invalid_confirmation_reviews_fail_closed_after_bounded_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_frames = [
+        _confirmation_proposal_payload(confirmed_summary_version=2),
+        _confirmation_proposal_payload(
+            confirmed_action_kinds=["book_activity", "cancel_reservation"]
+        ),
+    ]
+    responses = list(invalid_frames)
+    prompts: list[str] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("confirmation review attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        prompts.append(envelope["system_prompt"])
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    def forbid_deterministic_proposal(*args, **kwargs):
+        pytest.fail("confirmation exhaustion attempted deterministic proposal construction")
+
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_fallback_proposal",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_recursive_read_fallback",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
     adapter = HermesModelAdapter(
         command=("synthetic-tool-free-child",),
         system_prompt="unused-general-prompt",
@@ -1027,18 +1189,131 @@ def test_invalid_confirmation_reviews_fall_back_to_unbound_inform() -> None:
         run=run,
         environ={},
     )
+    attempted_frames = []
+    original_attempt = adapter._attempt
 
-    turn = adapter.complete_audited(_confirmation_review_request())
+    def audited_attempt(request, *, stdin_bytes, decode=None):
+        turn, frame = original_attempt(
+            request,
+            stdin_bytes=stdin_bytes,
+            decode=decode,
+        )
+        attempted_frames.append(frame)
+        return turn, frame
 
-    assert attempts == 2
-    assert turn.proposal.intent == "inform"
-    assert turn.proposal.confirmed_summary_version is None
-    assert turn.proposal.confirmed_action_kinds == ()
-    assert turn.proposal.approval_basis is None
-    assert len(turn.frames) == 3
-    assert turn.closure.ephemeral_session_id.startswith(
-        "deterministic:protocol-fallback:"
+    monkeypatch.setattr(adapter, "_attempt", audited_attempt)
+
+    with pytest.raises(InvalidModelProposal) as captured:
+        adapter.complete_audited(_confirmation_review_request())
+
+    assert type(captured.value) is InvalidModelProposal
+    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
+    assert responses == []
+    assert len(prompts) == 2
+    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX not in prompts[0]
+    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX in prompts[1]
+    assert [frame.response_bytes for frame in attempted_frames] == invalid_frames
+    assert all(
+        json.loads(frame.response_bytes)["effect_proposals"] == []
+        for frame in attempted_frames
     )
+
+
+def test_ordinary_invalid_proposals_fail_closed_after_one_protocol_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = ModelRequest(
+        request_id="request:ordinary-bounded-exhaustion",
+        lead_id="manychat:ordinary-bounded-exhaustion",
+        source_event_id="batch:ordinary-bounded-exhaustion",
+        message="Continue o atendimento.",
+        locale="pt-BR",
+        state_version=0,
+    )
+    invalid_frames = [
+        _versioned_proposal_payload(
+            7,
+            "batch:wrong-source-first",
+            reply_chunks=("Primeiro frame inválido escrito pelo modelo.",),
+            facts=({"name": "service", "value": "activity"},),
+        ),
+        _versioned_proposal_payload(
+            7,
+            "batch:wrong-source-repair",
+            reply_chunks=("Segundo frame inválido escrito pelo modelo.",),
+            facts=({"name": "service", "value": "activity"},),
+        ),
+    ]
+    responses = list(invalid_frames)
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("ordinary exhaustion attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    def forbid_deterministic_proposal(*args, **kwargs):
+        pytest.fail("ordinary exhaustion attempted deterministic proposal construction")
+
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_fallback_proposal",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_recursive_read_fallback",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"ordinary-exhaustion-transcript-key-01",
+        run=run,
+        environ={},
+    )
+    attempted_frames = []
+    original_attempt = adapter._attempt
+
+    def audited_attempt(request, *, stdin_bytes, decode=None):
+        turn, frame = original_attempt(
+            request,
+            stdin_bytes=stdin_bytes,
+            decode=decode,
+        )
+        attempted_frames.append(frame)
+        return turn, frame
+
+    monkeypatch.setattr(adapter, "_attempt", audited_attempt)
+
+    with pytest.raises(InvalidModelProposal) as captured:
+        adapter.complete_audited(request)
+
+    assert type(captured.value) is InvalidModelProposal
+    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
+    assert responses == []
+    assert len(seen) == 2
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
+    assert [frame.response_bytes for frame in attempted_frames] == invalid_frames
+    assert all(
+        json.loads(frame.response_bytes)["effect_proposals"] == []
+        for frame in attempted_frames
+    )
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
 
 
 def test_adapter_revises_structural_noop_once_with_same_complete_context() -> None:
@@ -1144,10 +1419,12 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    responses = [b"{}", no_op, b"{}", b"{}"]
+    responses = [b"{}", no_op, b"{}"]
     review_flags: list[bool] = []
 
     def run(command, **kwargs):
+        if not responses:
+            pytest.fail("progress review attempted an unexpected nested repair call")
         envelope = json.loads(kwargs["input"])
         user = json.loads(envelope["messages"][-1][1])
         review_flags.append(user["progress_review_required"])
@@ -1166,12 +1443,13 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
         environ={},
     )
 
-    turn = adapter.complete_audited(request)
+    with pytest.raises(InvalidModelProposal) as captured:
+        adapter.complete_audited(request)
 
+    assert type(captured.value) is InvalidModelProposal
+    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
+    assert responses == []
     assert review_flags == [False, False, True]
-    assert turn.closure.ephemeral_session_id.startswith(
-        "deterministic:protocol-fallback:"
-    )
 
 
 def _versioned_proposal_payload(
@@ -1394,11 +1672,13 @@ def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
         HermesModelAdapter,
         "_fallback_proposal",
         staticmethod(forbid_deterministic_proposal),
+        raising=False,
     )
     monkeypatch.setattr(
         HermesModelAdapter,
         "_recursive_read_fallback",
         staticmethod(forbid_deterministic_proposal),
+        raising=False,
     )
     adapter = HermesModelAdapter(
         command=("synthetic-tool-free-child",),
@@ -1706,7 +1986,7 @@ def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None
     assert str(failure) == "model proposal remained invalid after bounded attempts"
 
 
-def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
+def test_current_observation_rejects_recursive_read_and_keeps_maya_repair() -> None:
     lodging_read = ReadRequest(
         request_id="batch:negative-package:read:lodging",
         kind=ReadKind.LODGING,
@@ -1761,7 +2041,7 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
             ),
         ),
     )
-    payload = json.dumps(
+    recursive = json.dumps(
         {
             "schema": "v2-model-proposal-v6",
             "source_event_id": request.source_event_id,
@@ -1793,14 +2073,26 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    attempts = 0
+    repaired_chunks = (
+        "As duas opções consultadas estão indisponíveis nessas datas.",
+        "Nada foi reservado; posso ajudar a avaliar outras datas.",
+    )
+    repaired = _versioned_proposal_payload(
+        7,
+        request.source_event_id,
+        reply_chunks=repaired_chunks,
+    )
+    responses = [recursive, repaired]
+    prompts: list[str] = []
 
     def run(command, **kwargs):
-        nonlocal attempts
-        attempts += 1
+        if not responses:
+            pytest.fail("recursive-read repair attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        prompts.append(envelope["system_prompt"])
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + payload,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
             stderr=b"",
         )
 
@@ -1815,19 +2107,18 @@ def test_current_observation_normalizes_recursive_reads_without_second_inference
 
     turn = adapter.complete_audited(request)
 
-    assert attempts == 1
+    assert responses == []
+    assert len(prompts) == 2
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt in prompts] == [False, True]
     assert turn.proposal.intent == "inform"
-    assert turn.proposal.reply_chunks == (
-        "A hospedagem e o passeio solicitados não estão disponíveis para as "
-        "datas consultadas. Nada foi reservado. Posso consultar outras datas.",
-    )
+    assert turn.proposal.reply_chunks == repaired_chunks
     assert turn.proposal.read_requests == ()
     assert turn.proposal.selection_requested is False
     assert turn.proposal.effect_proposals == ()
-    assert len(turn.frames) == 1
-    assert turn.closure.ephemeral_session_id.startswith(
-        "deterministic:recursive-read-fallback:"
-    )
+    assert len(turn.frames) == 2
+    assert [frame.response_bytes for frame in turn.frames] == [recursive, repaired]
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+    assert not turn.closure.ephemeral_session_id.startswith("deterministic:")
 
 
 def test_prompt_routes_known_activity_difficulty_questions_to_activity_description() -> (
@@ -1853,9 +2144,9 @@ def test_prompt_routes_known_activity_difficulty_questions_to_activity_descripti
     assert "activity_description in the initial frame" in prompt
 
 
-def test_incomplete_informational_observation_fails_honestly_without_repeat_request() -> (
-    None
-):
+def test_recursive_read_repair_repetition_fails_closed_without_adapter_prose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     observed_at = datetime(2026, 8, 6, 19, 25, tzinfo=timezone.utc)
     request = ModelRequest(
         request_id="request:sossego-information-followup",
@@ -1881,7 +2172,7 @@ def test_incomplete_informational_observation_fails_honestly_without_repeat_requ
             ),
         ),
     )
-    recursive = {
+    recursive: dict[str, object] = {
         "schema": "v2-model-proposal-v6",
         "source_event_id": request.source_event_id,
         "intent": "inform",
@@ -1904,15 +2195,53 @@ def test_incomplete_informational_observation_fails_honestly_without_repeat_requ
         "pending_disposition": None,
         "passengers": [],
     }
-    payload = json.dumps(recursive, ensure_ascii=False).encode()
+    first = json.dumps(
+        recursive,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    recursive["schema"] = "v2-model-proposal-v7"
+    recursive["reply_chunks"] = [
+        "Ainda quero repetir a consulta em vez de usar a observação."
+    ]
+    recursive["clarification_question"] = None
+    repeated_repair = json.dumps(
+        recursive,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    invalid_frames = [first, repeated_repair]
+    responses = list(invalid_frames)
+    prompts: list[str] = []
 
     def run(command, **kwargs):
+        if not responses:
+            pytest.fail("recursive-read exhaustion attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        prompts.append(envelope["system_prompt"])
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + payload,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
             stderr=b"",
         )
 
+    def forbid_deterministic_proposal(*args, **kwargs):
+        pytest.fail("recursive read attempted deterministic proposal construction")
+
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_fallback_proposal",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_recursive_read_fallback",
+        staticmethod(forbid_deterministic_proposal),
+        raising=False,
+    )
     adapter = HermesModelAdapter(
         command=("synthetic-tool-free-child",),
         system_prompt="closed prompt",
@@ -1921,13 +2250,34 @@ def test_incomplete_informational_observation_fails_honestly_without_repeat_requ
         run=run,
         environ={},
     )
+    attempted_frames = []
+    original_attempt = adapter._attempt
 
-    turn = adapter.complete_audited(request)
+    def audited_attempt(request, *, stdin_bytes, decode=None):
+        turn, frame = original_attempt(
+            request,
+            stdin_bytes=stdin_bytes,
+            decode=decode,
+        )
+        attempted_frames.append(frame)
+        return turn, frame
 
-    assert turn.proposal.reply_chunks == (
-        "Não encontrei detalhes verificados suficientes para responder com segurança. "
-        "Posso verificar a descrição oficial do passeio em uma nova consulta.",
+    monkeypatch.setattr(adapter, "_attempt", audited_attempt)
+
+    with pytest.raises(InvalidModelProposal) as captured:
+        adapter.complete_audited(request)
+
+    assert type(captured.value) is InvalidModelProposal
+    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
+    assert responses == []
+    assert len(prompts) == 2
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt in prompts] == [False, True]
+    assert [frame.response_bytes for frame in attempted_frames] == invalid_frames
+    assert all(
+        json.loads(frame.response_bytes)["read_requests"]
+        for frame in attempted_frames
     )
-    assert "repita" not in " ".join(turn.proposal.reply_chunks).casefold()
-    assert turn.proposal.read_requests == ()
-    assert turn.proposal.effect_proposals == ()
+    assert all(
+        json.loads(frame.response_bytes)["effect_proposals"] == []
+        for frame in attempted_frames
+    )

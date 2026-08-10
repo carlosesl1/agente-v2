@@ -12,11 +12,6 @@ from dataclasses import replace
 from datetime import date
 from typing import Final
 
-from v2_contracts.confirmation_review import (
-    ContextualConfirmationDecision,
-    ContextualConfirmationReview,
-    InvalidContextualConfirmationReview,
-)
 from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import (
     AuditedModelTurn,
@@ -76,33 +71,40 @@ _RESPONSE_FIELDS_V6: Final = frozenset((*_RESPONSE_FIELDS_V5, "passengers"))
 _RESPONSE_FIELDS_V7: Final = frozenset(
     (*_RESPONSE_FIELDS_V6, "clarification_question")
 )
-_CONFIRMATION_REVIEW_FIELDS: Final = frozenset(
-    ("schema", "source_event_id", "decision")
-)
 _CONFIRMATION_REVIEW_SYSTEM_PROMPT: Final = """
-You are a narrow semantic reviewer for one pending critical action. You have no tools
-and no authority to execute anything. Compare the complete current message with the
-complete pending public summary. Return exactly one JSON object with exactly these
-fields: schema, source_event_id, decision. schema must be
-"v2-contextual-confirmation-review-v1". Copy source_event_id exactly. decision must be
-one of "approve", "reject", "adjust", or "uncertain".
+You are Maya reviewing one pending critical action. You have no tools and no authority
+to execute anything. Compare the complete current message with the complete pending
+public summary and author the customer-facing response. Return exactly one
+v2-model-proposal-v7 JSON object with every field required by that schema and no
+commentary or extra field. Copy source_event_id exactly. reply_chunks must contain one
+or two non-empty trimmed customer-facing strings written by Maya.
 
-Use "approve" only when the complete current message unconditionally approves the
-complete pending summary without changing, narrowing, postponing, or conditioning any
-material term or action. Use "reject" for refusal, cancellation, postponement, or
-withdrawal. Use "adjust" when the message adds a condition or changes any product,
-date, party, amount, currency, payment term, or action scope. Use "uncertain" for a
-question, ambiguity, hesitation, unrelated text, or insufficient evidence. Judge the
-meaning of the complete message in context; never decide from the presence or absence
-of a word, token, emoji, substring, or fixed expression. Return no rationale, reply,
-Markdown, or extra field.
+The only supported intents are confirm, adjust, and inform. facts, read_requests,
+effect_proposals, target_offer_ids, and passengers must be empty; target_offer_id and
+clarification_question must be null; selection_requested must be false.
+
+Use confirm only when the complete message unconditionally approves the exact pending
+summary without changing, narrowing, postponing, or conditioning any material term or
+action. For confirm, copy pending_action.summary_version and action_kinds exactly, set
+approval_basis to contextual_reference, and set pending_disposition to null.
+
+Use adjust for refusal, cancellation, postponement, withdrawal, a new condition, or a
+material change. For adjust, set confirmed_summary_version and approval_basis to null,
+confirmed_action_kinds to an empty list, and pending_disposition to revoke.
+
+Use inform for a question, ambiguity, hesitation, unrelated text, or insufficient
+evidence. For inform, set confirmed_summary_version, approval_basis, and
+pending_disposition to null and confirmed_action_kinds to an empty list. Judge the
+complete message semantically in context; never decide from a word, token, emoji,
+substring, fixed expression, regex, or alias.
 """.strip()
 _CONFIRMATION_REVIEW_REPAIR_SUFFIX: Final = """
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-contextual-confirmation-review-v1 JSON object with only schema,
-source_event_id, and decision. Copy source_event_id exactly. decision must be approve,
-reject, adjust, or uncertain under the supplied semantic contract. Return no rationale,
-reply, Markdown, or extra field.
+Return exactly one complete v2-model-proposal-v7 JSON object under the supplied
+confirmation contract. Copy source_event_id exactly and write the customer-facing
+reply_chunks as Maya. Use only confirm with the exact pending binding, adjust with
+pending_disposition revoke and no confirmation binding, or inform with neither a
+confirmation binding nor pending disposition. Return no commentary or extra field.
 """.strip()
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
@@ -535,6 +537,7 @@ def _proposal(
     source_event_id: str,
     *,
     require_v7: bool = False,
+    normalize_legacy_inform_preserve: bool = True,
 ) -> ModelProposal:
     try:
         decoded = json.loads(payload, object_pairs_hook=_unique_object)
@@ -576,7 +579,11 @@ def _proposal(
         )
         else None
     )
-    if decoded["intent"] == "inform" and pending_disposition == "preserve":
+    if (
+        normalize_legacy_inform_preserve
+        and decoded["intent"] == "inform"
+        and pending_disposition == "preserve"
+    ):
         pending_disposition = None
     reply_chunks = tuple(
         unicodedata.normalize("NFKC", item).strip()
@@ -679,90 +686,62 @@ def _proposal(
         raise InvalidModelProposal("model proposal is invalid") from exc
 
 
-def _confirmation_review(
-    payload: bytes,
-    source_event_id: str,
-) -> ContextualConfirmationReview:
-    try:
-        decoded = json.loads(payload, object_pairs_hook=_unique_object)
-    except (json.JSONDecodeError, UnicodeError) as exc:
+def _confirmation_proposal(payload: bytes, request: ModelRequest) -> ModelProposal:
+    if not request.confirmation_review_required or request.pending_action is None:
         raise InvalidModelProposal(
-            "confirmation review response is not valid JSON"
-        ) from exc
-    if type(decoded) is not dict or set(decoded) != _CONFIRMATION_REVIEW_FIELDS:
-        raise InvalidModelProposal("confirmation review response fields mismatch")
-    if decoded["schema"] != "v2-contextual-confirmation-review-v1":
-        raise InvalidModelProposal("confirmation review response schema mismatch")
-    if decoded["source_event_id"] != source_event_id:
-        raise InvalidModelProposal("confirmation review source event mismatch")
-    try:
-        decision = ContextualConfirmationDecision(decoded["decision"])
-        return ContextualConfirmationReview(
-            source_event_id=decoded["source_event_id"],
-            decision=decision,
+            "contextual confirmation review requires an exact pending action"
         )
-    except (TypeError, ValueError, InvalidContextualConfirmationReview) as exc:
-        raise InvalidModelProposal("confirmation review decision is invalid") from exc
-
-
-def _proposal_from_confirmation_review(
-    request: ModelRequest,
-    review: ContextualConfirmationReview,
-) -> ModelProposal:
-    if (
-        not request.confirmation_review_required
-        or request.pending_action is None
-        or review.source_event_id != request.source_event_id
-    ):
-        raise InvalidModelProposal(
-            "confirmation review is not bound to the pending request"
-        )
-    english = request.locale.lower().startswith("en")
-    if review.decision is ContextualConfirmationDecision.APPROVE:
-        return ModelProposal(
-            source_event_id=request.source_event_id,
-            intent="confirm",
-            reply_chunks=(
-                "Confirmation received. I will process exactly the summary above."
-                if english
-                else "Confirmação recebida. Vou processar exatamente o resumo acima.",
-            ),
-            facts=(),
-            read_requests=(),
-            effect_proposals=(),
-            confirmed_summary_version=request.pending_action.summary_version,
-            confirmed_action_kinds=request.pending_action.action_kinds,
-            approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
-        )
-    if review.decision in (
-        ContextualConfirmationDecision.REJECT,
-        ContextualConfirmationDecision.ADJUST,
-    ):
-        return ModelProposal(
-            source_event_id=request.source_event_id,
-            intent="adjust",
-            reply_chunks=(
-                "Understood. I will not execute the previous summary."
-                if english
-                else "Entendido. Não vou executar o resumo anterior.",
-            ),
-            facts=(),
-            read_requests=(),
-            effect_proposals=(),
-            pending_disposition="revoke",
-        )
-    return ModelProposal(
-        source_event_id=request.source_event_id,
-        intent="inform",
-        reply_chunks=(
-            "I have not considered the pending summary confirmed."
-            if english
-            else "Ainda não considerei o resumo pendente confirmado.",
-        ),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
+    proposal = _proposal(
+        payload,
+        request.source_event_id,
+        require_v7=True,
+        normalize_legacy_inform_preserve=False,
     )
+    if not 1 <= len(proposal.reply_chunks) <= 2:
+        raise InvalidModelProposal(
+            "confirmation reply_chunks must contain one or two exact strings"
+        )
+    if (
+        proposal.facts
+        or proposal.read_requests
+        or proposal.effect_proposals
+        or proposal.target_offer_id is not None
+        or proposal.target_offer_ids
+        or proposal.selection_requested
+        or proposal.passengers
+        or proposal.clarification_question is not None
+    ):
+        raise InvalidModelProposal("confirmation proposal carries unsupported fields")
+
+    pending = request.pending_action
+    if proposal.intent == "confirm":
+        valid = (
+            proposal.confirmed_summary_version == pending.summary_version
+            and proposal.confirmed_action_kinds == pending.action_kinds
+            and proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+            and proposal.pending_disposition is None
+        )
+    elif proposal.intent == "adjust":
+        valid = (
+            proposal.confirmed_summary_version is None
+            and not proposal.confirmed_action_kinds
+            and proposal.approval_basis is None
+            and proposal.pending_disposition == "revoke"
+        )
+    elif proposal.intent == "inform":
+        valid = (
+            proposal.confirmed_summary_version is None
+            and not proposal.confirmed_action_kinds
+            and proposal.approval_basis is None
+            and proposal.pending_disposition is None
+        )
+    else:
+        valid = False
+    if not valid:
+        raise InvalidModelProposal(
+            "confirmation proposal is not bound to the exact pending action"
+        )
+    return proposal
 
 
 class HermesModelAdapter:
@@ -898,19 +877,7 @@ class HermesModelAdapter:
         except InvalidModelProposal:
             return None, frame
         if request.observations and proposal.read_requests:
-            if request.public_reply_correction_reasons:
-                return None, frame
-            session_hash = hashlib.sha256(stdin_bytes).hexdigest()[:32]
-            return (
-                AuditedModelTurn.from_frames(
-                    proposal=self._recursive_read_fallback(request, proposal),
-                    frames=(frame,),
-                    ephemeral_session_id=(
-                        f"deterministic:recursive-read-fallback:{session_hash}"
-                    ),
-                ),
-                frame,
-            )
+            return None, frame
         turn = AuditedModelTurn.from_exchange(
             proposal=proposal,
             stdin_bytes=stdin_bytes,
@@ -920,87 +887,6 @@ class HermesModelAdapter:
             ephemeral_session_id="uds:" + hashlib.sha256(stdin_bytes).hexdigest()[:32],
         )
         return turn, turn.frames[0]
-
-    @staticmethod
-    def _fallback_proposal(request: ModelRequest) -> ModelProposal:
-        if request.locale.lower().startswith("en"):
-            text = "I couldn't complete that reply just now. Could you repeat your last message?"
-        else:
-            text = (
-                "Não consegui concluir essa resposta agora. "
-                "Pode repetir sua última mensagem?"
-            )
-        return ModelProposal(
-            source_event_id=request.source_event_id,
-            intent="inform",
-            reply_chunks=(text,),
-            facts=(),
-            read_requests=(),
-            effect_proposals=(),
-        )
-
-    @staticmethod
-    def _recursive_read_fallback(
-        request: ModelRequest,
-        proposal: ModelProposal,
-    ) -> ModelProposal:
-        negative_providers = {
-            observation.provider
-            for observation in request.observations
-            if observation.public_payload.get("available") is False
-        }
-        english = request.locale.lower().startswith("en")
-        if {"bokun", "cloudbeds"}.issubset(negative_providers):
-            text = (
-                "The requested lodging and activity are not available for the "
-                "consulted dates. Nothing was booked. I can check other dates."
-                if english
-                else "A hospedagem e o passeio solicitados não estão disponíveis para "
-                "as datas consultadas. Nada foi reservado. Posso consultar outras datas."
-            )
-        elif "bokun" in negative_providers:
-            text = (
-                "The requested activity is not available for the consulted date. "
-                "Nothing was booked. I can check another date."
-                if english
-                else "O passeio solicitado não está disponível para a data consultada. "
-                "Nada foi reservado. Posso consultar outra data."
-            )
-        elif "cloudbeds" in negative_providers:
-            text = (
-                "The requested lodging is not available for the consulted dates. "
-                "Nothing was booked. I can check other dates."
-                if english
-                else "A hospedagem solicitada não está disponível para as datas consultadas. "
-                "Nada foi reservado. Posso consultar outras datas."
-            )
-        elif ReadKind.ACTIVITY_DESCRIPTION in {
-            item.kind for item in proposal.read_requests
-        }:
-            text = (
-                "I did not find enough verified detail to answer safely. I can check "
-                "the activity's official description in a new lookup."
-                if english
-                else "Não encontrei detalhes verificados suficientes para responder com "
-                "segurança. Posso verificar a descrição oficial do passeio em uma nova "
-                "consulta."
-            )
-        else:
-            text = (
-                "I couldn't safely complete that response from the verified information. "
-                "Please ask me to check it again."
-                if english
-                else "Não consegui concluir essa resposta com segurança a partir das "
-                "informações verificadas. Peça para eu consultar novamente."
-            )
-        return ModelProposal(
-            source_event_id=request.source_event_id,
-            intent="inform",
-            reply_chunks=(text,),
-            facts=(),
-            read_requests=(),
-            effect_proposals=(),
-        )
 
     def _maybe_progress_review(
         self,
@@ -1061,10 +947,7 @@ class HermesModelAdapter:
             wire = _confirmation_review_wire
 
             def decode(response: bytes) -> ModelProposal:
-                return _proposal_from_confirmation_review(
-                    request,
-                    _confirmation_review(response, request.source_event_id),
-                )
+                return _confirmation_proposal(response, request)
 
         else:
             base_prompt = self._system_prompt
@@ -1094,40 +977,8 @@ class HermesModelAdapter:
                 return self._maybe_progress_review(request, turn)
             attempted_frames.append(frame)
 
-        if request.public_reply_correction_reasons:
-            raise InvalidModelProposal(
-                "model proposal remained invalid after bounded attempts"
-            )
-        proposal = self._fallback_proposal(request)
-        fallback_response = _canonical(
-            {
-                "schema": "v2-deterministic-protocol-fallback-v1",
-                "source_event_id": request.source_event_id,
-                "intent": proposal.intent,
-                "reply_chunks": list(proposal.reply_chunks),
-                "facts": [],
-                "read_requests": [],
-                "effect_proposals": [],
-            }
-        )
-        fallback_stdin = _canonical(
-            {
-                "schema": "v2-deterministic-protocol-fallback-request-v1",
-                "request_hash": hashlib.sha256(original_stdin).hexdigest(),
-                "failed_attempts": len(attempted_frames),
-            }
-        )
-        fallback_frame = AuditedTranscriptFrame.create(
-            stdin_bytes=fallback_stdin,
-            stdout_bytes=b"V2_DETERMINISTIC_FALLBACK\x00" + fallback_response,
-            response_bytes=fallback_response,
-            transcript_key=self._transcript_key,
-        )
-        session_hash = hashlib.sha256(fallback_stdin).hexdigest()[:32]
-        return AuditedModelTurn.from_frames(
-            proposal=proposal,
-            frames=(*attempted_frames, fallback_frame),
-            ephemeral_session_id=f"deterministic:protocol-fallback:{session_hash}",
+        raise InvalidModelProposal(
+            "model proposal remained invalid after bounded attempts"
         )
 
 
