@@ -142,7 +142,7 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
 def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> None:
     prompt = PROMPT.read_text(encoding="utf-8")
     for literal in (
-        "v2-model-proposal-v6",
+        "v2-model-proposal-v7",
         "source_event_id",
         "target_offer_id",
         "target_offer_ids",
@@ -153,6 +153,8 @@ def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> No
         "pending_action",
         "contextual_reference",
         "passengers",
+        "clarification_question",
+        "progress_review_required",
         "effect_proposals deve ser sempre []",
         "product:buracao",
         "Nunca exponha offer_id",
@@ -160,6 +162,7 @@ def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> No
         "Não execute reserva",
     ):
         assert literal in prompt
+    assert "v2-model-proposal-v6" not in prompt
     assert "v2-model-proposal-v5" not in prompt
     assert "A mensagem atual e o fato `language` em state_facts vencem" not in prompt
     assert (

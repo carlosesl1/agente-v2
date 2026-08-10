@@ -398,6 +398,7 @@ def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair(
         message="Oi",
         locale="pt-BR",
         state_version=0,
+        progress_review_required=True,
     )
 
     assert adapter.complete(request).reply_chunks == ("Olá!",)
