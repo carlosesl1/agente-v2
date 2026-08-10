@@ -15,8 +15,7 @@ from typing import Final
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from v2_adapters.hermes_model import _confirmation_review, HermesModelAdapter
-from v2_contracts.confirmation_review import ContextualConfirmationDecision
+from v2_adapters.hermes_model import HermesModelAdapter
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
@@ -46,7 +45,7 @@ class ValidationCase:
     locale: str
     message: str
     summary: str
-    expected: ContextualConfirmationDecision
+    expected_intent: str
 
 
 CASES: Final = (
@@ -55,7 +54,7 @@ CASES: Final = (
         "pt-BR",
         "Sim, confirmo exatamente esse resumo. Pode fazer a reserva agora.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.APPROVE,
+        "confirm",
     ),
     ValidationCase(
         "free_paraphrase",
@@ -63,7 +62,7 @@ CASES: Final = (
         "O conteúdo integral acima corresponde ao que decidi; prossiga com o "
         "conjunto completo tal como foi apresentado, sem modificar nada.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.APPROVE,
+        "confirm",
     ),
     ValidationCase(
         "english_paraphrase",
@@ -71,77 +70,77 @@ CASES: Final = (
         "Everything in that summary matches my decision in full; carry out the "
         "whole set exactly as presented, with no changes.",
         _EN_SUMMARY,
-        ContextualConfirmationDecision.APPROVE,
+        "confirm",
     ),
     ValidationCase(
         "question",
         "pt-BR",
         "Se eu aceitar esse resumo, quando recebo as instruções de pagamento?",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.UNCERTAIN,
+        "inform",
     ),
     ValidationCase(
         "hesitation",
         "en-US",
         "I might go ahead with that, but I am still thinking about it.",
         _EN_SUMMARY,
-        ContextualConfirmationDecision.UNCERTAIN,
+        "inform",
     ),
     ValidationCase(
         "refusal",
         "pt-BR",
         "Não prossiga com o resumo; desisti por enquanto.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.REJECT,
+        "adjust",
     ),
     ValidationCase(
         "postponement",
         "en-US",
         "Leave that summary pending until tomorrow; do not carry it out now.",
         _EN_SUMMARY,
-        ContextualConfirmationDecision.REJECT,
+        "adjust",
     ),
     ValidationCase(
         "condition",
         "pt-BR",
         "Faça o que está no resumo somente se houver café incluído.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
     ValidationCase(
         "date_change",
         "pt-BR",
         "Pode seguir, mas altere a saída para 16 de setembro.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
     ValidationCase(
         "party_change",
         "pt-BR",
         "Prossiga com a reserva para apenas dois adultos, sem a criança.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
     ValidationCase(
         "amount_change",
         "en-US",
         "Go ahead only if the final total is BRL 400.00 instead.",
         _EN_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
     ValidationCase(
         "payment_change",
         "pt-BR",
         "A reserva está certa, porém troque o Pix por cartão.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
     ValidationCase(
         "scope_narrowing",
         "pt-BR",
         "Reserve o quarto agora, mas não envie as instruções Pix.",
         _PT_SUMMARY,
-        ContextualConfirmationDecision.ADJUST,
+        "adjust",
     ),
 )
 
@@ -176,34 +175,31 @@ def _request(case: ValidationCase) -> ModelRequest:
 
 def _proposal_matches(
     request: ModelRequest,
-    decision: ContextualConfirmationDecision,
+    expected_intent: str,
     proposal,
 ) -> bool:
-    if decision is ContextualConfirmationDecision.APPROVE:
+    pending = request.pending_action
+    if pending is None or proposal.intent != expected_intent:
+        return False
+    if expected_intent == "confirm":
         return (
-            proposal.intent == "confirm"
-            and proposal.confirmed_summary_version
-            == request.pending_action.summary_version
-            and proposal.confirmed_action_kinds == request.pending_action.action_kinds
+            proposal.confirmed_summary_version == pending.summary_version
+            and proposal.confirmed_action_kinds == pending.action_kinds
             and proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
             and proposal.facts == ()
             and proposal.read_requests == ()
             and proposal.effect_proposals == ()
             and proposal.passengers == ()
         )
-    if decision in (
-        ContextualConfirmationDecision.REJECT,
-        ContextualConfirmationDecision.ADJUST,
-    ):
+    if expected_intent == "adjust":
         return (
-            proposal.intent == "adjust"
-            and proposal.pending_disposition == "revoke"
+            proposal.pending_disposition == "revoke"
             and proposal.confirmed_summary_version is None
             and proposal.confirmed_action_kinds == ()
             and proposal.approval_basis is None
         )
     return (
-        proposal.intent == "inform"
+        expected_intent == "inform"
         and proposal.confirmed_summary_version is None
         and proposal.confirmed_action_kinds == ()
         and proposal.approval_basis is None
@@ -220,15 +216,15 @@ def run_validation(adapter: HermesModelAdapter) -> dict[str, object]:
         proposal_valid = False
         try:
             turn = adapter.complete_audited(request)
-            review = _confirmation_review(
-                turn.frames[-1].response_bytes,
-                request.source_event_id,
+            actual = turn.proposal.intent
+            proposal_valid = _proposal_matches(
+                request,
+                case.expected_intent,
+                turn.proposal,
             )
-            actual = review.decision.value
-            proposal_valid = _proposal_matches(request, review.decision, turn.proposal)
         except (InvalidModelProposal, TypeError, ValueError):
             proposal_valid = False
-        ok = actual == case.expected.value and proposal_valid
+        ok = actual == case.expected_intent and proposal_valid
         passed += int(ok)
         suite_rows.append(
             {
@@ -236,7 +232,7 @@ def run_validation(adapter: HermesModelAdapter) -> dict[str, object]:
                 "locale": case.locale,
                 "message_hash": hashlib.sha256(case.message.encode()).hexdigest(),
                 "summary_hash": hashlib.sha256(case.summary.encode()).hexdigest(),
-                "expected": case.expected.value,
+                "expected": case.expected_intent,
             }
         )
         result_rows.append(

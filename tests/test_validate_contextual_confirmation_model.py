@@ -9,28 +9,26 @@ from types import SimpleNamespace
 from scripts.validate_contextual_confirmation_model import CASES, run_validation
 from v2_adapters.hermes_model import (
     _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
-    _proposal_from_confirmation_review,
+    _confirmation_proposal,
     HermesModelAdapter,
 )
 
 
 def test_parent_binding_never_classifies_message_text_or_uses_lexical_triggers() -> None:
-    source = inspect.getsource(_proposal_from_confirmation_review)
+    source = inspect.getsource(_confirmation_proposal)
+    prompt = " ".join(_CONFIRMATION_REVIEW_SYSTEM_PROMPT.split())
 
     assert "request.message" not in source
     assert "casefold" not in source
     assert "re." not in source
-    assert "Sim, confirmo exatamente esse resumo" not in _CONFIRMATION_REVIEW_SYSTEM_PROMPT
-    assert "Confirmed. Please book exactly that summary" not in (
-        _CONFIRMATION_REVIEW_SYSTEM_PROMPT
-    )
-    assert "never decide from the presence or absence" in (
-        _CONFIRMATION_REVIEW_SYSTEM_PROMPT
-    )
+    assert "Sim, confirmo exatamente esse resumo" not in prompt
+    assert "Confirmed. Please book exactly that summary" not in prompt
+    assert "Judge the complete message semantically in context" in prompt
+    assert "never decide from a word, token, emoji" in prompt
 
 
 def test_sandbox_validator_checks_typed_semantics_without_printing_messages() -> None:
-    expected = {case.message: case.expected for case in CASES}
+    expected = {case.message: case.expected_intent for case in CASES}
     captured_inputs: list[bytes] = []
 
     def run(command, **kwargs):
@@ -39,11 +37,31 @@ def test_sandbox_validator_checks_typed_semantics_without_printing_messages() ->
         captured_inputs.append(wire)
         envelope = json.loads(wire)
         user = json.loads(envelope["messages"][0][1])
+        intent = expected[user["message"]]
         response = json.dumps(
             {
-                "schema": "v2-contextual-confirmation-review-v1",
+                "schema": "v2-model-proposal-v7",
                 "source_event_id": user["source_event_id"],
-                "decision": expected[user["message"]].value,
+                "intent": intent,
+                "reply_chunks": ["Synthetic contextual review result."],
+                "facts": [],
+                "read_requests": [],
+                "effect_proposals": [],
+                "target_offer_id": None,
+                "target_offer_ids": [],
+                "confirmed_summary_version": 1 if intent == "confirm" else None,
+                "confirmed_action_kinds": (
+                    ["initiate_payment", "reserve_lodging"]
+                    if intent == "confirm"
+                    else []
+                ),
+                "approval_basis": (
+                    "contextual_reference" if intent == "confirm" else None
+                ),
+                "selection_requested": False,
+                "pending_disposition": "revoke" if intent == "adjust" else None,
+                "passengers": [],
+                "clarification_question": None,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -84,11 +102,11 @@ def test_sandbox_validator_checks_typed_semantics_without_printing_messages() ->
 
 
 def test_sandbox_validator_case_matrix_covers_approval_and_false_positive_classes() -> None:
-    decisions = {case.expected.value for case in CASES}
+    decisions = {case.expected_intent for case in CASES}
     locales = {case.locale for case in CASES}
     labels = {case.label for case in CASES}
 
-    assert decisions == {"approve", "reject", "adjust", "uncertain"}
+    assert decisions == {"confirm", "adjust", "inform"}
     assert locales == {"pt-BR", "en-US"}
     assert {
         "canary_witness",
