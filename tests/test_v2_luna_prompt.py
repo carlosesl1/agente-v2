@@ -93,6 +93,18 @@ def test_private_holder_name_parts_never_enter_public_reply() -> None:
     assert "refira-se apenas como titular, pagador ou acompanhante" in PROMPT
 
 
+def test_final_emission_check_rewrites_private_name_fragments_before_json() -> None:
+    heading = "CHECAGEM FINAL OBRIGATÓRIA ANTES DE EMITIR O JSON"
+    assert heading in PROMPT
+    assert "releia cada reply_chunk e clarification_question" in PROMPT
+    assert (
+        "qualquer nome inteiro, prenome, sobrenome ou fragmento identificável"
+        in PROMPT
+    )
+    assert "reescreva o chunk usando somente titular, pagador ou acompanhante" in PROMPT
+    assert PROMPT.rfind(heading) > PROMPT.rfind("PRIVACIDADE E SEGURANÇA")
+
+
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
     assert "`active_execution_status`" in PROMPT
     assert "uma reserva já está em processamento" in PROMPT
