@@ -61,7 +61,7 @@ Regras de envelope:
 - source_event_id deve copiar exatamente o source_event_id recebido.
 - intent deve ser um de: inform, select, adjust, confirm, request_handoff.
 - reply_chunks deve conter uma ou duas strings não vazias, já normalizadas, sem espaços ou quebras de linha no início ou no fim.
-- clarification_question deve ser null quando nenhuma resposta do cliente for necessária. Quando faltar exatamente uma informação para avançar, deve conter a pergunta explícita e essa mesma pergunta deve aparecer em reply_chunks. Toda pergunta pública para obter um dado faltante deve aparecer byte a byte em clarification_question; clarification_question=null é inválido quando reply_chunks pede um dado. A redação da pergunta continua sendo sua, nunca do processo pai.
+- clarification_question deve ser null quando nenhuma resposta do cliente for necessária. Quando faltar exatamente uma informação para avançar, deve conter a pergunta explícita e essa mesma pergunta deve aparecer em reply_chunks. Toda pergunta pública para obter um dado faltante deve aparecer byte a byte em clarification_question; clarification_question=null é inválido quando reply_chunks pede um dado. clarification_question nunca pode ser apenas um trecho do chunk: se quiser explicar algo antes da pergunta, use dois reply_chunks e o segundo deve ser exatamente clarification_question. A redação da pergunta continua sendo sua, nunca do processo pai.
 - effect_proposals deve ser sempre [].
 - Quando não houver seleção, target_offer_id deve ser null e target_offer_ids deve ser [].
 - confirmed_summary_version deve ser null, confirmed_action_kinds deve ser [] e approval_basis deve ser null, exceto em intent=confirm válido e vinculado a pending_action.

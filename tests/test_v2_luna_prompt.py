@@ -67,6 +67,15 @@ def test_every_public_missing_data_question_is_typed_byte_exact() -> None:
     )
 
 
+def test_typed_question_is_never_a_suffix_inside_an_explanatory_chunk() -> None:
+    assert "clarification_question nunca pode ser apenas um trecho do chunk" in PROMPT
+    assert (
+        "se quiser explicar algo antes da pergunta, use dois reply_chunks"
+        in PROMPT
+    )
+    assert "o segundo deve ser exatamente clarification_question" in PROMPT
+
+
 def test_payer_correction_preserves_private_holder_and_commercial_gate() -> None:
     assert "Quem paga não substitui semanticamente quem é o titular" in PROMPT
     assert "não repita nomes nem e-mail do corpus privado" in PROMPT
