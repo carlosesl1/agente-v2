@@ -103,7 +103,7 @@ from v2_application.turn_plan import (
     reuses_fresh_consultation,
 )
 from v2_application.turns import validate_productive_proposal
-from v2_contracts.channel import InboundBatch
+from v2_contracts.channel import InboundBatch, PublicMessageAuthor
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
 from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.model import (
@@ -2726,6 +2726,34 @@ class V2TurnExecutor:
                 fact_commitment_hash=fact_commitment_hash,
                 now=decision_now,
             )
+        if decision.public_reply.kind == "approval_expired":
+            proposal, audited = request_public_reply_correction(
+                proposal,
+                audited,
+                PublicReplyCorrectionReason.CRITICAL_AUTHORITY_EXPIRED,
+            )
+            audited = AuditedModelTurn.from_frames(
+                proposal=proposal,
+                frames=audited.frames,
+                ephemeral_session_id=audited.closure.ephemeral_session_id,
+            )
+            frames = _frame_commitments(audited)
+            final_frame_hash = frames[-1].canonical_hash()
+            fact_commitment_hash = final_frame_hash
+            decision = self._reducer.reduce(
+                state=current.state,
+                projection=projection,
+                proposal=proposal,
+                profile=profile,
+                private_facts=private_facts,
+                reads=v2_observations,
+                fact_commitment_hash=fact_commitment_hash,
+                now=decision_now,
+            )
+            if decision.public_reply.kind != "approval_expired":
+                raise TurnExecutionError(
+                    "critical expiry correction changed reducer disposition"
+                )
         if not any(item.name == "language" for item in decision.projection.facts):
             language_fact = TypedFact(
                 "language",
@@ -2780,15 +2808,32 @@ class V2TurnExecutor:
             ephemeral_session_id=audited.closure.ephemeral_session_id,
             zero_requests_in_flight=audited.closure.zero_requests_in_flight,
         )
-        chunks = tuple(
+        maya_chunks = tuple(
             PublicReplyChunk(
                 batch.batch_id,
                 ordinal,
                 text,
                 closure.canonical_hash(),
+                PublicMessageAuthor.MAYA,
             )
             for ordinal, text in enumerate(decision.public_reply.chunks)
         )
+        system_texts = tuple(
+            text
+            for reply in decision.authenticated_system_replies
+            for text in reply.chunks
+        )
+        system_chunks = tuple(
+            PublicReplyChunk(
+                batch.batch_id,
+                len(maya_chunks) + offset,
+                text,
+                closure.canonical_hash(),
+                PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+            )
+            for offset, text in enumerate(system_texts)
+        )
+        chunks = maya_chunks + system_chunks
         graph_digest = _domain_hash(
             "v2-runtime-graph-v1",
             _canonical(
@@ -2799,6 +2844,9 @@ class V2TurnExecutor:
                     "facts": [item.canonical_hash() for item in facts],
                     "projection": decision.projection.canonical_hash(),
                     "kernel": kernel_hash,
+                    "authenticated_system_public": [
+                        item.canonical_hash() for item in system_chunks
+                    ],
                 },
             ),
         )
@@ -2809,7 +2857,7 @@ class V2TurnExecutor:
             facts=artifact_facts,
             normalized_tool_proposals=(),
             learning_proposals=(),
-            public_reply_chunks=chunks,
+            public_reply_chunks=maya_chunks,
             final_transcript_commitment_hash=frames[-1].canonical_hash(),
             final_transcript_mac=audited.closure.transcript_mac,
             runtime_graph_digest=graph_digest,
@@ -3039,7 +3087,7 @@ class V2TurnExecutor:
                 command_relays=command_relays,
                 internal_jobs=internal_jobs,
                 public_rows=public_rows,
-                reply_chunks=decision.public_reply.chunks,
+                reply_chunks=tuple(item.text for item in chunks),
                 private_profile_material_hash=private_profile_material_hash,
             ),
             current.version,

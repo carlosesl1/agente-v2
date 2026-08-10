@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from reservation_boundary import ConversationStage, StringSlot, TypedFact
-from reservation_boundary.conversation import ConversationProjection
+from reservation_boundary.conversation import ConversationProjection, PublicReplyChunk
 from reservation_boundary.effects import HandoffRelayBundle, ReservationRelayBundle
 from reservation_boundary.sqlite_store import (
     ConcurrencyConflict,
@@ -59,6 +59,7 @@ from v2_contracts.channel import (
     PublicAcceptanceState,
     PublicChannelAcceptance,
     PublicDeliveryUnknown,
+    PublicMessageAuthor,
 )
 from v2_contracts.critical_actions import (
     ApprovalBasis,
@@ -970,6 +971,16 @@ class DeterministicFallbackAuditedModel:
         )
 
 
+def _with_authenticated_system_slot(
+    authority: PublicTurnAuthority,
+) -> PublicTurnAuthority:
+    allocation_id = f"{authority.allocation_ids[-1]}-authenticated-system"
+    return replace(
+        authority,
+        allocation_ids=authority.allocation_ids + (allocation_id,),
+    )
+
+
 class FixedAuthority:
     def resolve(
         self,
@@ -979,9 +990,13 @@ class FixedAuthority:
         now: datetime,
     ) -> PublicTurnAuthority:
         assert batch == BATCH
-        assert chunk_count == 1
+        assert chunk_count in (1, 2)
         assert now == NOW
-        return AUTHORITY
+        return (
+            AUTHORITY
+            if chunk_count == 1
+            else _with_authenticated_system_slot(AUTHORITY)
+        )
 
 
 class MappingAuthority:
@@ -996,6 +1011,8 @@ class MappingAuthority:
         now: datetime,
     ) -> PublicTurnAuthority:
         value = self.values[batch.batch_id]
+        if chunk_count == len(value.allocation_ids) + 1:
+            value = _with_authenticated_system_slot(value)
         assert chunk_count == len(value.allocation_ids)
         assert NOW <= now < value.deadline_at
         return value
@@ -1191,6 +1208,7 @@ def _install_public_authority(
     store: SQLiteBoundaryStore,
     authority: PublicTurnAuthority = AUTHORITY,
 ) -> None:
+    authority_with_system_slot = _with_authenticated_system_slot(authority)
     common = (
         authority.authorization_id,
         authority.scope_subject_id,
@@ -1219,7 +1237,9 @@ def _install_public_authority(
             + common[4:11]
             + (None, common[11], NOW.isoformat(), NOW.isoformat()),
         )
-        for ordinal, allocation_id in enumerate(authority.allocation_ids):
+        for ordinal, allocation_id in enumerate(
+            authority_with_system_slot.allocation_ids
+        ):
             store._connection.execute(
                 "INSERT INTO boundary_dispatch_authority "
                 "(authorization_id,scope_subject_id,channel_scope,generation,allocation_id,"
@@ -1915,15 +1935,25 @@ def test_selection_without_read_derives_fresh_read_instead_of_reducer_error() ->
         target_offer_id="offer:" + "7" * 64,
     )
     selected = replace(first, read_requests=())
+    authority = replace(
+        AUTHORITY,
+        authorization_id="auth:selection-summary",
+        allocation_ids=(
+            "allocation:selection-summary-maya",
+            "allocation:selection-summary-system",
+        ),
+        allocation_manifest_hash="8" * 64,
+    )
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first, selected])
     port = FakeLodgingReadPort(store)
-    _install_public_authority(store)
+    _install_public_authority(store, authority)
     executor = _executor(
         store=store,
         model=model,
         profile=FakeProfile(store),
         reads=V2ReadService({ReadKind.LODGING: port}),
+        public_authority=MappingAuthority({BATCH.batch_id: authority}),
     )
     try:
         result = executor.execute(BATCH)
@@ -1931,7 +1961,16 @@ def test_selection_without_read_derives_fresh_read_instead_of_reducer_error() ->
         assert len(port.calls) == 1
         assert len(model.calls) == 2
         assert isinstance(store.load_state(BATCH.lead_id).state.workflow, AwaitingConfirmationState)
-        assert result.reply_chunks[0].startswith("Só para confirmar:")
+        assert result.reply_chunks[0] == "Vou preparar o resumo."
+        assert result.reply_chunks[1].startswith("Só para confirmar:")
+        committed_chunks = tuple(
+            PublicReplyChunk.from_canonical_bytes(row[2])
+            for row in result.receipt.public_chunks
+        )
+        assert tuple(chunk.author for chunk in committed_chunks) == (
+            PublicMessageAuthor.MAYA,
+            PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
     finally:
@@ -3229,7 +3268,8 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
             ).fetchall()
         )
 
-        assert "Só para confirmar" in result.reply_chunks[0]
+        assert result.reply_chunks[0] == corrected_selection.reply_chunks[0]
+        assert "Só para confirmar" in result.reply_chunks[1]
         assert "Guardei esses dados" not in " ".join(result.reply_chunks)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
@@ -3842,9 +3882,7 @@ def test_incomplete_country_allows_read_but_blocks_followup_selection() -> None:
         assert read_port.calls == [request]
         assert len(model.calls) == 2
         assert len(result.receipt.read_observations) == 1
-        assert result.reply_chunks == (
-            "Para avançar com a reserva, preciso dos seus dados de contato.",
-        )
+        assert result.reply_chunks == selection.reply_chunks
         assert not isinstance(store.load_state(BATCH.lead_id).state.workflow, AwaitingConfirmationState)
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
@@ -3951,7 +3989,8 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         result = executor.execute(BATCH)
         projection = store.load_latest_conversation_projection(BATCH.lead_id)
 
-        assert result.reply_chunks[0].startswith("Só para confirmar:")
+        assert result.reply_chunks[0] == selection.reply_chunks[0]
+        assert result.reply_chunks[1].startswith("Só para confirmar:")
         assert projection is not None
         values = {fact.name: fact.value.value for fact in projection.facts}
         assert "birth_date" not in values
@@ -4026,7 +4065,7 @@ def test_read_round_preserves_first_frame_customer_facts_for_selection() -> None
         confirmed = confirmation_executor.execute(confirmation_batch)
 
         assert len(confirmed.receipt.command_rows) == 1
-        assert confirmed.reply_chunks == ("Perfeito — vou processar sua reserva agora.",)
+        assert confirmed.reply_chunks == confirmation.reply_chunks
     finally:
         private_store.close()
         store.close()
@@ -4311,25 +4350,6 @@ def test_critical_confirmation_binding_rejects_expiry_and_scope_drift() -> None:
     assert reads_allowed(information) is True
 
 @pytest.mark.parametrize(
-    ("locale", "expected"),
-    (
-        (
-            "pt-BR",
-            "Não consegui autorizar essa execução com segurança; nenhuma reserva foi feita.",
-        ),
-        (
-            "en-US",
-            "I could not authorize this action safely; no booking was made.",
-        ),
-    ),
-)
-def test_missing_domain_command_reply_is_localized(locale: str, expected: str) -> None:
-    from v2_application.conversation import _confirmation_not_authorized_reply
-
-    assert _confirmation_not_authorized_reply(locale) == expected
-
-
-@pytest.mark.parametrize(
     ("review_intent", "pending_disposition"),
     (
         ("inform", None),
@@ -4394,9 +4414,7 @@ def test_confirmation_without_domain_command_never_claims_processing() -> None:
 
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
-        assert result.reply_chunks == (
-            "Não consegui autorizar essa execução com segurança; nenhuma reserva foi feita.",
-        )
+        assert result.reply_chunks == ("Confirmado.",)
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone()[0] == 0
@@ -4869,10 +4887,18 @@ def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() ->
     )
     try:
         assert len(read_port.calls) == 1
+        expired_text = "A autorização expirou antes da execução; nenhuma reserva foi feita."
+        model.proposals[1] = replace(
+            model.proposals[1],
+            reply_chunks=(expired_text,),
+        )
         expired = executor.execute(second_batch)
-        assert "expirou" in " ".join(expired.reply_chunks).casefold()
+        assert expired.reply_chunks == (expired_text,)
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.CRITICAL_AUTHORITY_EXPIRED,
+        )
         assert len(read_port.calls) == 1
-        assert len(model.calls) == 3
+        assert len(model.calls) == 4
         assert expired.receipt.command_rows == ()
         assert expired.receipt.relay_rows == ()
         assert store._connection.execute(
@@ -5080,7 +5106,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert confirmed.receipt.committed_state_version == 2
         assert replayed.replayed is True
         assert replayed.receipt == confirmed.receipt
-        expected_confirmation_reply = "Perfeito — vou processar sua reserva agora."
+        expected_confirmation_reply = "Confirmado."
         assert confirmed.reply_chunks == (expected_confirmation_reply,)
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
@@ -5089,7 +5115,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert model.calls[1].pending_action is None
         pending = model.calls[2].pending_action
         assert pending is not None
-        assert pending.public_summary == summary.reply_chunks[0]
+        assert pending.public_summary == summary.reply_chunks[1]
         assert pending.action_kinds == (
             CriticalActionKind.RESERVE_LODGING,
         )

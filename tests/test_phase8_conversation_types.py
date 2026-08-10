@@ -16,6 +16,7 @@ from reservation_boundary.types import (
     StringSlot,
     TypedFact,
 )
+from v2_contracts.channel import PublicMessageAuthor
 
 
 DEADLINE = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
@@ -530,11 +531,18 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             ordinal=0,
             text="Vou chamar uma pessoa.",
             source_closure_hash="a" * 64,
+            author=PublicMessageAuthor.MAYA,
         )
 
         self.assertEqual(
             tuple(field.name for field in fields(chunk_type)),
-            ("aggregate_turn_id", "ordinal", "text", "source_closure_hash"),
+            (
+                "aggregate_turn_id",
+                "ordinal",
+                "text",
+                "source_closure_hash",
+                "author",
+            ),
         )
         self.assertEqual(chunk_type.SCHEMA, "phase8-public-reply-chunk")
         self.assertEqual(chunk_type.VERSION, 1)
@@ -548,6 +556,19 @@ class Phase8ConversationTypeTests(unittest.TestCase):
         self.assertEqual(
             chunk.canonical_hash(),
             "151df95a0d5ac9322f1263e9f35766e3e1db3aa91c6f42332d946dfcbf3641e1",
+        )
+        self.assertEqual(chunk_type.from_canonical_bytes(expected), chunk)
+        system = chunk_type(
+            aggregate_turn_id="turn-1",
+            ordinal=1,
+            text="Resumo autenticado.",
+            source_closure_hash="a" * 64,
+            author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
+        self.assertIn(b'"author":"authenticated_system"', system.to_canonical_bytes())
+        self.assertEqual(
+            chunk_type.from_canonical_bytes(system.to_canonical_bytes()),
+            system,
         )
         for override in (
             {"aggregate_turn_id": "Turn-1"},

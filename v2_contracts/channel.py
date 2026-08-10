@@ -77,6 +77,13 @@ class PublicAcceptanceOperation(str, Enum):
     TRIGGER_FLOW = "trigger_flow"
 
 
+class PublicMessageAuthor(str, Enum):
+    """Explicit authority that authored one customer-visible public message."""
+
+    MAYA = "maya"
+    AUTHENTICATED_SYSTEM = "authenticated_system"
+
+
 @dataclass(frozen=True, slots=True)
 class PublicChannelAcceptance:
     """Typed API-acceptance evidence; it is deliberately not a delivery receipt."""

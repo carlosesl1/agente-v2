@@ -83,6 +83,7 @@ from v2_application.private_customer_facts import (
     canonical_full_name,
 )
 from v2_application.turns import validate_productive_proposal
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.critical_actions import PendingCriticalActionContext
 from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.profile import PrivateCustomerBinding
@@ -118,6 +119,7 @@ class ConversationReductionError(ValueError):
 class ConversationReply:
     kind: str
     chunks: tuple[str, ...]
+    author: PublicMessageAuthor
 
     def __post_init__(self) -> None:
         if type(self.kind) is not str or not self.kind:
@@ -128,6 +130,8 @@ class ConversationReply:
             or any(type(item) is not str or not item.strip() for item in self.chunks)
         ):
             raise ValueError("reply chunks must be a non-empty exact text tuple")
+        if type(self.author) is not PublicMessageAuthor:
+            raise TypeError("reply author must be exact PublicMessageAuthor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +140,7 @@ class V2ConversationDecision:
     projection: ConversationProjection
     commands: tuple[ReservationCommand, ...]
     public_reply: ConversationReply
+    authenticated_system_replies: tuple[ConversationReply, ...] = ()
     handoff_request: HandoffRequested | None = None
     receipt_requirements: tuple[str, ...] = ()
 
@@ -150,6 +155,16 @@ class V2ConversationDecision:
             raise TypeError("commands must contain exact ReservationCommand values")
         if type(self.public_reply) is not ConversationReply:
             raise TypeError("public_reply must be exact ConversationReply")
+        if self.public_reply.author is not PublicMessageAuthor.MAYA:
+            raise ValueError("public_reply must be authored by Maya")
+        if type(self.authenticated_system_replies) is not tuple or any(
+            type(item) is not ConversationReply
+            or item.author is not PublicMessageAuthor.AUTHENTICATED_SYSTEM
+            for item in self.authenticated_system_replies
+        ):
+            raise TypeError(
+                "authenticated_system_replies must contain exact authenticated-system replies"
+            )
         if (
             self.handoff_request is not None
             and type(self.handoff_request) is not HandoffRequested
@@ -1086,57 +1101,24 @@ def _reads_explicitly_unavailable(reads: tuple[ReadObservation, ...]) -> bool:
     return False
 
 
-def _refresh_revoked_reply(*, unavailable: bool, locale: str) -> str:
-    if locale.casefold().startswith("en"):
-        if unavailable:
-            return (
-                "The spot is no longer available. Nothing was booked; "
-                "I’ll need to check another option before asking for confirmation again."
-            )
-        return (
-            "Availability or price changed. Nothing was booked; "
-            "I’ll present a new summary before asking for confirmation again."
+def _model_owned_reply(kind: str, proposal: ModelProposal) -> ConversationReply:
+    if type(proposal) is not ModelProposal:
+        raise TypeError("proposal must be an exact ModelProposal")
+    if not proposal.reply_chunks:
+        raise ConversationReductionError(
+            "final model proposal requires public reply chunks"
         )
-    if unavailable:
-        return (
-            "A vaga não está mais disponível. Nada foi reservado; "
-            "vou verificar outra opção antes de pedir uma nova confirmação."
-        )
-    return (
-        "A disponibilidade ou o valor mudou. Nada foi reservado; "
-        "vou apresentar um novo resumo antes de pedir outra confirmação."
-    )
+    return ConversationReply(kind, proposal.reply_chunks, PublicMessageAuthor.MAYA)
 
 
-def _generic_reply(proposal: ModelProposal) -> ConversationReply:
-    chunks = proposal.reply_chunks or ("Preciso de mais informações para continuar.",)
-    return ConversationReply("inform", chunks)
-
-
-def _confirmed_reply(locale: str) -> str:
-    if locale.casefold().startswith("en"):
-        return "Perfect — I’ll process your booking now."
-    return "Perfeito — vou processar sua reserva agora."
-
-
-def _confirmation_not_authorized_reply(locale: str) -> str:
-    if locale.casefold().startswith("en"):
-        return "I could not authorize this action safely; no booking was made."
-    return (
-        "Não consegui autorizar essa execução com segurança; "
-        "nenhuma reserva foi feita."
-    )
-
-
-def _reservation_already_processing_reply(locale: str) -> str:
-    if locale.casefold().startswith("en"):
-        return (
-            "A booking is already being processed or completed in this conversation; "
-            "I won’t create another one automatically."
-        )
-    return (
-        "Já existe uma reserva em processamento ou concluída neste atendimento; "
-        "não vou criar outra automaticamente."
+def _authenticated_system_reply(
+    kind: str,
+    chunks: tuple[str, ...],
+) -> ConversationReply:
+    return ConversationReply(
+        kind,
+        chunks,
+        PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
 
 
@@ -1172,32 +1154,18 @@ def _post_command_guard_decision(
     *,
     state: BoundaryState,
     projection: ConversationProjection,
-    source_event_id: str,
+    proposal: ModelProposal,
 ) -> V2ConversationDecision:
     return V2ConversationDecision(
         next_state=_consume_without_workflow_transition(
             state,
-            source_event_id,
+            proposal.source_event_id,
         ),
         projection=projection,
         commands=(),
-        public_reply=ConversationReply(
-            "reservation_already_processing",
-            (_reservation_already_processing_reply(projection.locale),),
-        ),
+        public_reply=_model_owned_reply("reservation_already_processing", proposal),
         receipt_requirements=("reservation_already_processing",),
     )
-
-
-def _handoff_effect_guard_reply(locale: str) -> str:
-    if type(locale) is not str or not locale:
-        raise ValueError("locale must be non-empty exact text")
-    if locale.casefold().startswith("en"):
-        return (
-            "Your human support conversation is still active; "
-            "I won’t execute any actions."
-        )
-    return "Seu atendimento humano continua ativo; não vou executar efeitos."
 
 
 def _projection_party(projection: ConversationProjection) -> Party | None:
@@ -1390,18 +1358,16 @@ class V2ConversationReducer:
     def _critical_action_denied(
         state: BoundaryState,
         projection: ConversationProjection,
-        source_event_id: str,
+        proposal: ModelProposal,
     ) -> V2ConversationDecision:
         return V2ConversationDecision(
-            next_state=_consume_without_workflow_transition(state, source_event_id),
+            next_state=_consume_without_workflow_transition(
+                state,
+                proposal.source_event_id,
+            ),
             projection=projection,
             commands=(),
-            public_reply=ConversationReply(
-                "critical_action_unavailable",
-                (
-                    "Essa ação não está disponível com segurança agora. Posso continuar ajudando sem executá-la.",
-                ),
-            ),
+            public_reply=_model_owned_reply("critical_action_unavailable", proposal),
             receipt_requirements=("critical_action_denied",),
         )
 
@@ -1501,11 +1467,7 @@ class V2ConversationReducer:
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply(
-                    "handoff",
-                    proposal.reply_chunks
-                    or ("Vou encaminhar seu atendimento para uma pessoa.",),
-                ),
+                public_reply=_model_owned_reply("handoff", proposal),
                 handoff_request=handoff_request,
                 receipt_requirements=("handoff_relay",),
             )
@@ -1519,10 +1481,7 @@ class V2ConversationReducer:
                 ),
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply(
-                    "handoff",
-                    (_handoff_effect_guard_reply(merged.locale),),
-                ),
+                public_reply=_model_owned_reply("handoff", proposal),
                 receipt_requirements=("handoff_effect_guard",),
             )
 
@@ -1532,7 +1491,7 @@ class V2ConversationReducer:
             return _post_command_guard_decision(
                 state=state,
                 projection=projection,
-                source_event_id=proposal.source_event_id,
+                proposal=proposal,
             )
 
         # Authenticated contact plus a country fact is a write-boundary requirement,
@@ -1544,37 +1503,13 @@ class V2ConversationReducer:
             private_facts=private_facts,
             activity_party=activity_party,
         ):
-            if (
-                reservation_profile_ready(
-                    profile,
-                    merged,
-                    instant,
-                    private_facts=private_facts,
-                )
-                and activity_party is not None
-            ):
-                if activity_party.adults + activity_party.children == 1:
-                    missing_profile_text = (
-                        "Para reservar o passeio, preciso da data de nascimento e gênero cadastral."
-                    )
-                else:
-                    missing_profile_text = (
-                        "Para reservar o passeio do grupo, preciso do nome completo, data de nascimento, gênero cadastral e país de cada passageiro."
-                    )
-            else:
-                missing_profile_text = (
-                    "Para avançar com a reserva, preciso dos seus dados de contato."
-                )
             return V2ConversationDecision(
                 next_state=_consume_without_workflow_transition(
                     state, proposal.source_event_id
                 ),
                 projection=merged,
                 commands=(),
-                public_reply=ConversationReply(
-                    "profile_completion",
-                    (missing_profile_text,),
-                ),
+                public_reply=_model_owned_reply("profile_completion", proposal),
                 receipt_requirements=("profile_completion",),
             )
 
@@ -1598,11 +1533,7 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "inform",
-                        proposal.reply_chunks
-                        or ("O resumo continua válido; fico aguardando sua decisão.",),
-                    ),
+                    public_reply=_model_owned_reply("inform", proposal),
                     receipt_requirements=("proposal_preserved",),
                 )
             transition = reduce_domain(
@@ -1628,11 +1559,7 @@ class V2ConversationReducer:
                 ),
                 projection=merged,
                 commands=(),
-                public_reply=ConversationReply(
-                    "adjust",
-                    proposal.reply_chunks
-                    or ("Tudo bem. Não vou executar esse resumo.",),
-                ),
+                public_reply=_model_owned_reply("adjust", proposal),
                 receipt_requirements=("proposal_revoked",),
             )
         if type(workflow) is AwaitingConfirmationState and proposal.intent == "confirm":
@@ -1660,11 +1587,9 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
+                    public_reply=_model_owned_reply(
                         "critical_action_unavailable",
-                        (
-                            "Essa ação não está disponível com segurança agora. Não vou executar o resumo anterior.",
-                        ),
+                        proposal,
                     ),
                     receipt_requirements=("critical_action_denied",),
                 )
@@ -1692,12 +1617,7 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "proposal_changed",
-                        (
-                            "Os detalhes mudaram. Não vou executar o resumo anterior; vou atualizar a proposta antes de pedir nova confirmação.",
-                        ),
-                    ),
+                    public_reply=_model_owned_reply("proposal_changed", proposal),
                     receipt_requirements=("proposal_superseded",),
                 )
             pending = self.pending_action(workflow, locale=merged.locale)
@@ -1740,12 +1660,7 @@ class V2ConversationReducer:
                         ),
                         projection=expired_projection,
                         commands=(),
-                        public_reply=ConversationReply(
-                            "approval_expired",
-                            (
-                                "Esse resumo expirou. Vou atualizar disponibilidade e valores antes de pedir uma nova confirmação.",
-                            ),
-                        ),
+                        public_reply=_model_owned_reply("approval_expired", proposal),
                         receipt_requirements=("approval_expired",),
                     )
                 return V2ConversationDecision(
@@ -1754,12 +1669,7 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "stale_confirmation",
-                        (
-                            "Essa resposta não autoriza exatamente o resumo atual. Vou apresentar os termos novamente.",
-                        ),
-                    ),
+                    public_reply=_model_owned_reply("stale_confirmation", proposal),
                     receipt_requirements=("stale_confirmation",),
                 )
             if workflow.draft.customer != _customer(
@@ -1774,10 +1684,7 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "profile_completion",
-                        ("Seus dados mudaram; revise o perfil antes de confirmar.",),
-                    ),
+                    public_reply=_model_owned_reply("profile_completion", proposal),
                     receipt_requirements=("profile_completion",),
                 )
             if not _reads_bind_draft(workflow, reads, now=instant):
@@ -1818,14 +1725,9 @@ class V2ConversationReducer:
                         ),
                         projection=revoked_projection,
                         commands=(),
-                        public_reply=ConversationReply(
+                        public_reply=_model_owned_reply(
                             "offer_unavailable" if unavailable else "proposal_changed",
-                            (
-                                _refresh_revoked_reply(
-                                    unavailable=unavailable,
-                                    locale=merged.locale,
-                                ),
-                            ),
+                            proposal,
                         ),
                         receipt_requirements=("proposal_revoked_after_refresh",),
                     )
@@ -1835,12 +1737,7 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
-                        "fresh_reads_required",
-                        (
-                            "Vou atualizar disponibilidade e valores antes de confirmar.",
-                        ),
-                    ),
+                    public_reply=_model_owned_reply("fresh_reads_required", proposal),
                     receipt_requirements=("fresh_reads_required",),
                 )
             transition = reduce_domain(
@@ -1866,9 +1763,9 @@ class V2ConversationReducer:
                     ),
                     projection=merged,
                     commands=(),
-                    public_reply=ConversationReply(
+                    public_reply=_model_owned_reply(
                         "critical_action_unavailable",
-                        (_confirmation_not_authorized_reply(merged.locale),),
+                        proposal,
                     ),
                     receipt_requirements=("reservation_command_absent",),
                 )
@@ -1881,10 +1778,7 @@ class V2ConversationReducer:
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=transition.commands,
-                public_reply=ConversationReply(
-                    "reservation_authorized",
-                    (_confirmed_reply(merged.locale),),
-                ),
+                public_reply=_model_owned_reply("reservation_authorized", proposal),
                 receipt_requirements=("reservation_command",),
             )
 
@@ -1990,7 +1884,7 @@ class V2ConversationReducer:
                 return _post_command_guard_decision(
                     state=state,
                     projection=projection,
-                    source_event_id=proposal.source_event_id,
+                    proposal=proposal,
                 )
             summary_id = _identity(
                 domain_state.draft.draft_id,
@@ -2006,7 +1900,9 @@ class V2ConversationReducer:
                 )
             except CriticalActionDenied:
                 return self._critical_action_denied(
-                    state, merged, proposal.source_event_id
+                    state,
+                    merged,
+                    proposal,
                 )
             proposal_digest = critical_proposal_digest(
                 domain_state.draft,
@@ -2039,9 +1935,12 @@ class V2ConversationReducer:
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply(
-                    "summary",
-                    (critical_context.public_summary,),
+                public_reply=_model_owned_reply("summary", proposal),
+                authenticated_system_replies=(
+                    _authenticated_system_reply(
+                        "summary",
+                        (critical_context.public_summary,),
+                    ),
                 ),
                 receipt_requirements=("summary_presented",),
             )
@@ -2135,7 +2034,7 @@ class V2ConversationReducer:
                 return _post_command_guard_decision(
                     state=state,
                     projection=projection,
-                    source_event_id=proposal.source_event_id,
+                    proposal=proposal,
                 )
             summary_id = _identity(
                 domain_state.draft.draft_id,
@@ -2151,7 +2050,9 @@ class V2ConversationReducer:
                 )
             except CriticalActionDenied:
                 return self._critical_action_denied(
-                    state, merged, proposal.source_event_id
+                    state,
+                    merged,
+                    proposal,
                 )
             proposal_digest = critical_proposal_digest(
                 domain_state.draft,
@@ -2184,9 +2085,12 @@ class V2ConversationReducer:
                 next_state=next_state,
                 projection=replace(merged, stage=ConversationStage.CLOSING),
                 commands=(),
-                public_reply=ConversationReply(
-                    "summary",
-                    (critical_context.public_summary,),
+                public_reply=_model_owned_reply("summary", proposal),
+                authenticated_system_replies=(
+                    _authenticated_system_reply(
+                        "summary",
+                        (critical_context.public_summary,),
+                    ),
                 ),
                 receipt_requirements=("summary_presented",),
             )
@@ -2197,7 +2101,7 @@ class V2ConversationReducer:
             ),
             projection=merged,
             commands=(),
-            public_reply=_generic_reply(proposal),
+            public_reply=_model_owned_reply("inform", proposal),
         )
 
 

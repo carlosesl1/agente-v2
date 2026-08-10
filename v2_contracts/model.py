@@ -87,6 +87,7 @@ class PublicReplyCorrectionReason(str, Enum):
     STALE_CONSULTATION_REUSE = "stale_consultation_reuse"
     INVALID_CONFIRMATION_REVIEW = "invalid_confirmation_review"
     RECURSIVE_READ_AFTER_OBSERVATION = "recursive_read_after_observation"
+    CRITICAL_AUTHORITY_EXPIRED = "critical_authority_expired"
 
 
 def _text(value: object, name: str, *, identifier: bool = False) -> str:

@@ -63,6 +63,7 @@ from reservation_followup import (
 from reservation_followup import (
     to_wire_json as to_phase6_wire_json,
 )
+from v2_contracts.channel import PublicMessageAuthor
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -243,32 +244,7 @@ def _receipt_id(value: object, name: str) -> str:
 
 
 def _receipt_public_chunk(payload: bytes) -> PublicReplyChunk:
-    envelope = _receipt_load_json(payload, "PublicReplyChunk")
-    if set(envelope) != {"schema", "version", "data"}:
-        raise ValueError("PublicReplyChunk envelope fields mismatch")
-    if (
-        envelope["schema"] != PublicReplyChunk.SCHEMA
-        or envelope["version"] != PublicReplyChunk.VERSION
-        or type(envelope["data"]) is not dict
-    ):
-        raise ValueError("PublicReplyChunk identity mismatch")
-    data = envelope["data"]
-    if set(data) != {
-        "aggregate_turn_id",
-        "ordinal",
-        "text",
-        "source_closure_hash",
-    }:
-        raise ValueError("PublicReplyChunk fields mismatch")
-    chunk = PublicReplyChunk(
-        aggregate_turn_id=data["aggregate_turn_id"],
-        ordinal=data["ordinal"],
-        text=data["text"],
-        source_closure_hash=data["source_closure_hash"],
-    )
-    if chunk.to_canonical_bytes() != payload:
-        raise ValueError("PublicReplyChunk is not byte-canonical")
-    return chunk
+    return PublicReplyChunk.from_canonical_bytes(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -920,6 +896,16 @@ def _validate_v8_artifact_graph(
         item.canonical_bytes for item in by_kind["normalized_tool_proposal"]
     )
     stored_learning = tuple(item.canonical_bytes for item in by_kind["learning_proposal"])
+    maya_public_bytes = tuple(
+        item.to_canonical_bytes()
+        for item in public_chunks
+        if item.author is PublicMessageAuthor.MAYA
+    )
+    system_public_bytes = tuple(
+        item.to_canonical_bytes()
+        for item in public_chunks
+        if item.author is PublicMessageAuthor.AUTHENTICATED_SYSTEM
+    )
     public_bytes = tuple(item.to_canonical_bytes() for item in public_chunks)
     if (
         proposal_reads != stored_reads
@@ -927,7 +913,8 @@ def _validate_v8_artifact_graph(
         or proposal_facts != stored_facts
         or proposal_tools != stored_tools
         or proposal_learning != stored_learning
-        or proposal_public != public_bytes
+        or proposal_public != maya_public_bytes
+        or public_bytes != maya_public_bytes + system_public_bytes
         or public_bytes != tuple(row[2] for row in receipt.public_chunks)
     ):
         raise ValueError("v8 Maya proposal child graph diverged")

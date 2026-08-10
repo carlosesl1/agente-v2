@@ -22,6 +22,7 @@ from reservation_boundary.types import (
     NormalizedMessage,
     TypedFact,
 )
+from v2_contracts.channel import PublicMessageAuthor
 
 if TYPE_CHECKING:
     from reservation_boundary.reads import ReadObservation
@@ -720,6 +721,7 @@ class PublicReplyChunk:
     ordinal: int
     text: str
     source_closure_hash: str
+    author: PublicMessageAuthor = PublicMessageAuthor.MAYA
 
     SCHEMA: ClassVar[str] = "phase8-public-reply-chunk"
     VERSION: ClassVar[int] = 1
@@ -736,17 +738,22 @@ class PublicReplyChunk:
             self.source_closure_hash,
             "PublicReplyChunk.source_closure_hash",
         )
+        if type(self.author) is not PublicMessageAuthor:
+            raise TypeError("PublicReplyChunk.author must be exact PublicMessageAuthor")
 
     def to_canonical_bytes(self) -> bytes:
+        data: dict[str, object] = {
+            "aggregate_turn_id": self.aggregate_turn_id,
+            "ordinal": self.ordinal,
+            "text": self.text,
+            "source_closure_hash": self.source_closure_hash,
+        }
+        if self.author is PublicMessageAuthor.AUTHENTICATED_SYSTEM:
+            data["author"] = self.author.value
         return _canonical_envelope(
             schema=self.SCHEMA,
             version=self.VERSION,
-            data={
-                "aggregate_turn_id": self.aggregate_turn_id,
-                "ordinal": self.ordinal,
-                "text": self.text,
-                "source_closure_hash": self.source_closure_hash,
-            },
+            data=data,
         )
 
     def canonical_hash(self) -> str:
@@ -756,20 +763,37 @@ class PublicReplyChunk:
 
     @classmethod
     def from_canonical_bytes(cls, payload: bytes) -> PublicReplyChunk:
-        data = _load_contract_data(
-            payload,
-            "PublicReplyChunk",
-            schema=cls.SCHEMA,
-            version=cls.VERSION,
-            fields=frozenset(
-                ("aggregate_turn_id", "ordinal", "text", "source_closure_hash")
-            ),
-        )
+        envelope = _load_canonical_object(payload, "PublicReplyChunk")
+        if set(envelope) != {"schema", "version", "data"} or (
+            envelope.get("schema") != cls.SCHEMA
+            or envelope.get("version") != cls.VERSION
+            or type(envelope.get("data")) is not dict
+        ):
+            raise ValueError("PublicReplyChunk envelope identity mismatch")
+        data = envelope["data"]
+        base_fields = {
+            "aggregate_turn_id",
+            "ordinal",
+            "text",
+            "source_closure_hash",
+        }
+        if set(data) == base_fields:
+            author = PublicMessageAuthor.MAYA
+        elif set(data) == base_fields | {"author"}:
+            try:
+                author = PublicMessageAuthor(data["author"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("PublicReplyChunk author is invalid") from exc
+            if author is not PublicMessageAuthor.AUTHENTICATED_SYSTEM:
+                raise ValueError("explicit PublicReplyChunk author must be authenticated system")
+        else:
+            raise ValueError("PublicReplyChunk data fields mismatch")
         chunk = cls(
             aggregate_turn_id=data["aggregate_turn_id"],
             ordinal=data["ordinal"],
             text=data["text"],
             source_closure_hash=data["source_closure_hash"],
+            author=author,
         )
         if chunk.to_canonical_bytes() != payload:
             raise ValueError("PublicReplyChunk is not byte-canonical")

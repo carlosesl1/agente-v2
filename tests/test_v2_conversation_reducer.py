@@ -62,7 +62,6 @@ from v2_application.conversation import (
     ConversationReductionError,
     PackageCommandCoordinator,
     V2ConversationReducer,
-    _handoff_effect_guard_reply,
 )
 from v2_application.passengers import projection_passengers
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
@@ -285,7 +284,11 @@ def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
     assert decision.public_reply.kind == "summary"
     assert type(decision.next_state.workflow) is AwaitingConfirmationState
     assert decision.next_state.workflow.draft.components[0].start_time == "08:30"
-    assert "às 08:30" in " ".join(decision.public_reply.chunks)
+    assert decision.public_reply.chunks == proposal.reply_chunks
+    assert len(decision.authenticated_system_replies) == 1
+    assert "às 08:30" in " ".join(
+        decision.authenticated_system_replies[0].chunks
+    )
     assert decision.next_state.workflow.draft.customer.passengers == (
         PassengerFacts(
             1,
@@ -574,15 +577,6 @@ def test_current_return_to_one_overrides_authenticated_group_party() -> None:
     assert values["adults"] == 1
 
 
-def test_active_handoff_effect_guard_is_localized() -> None:
-    assert _handoff_effect_guard_reply("pt-BR") == (
-        "Seu atendimento humano continua ativo; não vou executar efeitos."
-    )
-    assert _handoff_effect_guard_reply("en-US") == (
-        "Your human support conversation is still active; I won’t execute any actions."
-    )
-
-
 def test_active_handoff_reducer_guard_uses_projection_locale() -> None:
     handoff = new_handoff(
         HandoffRequested(
@@ -621,9 +615,7 @@ def test_active_handoff_reducer_guard_uses_projection_locale() -> None:
     )
 
     assert decision.commands == ()
-    assert decision.public_reply.chunks == (
-        "Your human support conversation is still active; I won’t execute any actions.",
-    )
+    assert decision.public_reply.chunks == proposal.reply_chunks
 
 
 def _enabled_policy() -> CriticalActionPolicy:
@@ -1252,14 +1244,15 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
             now=NOW,
         )
 
+    proposal = _proposal(
+        source="event:select-lodging",
+        intent="select",
+        target_offer_id=LODGING_OFFER_ID,
+    )
     decision = _reducer().reduce(
         state=_boundary(),
         projection=_projection(),
-        proposal=_proposal(
-            source="event:select-lodging",
-            intent="select",
-            target_offer_id=LODGING_OFFER_ID,
-        ),
+        proposal=proposal,
         profile=_profile(),
         reads=(_lodging_read(),),
         fact_commitment_hash=FRAME_HASH,
@@ -1269,14 +1262,16 @@ def test_selection_builds_authoritative_summary_without_command() -> None:
     assert decision.commands == ()
     assert type(decision.next_state.workflow) is AwaitingConfirmationState
     assert decision.public_reply.kind == "summary"
-    assert decision.public_reply.chunks == (
+    assert decision.public_reply.chunks == proposal.reply_chunks
+    assert len(decision.authenticated_system_replies) == 1
+    assert decision.authenticated_system_replies[0].chunks == (
         "Só para confirmar: vou reservar Suíte Casal de 10/08/2026 a "
         "12/08/2026 para 2 pessoas, pelo total final de R$ 480,00. O pagamento "
         "será tratado em uma etapa separada e não faz parte desta confirmação. "
         "Posso fazer somente essa reserva?",
     )
-    assert "BRL" not in decision.public_reply.chunks[0]
-    assert "stripe" not in decision.public_reply.chunks[0]
+    assert "BRL" not in decision.authenticated_system_replies[0].chunks[0]
+    assert "stripe" not in decision.authenticated_system_replies[0].chunks[0]
     assert decision.projection.stage is ConversationStage.CLOSING
     assert (
         tuple(fact.name for fact in decision.projection.facts)[-1] == "payment_method"
@@ -1388,6 +1383,7 @@ def test_disabled_critical_capability_fails_closed_with_public_denial() -> None:
     assert decision.next_state.workflow is None
     assert decision.commands == ()
     assert decision.public_reply.kind == "critical_action_unavailable"
+    assert decision.public_reply.chunks == ("Mensagem pública do modelo.",)
     assert decision.receipt_requirements == ("critical_action_denied",)
 
 
@@ -1451,19 +1447,7 @@ def test_confirmed_summary_emits_domain_command_only() -> None:
     assert type(decision.commands[0]) is ReservationCommand
     assert decision.commands[0].operation is ReservationOperation.RESERVE_LODGING
     assert type(decision.next_state.workflow) is ExecutionQueuedState
-
-
-def test_post_command_guard_reply_is_localized() -> None:
-    from v2_application.conversation import _reservation_already_processing_reply
-
-    assert _reservation_already_processing_reply("pt-BR") == (
-        "Já existe uma reserva em processamento ou concluída neste atendimento; "
-        "não vou criar outra automaticamente."
-    )
-    assert _reservation_already_processing_reply("en-US") == (
-        "A booking is already being processed or completed in this conversation; "
-        "I won’t create another one automatically."
-    )
+    assert decision.public_reply.chunks == ("Mensagem pública do modelo.",)
 
 
 def test_post_command_offer_overlap_detects_partial_package_duplicate() -> None:
@@ -1661,7 +1645,7 @@ def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -
 
 
 @pytest.mark.parametrize(
-    ("service", "mutator", "expected_kind", "expected_text"),
+    ("service", "mutator", "expected_kind"),
     (
         (
             ServiceKind.ACTIVITY,
@@ -1670,7 +1654,6 @@ def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -
                 public_payload={**read.public_payload, "available": False},
             ),
             "offer_unavailable",
-            "A vaga não está mais disponível",
         ),
         (
             ServiceKind.LODGING,
@@ -1680,7 +1663,6 @@ def test_execution_queued_state_rejects_new_select_and_confirm_without_reset() -
                 private_binding_hash="1" * 64,
             ),
             "proposal_changed",
-            "A disponibilidade ou o valor mudou",
         ),
     ),
 )
@@ -1688,7 +1670,6 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
     service: ServiceKind,
     mutator,
     expected_kind: str,
-    expected_text: str,
 ) -> None:
     awaiting = _awaiting_from_ready(
         _ready_state(
@@ -1742,8 +1723,7 @@ def test_confirmation_refresh_mismatch_revokes_pending_summary_without_command(
         locale="pt-BR",
     ) is None
     assert decision.public_reply.kind == expected_kind
-    assert expected_text in decision.public_reply.chunks[0]
-    assert "Nada foi reservado" in decision.public_reply.chunks[0]
+    assert decision.public_reply.chunks == ("Mensagem pública do modelo.",)
     assert decision.receipt_requirements == ("proposal_revoked_after_refresh",)
     assert {
         fact.name: fact.value.value for fact in decision.projection.facts
@@ -2029,7 +2009,9 @@ def test_runtime_package_selection_builds_one_bound_summary_then_two_child_comma
     assert type(selected.next_state.workflow) is AwaitingConfirmationState
     assert len(selected.next_state.workflow.draft.components) == 2
     assert selected.public_reply.kind == "summary"
-    public_text = " ".join(selected.public_reply.chunks)
+    assert selected.public_reply.chunks == proposal.reply_chunks
+    assert len(selected.authenticated_system_replies) == 1
+    public_text = " ".join(selected.authenticated_system_replies[0].chunks)
     assert "Suíte Casal" in public_text
     assert "Buracão" in public_text
     assert "product:" not in public_text
