@@ -288,7 +288,7 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
         replace(audited.frames[0], stdout_bytes=audited.frames[0].stdout_bytes + b"x")
 
 
-def test_hermes_adapter_repairs_repeated_read_after_observation() -> None:
+def test_hermes_adapter_fails_closed_after_repeated_read_after_observation() -> None:
     repeated = json.dumps(
         {
             "schema": "v2-model-proposal-v2",
@@ -336,31 +336,31 @@ def test_hermes_adapter_repairs_repeated_read_after_observation() -> None:
         environ={"PATH": "/usr/bin"},
     )
 
-    audited = adapter.complete_audited(
-        ModelRequest(
-            request_id="model-request:repeat-read",
-            lead_id="manychat:repeat-read",
-            source_event_id="event:repeat-read",
-            message="Use a consulta já feita.",
-            locale="pt-BR",
-            state_version=0,
-            observations=(observation,),
-        )
+    request = ModelRequest(
+        request_id="model-request:repeat-read",
+        lead_id="manychat:repeat-read",
+        source_event_id="event:repeat-read",
+        message="Use a consulta já feita.",
+        locale="pt-BR",
+        state_version=0,
+        observations=(observation,),
     )
 
-    assert audited.proposal.read_requests == ()
-    assert audited.proposal.effect_proposals == ()
-    assert audited.closure.ephemeral_session_id.startswith("deterministic:")
-    assert len(audited.frames) == 1
+    with pytest.raises(
+        InvalidModelProposal,
+        match="model proposal remained invalid after bounded attempts",
+    ):
+        adapter.complete_audited(request)
+    assert responses == []
 
 
-def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair() -> (
+def test_hermes_adapter_preserves_valid_reply_bytes_and_fails_closed_after_repair() -> (
     None
 ):
     def proposal(reply: str) -> bytes:
         return json.dumps(
             {
-                "schema": "v2-model-proposal-v1",
+                "schema": "v2-model-proposal-v7",
                 "source_event_id": "event:normalize-001",
                 "intent": "inform",
                 "reply_chunks": [reply],
@@ -368,14 +368,21 @@ def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair(
                 "read_requests": [],
                 "effect_proposals": [],
                 "target_offer_id": None,
+                "target_offer_ids": [],
                 "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+                "selection_requested": False,
+                "pending_disposition": None,
+                "passengers": [],
+                "clarification_question": None,
             },
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
 
     responses = [
-        proposal("  Olá!  \n"),
+        proposal("Olá e\u0301!"),
         proposal(" \n "),
         proposal(" \n "),
     ]
@@ -401,21 +408,17 @@ def test_hermes_adapter_normalizes_reply_boundaries_and_falls_back_after_repair(
         progress_review_required=True,
     )
 
-    assert adapter.complete(request).reply_chunks == ("Olá!",)
+    assert adapter.complete(request).reply_chunks == ("Olá e\u0301!",)
 
-    fallback = adapter.complete_audited(request)
-
-    assert fallback.proposal.reply_chunks == (
-        "Não consegui concluir essa resposta agora. Pode repetir sua última mensagem?",
-    )
-    assert fallback.proposal.intent == "inform"
-    assert fallback.proposal.read_requests == ()
-    assert fallback.proposal.effect_proposals == ()
-    assert len(fallback.frames) == 3
-    assert fallback.closure.ephemeral_session_id.startswith("deterministic:")
+    with pytest.raises(
+        InvalidModelProposal,
+        match="model proposal remained invalid after bounded attempts",
+    ):
+        adapter.complete_audited(request)
+    assert responses == []
 
 
-def test_hermes_adapter_falls_back_after_two_child_process_failures() -> None:
+def test_hermes_adapter_fails_closed_after_two_child_process_failures() -> None:
     class Failed:
         returncode = 1
         stdout = b""
@@ -443,12 +446,9 @@ def test_hermes_adapter_falls_back_after_two_child_process_failures() -> None:
         state_version=0,
     )
 
-    fallback = adapter.complete_audited(request)
-
-    assert fallback.proposal.source_event_id == request.source_event_id
-    assert fallback.proposal.intent == "inform"
-    assert len(fallback.proposal.reply_chunks) == 1
-    assert fallback.proposal.read_requests == ()
-    assert fallback.proposal.effect_proposals == ()
-    assert len(fallback.frames) == 3
-    assert fallback.closure.ephemeral_session_id.startswith("deterministic:")
+    with pytest.raises(
+        InvalidModelProposal,
+        match="model proposal remained invalid after bounded attempts",
+    ):
+        adapter.complete_audited(request)
+    assert responses == []

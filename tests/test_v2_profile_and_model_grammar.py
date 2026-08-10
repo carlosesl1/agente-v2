@@ -87,6 +87,7 @@ def test_public_reply_correction_reason_catalog_is_exact_and_default_is_empty() 
         ("STALE_CONSULTATION_REUSE", "stale_consultation_reuse"),
         ("INVALID_CONFIRMATION_REVIEW", "invalid_confirmation_review"),
         ("RECURSIVE_READ_AFTER_OBSERVATION", "recursive_read_after_observation"),
+        ("CRITICAL_AUTHORITY_EXPIRED", "critical_authority_expired"),
     )
     assert _model_request().public_reply_correction_reasons == ()
 

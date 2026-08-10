@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from reservation_boundary.conversation import PublicReplyChunk
 from reservation_boundary.effects import ReservationRelayBundle
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
@@ -37,7 +38,7 @@ from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_application.reads import V2ReadService
 from v2_application.turn_executor import TurnExecutionError, V2TurnExecutor
 from v2_application.workers import V2WorkerDisposition
-from v2_contracts.channel import InboundBatch
+from v2_contracts.channel import InboundBatch, PublicMessageAuthor
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
@@ -79,6 +80,19 @@ def _authority(batch: InboundBatch, marker: str):
         allocation_ids=(f"allocation:split-origin-{marker}",),
         allocation_manifest_hash=marker * 64,
         deadline_at=NOW + timedelta(minutes=10),
+    )
+
+
+def _public_chunks(result) -> tuple[PublicReplyChunk, ...]:
+    return tuple(
+        PublicReplyChunk.from_canonical_bytes(row[2])
+        for row in result.receipt.public_chunks
+    )
+
+
+def _texts_by_author(result, author: PublicMessageAuthor) -> tuple[str, ...]:
+    return tuple(
+        chunk.text for chunk in _public_chunks(result) if chunk.author is author
     )
 
 
@@ -200,7 +214,15 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         snapshot = private_store.load(collect_batch.lead_id)
         assert summary.receipt.command_rows == ()
         assert summary.receipt.relay_rows == ()
-        assert "Só para confirmar" in summary.reply_chunks[0]
+        assert _texts_by_author(summary, PublicMessageAuthor.MAYA) == (
+            "Vou preparar o resumo.",
+        )
+        authenticated_summary = _texts_by_author(
+            summary,
+            PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
+        assert len(authenticated_summary) == 1
+        assert "Só para confirmar" in authenticated_summary[0]
         assert "Guardei esses dados" not in " ".join(summary.reply_chunks)
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
@@ -222,7 +244,7 @@ def test_split_origin_profile_reaches_one_monotonic_cloudbeds_post_and_replays_o
         confirmed = executor.execute(confirm_batch)
         pending = model.calls[2].pending_action
         assert pending is not None
-        assert pending.public_summary == summary.reply_chunks[0]
+        assert pending.public_summary == authenticated_summary[0]
         replayed_confirmation = executor.execute(confirm_batch)
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
@@ -416,7 +438,15 @@ def test_valid_private_correction_replaces_summary_in_same_turn(
         assert corrected_workflow.draft.subject_signature != (
             original_workflow.draft.subject_signature
         )
-        assert "Só para confirmar" in corrected.reply_chunks[0]
+        assert _texts_by_author(corrected, PublicMessageAuthor.MAYA) == (
+            "Vou preparar o resumo atualizado.",
+        )
+        authenticated_summary = _texts_by_author(
+            corrected,
+            PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
+        assert len(authenticated_summary) == 1
+        assert "Só para confirmar" in authenticated_summary[0]
         assert "Guardei esses dados" not in " ".join(corrected.reply_chunks)
         assert corrected.receipt.command_rows == ()
         assert corrected.receipt.relay_rows == ()
@@ -570,7 +600,15 @@ def test_private_correction_after_summary_cannot_preserve_or_confirm_stale_summa
     try:
         executor.execute(collect_batch)
         summary = executor.execute(summary_batch)
-        assert "Só para confirmar" in summary.reply_chunks[0]
+        assert _texts_by_author(summary, PublicMessageAuthor.MAYA) == (
+            "Vou preparar o resumo.",
+        )
+        authenticated_summary = _texts_by_author(
+            summary,
+            PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
+        assert len(authenticated_summary) == 1
+        assert "Só para confirmar" in authenticated_summary[0]
 
         correction = executor.execute(correction_batch)
         current = boundary.load_state(correction_batch.lead_id)
@@ -641,9 +679,8 @@ def test_private_collection_does_not_suppress_explicit_handoff(tmp_path: Path) -
     try:
         result = executor.execute(batch)
 
-        assert result.reply_chunks == (
-            "Vou encaminhar seu atendimento para uma pessoa.",
-        )
+        assert result.reply_chunks == ("Vou chamar uma pessoa.",)
+        assert _texts_by_author(result, PublicMessageAuthor.MAYA) == result.reply_chunks
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(result.receipt.internal_outbox_rows) == 1
@@ -857,7 +894,15 @@ def test_manychat_change_after_confirmation_decision_is_source_aware(
     )
     try:
         summary = executor.execute(summary_batch)
-        assert "Just to confirm" in summary.reply_chunks[0]
+        assert _texts_by_author(summary, PublicMessageAuthor.MAYA) == (
+            "Vou preparar o resumo.",
+        )
+        authenticated_summary = _texts_by_author(
+            summary,
+            PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        )
+        assert len(authenticated_summary) == 1
+        assert "Just to confirm" in authenticated_summary[0]
         if mutation_timing == "decision":
             profile.mutate_before_second_next_read()
 
