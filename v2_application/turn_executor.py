@@ -116,7 +116,11 @@ from v2_contracts.model import (
     PRIVATE_CUSTOMER_FACT_ORDER,
     PublicReplyCorrectionReason,
 )
-from v2_contracts.passengers import PASSENGER_FIELD_ORDER, PassengerManifestStatus
+from v2_contracts.passengers import (
+    PASSENGER_FIELD_ORDER,
+    PassengerInput,
+    PassengerManifestStatus,
+)
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -232,6 +236,18 @@ class _PreparedTurn:
 @dataclass(slots=True)
 class _PublicReplyCorrectionBudget:
     consumed: bool = False
+
+
+@dataclass(slots=True, repr=False)
+class _PrivateValueCorpus:
+    values: tuple[str, ...] = ()
+
+    def extend(self, values: tuple[str, ...]) -> None:
+        if type(values) is not tuple or any(
+            type(value) is not str or not value for value in values
+        ):
+            raise TypeError("private value corpus requires an exact string tuple")
+        self.values = tuple(dict.fromkeys((*self.values, *values)))
 
 
 def _canonical(schema: str, data: object) -> bytes:
@@ -920,6 +936,14 @@ def _private_scalar_text(value: object) -> str | None:
     return None
 
 
+def _private_country_values(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if type(value) is not str or len(value) != 2 or not value.isascii():
+        raise TypeError("private country exposure guard requires an ISO alpha-2 string")
+    return tuple(dict.fromkeys((value, value.lower())))
+
+
 def _private_snapshot_values(
     snapshot: PrivateCustomerFactSnapshot,
 ) -> tuple[str, ...]:
@@ -932,11 +956,12 @@ def _private_snapshot_values(
         snapshot.birth_date,
         snapshot.gender,
     )
-    return tuple(
+    values = tuple(
         text
         for value in values
         if (text := _private_scalar_text(value)) is not None
     )
+    return (*values, *_private_country_values(snapshot.country_code))
 
 
 def _private_profile_values(
@@ -948,7 +973,7 @@ def _private_profile_values(
         raise TypeError("private profile exposure guard requires exact contracts")
     if not profile.observed_at <= now < profile.expires_at:
         return ()
-    return tuple(
+    values = tuple(
         value
         for value in (
             profile.full_name,
@@ -958,6 +983,7 @@ def _private_profile_values(
         )
         if value is not None
     )
+    return (*values, *_private_country_values(profile.country_code))
 
 
 def _accepted_private_fact_values(
@@ -980,6 +1006,25 @@ def _accepted_private_fact_values(
         for value in values
         if (text := _private_scalar_text(value)) is not None
     )
+
+
+def _passenger_input_private_values(
+    passengers: tuple[PassengerInput, ...],
+) -> tuple[str, ...]:
+    if type(passengers) is not tuple or any(
+        type(passenger) is not PassengerInput for passenger in passengers
+    ):
+        raise TypeError("passenger exposure guard requires exact inputs")
+    values: list[str] = []
+    for passenger in passengers:
+        for name in PASSENGER_FIELD_ORDER:
+            value = getattr(passenger, name)
+            text = _private_scalar_text(value)
+            if text is not None:
+                values.append(text)
+            if name == "country_code":
+                values.extend(_private_country_values(value))
+    return tuple(values)
 
 
 def _projection_passenger_private_values(
@@ -1010,6 +1055,8 @@ def _projection_passenger_private_values(
             if type(value) is not str or not value:
                 raise TurnExecutionError("passenger manifest private values are invalid")
             values.append(value)
+            if name == "country_code":
+                values.extend(_private_country_values(value))
     return tuple(values)
 
 
@@ -1580,6 +1627,7 @@ class V2TurnExecutor:
 
         last_conflict: ConcurrencyConflict | None = None
         correction_budget = _PublicReplyCorrectionBudget()
+        private_value_corpus = _PrivateValueCorpus()
         for _ in range(self._max_commit_attempts):
             try:
                 prepared, expected_version, fencing_token = self._prepare(
@@ -1587,6 +1635,7 @@ class V2TurnExecutor:
                     sources=sources,
                     event_hash=event_hash,
                     correction_budget=correction_budget,
+                    private_value_corpus=private_value_corpus,
                 )
                 if prepared.private_profile_material_hash is not None:
                     profile_now = self._clock.now()
@@ -1680,9 +1729,12 @@ class V2TurnExecutor:
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
         correction_budget: _PublicReplyCorrectionBudget,
+        private_value_corpus: _PrivateValueCorpus,
     ) -> tuple[_PreparedTurn, int, int]:
         if type(correction_budget) is not _PublicReplyCorrectionBudget:
             raise TypeError("public reply correction budget must be exact")
+        if type(private_value_corpus) is not _PrivateValueCorpus:
+            raise TypeError("private value corpus must be exact")
         now = self._clock.now()
         try:
             self._store.load_state(batch.lead_id)
@@ -1774,11 +1826,13 @@ class V2TurnExecutor:
             ),
             active_execution_status=active_execution_status(current.state),
         )
-        accepted_private_values = [
-            *_private_snapshot_values(private_facts),
-            *_private_profile_values(profile, now=now),
-            *_projection_passenger_private_values(projection),
-        ]
+        private_value_corpus.extend(
+            (
+                *_private_snapshot_values(private_facts),
+                *_private_profile_values(profile, now=now),
+                *_projection_passenger_private_values(projection),
+            )
+        )
 
         def request_public_reply_correction(
             expected: ModelProposal,
@@ -1808,7 +1862,7 @@ class V2TurnExecutor:
                 audited=audited,
                 expected=expected,
                 reason=reason,
-                private_values=tuple(dict.fromkeys(accepted_private_values)),
+                private_values=private_value_corpus.values,
             )
             return corrected
 
@@ -1835,11 +1889,14 @@ class V2TurnExecutor:
             first_public_facts,
             projection.locale,
         )
-        accepted_private_values.extend(
+        private_value_corpus.extend(
             _accepted_private_fact_values(
                 first_proposal.facts,
                 first_private_facts,
             )
+        )
+        private_value_corpus.extend(
+            _passenger_input_private_values(first_proposal.passengers)
         )
         if first_private_facts:
             private_facts = _persist_private_collection(
@@ -1973,11 +2030,14 @@ class V2TurnExecutor:
                 review_public_facts,
                 projection.locale,
             )
-            accepted_private_values.extend(
+            private_value_corpus.extend(
                 _accepted_private_fact_values(
                     review_proposal.facts,
                     review_private_facts,
                 )
+            )
+            private_value_corpus.extend(
+                _passenger_input_private_values(review_proposal.passengers)
             )
             if review_private_facts:
                 private_facts = _persist_private_collection(
@@ -2133,7 +2193,7 @@ class V2TurnExecutor:
             )
         if _proposal_exposes_private_values(
             first_proposal,
-            tuple(dict.fromkeys(accepted_private_values)),
+            private_value_corpus.values,
         ):
             read_requests = ()
             derived_confirmation_reads = False
@@ -2312,11 +2372,14 @@ class V2TurnExecutor:
                 second_public_facts,
                 projection.locale,
             )
-            accepted_private_values.extend(
+            private_value_corpus.extend(
                 _accepted_private_fact_values(
                     proposal.facts,
                     second_private_facts,
                 )
+            )
+            private_value_corpus.extend(
+                _passenger_input_private_values(proposal.passengers)
             )
             if second_private_facts:
                 private_facts = _persist_private_collection(
@@ -2458,7 +2521,7 @@ class V2TurnExecutor:
             audited = first_audited
             proposal = first_proposal
 
-        accepted_private_values.extend(
+        private_value_corpus.extend(
             _projection_passenger_private_values(projection)
         )
         if private_update_turn and not collection_only:
@@ -2488,7 +2551,7 @@ class V2TurnExecutor:
             )
         if _proposal_exposes_private_values(
             proposal,
-            tuple(dict.fromkeys(accepted_private_values)),
+            private_value_corpus.values,
         ):
             proposal, audited = request_public_reply_correction(
                 proposal,

@@ -5298,6 +5298,156 @@ def test_public_reply_correction_budget_survives_commit_retry() -> None:
         inner.close()
 
 
+def test_private_raw_value_corpus_survives_correction_and_commit_retry() -> None:
+    raw_email = "Alice@Example.INVALID"
+    canonical_email = "alice@example.invalid"
+    inner = SQLiteBoundaryStore.open_memory_v8()
+    store = OneCommitConflictStore(inner)
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    first_leak = replace(
+        _proposal(f"Contato {raw_email} confirmado."),
+        facts=(ModelFact("email", raw_email),),
+    )
+    first_correction = _proposal("Contato registrado sem expor dados privados.")
+    retry_leak_without_fact = _proposal(f"Contato {raw_email} confirmado.")
+    unused_second_correction = _proposal("Esta quarta chamada não pode acontecer.")
+    model = FakeAuditedModel(
+        inner,
+        [
+            first_leak,
+            first_correction,
+            retry_leak_without_fact,
+            unused_second_correction,
+        ],
+    )
+    _install_public_authority(inner)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(inner),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        with pytest.raises(
+            TurnExecutionError,
+            match="public reply correction was already consumed",
+        ):
+            executor.execute(BATCH)
+
+        assert store.conflicts == 1
+        assert len(model.calls) == 3
+        assert model.proposals == [unused_second_correction]
+        private_snapshot = private_store.load(BATCH.lead_id)
+        assert private_snapshot.email == canonical_email
+        assert raw_email not in repr(private_snapshot)
+        assert inner.turn_receipt_count(BATCH.batch_id) == 0
+        for table in (
+            "boundary_commands",
+            "boundary_command_relays",
+            "boundary_outbox",
+            "boundary_public_outbox",
+            "boundary_turn_artifacts",
+        ):
+            assert inner._connection.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone() == (0,)
+    finally:
+        private_store.close()
+        inner.close()
+
+
+def test_passenger_country_raw_variant_corpus_survives_commit_retry() -> None:
+    raw_country = "br"
+    inner = SQLiteBoundaryStore.open_memory_v8()
+    store = OneCommitConflictStore(inner)
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    first_leak = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(f"País {raw_country} confirmado.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        passengers=(
+            PassengerInput(
+                position=1,
+                participant_type="adult",
+                full_name=None,
+                birth_date=None,
+                gender=None,
+                country_code=raw_country,
+            ),
+        ),
+    )
+    first_correction = replace(
+        first_leak,
+        reply_chunks=("País registrado sem expor dados privados.",),
+    )
+    retry_leak_without_passengers = _proposal(f"País {raw_country} confirmado.")
+    unused_second_correction = _proposal("Esta quarta chamada não pode acontecer.")
+    model = FakeAuditedModel(
+        inner,
+        [
+            first_leak,
+            first_correction,
+            retry_leak_without_passengers,
+            unused_second_correction,
+        ],
+    )
+    _install_public_authority(inner)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(inner),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        with pytest.raises(
+            TurnExecutionError,
+            match="public reply correction was already consumed",
+        ):
+            executor.execute(BATCH)
+
+        assert store.conflicts == 1
+        assert len(model.calls) == 3
+        assert model.proposals == [unused_second_correction]
+        manifest = private_store.load_passenger_manifest(BATCH.lead_id)
+        assert manifest is not None
+        assert '"country_code":"BR"' in manifest.value.value
+        assert inner.turn_receipt_count(BATCH.batch_id) == 0
+        for table in (
+            "boundary_commands",
+            "boundary_command_relays",
+            "boundary_outbox",
+            "boundary_public_outbox",
+            "boundary_turn_artifacts",
+        ):
+            assert inner._connection.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone() == (0,)
+    finally:
+        private_store.close()
+        inner.close()
+
+
 def test_turn_executor_never_assigns_model_owned_text_in_replace_calls() -> None:
     module = inspect.getmodule(V2TurnExecutor)
     assert module is not None
