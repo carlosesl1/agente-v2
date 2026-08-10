@@ -65,14 +65,14 @@ def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validatio
     )
 
 
-def test_v7_parser_requires_and_normalizes_typed_clarification_question() -> None:
+def test_v7_parser_preserves_exact_reply_chunks_for_matching_clarification() -> None:
     payload = {
         "schema": "v2-model-proposal-v7",
-        "source_event_id": "batch:typed-question-001",
+        "source_event_id": "batch:typed-question-preserve",
         "intent": "inform",
         "reply_chunks": [
-            "The holder should be the person staying. Who will that be?",
-            "Please confirm the holder.",
+            "Dados recebidos sem repeti-los.",
+            "Haverá alguma criança no grupo?",
         ],
         "facts": [],
         "read_requests": [],
@@ -85,16 +85,97 @@ def test_v7_parser_requires_and_normalizes_typed_clarification_question() -> Non
         "selection_requested": False,
         "pending_disposition": None,
         "passengers": [],
-        "clarification_question": "  Who will be the reservation holder?  ",
+        "clarification_question": "Haverá alguma criança no grupo?",
     }
 
-    parsed = _proposal(
-        json.dumps(payload).encode(),
-        "batch:typed-question-001",
+    turn = _proposal(
+        json.dumps(payload, ensure_ascii=False).encode(),
+        "batch:typed-question-preserve",
     )
 
-    assert parsed.clarification_question == "Who will be the reservation holder?"
-    assert parsed.reply_chunks == ("Who will be the reservation holder?",)
+    assert turn.reply_chunks == (
+        "Dados recebidos sem repeti-los.",
+        "Haverá alguma criança no grupo?",
+    )
+    assert turn.clarification_question == "Haverá alguma criança no grupo?"
+
+
+def test_clarification_mismatch_invokes_protocol_repair_and_parser_rejects() -> None:
+    request = ModelRequest(
+        request_id="request:typed-question-mismatch",
+        lead_id="manychat:typed-question-mismatch",
+        source_event_id="batch:typed-question-mismatch",
+        message="Somos dois adultos.",
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    def payload(*, clarification_question: str) -> bytes:
+        return json.dumps(
+            {
+                "schema": "v2-model-proposal-v7",
+                "source_event_id": request.source_event_id,
+                "intent": "inform",
+                "reply_chunks": [
+                    "Dados recebidos sem repeti-los.",
+                    "Haverá alguma criança no grupo?",
+                ],
+                "facts": [],
+                "read_requests": [],
+                "effect_proposals": [],
+                "target_offer_id": None,
+                "target_offer_ids": [],
+                "confirmed_summary_version": None,
+                "confirmed_action_kinds": [],
+                "approval_basis": None,
+                "selection_requested": False,
+                "pending_disposition": None,
+                "passengers": [],
+                "clarification_question": clarification_question,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
+    mismatched = payload(clarification_question="Qual é a idade da criança?")
+    repaired = payload(clarification_question="Haverá alguma criança no grupo?")
+    prompts: list[str] = []
+    responses = [mismatched, repaired]
+
+    def run(command, **kwargs):
+        envelope = json.loads(kwargs["input"])
+        prompts.append(envelope["system_prompt"])
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"typed-question-mismatch-key-0001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert len(prompts) == 2
+    assert _PROTOCOL_REPAIR_SUFFIX not in prompts[0]
+    assert _PROTOCOL_REPAIR_SUFFIX in prompts[1]
+    assert turn.proposal.reply_chunks == (
+        "Dados recebidos sem repeti-los.",
+        "Haverá alguma criança no grupo?",
+    )
+    assert turn.proposal.clarification_question == "Haverá alguma criança no grupo?"
+    with pytest.raises(
+        InvalidModelProposal,
+        match="clarification_question must be an exact reply chunk",
+    ):
+        _proposal(mismatched, request.source_event_id)
 
 
 def _pending_action() -> PendingCriticalActionContext:

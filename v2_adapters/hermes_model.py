@@ -567,8 +567,6 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
         if schema == "v2-model-proposal-v7"
         else None
     )
-    if type(clarification_question) is str and clarification_question:
-        reply_chunks = (clarification_question,)
     try:
         return ModelProposal(
             source_event_id=decoded["source_event_id"],
