@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import date, datetime, timedelta
+from enum import Enum
 from typing import ClassVar, Final
 
 from v2_contracts.critical_actions import (
@@ -73,6 +74,19 @@ _HANDOFF_STATUSES: Final = frozenset(
 
 class InvalidModelProposal(ValueError):
     """Raised when a model response violates the closed V2 grammar."""
+
+
+class PublicReplyCorrectionReason(str, Enum):
+    PRIVATE_VALUE_EXPOSURE = "private_value_exposure"
+    TYPED_CLARIFICATION_MISMATCH = "typed_clarification_mismatch"
+    UNSUPPORTED_OBSERVATION_CLAIM = "unsupported_observation_claim"
+    OPERATIONAL_STATUS_CONFLICT = "operational_status_conflict"
+    READ_REMOVED_BY_AUTHORITY = "read_removed_by_authority"
+    SELECTION_BINDING_FAILURE = "selection_binding_failure"
+    ACTIVE_EXECUTION_CONFLICT = "active_execution_conflict"
+    STALE_CONSULTATION_REUSE = "stale_consultation_reuse"
+    INVALID_CONFIRMATION_REVIEW = "invalid_confirmation_review"
+    RECURSIVE_READ_AFTER_OBSERVATION = "recursive_read_after_observation"
 
 
 def _text(value: object, name: str, *, identifier: bool = False) -> str:
@@ -301,6 +315,7 @@ class ModelRequest:
     progress_review_required: bool = False
     active_execution_status: str | None = None
     recap_reuse_required: bool = False
+    public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
@@ -312,6 +327,29 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "state_version must be a non-negative exact integer"
             )
+        if type(self.public_reply_correction_reasons) is not tuple:
+            raise InvalidModelProposal(
+                "public reply correction reasons must be an exact tuple"
+            )
+        if any(
+            type(item) is not PublicReplyCorrectionReason
+            for item in self.public_reply_correction_reasons
+        ):
+            raise InvalidModelProposal(
+                "public reply correction reasons must contain exact enum values"
+            )
+        if len(self.public_reply_correction_reasons) > 4:
+            raise InvalidModelProposal(
+                "public reply correction reasons exceed the four-reason bound"
+            )
+        if len(set(self.public_reply_correction_reasons)) != len(
+            self.public_reply_correction_reasons
+        ):
+            raise InvalidModelProposal("public reply correction reasons must be unique")
+        if self.public_reply_correction_reasons != tuple(
+            sorted(self.public_reply_correction_reasons, key=lambda item: item.value)
+        ):
+            raise InvalidModelProposal("public reply correction reasons must be canonical")
         if type(self.recent_dialogue) is not tuple or any(
             type(item) is not ConversationExchange for item in self.recent_dialogue
         ):
@@ -462,6 +500,15 @@ class ModelRequest:
         ):
             raise InvalidModelProposal(
                 "recap reuse cannot coexist with observations or semantic reviews"
+            )
+        if self.public_reply_correction_reasons and (
+            self.progress_review_required
+            or self.confirmation_review_required
+            or self.selection_review_required
+            or self.recap_reuse_required
+        ):
+            raise InvalidModelProposal(
+                "public reply correction and semantic reviews must be mutually exclusive"
             )
 
 
@@ -879,5 +926,6 @@ __all__ = [
     "ModelFact",
     "ModelProposal",
     "ModelRequest",
+    "PublicReplyCorrectionReason",
     "TurnResult",
 ]

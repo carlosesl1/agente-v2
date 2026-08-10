@@ -7,6 +7,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+import v2_adapters.hermes_model as hermes_model_module
+import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import (
     _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
     _PROTOCOL_REPAIR_SUFFIX,
@@ -98,6 +100,46 @@ def test_v7_parser_preserves_exact_reply_chunks_for_matching_clarification() -> 
         "Haverá alguma criança no grupo?",
     )
     assert turn.clarification_question == "Haverá alguma criança no grupo?"
+
+
+def test_v7_parser_normalizes_matching_clarification_without_collapsing_chunks() -> (
+    None
+):
+    raw_question = "Qual e\u0301 a pro\u0301xima data disponi\u0301vel?"
+    normalized_question = unicodedata.normalize("NFKC", raw_question)
+    assert raw_question != normalized_question
+    payload = {
+        "schema": "v2-model-proposal-v7",
+        "source_event_id": "batch:typed-question-normalized",
+        "intent": "inform",
+        "reply_chunks": [
+            "Contexto anterior preservado.",
+            f"  {raw_question}\n",
+        ],
+        "facts": [],
+        "read_requests": [],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "selection_requested": False,
+        "pending_disposition": None,
+        "passengers": [],
+        "clarification_question": f"\t{raw_question}  ",
+    }
+
+    turn = _proposal(
+        json.dumps(payload, ensure_ascii=False).encode(),
+        "batch:typed-question-normalized",
+    )
+
+    assert turn.reply_chunks == (
+        "Contexto anterior preservado.",
+        normalized_question,
+    )
+    assert turn.clarification_question == normalized_question
 
 
 def test_clarification_mismatch_invokes_protocol_repair_and_parser_rejects() -> None:
@@ -276,6 +318,84 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         "content_hash",
     ):
         assert forbidden not in serialized
+
+
+def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    observed_at = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+    reasons = tuple(
+        sorted(
+            (
+                reason_type.PRIVATE_VALUE_EXPOSURE,
+                reason_type.UNSUPPORTED_OBSERVATION_CLAIM,
+            ),
+            key=lambda item: item.value,
+        )
+    )
+    request = ModelRequest(
+        request_id="request:public-reply-correction-wire",
+        lead_id="manychat:public-reply-correction-wire",
+        source_event_id="batch:public-reply-correction-wire",
+        message="Continue o atendimento.",
+        locale="pt-BR",
+        state_version=4,
+        observations=(
+            ReadObservation(
+                request_hash="a" * 64,
+                provider="cloudbeds",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={"available": False},
+                private_binding_hash="b" * 64,
+            ),
+        ),
+        state_facts=(ModelFact("service", "hostel"),),
+        private_customer_fact_names=("full_name", "email"),
+        public_reply_correction_reasons=reasons,
+    )
+
+    envelope = json.loads(_request_wire(request, "Closed prompt."))
+    current = json.loads(envelope["messages"][-1][1])
+    expected_suffix = """PUBLIC REPLY CORRECTION
+The previous candidate could not be published for the listed closed reasons.
+You, Maya, must write the corrected customer-facing reply.
+Do not repeat private values. Do not request another read after observations.
+Do not strengthen operational status beyond exact receipts.
+Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
+
+    assert set(envelope) == {"system_prompt", "messages"}
+    assert current["public_reply_correction_reasons"] == [
+        item.value for item in reasons
+    ]
+    assert current["state_facts"] == [{"name": "service", "value": "hostel"}]
+    assert current["observations"] == [
+        {
+            "request_hash": "a" * 64,
+            "provider": "cloudbeds",
+            "observed_at": observed_at.isoformat(),
+            "expires_at": (observed_at + timedelta(minutes=5)).isoformat(),
+            "public_payload": {"available": False},
+        }
+    ]
+    assert hermes_model_module._PUBLIC_REPLY_CORRECTION_SUFFIX == expected_suffix
+    assert envelope["system_prompt"].endswith(expected_suffix)
+    assert envelope["system_prompt"].count("PUBLIC REPLY CORRECTION") == 1
+    serialized = envelope["messages"][-1][1]
+    assert "private_binding_hash" not in serialized
+    assert "b" * 64 not in serialized
+
+    ordinary_request = ModelRequest(
+        request_id="request:without-public-reply-correction",
+        lead_id="manychat:without-public-reply-correction",
+        source_event_id="batch:without-public-reply-correction",
+        message="Continue o atendimento.",
+        locale="pt-BR",
+        state_version=0,
+    )
+    ordinary = json.loads(_request_wire(ordinary_request, "Closed."))
+    ordinary_current = json.loads(ordinary["messages"][-1][1])
+    assert ordinary_current["public_reply_correction_reasons"] == []
+    assert "PUBLIC REPLY CORRECTION" not in ordinary["system_prompt"]
 
 
 def test_recent_dialogue_is_transport_only_context_before_complete_current_request() -> None:
@@ -1052,6 +1172,85 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
     assert turn.closure.ephemeral_session_id.startswith(
         "deterministic:protocol-fallback:"
     )
+
+
+def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = ModelRequest(
+        request_id="request:bounded-public-reply-correction",
+        lead_id="manychat:bounded-public-reply-correction",
+        source_event_id="batch:bounded-public-reply-correction",
+        message="Continue o atendimento sem expor dados privados.",
+        locale="pt-BR",
+        state_version=5,
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    repaired = json.dumps(
+        {
+            "schema": "v2-model-proposal-v7",
+            "source_event_id": request.source_event_id,
+            "intent": "inform",
+            "reply_chunks": ["Posso continuar o atendimento sem repetir esses dados."],
+            "facts": [],
+            "read_requests": [],
+            "effect_proposals": [],
+            "target_offer_id": None,
+            "target_offer_ids": [],
+            "confirmed_summary_version": None,
+            "confirmed_action_kinds": [],
+            "approval_basis": None,
+            "selection_requested": False,
+            "pending_disposition": None,
+            "passengers": [],
+            "clarification_question": None,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    responses = [b"{}", repaired]
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"bounded-correction-transcript-key-01",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    correction_suffix = hermes_model_module._PUBLIC_REPLY_CORRECTION_SUFFIX
+    assert len(seen) == 2
+    assert len(turn.frames) == 2
+    assert turn.proposal.reply_chunks == (
+        "Posso continuar o atendimento sem repetir esses dados.",
+    )
+    assert _PROTOCOL_REPAIR_SUFFIX not in seen[0][0]
+    assert _PROTOCOL_REPAIR_SUFFIX in seen[1][0]
+    assert all(prompt.endswith(correction_suffix) for prompt, _ in seen)
+    assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
+    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
+        ["private_value_exposure"],
+        ["private_value_exposure"],
+    ]
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
 
 
 def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:

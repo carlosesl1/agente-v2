@@ -5,6 +5,9 @@ import json
 
 import pytest
 
+import v2_contracts.model as model_contracts
+from v2_adapters.hermes_model import _request_wire
+from v2_contracts.model import ModelRequest
 from v2_host.hermes_child import run
 
 
@@ -99,6 +102,41 @@ def test_child_accepts_four_private_exchanges_and_keeps_current_request_last() -
     assert "customer 0" in prompt
     assert "assistant 3" in prompt
     assert prompt.rfind('{"message":"current"}') > prompt.rfind("assistant 3")
+
+
+def test_child_transports_public_reply_correction_without_changing_current_request() -> (
+    None
+):
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = ModelRequest(
+        request_id="request:child-correction-transport",
+        lead_id="manychat:child-correction-transport",
+        source_event_id="batch:child-correction-transport",
+        message="Continue com uma resposta corrigida.",
+        locale="pt-BR",
+        state_version=2,
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    wire = _request_wire(request, "Return V2 JSON.")
+    envelope = json.loads(wire)
+    current_request = envelope["messages"][-1][1]
+    captured = {}
+
+    def execute(command, **kwargs):
+        captured.update(command=command, kwargs=kwargs)
+        return Result(b'{"schema":"v2-model-proposal-v7"}')
+
+    run(("hermes", "--profile", "leads"), wire, execute=execute)
+
+    prompt = captured["command"][-1]
+    assert set(envelope) == {"system_prompt", "messages"}
+    assert json.loads(current_request)["public_reply_correction_reasons"] == [
+        "private_value_exposure"
+    ]
+    assert "PUBLIC REPLY CORRECTION" in envelope["system_prompt"]
+    assert prompt.endswith(current_request)
+    assert prompt.count(current_request) == 1
+    assert captured["command"][3:5] == ("--toolsets", "")
 
 
 @pytest.mark.parametrize(

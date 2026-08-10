@@ -260,6 +260,16 @@ KNOWN ACTIVITY INFORMATION ROUTING:
 """.strip()
 
 
+_PUBLIC_REPLY_CORRECTION_SUFFIX: Final = """
+PUBLIC REPLY CORRECTION
+The previous candidate could not be published for the listed closed reasons.
+You, Maya, must write the corrected customer-facing reply.
+Do not repeat private values. Do not request another read after observations.
+Do not strengthen operational status beyond exact receipts.
+Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it.
+""".strip()
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -322,6 +332,9 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         "progress_review_required": request.progress_review_required,
         "active_execution_status": request.active_execution_status,
         "recap_reuse_required": request.recap_reuse_required,
+        "public_reply_correction_reasons": [
+            item.value for item in request.public_reply_correction_reasons
+        ],
         "observations": observations,
         "consultation_history": consultation_history,
     }
@@ -381,6 +394,11 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
                 + "\n\n"
                 + _TURN_COMPLETION_SYSTEM_SUFFIX
+                + (
+                    "\n\n" + _PUBLIC_REPLY_CORRECTION_SUFFIX
+                    if request.public_reply_correction_reasons
+                    else ""
+                )
             ),
             "messages": messages,
         }
@@ -985,6 +1003,7 @@ class HermesModelAdapter:
             or request.selection_review_required
             or request.active_execution_status is not None
             or request.recap_reuse_required
+            or request.public_reply_correction_reasons
             or not proposal_requires_progress_review(turn.proposal)
         ):
             return turn

@@ -5,8 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import v2_contracts.model as model_contracts
 from v2_adapters.manychat_profile import ManyChatProfileAdapter, ManyChatProfilePayloadError
 from v2_application.turns import validate_productive_proposal
+from v2_contracts.critical_actions import CriticalActionKind, PendingCriticalActionContext
 from v2_contracts.model import (
     EffectProposal,
     InvalidModelProposal,
@@ -49,6 +51,95 @@ def _complete_payload() -> dict[str, object]:
         "phone_e164": "+5511999999999",
         "country_code": "BR",
     }
+
+
+def _model_request() -> ModelRequest:
+    return ModelRequest(
+        request_id="model-request:correction-contract",
+        lead_id="manychat:correction-contract",
+        source_event_id="event:correction-contract",
+        message="Continue sem repetir dados privados.",
+        locale="pt-BR",
+        state_version=3,
+    )
+
+
+def _pending_action() -> PendingCriticalActionContext:
+    return PendingCriticalActionContext(
+        summary_version=1,
+        action_kinds=(CriticalActionKind.BOOK_ACTIVITY,),
+        public_summary="Resumo público pendente.",
+        expires_at=NOW + timedelta(minutes=5),
+    )
+
+
+def test_public_reply_correction_reason_catalog_is_exact_and_default_is_empty() -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+
+    assert tuple((item.name, item.value) for item in reason_type) == (
+        ("PRIVATE_VALUE_EXPOSURE", "private_value_exposure"),
+        ("TYPED_CLARIFICATION_MISMATCH", "typed_clarification_mismatch"),
+        ("UNSUPPORTED_OBSERVATION_CLAIM", "unsupported_observation_claim"),
+        ("OPERATIONAL_STATUS_CONFLICT", "operational_status_conflict"),
+        ("READ_REMOVED_BY_AUTHORITY", "read_removed_by_authority"),
+        ("SELECTION_BINDING_FAILURE", "selection_binding_failure"),
+        ("ACTIVE_EXECUTION_CONFLICT", "active_execution_conflict"),
+        ("STALE_CONSULTATION_REUSE", "stale_consultation_reuse"),
+        ("INVALID_CONFIRMATION_REVIEW", "invalid_confirmation_review"),
+        ("RECURSIVE_READ_AFTER_OBSERVATION", "recursive_read_after_observation"),
+    )
+    assert _model_request().public_reply_correction_reasons == ()
+
+
+def test_public_reply_correction_reasons_require_exact_unique_sorted_bounded_enum_tuple() -> (
+    None
+):
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    reasons = tuple(sorted(reason_type, key=lambda item: item.value))
+    request = _model_request()
+
+    invalid_values = (
+        ([reasons[0]], "exact tuple"),
+        ((reasons[0].value,), "exact enum"),
+        ((reasons[0], reasons[0]), "unique"),
+        ((reasons[1], reasons[0]), "canonical"),
+        (reasons[:5], "four-reason bound"),
+    )
+    for value, message in invalid_values:
+        with pytest.raises(InvalidModelProposal, match=message):
+            replace(request, public_reply_correction_reasons=value)
+
+    accepted = reasons[:4]
+    assert replace(
+        request,
+        public_reply_correction_reasons=accepted,
+    ).public_reply_correction_reasons == accepted
+
+
+def test_public_reply_correction_is_mutually_exclusive_with_every_semantic_review() -> (
+    None
+):
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = replace(
+        _model_request(),
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    conflicting_fields = (
+        {"progress_review_required": True},
+        {
+            "pending_action": _pending_action(),
+            "confirmation_review_required": True,
+        },
+        {
+            "private_profile_complete": True,
+            "selection_review_required": True,
+        },
+        {"recap_reuse_required": True},
+    )
+
+    for fields in conflicting_fields:
+        with pytest.raises(InvalidModelProposal, match="mutually exclusive"):
+            replace(request, **fields)
 
 
 def test_productive_proposal_rejects_effects_and_closes_payment_method() -> None:
