@@ -116,7 +116,7 @@ from v2_contracts.model import (
     PRIVATE_CUSTOMER_FACT_ORDER,
     PublicReplyCorrectionReason,
 )
-from v2_contracts.passengers import PassengerManifestStatus
+from v2_contracts.passengers import PASSENGER_FIELD_ORDER, PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -227,6 +227,11 @@ class _PreparedTurn:
     public_rows: tuple[PublicOutboxWrite, ...]
     reply_chunks: tuple[str, ...]
     private_profile_material_hash: str | None
+
+
+@dataclass(slots=True)
+class _PublicReplyCorrectionBudget:
+    consumed: bool = False
 
 
 def _canonical(schema: str, data: object) -> bytes:
@@ -907,9 +912,112 @@ def _private_update_no_command_proposal(
     )
 
 
+def _private_scalar_text(value: object) -> str | None:
+    if type(value) is str:
+        return value or None
+    if type(value) is date:
+        return value.isoformat()
+    return None
+
+
+def _private_snapshot_values(
+    snapshot: PrivateCustomerFactSnapshot,
+) -> tuple[str, ...]:
+    if type(snapshot) is not PrivateCustomerFactSnapshot:
+        raise TypeError("private snapshot exposure guard requires an exact snapshot")
+    values = (
+        snapshot.full_name,
+        snapshot.email,
+        snapshot.country_code,
+        snapshot.birth_date,
+        snapshot.gender,
+    )
+    return tuple(
+        text
+        for value in values
+        if (text := _private_scalar_text(value)) is not None
+    )
+
+
+def _private_profile_values(
+    profile: PrivateCustomerBinding,
+    *,
+    now: datetime,
+) -> tuple[str, ...]:
+    if type(profile) is not PrivateCustomerBinding or type(now) is not datetime:
+        raise TypeError("private profile exposure guard requires exact contracts")
+    if not profile.observed_at <= now < profile.expires_at:
+        return ()
+    return tuple(
+        value
+        for value in (
+            profile.full_name,
+            profile.email,
+            profile.phone_e164,
+            profile.country_code,
+        )
+        if value is not None
+    )
+
+
+def _accepted_private_fact_values(
+    proposed: tuple[ModelFact, ...],
+    accepted: tuple[ModelFact, ...],
+) -> tuple[str, ...]:
+    if (
+        type(proposed) is not tuple
+        or type(accepted) is not tuple
+        or any(type(item) is not ModelFact for item in (*proposed, *accepted))
+    ):
+        raise TypeError("accepted private exposure guard requires exact facts")
+    accepted_names = {item.name for item in accepted}
+    values = (
+        *(item.value for item in proposed if item.name in accepted_names),
+        *(item.value for item in accepted),
+    )
+    return tuple(
+        text
+        for value in values
+        if (text := _private_scalar_text(value)) is not None
+    )
+
+
+def _projection_passenger_private_values(
+    projection: ConversationProjection,
+) -> tuple[str, ...]:
+    if type(projection) is not ConversationProjection:
+        raise TypeError("passenger exposure guard requires an exact projection")
+    manifest = projection_manifest_fact(projection)
+    if manifest is None:
+        return ()
+    manifest_json = manifest.value.value
+    if type(manifest_json) is not str:
+        raise TurnExecutionError("passenger manifest private values are invalid")
+    try:
+        decoded = json.loads(manifest_json)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise TurnExecutionError("passenger manifest private values are invalid") from exc
+    if type(decoded) is not dict or type(decoded.get("passengers")) is not list:
+        raise TurnExecutionError("passenger manifest private values are invalid")
+    values: list[str] = []
+    for passenger in decoded["passengers"]:
+        if type(passenger) is not dict:
+            raise TurnExecutionError("passenger manifest private values are invalid")
+        for name in PASSENGER_FIELD_ORDER:
+            value = passenger.get(name)
+            if value is None:
+                continue
+            if type(value) is not str or not value:
+                raise TurnExecutionError("passenger manifest private values are invalid")
+            values.append(value)
+    return tuple(values)
+
+
 def _reply_chunk_contains_literal_value(chunk: str, private_value: str) -> bool:
     if type(chunk) is not str or type(private_value) is not str or not private_value:
         raise TypeError("private literal check requires exact strings")
+    if len(private_value) > 3:
+        return private_value in chunk
     cursor = 0
     while True:
         position = chunk.find(private_value, cursor)
@@ -1000,11 +1108,11 @@ def _request_public_reply_correction(
     )
     try:
         corrected_audited = model.complete_audited(correction_request)
+        if type(corrected_audited) is not AuditedModelTurn:
+            raise TypeError("model must return exact AuditedModelTurn")
+        corrected = validate_productive_proposal(corrected_audited.proposal)
     except InvalidModelProposal as exc:
         raise TurnExecutionError("public reply correction remained invalid") from exc
-    if type(corrected_audited) is not AuditedModelTurn:
-        raise TypeError("model must return exact AuditedModelTurn")
-    corrected = validate_productive_proposal(corrected_audited.proposal)
     if (
         not _same_terminal_structure(expected, corrected)
         or _proposal_exposes_private_values(corrected, private_values)
@@ -1471,12 +1579,14 @@ class V2TurnExecutor:
             return V2TurnExecutionResult(replay, reply_chunks, True)
 
         last_conflict: ConcurrencyConflict | None = None
+        correction_budget = _PublicReplyCorrectionBudget()
         for _ in range(self._max_commit_attempts):
             try:
                 prepared, expected_version, fencing_token = self._prepare(
                     batch,
                     sources=sources,
                     event_hash=event_hash,
+                    correction_budget=correction_budget,
                 )
                 if prepared.private_profile_material_hash is not None:
                     profile_now = self._clock.now()
@@ -1569,7 +1679,10 @@ class V2TurnExecutor:
         *,
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
+        correction_budget: _PublicReplyCorrectionBudget,
     ) -> tuple[_PreparedTurn, int, int]:
+        if type(correction_budget) is not _PublicReplyCorrectionBudget:
+            raise TypeError("public reply correction budget must be exact")
         now = self._clock.now()
         try:
             self._store.load_state(batch.lead_id)
@@ -1661,17 +1774,20 @@ class V2TurnExecutor:
             ),
             active_execution_status=active_execution_status(current.state),
         )
-        correction_used = False
-        accepted_private_values: list[str] = []
+        accepted_private_values = [
+            *_private_snapshot_values(private_facts),
+            *_private_profile_values(profile, now=now),
+            *_projection_passenger_private_values(projection),
+        ]
 
         def request_public_reply_correction(
             expected: ModelProposal,
             audited: AuditedModelTurn,
             reason: PublicReplyCorrectionReason,
         ) -> tuple[ModelProposal, AuditedModelTurn]:
-            nonlocal correction_used
-            if correction_used:
+            if correction_budget.consumed:
                 raise TurnExecutionError("public reply correction was already consumed")
+            correction_budget.consumed = True
             corrected = _request_public_reply_correction(
                 self._model,
                 request=replace(
@@ -1694,7 +1810,6 @@ class V2TurnExecutor:
                 reason=reason,
                 private_values=tuple(dict.fromkeys(accepted_private_values)),
             )
-            correction_used = True
             return corrected
 
         first_audited = self._model.complete_audited(request)
@@ -1721,7 +1836,10 @@ class V2TurnExecutor:
             projection.locale,
         )
         accepted_private_values.extend(
-            item.value for item in first_private_facts if type(item.value) is str
+            _accepted_private_fact_values(
+                first_proposal.facts,
+                first_private_facts,
+            )
         )
         if first_private_facts:
             private_facts = _persist_private_collection(
@@ -1856,7 +1974,10 @@ class V2TurnExecutor:
                 projection.locale,
             )
             accepted_private_values.extend(
-                item.value for item in review_private_facts if type(item.value) is str
+                _accepted_private_fact_values(
+                    review_proposal.facts,
+                    review_private_facts,
+                )
             )
             if review_private_facts:
                 private_facts = _persist_private_collection(
@@ -2192,7 +2313,10 @@ class V2TurnExecutor:
                 projection.locale,
             )
             accepted_private_values.extend(
-                item.value for item in second_private_facts if type(item.value) is str
+                _accepted_private_fact_values(
+                    proposal.facts,
+                    second_private_facts,
+                )
             )
             if second_private_facts:
                 private_facts = _persist_private_collection(
@@ -2323,11 +2447,10 @@ class V2TurnExecutor:
                     != first_proposal.confirmed_action_kinds
                     or proposal.approval_basis is not first_proposal.approval_basis
                 ):
-                    proposal = replace(
-                        first_proposal,
-                        reply_chunks=proposal.reply_chunks,
-                        clarification_question=proposal.clarification_question,
-                        read_requests=(),
+                    proposal, second_audited = request_public_reply_correction(
+                        replace(first_proposal, read_requests=()),
+                        second_audited,
+                        PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
                     )
                 proposal = preserve_initial_adjustment(first_proposal, proposal)
             audited = AuditedModelTurn.combine((first_audited, second_audited))
@@ -2335,6 +2458,9 @@ class V2TurnExecutor:
             audited = first_audited
             proposal = first_proposal
 
+        accepted_private_values.extend(
+            _projection_passenger_private_values(projection)
+        )
         if private_update_turn and not collection_only:
             proposal = _private_update_no_command_proposal(
                 proposal,

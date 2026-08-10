@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
 import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -44,6 +46,7 @@ from v2_application.turn_executor import (
     _confirmation_read_requests,
     _intent,
     _private_update_no_command_proposal,
+    _request_public_reply_correction,
     _repair_requested_activity_selection,
     _selection_binding_failure_proposal,
     _structured_selection_review_required,
@@ -66,6 +69,7 @@ from v2_contracts.model import (
     AuditedModelTurn,
     AuditedTranscriptFrame,
     ConversationExchange,
+    EffectProposal,
     ModelFact,
     ModelProposal,
     ModelRequest,
@@ -1155,6 +1159,21 @@ class FaultingStore:
                 raise RuntimeError("injected atomic turn failure")
 
         return self.inner.commit_turn_v8(**values, fault_hook=fault)
+
+
+class OneCommitConflictStore:
+    def __init__(self, inner: SQLiteBoundaryStore) -> None:
+        self.inner = inner
+        self.conflicts = 0
+
+    def __getattr__(self, name: str):
+        return getattr(self.inner, name)
+
+    def commit_turn_v8(self, **values):
+        if self.conflicts == 0:
+            self.conflicts += 1
+            raise ConcurrencyConflict("injected aggregate commit conflict")
+        return self.inner.commit_turn_v8(**values)
 
 
 def _proposal(text: str = "Olá! Como posso ajudar?") -> ModelProposal:
@@ -5061,3 +5080,332 @@ def test_parent_overrides_model_read_locale_before_provider_dispatch() -> None:
     localized = module._authoritative_read_locales((request,), locale="en")
 
     assert localized == (replace(request, locale="en"),)
+
+
+def test_previously_persisted_private_value_still_requires_model_correction(
+    tmp_path,
+) -> None:
+    private_name = "Pessoa Replay Silva"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore(
+        tmp_path / "persisted-private-reply.sqlite3"
+    )
+    private_store.persist_turn(
+        lead_id=BATCH.lead_id,
+        source_turn_id="batch:prior-private-owner",
+        source_event_hash="1" * 64,
+        facts=(ModelFact("full_name", private_name),),
+        persisted_at=NOW,
+    )
+    leaked = _proposal(f"Olá, {private_name}.")
+    corrected_text = "Olá! Como posso ajudar?"
+    corrected = _proposal(corrected_text)
+    model = FakeAuditedModel(store, [leaked, corrected])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+        assert private_name not in result.receipt.to_canonical_bytes().decode("utf-8")
+    finally:
+        private_store.close()
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("fact_name", "accepted_value", "public_text"),
+    (
+        (
+            "email",
+            "Alice@Example.INVALID",
+            "Contato Alice@Example.INVALID confirmado.",
+        ),
+        (
+            "full_name",
+            "Pessoa Privada Silva",
+            "prefixPessoa Privada SilvaX",
+        ),
+    ),
+)
+def test_private_gate_covers_raw_and_embedded_high_entropy_literals(
+    fact_name: str,
+    accepted_value: str,
+    public_text: str,
+) -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    leaked = replace(
+        _proposal(public_text),
+        facts=(ModelFact(fact_name, accepted_value),),
+    )
+    corrected_text = "Contato registrado sem expor dados privados."
+    corrected = _proposal(corrected_text)
+    model = FakeAuditedModel(store, [leaked, corrected])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+        assert public_text not in result.receipt.to_canonical_bytes().decode("utf-8")
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_low_entropy_private_code_inside_public_word_is_not_exposure() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    maya_text = "A diária permanece em BRL 480.00."
+    proposal = replace(
+        _proposal(maya_text),
+        facts=(ModelFact("country_code", "BR"),),
+    )
+    model = FakeAuditedModel(store, [proposal])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=PhoneOnlyManyChatContact(store),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (maya_text,)
+        assert len(model.calls) == 1
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_passenger_private_value_requires_terminal_model_correction() -> None:
+    private_name = "Pessoa Passageira Fictícia"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    leaked = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=(f"Registrei {private_name}.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        passengers=(
+            PassengerInput(
+                position=1,
+                participant_type="adult",
+                full_name=private_name,
+                birth_date=None,
+                gender=None,
+                country_code=None,
+            ),
+        ),
+    )
+    corrected_text = "Registrei os dados da pessoa participante."
+    corrected = replace(leaked, reply_chunks=(corrected_text,))
+    model = FakeAuditedModel(store, [leaked, corrected])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=UnusableManyChatPhone(store, "missing"),
+        private_customer_facts=private_store,
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+        assert private_name not in result.receipt.to_canonical_bytes().decode("utf-8")
+    finally:
+        private_store.close()
+        store.close()
+
+
+def test_public_reply_correction_budget_survives_commit_retry() -> None:
+    private_name = "Pessoa Conflict Silva"
+    inner = SQLiteBoundaryStore.open_memory_v8()
+    store = OneCommitConflictStore(inner)
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    leaked = replace(
+        _proposal(f"Olá, {private_name}."),
+        facts=(ModelFact("full_name", private_name),),
+    )
+    corrected = _proposal("Olá! Como posso ajudar?")
+    model = FakeAuditedModel(inner, [leaked, corrected, leaked, corrected])
+    _install_public_authority(inner)
+    executor = V2TurnExecutor(
+        store=store,
+        model=model,
+        reads=V2ReadService({}),
+        profile=PhoneOnlyManyChatContact(inner),
+        private_customer_facts=private_store,
+        reducer=_enabled_reducer(),
+        public_authority=FixedAuthority(),
+        clock=FixedClock(),
+        locale="pt-BR",
+        turn_timeout=timedelta(seconds=30),
+        max_commit_attempts=2,
+    )
+    try:
+        with pytest.raises(
+            TurnExecutionError,
+            match="public reply correction was already consumed",
+        ):
+            executor.execute(BATCH)
+
+        assert store.conflicts == 1
+        assert len(model.calls) == 3
+        assert model.proposals == [corrected]
+        assert inner.turn_receipt_count(BATCH.batch_id) == 0
+        for table in (
+            "boundary_commands",
+            "boundary_command_relays",
+            "boundary_outbox",
+            "boundary_public_outbox",
+        ):
+            assert inner._connection.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone() == (0,)
+    finally:
+        private_store.close()
+        inner.close()
+
+
+def test_turn_executor_never_assigns_model_owned_text_in_replace_calls() -> None:
+    module = inspect.getmodule(V2TurnExecutor)
+    assert module is not None
+    tree = ast.parse(inspect.getsource(module))
+    forbidden = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "replace":
+            continue
+        assigned = {
+            keyword.arg
+            for keyword in node.keywords
+            if keyword.arg in {"reply_chunks", "clarification_question"}
+        }
+        if assigned:
+            forbidden.append((node.lineno, tuple(sorted(assigned))))
+
+    assert forbidden == []
+
+
+def test_productively_invalid_correction_uses_terminal_turn_error() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    request = ModelRequest(
+        request_id="model-request:invalid-correction",
+        lead_id=BATCH.lead_id,
+        source_event_id=BATCH.batch_id,
+        message=BATCH.combined_text,
+        locale="pt-BR",
+        state_version=0,
+    )
+    expected = _proposal("Maya precisa corrigir esta resposta.")
+    invalid = replace(
+        expected,
+        reply_chunks=("Correction with a forbidden effect.",),
+        effect_proposals=(EffectProposal("forbidden_effect", {}),),
+    )
+    model = FakeAuditedModel(store, [expected, invalid])
+    audited = model.complete_audited(request)
+    try:
+        with pytest.raises(
+            TurnExecutionError,
+            match="public reply correction remained invalid",
+        ):
+            _request_public_reply_correction(
+                model,
+                request=request,
+                audited=audited,
+                expected=expected,
+                reason=PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+                private_values=(),
+            )
+    finally:
+        store.close()
+
+
+def test_confirmation_read_divergence_requires_complete_model_owned_correction() -> None:
+    store, model, _read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=5),
+        confirmation_clock=FixedClock(),
+    )
+    confirmation = model.proposals[0]
+    divergent = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent="inform",
+        reply_chunks=("A consulta mudou o contexto da confirmação.",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    corrected_text = "Confirmação mantida após a consulta atualizada."
+    corrected = replace(confirmation, reply_chunks=(corrected_text,))
+    model.proposals[:] = [confirmation, divergent, corrected]
+    prior_calls = len(model.calls)
+    try:
+        result = executor.execute(second_batch)
+
+        assert result.reply_chunks != divergent.reply_chunks
+        assert len(model.calls) == prior_calls + 3
+        assert model.proposals == []
+        correction_request = model.calls[-1]
+        assert correction_request.public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
+        )
+    finally:
+        store.close()
+
+
+def test_authenticated_profile_private_value_requires_model_correction() -> None:
+    private_name = "Pessoa Teste"
+    store = SQLiteBoundaryStore.open_memory_v8()
+    leaked = _proposal(f"Olá, {private_name}.")
+    corrected_text = "Olá! Como posso ajudar?"
+    corrected = _proposal(corrected_text)
+    model = FakeAuditedModel(store, [leaked, corrected])
+    _install_public_authority(store)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+    )
+    try:
+        result = executor.execute(BATCH)
+
+        assert result.reply_chunks == (corrected_text,)
+        assert len(model.calls) == 2
+        assert model.calls[-1].public_reply_correction_reasons == (
+            PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
+        )
+    finally:
+        store.close()
