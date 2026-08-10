@@ -553,16 +553,27 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
     )
     if decoded["intent"] == "inform" and pending_disposition == "preserve":
         pending_disposition = None
+    reply_chunks = tuple(
+        unicodedata.normalize("NFKC", item).strip()
+        if type(item) is str
+        else item
+        for item in _tuple_items(decoded["reply_chunks"], "reply_chunks")
+    )
+    clarification_question = (
+        unicodedata.normalize("NFKC", decoded["clarification_question"]).strip()
+        if schema == "v2-model-proposal-v7"
+        and type(decoded["clarification_question"]) is str
+        else decoded["clarification_question"]
+        if schema == "v2-model-proposal-v7"
+        else None
+    )
+    if type(clarification_question) is str and clarification_question:
+        reply_chunks = (clarification_question,)
     try:
         return ModelProposal(
             source_event_id=decoded["source_event_id"],
             intent=decoded["intent"],
-            reply_chunks=tuple(
-                unicodedata.normalize("NFKC", item).strip()
-                if type(item) is str
-                else item
-                for item in _tuple_items(decoded["reply_chunks"], "reply_chunks")
-            ),
+            reply_chunks=reply_chunks,
             facts=tuple(
                 _fact(item) for item in _tuple_items(decoded["facts"], "facts")
             ),
@@ -637,16 +648,7 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
                 if schema in ("v2-model-proposal-v6", "v2-model-proposal-v7")
                 else ()
             ),
-            clarification_question=(
-                unicodedata.normalize(
-                    "NFKC", decoded["clarification_question"]
-                ).strip()
-                if schema == "v2-model-proposal-v7"
-                and type(decoded["clarification_question"]) is str
-                else decoded["clarification_question"]
-                if schema == "v2-model-proposal-v7"
-                else None
-            ),
+            clarification_question=clarification_question,
         )
     except (TypeError, ValueError) as exc:
         if type(exc) is InvalidModelProposal:

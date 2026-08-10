@@ -71,8 +71,8 @@ def test_v7_parser_requires_and_normalizes_typed_clarification_question() -> Non
         "source_event_id": "batch:typed-question-001",
         "intent": "inform",
         "reply_chunks": [
-            "I found one option.",
-            "Who will be the reservation holder?",
+            "The holder should be the person staying. Who will that be?",
+            "Please confirm the holder.",
         ],
         "facts": [],
         "read_requests": [],
@@ -94,6 +94,7 @@ def test_v7_parser_requires_and_normalizes_typed_clarification_question() -> Non
     )
 
     assert parsed.clarification_question == "Who will be the reservation holder?"
+    assert parsed.reply_chunks == ("Who will be the reservation holder?",)
 
 
 def _pending_action() -> PendingCriticalActionContext:
