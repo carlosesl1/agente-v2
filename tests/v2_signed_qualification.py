@@ -47,6 +47,7 @@ from v2_application.inbox import SQLiteInbox
 from v2_application.payments import (
     PaymentInitiationWorker,
     PaymentService,
+    SQLitePaymentInitiationStore,
 )
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reservations import V2ReservationExecutionAdapter
@@ -98,7 +99,7 @@ class StripeTransport:
         self.calls.append(request)
         return {
             "link_id": f"fake-link-{request.payment_id}",
-            "url": f"https://pay.invalid/{request.payment_id}",
+            "url": f"https://buy.stripe.com/test_{request.payment_id}",
         }
 
 
@@ -205,6 +206,22 @@ def qualification_settings(tmp_path: Path) -> V2Settings:
     )
 
 
+def open_qualification_container(settings: V2Settings) -> V2Container:
+    """Attach the fake-only payment queue without opening any real-effect gate."""
+
+    if type(settings) is not V2Settings or not settings.all_real_effect_gates_closed:
+        raise ValueError("qualification container requires every real-effect gate closed")
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    if container.payment_initiation is not None:
+        container.close()
+        raise RuntimeError("qualification payment queue must be fixture-owned")
+    container.payment_initiation = SQLitePaymentInitiationStore(
+        settings.sqlite_paths["payment_initiation"],
+        result_encryption_key=b"q" * 32,
+    )
+    return container
+
+
 class SignedQualificationRuntime:
     def __init__(self, tmp_path: Path, scenario: str) -> None:
         if scenario not in SHAPES:
@@ -215,6 +232,10 @@ class SignedQualificationRuntime:
         self.container = V2Container.open(
             settings=self.settings,
             role=V2Role.WORKER,
+        )
+        qualification_payment_store = SQLitePaymentInitiationStore(
+            self.settings.sqlite_paths["payment_initiation"],
+            result_encryption_key=b"q" * 32,
         )
         self.reservation_transports = {
             provider: ReservationTransport(provider)
@@ -270,9 +291,8 @@ class SignedQualificationRuntime:
             wise=self.wise,
             pix=PixInstructionAdapter(knowledge=self.knowledge),
         )
-        assert self.container.payment_initiation is not None
         self.payment_worker = PaymentInitiationWorker(
-            store=self.container.payment_initiation,
+            store=qualification_payment_store,
             payments=self.payment_service,
             worker_id="worker:signed-e2e:payment-initiation",
             lease_ttl=timedelta(seconds=30),
@@ -331,6 +351,7 @@ class SignedQualificationRuntime:
             settings=self.settings,
         )
         self.cycle = build_worker_cycle(self.container, factory_workers)
+        self.container.payment_initiation = qualification_payment_store
 
     def close(self) -> None:
         self.container.close()

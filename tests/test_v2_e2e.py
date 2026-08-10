@@ -32,9 +32,12 @@ from v2_contracts.payments import (
     PaymentSelection,
 )
 from v2_contracts.providers import ProviderWriteAuthorization
-from v2_host.composition import V2Container, V2Role
+from v2_host.composition import V2Container
 from v2_host.settings import V2Settings
-from tests.v2_signed_qualification import SignedQualificationRuntime
+from tests.v2_signed_qualification import (
+    SignedQualificationRuntime,
+    open_qualification_container,
+)
 from tests.v2_payment_display_fixtures import synthetic_payment_display_details
 
 
@@ -70,7 +73,7 @@ class StripeTransport:
         self.calls.append(request)
         return {
             "link_id": f"fake-link-{request.payment_id}",
-            "url": f"https://pay.invalid/{request.payment_id}",
+            "url": f"https://buy.stripe.com/test_{request.payment_id}",
         }
 
 
@@ -256,7 +259,7 @@ def test_lodging_stripe_qualification_has_one_effect_per_idempotency_key(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
-    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    container = open_qualification_container(settings)
     try:
         _queue(container, "cloudbeds", "workflow:e2e:lodging-stripe")
         worker, transports = _reservation_worker(container, ("cloudbeds",))
@@ -290,7 +293,7 @@ def test_lodging_stripe_qualification_has_one_effect_per_idempotency_key(
 def test_activity_pix_qualification_uses_knowledge_and_no_stripe(
     tmp_path: Path,
 ) -> None:
-    container = V2Container.open(settings=_settings(tmp_path), role=V2Role.WORKER)
+    container = open_qualification_container(_settings(tmp_path))
     try:
         _queue(container, "bokun", "workflow:e2e:activity-pix")
         worker, transports = _reservation_worker(container, ("bokun",))
@@ -323,7 +326,7 @@ def test_activity_pix_qualification_uses_knowledge_and_no_stripe(
 def test_package_wise_qualification_keeps_components_and_units_separate(
     tmp_path: Path,
 ) -> None:
-    container = V2Container.open(settings=_settings(tmp_path), role=V2Role.WORKER)
+    container = open_qualification_container(_settings(tmp_path))
     try:
         _queue(container, "cloudbeds", "workflow:e2e:package:hostel")
         _queue(container, "bokun", "workflow:e2e:package:agency")
