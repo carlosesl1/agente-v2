@@ -4288,6 +4288,9 @@ def test_short_inert_reaffirmation_after_queue_reports_existing_processing() -> 
                 facts=(),
                 read_requests=(),
                 effect_proposals=(),
+                clarification_question=(
+                    "Qual opção você prefere: dormitório ou quarto privativo?"
+                ),
             )
         ]
 

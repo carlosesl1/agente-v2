@@ -124,6 +124,32 @@ def test_private_dialogue_store_rejects_divergent_replay(tmp_path) -> None:
         _record(store, 1, customer_message="divergent customer message")
 
 
+def test_private_dialogue_retention_uses_commit_order_when_timestamps_tie(
+    tmp_path,
+) -> None:
+    store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
+    instant = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    turn_ids = ("turn:z", "turn:y", "turn:x", "turn:w", "turn:a")
+    for index, turn_id in enumerate(turn_ids, start=1):
+        store.record_dialogue_turn(
+            lead_id="lead:context",
+            source_turn_id=turn_id,
+            source_event_hash=f"{index:064x}",
+            customer_message=f"customer message {index}",
+            assistant_reply_chunks=(f"assistant reply {index}",),
+            committed_at=instant,
+        )
+
+    assert tuple(
+        item.customer_message for item in store.load_recent_dialogue("lead:context")
+    ) == (
+        "customer message 2",
+        "customer message 3",
+        "customer message 4",
+        "customer message 5",
+    )
+
+
 def test_private_dialogue_store_detects_content_tampering(tmp_path) -> None:
     store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
     _record(store, 1)

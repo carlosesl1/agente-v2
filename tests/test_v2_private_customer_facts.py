@@ -353,6 +353,62 @@ def test_store_rejects_schema_with_required_checks_removed(tmp_path: Path) -> No
         SQLitePrivateCustomerFactStore(path)
 
 
+def test_incompatible_open_rolls_back_all_new_schema_objects(tmp_path: Path) -> None:
+    path = tmp_path / "private-customer-atomic-open.sqlite3"
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE private_customer_fact_turns (
+                lead_id TEXT NOT NULL,
+                source_turn_id TEXT NOT NULL,
+                source_event_hash TEXT NOT NULL,
+                fact_names_json TEXT NOT NULL,
+                private_content_hash TEXT NOT NULL,
+                persisted_at TEXT NOT NULL,
+                unexpected TEXT,
+                PRIMARY KEY (lead_id, source_turn_id)
+            ) STRICT;
+            CREATE TABLE private_customer_facts (
+                lead_id TEXT NOT NULL,
+                fact_name TEXT NOT NULL CHECK (
+                    fact_name IN ('full_name','email','country_code','birth_date','gender')
+                ),
+                private_value TEXT NOT NULL,
+                value_hash TEXT NOT NULL,
+                source_turn_id TEXT NOT NULL,
+                source_event_hash TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision >= 1),
+                persisted_at TEXT NOT NULL,
+                PRIMARY KEY (lead_id, fact_name)
+            ) STRICT;
+            """
+        )
+        before = tuple(
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+        )
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        SQLitePrivateCustomerFactStore(path)
+
+    reopened = sqlite3.connect(path)
+    try:
+        after = tuple(
+            row[0]
+            for row in reopened.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+        )
+    finally:
+        reopened.close()
+    assert after == before
+
+
 def test_store_load_rejects_tampered_value_and_unbacked_source(tmp_path: Path) -> None:
     store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer-tamper.sqlite3")
     try:

@@ -996,7 +996,10 @@ class HermesModelAdapter:
             ),
             progress_review_required=True,
         )
-        reviewed = self.complete_audited(review_request)
+        reviewed = self._complete_audited(
+            review_request,
+            allow_protocol_repair=False,
+        )
         return AuditedModelTurn.from_frames(
             proposal=reviewed.proposal,
             frames=(*turn.frames, *reviewed.frames),
@@ -1004,13 +1007,24 @@ class HermesModelAdapter:
         )
 
     def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
+        return self._complete_audited(request, allow_protocol_repair=True)
+
+    def _complete_audited(
+        self,
+        request: ModelRequest,
+        *,
+        allow_protocol_repair: bool,
+    ) -> AuditedModelTurn:
         if type(request) is not ModelRequest:
             raise TypeError("request must be an exact ModelRequest")
+        if type(allow_protocol_repair) is not bool:
+            raise TypeError("allow_protocol_repair must be an exact bool")
         if request.confirmation_review_required:
             base_prompt = _CONFIRMATION_REVIEW_SYSTEM_PROMPT
-            prompts = (
-                base_prompt,
-                base_prompt + "\n\n" + _CONFIRMATION_REVIEW_REPAIR_SUFFIX,
+            prompts = (base_prompt,) + (
+                (base_prompt + "\n\n" + _CONFIRMATION_REVIEW_REPAIR_SUFFIX,)
+                if allow_protocol_repair
+                else ()
             )
             wire = _confirmation_review_wire
 
@@ -1022,9 +1036,10 @@ class HermesModelAdapter:
 
         else:
             base_prompt = self._system_prompt
-            prompts = (
-                base_prompt,
-                base_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,
+            prompts = (base_prompt,) + (
+                (base_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,)
+                if allow_protocol_repair
+                else ()
             )
             wire = _request_wire
             decode = None

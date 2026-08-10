@@ -911,6 +911,67 @@ def test_adapter_revises_structural_noop_once_with_same_complete_context() -> No
     assert len(turn.frames) == 2
 
 
+def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None:
+    request = ModelRequest(
+        request_id="request:progress-review-budget",
+        lead_id="manychat:progress-review-budget",
+        source_event_id="batch:progress-review-budget",
+        message="I need a private room for two nights.",
+        locale="en",
+        state_version=0,
+    )
+    no_op = json.dumps(
+        {
+            "schema": "v2-model-proposal-v7",
+            "source_event_id": request.source_event_id,
+            "intent": "inform",
+            "reply_chunks": ["I am ready to help."],
+            "facts": [],
+            "read_requests": [],
+            "effect_proposals": [],
+            "target_offer_id": None,
+            "target_offer_ids": [],
+            "confirmed_summary_version": None,
+            "confirmed_action_kinds": [],
+            "approval_basis": None,
+            "selection_requested": False,
+            "pending_disposition": None,
+            "passengers": [],
+            "clarification_question": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    responses = [b"{}", no_op, b"{}", b"{}"]
+    review_flags: list[bool] = []
+
+    def run(command, **kwargs):
+        envelope = json.loads(kwargs["input"])
+        user = json.loads(envelope["messages"][-1][1])
+        review_flags.append(user["progress_review_required"])
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"x" * 32,
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert review_flags == [False, False, True]
+    assert turn.closure.ephemeral_session_id.startswith(
+        "deterministic:protocol-fallback:"
+    )
+
+
 def test_current_observation_normalizes_recursive_reads_without_second_inference() -> None:
     lodging_read = ReadRequest(
         request_id="batch:negative-package:read:lodging",

@@ -350,49 +350,6 @@ def _snapshot_hash(
     )
 
 
-_SCHEMA = """
-PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS private_customer_fact_turns (
-    lead_id TEXT NOT NULL,
-    source_turn_id TEXT NOT NULL,
-    source_event_hash TEXT NOT NULL,
-    fact_names_json TEXT NOT NULL,
-    private_content_hash TEXT NOT NULL,
-    persisted_at TEXT NOT NULL,
-    PRIMARY KEY (lead_id, source_turn_id)
-) STRICT;
-CREATE TABLE IF NOT EXISTS private_customer_facts (
-    lead_id TEXT NOT NULL,
-    fact_name TEXT NOT NULL CHECK (fact_name IN ('full_name','email','country_code','birth_date','gender')),
-    private_value TEXT NOT NULL,
-    value_hash TEXT NOT NULL,
-    source_turn_id TEXT NOT NULL,
-    source_event_hash TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK (revision >= 1),
-    persisted_at TEXT NOT NULL,
-    PRIMARY KEY (lead_id, fact_name)
-) STRICT;
-CREATE TABLE IF NOT EXISTS private_passenger_manifests (
-    lead_id TEXT NOT NULL PRIMARY KEY,
-    fact_json TEXT NOT NULL,
-    fact_hash TEXT NOT NULL,
-    source_turn_id TEXT NOT NULL,
-    source_event_hash TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK (revision >= 1),
-    persisted_at TEXT NOT NULL
-) STRICT;
-CREATE TABLE IF NOT EXISTS private_dialogue_turns (
-    lead_id TEXT NOT NULL,
-    source_turn_id TEXT NOT NULL,
-    source_event_hash TEXT NOT NULL,
-    customer_message TEXT NOT NULL,
-    assistant_reply_chunks_json TEXT NOT NULL,
-    private_content_hash TEXT NOT NULL,
-    committed_at TEXT NOT NULL,
-    PRIMARY KEY (lead_id, source_turn_id)
-) STRICT;
-"""
-
 _EXPECTED_SCHEMA = {
     "private_customer_fact_turns": (
         ("lead_id", "TEXT", 1, 1),
@@ -653,36 +610,40 @@ class SQLitePrivateCustomerFactStore:
         try:
             connection = sqlite3.connect(target, isolation_level=None)
             connection.execute("PRAGMA busy_timeout=5000")
-            existing = {
-                row[0]
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-                if row[0] in _EXPECTED_SCHEMA
-            }
-            legacy_tables = {
-                "private_customer_fact_turns",
-                "private_customer_facts",
-            }
-            if existing and not legacy_tables.issubset(existing):
-                raise RuntimeError("private customer schema is incompatible")
-            fact_schema_row = connection.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='private_customer_facts'"
-            ).fetchone()
-            if fact_schema_row is not None and "'birth_date'" not in fact_schema_row[0]:
-                legacy_fact_schema = _EXPECTED_TABLE_SQL[
-                    "private_customer_facts"
-                ].replace(
-                    "'country_code','birth_date','gender'",
-                    "'country_code'",
-                )
-                if _normalized_schema_sql(
-                    fact_schema_row[0]
-                ) != _normalized_schema_sql(legacy_fact_schema):
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                    if row[0] in _EXPECTED_SCHEMA
+                }
+                legacy_tables = {
+                    "private_customer_fact_turns",
+                    "private_customer_facts",
+                }
+                if existing and not legacy_tables.issubset(existing):
                     raise RuntimeError("private customer schema is incompatible")
-                connection.execute("BEGIN IMMEDIATE")
-                try:
+                fact_schema_row = connection.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='private_customer_facts'"
+                ).fetchone()
+                if (
+                    fact_schema_row is not None
+                    and "'birth_date'" not in fact_schema_row[0]
+                ):
+                    legacy_fact_schema = _EXPECTED_TABLE_SQL[
+                        "private_customer_facts"
+                    ].replace(
+                        "'country_code','birth_date','gender'",
+                        "'country_code'",
+                    )
+                    if _normalized_schema_sql(
+                        fact_schema_row[0]
+                    ) != _normalized_schema_sql(legacy_fact_schema):
+                        raise RuntimeError("private customer schema is incompatible")
                     connection.execute(
                         "ALTER TABLE private_customer_facts "
                         "RENAME TO private_customer_facts_legacy"
@@ -695,12 +656,20 @@ class SQLitePrivateCustomerFactStore:
                         "SELECT * FROM private_customer_facts_legacy"
                     )
                     connection.execute("DROP TABLE private_customer_facts_legacy")
-                    connection.execute("COMMIT")
-                except sqlite3.DatabaseError:
+                for table_sql in _EXPECTED_TABLE_SQL.values():
+                    connection.execute(
+                        table_sql.replace(
+                            "CREATE TABLE ",
+                            "CREATE TABLE IF NOT EXISTS ",
+                            1,
+                        )
+                    )
+                _validate_schema(connection)
+                connection.execute("COMMIT")
+            except (sqlite3.DatabaseError, RuntimeError):
+                if connection.in_transaction:
                     connection.execute("ROLLBACK")
-                    raise
-            connection.executescript(_SCHEMA)
-            _validate_schema(connection)
+                raise
         except (sqlite3.DatabaseError, RuntimeError):
             if connection is not None:
                 connection.close()
@@ -816,7 +785,7 @@ class SQLitePrivateCustomerFactStore:
                 "SELECT source_turn_id,source_event_hash,customer_message,"
                 "assistant_reply_chunks_json,private_content_hash,committed_at "
                 "FROM private_dialogue_turns WHERE lead_id=? "
-                "ORDER BY committed_at DESC,source_turn_id DESC LIMIT 4",
+                "ORDER BY committed_at DESC,rowid DESC LIMIT 4",
                 (canonical_lead,),
             ).fetchall()
         except sqlite3.DatabaseError:
@@ -920,7 +889,7 @@ class SQLitePrivateCustomerFactStore:
             self._connection.execute(
                 "DELETE FROM private_dialogue_turns WHERE lead_id=? AND source_turn_id "
                 "NOT IN (SELECT source_turn_id FROM private_dialogue_turns "
-                "WHERE lead_id=? ORDER BY committed_at DESC,source_turn_id DESC LIMIT 4)",
+                "WHERE lead_id=? ORDER BY committed_at DESC,rowid DESC LIMIT 4)",
                 (canonical_lead, canonical_lead),
             )
             self._connection.execute("COMMIT")

@@ -74,7 +74,7 @@ def is_regressive_post_command_reply(
         or proposal.passengers
     ):
         return False
-    return any("?" in chunk or "¿" in chunk for chunk in proposal.reply_chunks)
+    return proposal.clarification_question is not None
 
 
 def _request_matches_active_draft(

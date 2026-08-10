@@ -820,6 +820,7 @@ def _selection_binding_failure_proposal(
         proposal,
         intent="inform",
         reply_chunks=(reply,),
+        clarification_question=None,
         target_offer_id=None,
         target_offer_ids=(),
         selection_requested=False,
@@ -835,6 +836,7 @@ def _active_execution_guard_proposal(
         proposal,
         intent="inform",
         reply_chunks=execution_in_progress_reply(locale),
+        clarification_question=None,
         facts=(),
         read_requests=(),
         effect_proposals=(),
@@ -1998,6 +2000,7 @@ class V2TurnExecutor:
                 proposal = replace(
                     first_proposal,
                     reply_chunks=_consultation_reuse_fallback(projection.locale),
+                    clarification_question=None,
                 )
             (
                 second_private_facts,
@@ -2136,6 +2139,7 @@ class V2TurnExecutor:
                     proposal = replace(
                         first_proposal,
                         reply_chunks=proposal.reply_chunks,
+                        clarification_question=proposal.clarification_question,
                         read_requests=(),
                     )
                 proposal = preserve_initial_adjustment(first_proposal, proposal)
@@ -2162,6 +2166,7 @@ class V2TurnExecutor:
             proposal = replace(
                 proposal,
                 reply_chunks=execution_in_progress_reply(projection.locale),
+                clarification_question=None,
             )
         proposal = apply_positive_grounding(
             proposal,
