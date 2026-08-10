@@ -144,11 +144,12 @@ git commit -m "fix: preserve exact model reply chunks in parser"
 **Files:**
 - Modify: `v2_contracts/model.py:282-465`
 - Modify: `v2_adapters/hermes_model.py`
-- Modify: `scripts/phase8_hermes_child.py`
 - Modify: `config/v2_luna_system_prompt.txt`
 - Modify: `tests/test_v2_profile_and_model_grammar.py`
 - Modify: `tests/test_v2_hermes_model_adapter.py`
-- Modify: `tests/test_phase8_hermes_child.py`
+- Modify: `tests/test_v2_hermes_child.py`
+- Read/verify unchanged: `scripts/phase8_hermes_child.py`
+- Read/verify unchanged: `v2_host/hermes_child.py`
 
 **Interfaces:**
 - Produces: `PublicReplyCorrectionReason(str, Enum)` and `ModelRequest.public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()`.
@@ -175,6 +176,8 @@ class PublicReplyCorrectionReason(str, Enum):
 
 Assert the tuple is exact, unique, canonical by enum value, bounded to four reasons, and mutually exclusive with `progress_review_required`, `confirmation_review_required`, `selection_review_required`, and `recap_reuse_required`.
 
+Also add the Task 2 review's optional hardening: a v7 fixture whose decomposed/whitespace-padded clarification and corresponding reply chunk normalize to the same exact value while a separate first chunk remains unchanged and in order. Do not restore the old collapse assertion.
+
 - [ ] **Step 2: Implement the closed contract**
 
 Add to `ModelRequest`:
@@ -185,7 +188,7 @@ public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
 
 Validate exact enum instances, uniqueness, sorted canonical order, maximum four, and mutual exclusion with existing semantic review flags.
 
-- [ ] **Step 3: Extend the private wire and child schema**
+- [ ] **Step 3: Extend the private wire while preserving the closed child envelope**
 
 Serialize only reason enum values and the existing typed state/observations. Do not serialize private stored values, controller copy, or logs. Add a final high-salience prompt suffix:
 
@@ -198,17 +201,19 @@ Do not strengthen operational status beyond exact receipts.
 Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it.
 ```
 
+The child outer envelope remains exactly `{system_prompt, messages}`. Both child implementations are content-agnostic transports for the final current-request JSON, so do not add correction semantics or prose generation to either child. In `tests/test_v2_hermes_child.py`, prove the existing tool-free wrapper transports the correction reason values and final suffix without loading tools or changing the current-request payload.
+
 - [ ] **Step 4: Prove one bounded attempt**
 
-In adapter tests, make the first correction response invalid and assert there is no nested progress/confirmation/selection/correction call. The adapter may use its normal single protocol-repair frame, but the executor must never create a second correction request for the same turn.
+In adapter tests, make the first correction response invalid and assert there is no nested progress/confirmation/selection/correction call. The adapter may use its normal single protocol-repair frame, but it must never recursively create a second correction request. The executor's one-correction-request-per-turn gate is implemented and tested later in Task 5.
 
 - [ ] **Step 5: Run focused tests and commit**
 
 ```bash
-pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
-ruff check v2_contracts/model.py v2_adapters/hermes_model.py scripts/phase8_hermes_child.py
+pytest -q tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_v2_hermes_child.py
+ruff check v2_contracts/model.py v2_adapters/hermes_model.py
 
-git add v2_contracts/model.py v2_adapters/hermes_model.py scripts/phase8_hermes_child.py config/v2_luna_system_prompt.txt tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_phase8_hermes_child.py
+git add v2_contracts/model.py v2_adapters/hermes_model.py config/v2_luna_system_prompt.txt tests/test_v2_profile_and_model_grammar.py tests/test_v2_hermes_model_adapter.py tests/test_v2_hermes_child.py
 git commit -m "feat: add bounded model-owned public reply correction"
 ```
 
