@@ -33,14 +33,14 @@ from v2_contracts.model import (
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
-def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validation() -> None:
+def test_model_public_reply_chunks_preserve_valid_unicode_byte_exact() -> None:
     raw_text = "Opc\u0327a\u0303o econo\u0302mica disponi\u0301vel."
     assert raw_text != unicodedata.normalize("NFKC", raw_text)
     payload = {
         "schema": "v2-model-proposal-v2",
         "source_event_id": "batch:nfkc-model-reply-001",
         "intent": "inform",
-        "reply_chunks": [f"  {raw_text}  "],
+        "reply_chunks": [raw_text],
         "facts": [],
         "read_requests": [],
         "effect_proposals": [],
@@ -54,12 +54,8 @@ def test_model_public_reply_chunks_are_nfkc_normalized_before_boundary_validatio
         "batch:nfkc-model-reply-001",
     )
 
-    assert proposal.reply_chunks == (
-        unicodedata.normalize("NFKC", raw_text),
-    )
-    assert proposal.reply_chunks[0] == unicodedata.normalize(
-        "NFKC", proposal.reply_chunks[0]
-    )
+    assert proposal.reply_chunks == (raw_text,)
+    assert proposal.reply_chunks[0].encode("utf-8") == raw_text.encode("utf-8")
 
 
 def test_v7_parser_preserves_exact_reply_chunks_for_matching_clarification() -> None:
@@ -97,7 +93,7 @@ def test_v7_parser_preserves_exact_reply_chunks_for_matching_clarification() -> 
     assert turn.clarification_question == "Haverá alguma criança no grupo?"
 
 
-def test_v7_parser_normalizes_matching_clarification_without_collapsing_chunks() -> (
+def test_v7_parser_preserves_matching_unicode_clarification_byte_exact() -> (
     None
 ):
     raw_question = "Qual e\u0301 a pro\u0301xima data disponi\u0301vel?"
@@ -109,7 +105,7 @@ def test_v7_parser_normalizes_matching_clarification_without_collapsing_chunks()
         "intent": "inform",
         "reply_chunks": [
             "Contexto anterior preservado.",
-            f"  {raw_question}\n",
+            raw_question,
         ],
         "facts": [],
         "read_requests": [],
@@ -122,7 +118,7 @@ def test_v7_parser_normalizes_matching_clarification_without_collapsing_chunks()
         "selection_requested": False,
         "pending_disposition": None,
         "passengers": [],
-        "clarification_question": f"\t{raw_question}  ",
+        "clarification_question": raw_question,
     }
 
     turn = _proposal(
@@ -132,9 +128,9 @@ def test_v7_parser_normalizes_matching_clarification_without_collapsing_chunks()
 
     assert turn.reply_chunks == (
         "Contexto anterior preservado.",
-        normalized_question,
+        raw_question,
     )
-    assert turn.clarification_question == normalized_question
+    assert turn.clarification_question == raw_question
 
 
 def test_clarification_mismatch_invokes_protocol_repair_and_parser_rejects() -> None:

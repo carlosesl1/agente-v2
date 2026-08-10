@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
-import unicodedata
+
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
@@ -585,17 +585,9 @@ def _proposal(
         and pending_disposition == "preserve"
     ):
         pending_disposition = None
-    reply_chunks = tuple(
-        unicodedata.normalize("NFKC", item).strip()
-        if type(item) is str
-        else item
-        for item in _tuple_items(decoded["reply_chunks"], "reply_chunks")
-    )
+    reply_chunks = _tuple_items(decoded["reply_chunks"], "reply_chunks")
     clarification_question = (
-        unicodedata.normalize("NFKC", decoded["clarification_question"]).strip()
-        if schema == "v2-model-proposal-v7"
-        and type(decoded["clarification_question"]) is str
-        else decoded["clarification_question"]
+        decoded["clarification_question"]
         if schema == "v2-model-proposal-v7"
         else None
     )
