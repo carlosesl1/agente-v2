@@ -23,6 +23,7 @@ from v2_application.recovery import (
 )
 from v2_application.reservations import V2ReservationExecutionAdapter
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
@@ -234,6 +235,7 @@ def _deliver(container: V2Container, message_id: str) -> ManyChatTransport:
         message_id=message_id,
         channel="manychat",
         chunks=("Resultado qualificado com providers locais.",),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
     assert container.public_outbox.enqueue(reply, now=NOW) == 1
     assert container.public_outbox.enqueue(reply, now=NOW) == 0

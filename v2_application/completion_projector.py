@@ -19,6 +19,7 @@ from reservation_execution.projection import LedgerSnapshot
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from v2_application.completion import PublicOutboxStore, PublicReply
 from v2_application.payments import SQLitePaymentInitiationStore
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.localization import (
     CustomerLanguage,
     customer_language_from_phone,
@@ -116,6 +117,7 @@ class CompletionProjector:
                     ),
                     channel="manychat",
                     chunks=(_confirmation_text(tuple(item[0] for item in members)),),
+                    author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
                 ),
                 now=instant,
             )
@@ -154,6 +156,7 @@ class CompletionProjector:
                     message_id=message_id,
                     channel="manychat",
                     chunks=(text,),
+                    author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
                 ),
                 now=instant,
             )

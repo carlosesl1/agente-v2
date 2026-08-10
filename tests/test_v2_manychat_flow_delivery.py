@@ -10,6 +10,7 @@ from v2_application.completion import (
     PublicOutboxStore,
     PublicReply,
 )
+from v2_contracts.channel import PublicMessageAuthor
 
 NOW = datetime(2026, 7, 24, 18, 0, tzinfo=timezone.utc)
 
@@ -61,6 +62,7 @@ def test_reply_and_payment_use_typed_custom_fields_then_flows(tmp_path) -> None:
             message_id="message:reply:flow",
             channel="manychat",
             chunks=("Resposta da Maya.",),
+            author=PublicMessageAuthor.MAYA,
         ),
         now=NOW,
     )
@@ -74,6 +76,7 @@ def test_reply_and_payment_use_typed_custom_fields_then_flows(tmp_path) -> None:
                 "Link de pagamento da hospedagem: "
                 "https://buy.stripe.com/test_completion",
             ),
+            author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
         ),
         now=NOW,
     )
@@ -142,6 +145,7 @@ def test_manychat_success_without_request_ids_persists_only_correlations(tmp_pat
             message_id="message:reply:correlation-only",
             channel="manychat",
             chunks=("Resposta sem request id externo.",),
+            author=PublicMessageAuthor.MAYA,
         ),
         now=NOW,
     )
@@ -186,6 +190,7 @@ def test_partial_manychat_mutation_is_manual_review_without_resend(tmp_path) -> 
             message_id="message:reply:partial",
             channel="manychat",
             chunks=("Mensagem parcial.",),
+            author=PublicMessageAuthor.MAYA,
         ),
         now=NOW,
     )
@@ -219,6 +224,7 @@ def test_first_manychat_connect_failure_requeues(tmp_path) -> None:
             message_id="message:reply:not-called",
             channel="manychat",
             chunks=("Mensagem segura.",),
+            author=PublicMessageAuthor.MAYA,
         ),
         now=NOW,
     )
@@ -251,6 +257,7 @@ def test_delivery_allowlist_blocks_foreign_subscriber_before_transport(tmp_path)
             message_id="message:reply:foreign",
             channel="manychat",
             chunks=("Não deve sair.",),
+            author=PublicMessageAuthor.MAYA,
         ),
         now=NOW,
     )

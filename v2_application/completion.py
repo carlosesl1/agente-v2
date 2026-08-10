@@ -15,6 +15,7 @@ from v2_contracts.channel import (
     PublicDeliveryNotCalled,
     PublicDeliveryRejected,
     PublicDeliveryUnknown,
+    PublicMessageAuthor,
 )
 
 
@@ -80,6 +81,7 @@ class PublicReply:
     message_id: str
     channel: str
     chunks: tuple[str, ...]
+    author: PublicMessageAuthor
 
     def __post_init__(self) -> None:
         for name in ("release_id", "lead_id", "message_id", "channel"):
@@ -92,6 +94,8 @@ class PublicReply:
             type(chunk) is not str or not chunk.strip() for chunk in self.chunks
         ):
             raise ValueError("chunks must be a non-empty exact text tuple")
+        if type(self.author) is not PublicMessageAuthor:
+            raise TypeError("author must be exact PublicMessageAuthor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +106,7 @@ class PublicClaim:
     source_message_id: str
     chunk_index: int
     text: str
+    author: PublicMessageAuthor
     worker_id: str
     fencing_token: int
     lease_expires_at: datetime
@@ -134,6 +139,8 @@ CREATE TABLE public_outbox (
   acceptance_json TEXT,
   acceptance_hash TEXT,
   updated_at TEXT NOT NULL,
+  author TEXT NOT NULL DEFAULT 'authenticated_system'
+    CHECK(author IN ('maya','authenticated_system')),
   UNIQUE(release_id, chunk_index)
 ) STRICT
 """
@@ -157,6 +164,7 @@ _PUBLIC_OUTBOX_COLUMNS = (
     "acceptance_json",
     "acceptance_hash",
     "updated_at",
+    "author",
 )
 
 
@@ -182,11 +190,14 @@ def _migrate_checkpoint_schema(connection: sqlite3.Connection) -> None:
     actual_columns = tuple(
         item[1] for item in connection.execute("PRAGMA table_info(public_outbox)")
     )
-    legacy_columns = tuple(
-        item for item in _PUBLIC_OUTBOX_COLUMNS if item not in {"acceptance_json", "acceptance_hash"}
-    )
-    if "'manual_review'" not in row[0] and actual_columns == legacy_columns:
-        columns = ",".join(legacy_columns)
+    expected_columns = set(_PUBLIC_OUTBOX_COLUMNS)
+    legacy_columns = expected_columns - {
+        "author",
+        "acceptance_json",
+        "acceptance_hash",
+    }
+    if "'manual_review'" not in row[0] and set(actual_columns) == legacy_columns:
+        columns = ",".join(actual_columns)
         connection.execute("BEGIN IMMEDIATE")
         try:
             connection.execute(
@@ -204,11 +215,21 @@ def _migrate_checkpoint_schema(connection: sqlite3.Connection) -> None:
                 connection.execute("ROLLBACK")
             raise
         return
-    if "'manual_review'" in row[0] and actual_columns == legacy_columns:
+    if "'manual_review'" in row[0] and set(actual_columns) == legacy_columns:
         connection.execute("ALTER TABLE public_outbox ADD COLUMN acceptance_json TEXT")
         connection.execute("ALTER TABLE public_outbox ADD COLUMN acceptance_hash TEXT")
+        actual_columns = tuple(
+            item[1]
+            for item in connection.execute("PRAGMA table_info(public_outbox)")
+        )
+    if set(actual_columns) == expected_columns - {"author"}:
+        connection.execute(
+            "ALTER TABLE public_outbox ADD COLUMN author TEXT NOT NULL "
+            "DEFAULT 'authenticated_system' "
+            "CHECK(author IN ('maya','authenticated_system'))"
+        )
         return
-    if actual_columns != _PUBLIC_OUTBOX_COLUMNS:
+    if set(actual_columns) != expected_columns:
         raise RuntimeError("public outbox checkpoint schema is not migratable")
 
 
@@ -236,16 +257,26 @@ class PublicOutboxStore:
             for index, text in enumerate(reply.chunks):
                 outbox_id = _outbox_id(reply, index)
                 row = self._connection.execute(
-                    "SELECT release_id,lead_id,source_message_id,chunk_index,text FROM public_outbox WHERE outbox_id=?",
+                    "SELECT release_id,lead_id,source_message_id,chunk_index,text,author "
+                    "FROM public_outbox WHERE outbox_id=?",
                     (outbox_id,),
                 ).fetchone()
-                expected = (reply.release_id, reply.lead_id, reply.message_id, index, text)
+                expected = (
+                    reply.release_id,
+                    reply.lead_id,
+                    reply.message_id,
+                    index,
+                    text,
+                    reply.author.value,
+                )
                 if row is not None:
                     if row != expected:
                         raise RuntimeError("public outbox identity conflict")
                     continue
                 self._connection.execute(
-                    "INSERT INTO public_outbox (outbox_id,release_id,lead_id,source_message_id,chunk_index,text,status,updated_at) VALUES (?,?,?,?,?,?,'pending',?)",
+                    "INSERT INTO public_outbox "
+                    "(outbox_id,release_id,lead_id,source_message_id,chunk_index,text,"
+                    "author,status,updated_at) VALUES (?,?,?,?,?,?,?,'pending',?)",
                     (outbox_id, *expected, now_text),
                 )
                 inserted += 1
@@ -271,7 +302,8 @@ class PublicOutboxStore:
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             row = self._connection.execute(
-                "SELECT outbox_id,release_id,lead_id,source_message_id,chunk_index,text,fencing_token FROM public_outbox "
+                "SELECT outbox_id,release_id,lead_id,source_message_id,chunk_index,text,"
+                "author,fencing_token FROM public_outbox "
                 "WHERE status='pending' OR (status='leased' AND lease_expires_at<=?) "
                 "ORDER BY release_id,chunk_index LIMIT 1",
                 (now_text,),
@@ -279,13 +311,19 @@ class PublicOutboxStore:
             if row is None:
                 self._connection.execute("COMMIT")
                 return None
-            token = row[6] + 1
+            token = row[7] + 1
             self._connection.execute(
                 "UPDATE public_outbox SET status='leased',claim_owner=?,fencing_token=?,lease_expires_at=?,updated_at=? WHERE outbox_id=?",
                 (worker_id, token, expires_text, now_text, row[0]),
             )
             self._connection.execute("COMMIT")
-            return PublicClaim(*row[:6], worker_id, token, expires)
+            return PublicClaim(
+                *row[:6],
+                PublicMessageAuthor(row[6]),
+                worker_id,
+                token,
+                expires,
+            )
         except BaseException:
             if self._connection.in_transaction:
                 self._connection.execute("ROLLBACK")

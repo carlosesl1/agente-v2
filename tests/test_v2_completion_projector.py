@@ -25,6 +25,7 @@ from v2_application.completion_projector import (
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.reservations import ReservationAllocator
 from v2_contracts.localization import CustomerLanguage
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.payments import BusinessUnit, PaymentMethod
 
 
@@ -227,10 +228,14 @@ def test_package_confirmation_and_two_links_enter_public_outbox_once(
         assert first.inserted == 3
         assert replay.inserted == 0
         rows = public._connection.execute(
-            "SELECT release_id,text FROM public_outbox ORDER BY release_id,chunk_index"
+            "SELECT release_id,text,author FROM public_outbox "
+            "ORDER BY release_id,chunk_index"
         ).fetchall()
         assert len(rows) == 3
         texts = tuple(row[1] for row in rows)
+        assert {
+            PublicMessageAuthor(row[2]) for row in rows
+        } == {PublicMessageAuthor.AUTHENTICATED_SYSTEM}
         assert sum("confirmad" in text.casefold() for text in texts) == 1
         assert sum("https://buy.stripe.com/" in text for text in texts) == 2
         assert all("product:" not in text for text in texts)

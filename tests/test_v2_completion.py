@@ -23,6 +23,7 @@ from v2_contracts.channel import (
     PublicAcceptanceOperation,
     PublicAcceptanceState,
     PublicChannelAcceptance,
+    PublicMessageAuthor,
 )
 
 
@@ -130,6 +131,7 @@ def test_public_outbox_delivery_receipt_is_idempotent(tmp_path) -> None:
         message_id="message:001",
         channel="manychat",
         chunks=("Reserva confirmada.", "Confira os próximos passos."),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
     assert store.enqueue(reply, now=NOW) == 2
     assert store.enqueue(reply, now=NOW) == 0
@@ -154,6 +156,10 @@ def test_public_outbox_delivery_receipt_is_idempotent(tmp_path) -> None:
         for evidence in store.acceptance_evidence(reply.release_id)
     )
     assert len(delivery.calls) == 2
+    assert all(
+        claim.author is PublicMessageAuthor.AUTHENTICATED_SYSTEM
+        for claim in delivery.calls
+    )
 
 
 def test_delivery_failure_requeues_without_touching_upstream_effects(tmp_path) -> None:
@@ -164,6 +170,7 @@ def test_delivery_failure_requeues_without_touching_upstream_effects(tmp_path) -
         message_id="message:failure",
         channel="manychat",
         chunks=("Mensagem segura.",),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
     store.enqueue(reply, now=NOW)
     delivery = Delivery(fail=True)
@@ -189,6 +196,7 @@ def test_manychat_adapter_uses_subscriber_and_stable_outbox_identity(tmp_path) -
         message_id="message:manychat-success",
         channel="manychat",
         chunks=("Mensagem pública.",),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
     store.enqueue(reply, now=NOW)
     claim = store.claim(
@@ -216,6 +224,7 @@ def test_manychat_pre_send_failure_requeues_but_unknown_never_resends(tmp_path) 
             message_id=f"message:{name}",
             channel="manychat",
             chunks=("Mensagem pública.",),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
         )
         store.enqueue(reply, now=NOW)
         transport = ManyChatTransport(behavior)
@@ -276,6 +285,7 @@ def test_public_outbox_migrates_checkpoint_schema_before_unknown_outcome(tmp_pat
         message_id="message:migrated",
         channel="manychat",
         chunks=("Mensagem pública.",),
+        author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
     )
     store.enqueue(reply, now=NOW)
     worker = PublicDeliveryWorker(
@@ -328,6 +338,7 @@ def test_public_outbox_adds_acceptance_columns_to_modern_checkpoint(tmp_path) ->
             NOW.isoformat(),
         ),
     )
+    connection.commit()
     connection.close()
 
     store = PublicOutboxStore(path)
@@ -335,7 +346,10 @@ def test_public_outbox_adds_acceptance_columns_to_modern_checkpoint(tmp_path) ->
         columns = {
             row[1] for row in store._connection.execute("PRAGMA table_info(public_outbox)")
         }
-        assert {"acceptance_json", "acceptance_hash"}.issubset(columns)
+        assert {"acceptance_json", "acceptance_hash", "author"}.issubset(columns)
+        assert store._connection.execute(
+            "SELECT author FROM public_outbox WHERE outbox_id='public:legacy-terminal'"
+        ).fetchone() == (PublicMessageAuthor.AUTHENTICATED_SYSTEM.value,)
         delivery = Delivery()
         worker = PublicDeliveryWorker(
             store=store,
@@ -345,5 +359,10 @@ def test_public_outbox_adds_acceptance_columns_to_modern_checkpoint(tmp_path) ->
         )
         assert worker.run_once(now=NOW + timedelta(seconds=1)).value == "idle"
         assert delivery.calls == []
+        store.close()
+        store = PublicOutboxStore(path)
+        assert store._connection.execute(
+            "SELECT author FROM public_outbox WHERE outbox_id='public:legacy-terminal'"
+        ).fetchone() == (PublicMessageAuthor.AUTHENTICATED_SYSTEM.value,)
     finally:
         store.close()

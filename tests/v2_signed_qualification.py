@@ -52,6 +52,7 @@ from v2_application.payments import (
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reservations import V2ReservationExecutionAdapter
 from v2_application.workers import V2ReservationWorker
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.localization import CustomerLanguage
 from v2_contracts.payments import (
     BusinessUnit,
@@ -453,6 +454,7 @@ class SignedQualificationRuntime:
                 message_id=f"message:signed:{self.scenario}",
                 channel="manychat",
                 chunks=("Resultado qualificado com providers locais.",),
+                author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
             ),
             now=SIGNED_NOW,
         )
