@@ -8,12 +8,19 @@ import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from deploy.verify_runtime_identity import (
+    RuntimeIdentityError,
+    verify_runtime_identity_file,
+)
+
 Forward = Callable[[str, bytes, dict[str, str]], Awaitable[tuple[int, bytes, str]]]
 ReadyProbe = Callable[[str], Awaitable[bool]]
+IdentityProbe = Callable[[], Awaitable[bool]]
 
 
 def _first_text(*values: object) -> str:
@@ -215,9 +222,10 @@ def build_app(
     v2_url: str,
     v2_ready_url: str,
     legacy_url: str,
-    cutover_deadline: datetime,
+    cutover_deadline: datetime | None,
     forward: Forward = _http_forward,
     ready_probe: ReadyProbe = _http_ready,
+    identity_probe: IdentityProbe,
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     max_body_bytes: int = 65_536,
 ) -> FastAPI:
@@ -231,27 +239,41 @@ def build_app(
         or not legacy_url.startswith("http://")
     ):
         raise ValueError("relay upstreams must be private HTTP URLs")
-    if (
+    if cutover_deadline is not None and (
         type(cutover_deadline) is not datetime
         or cutover_deadline.tzinfo is None
         or cutover_deadline.utcoffset() != timezone.utc.utcoffset(cutover_deadline)
     ):
         raise ValueError("cutover deadline must be an exact UTC datetime")
-    if not callable(ready_probe) or not callable(clock):
+    if not callable(ready_probe) or not callable(identity_probe) or not callable(clock):
         raise TypeError("relay probe and clock must be callable")
     if type(max_body_bytes) is not int or max_body_bytes < 1:
         raise ValueError("max body bytes must be positive")
 
     app = FastAPI(title="Maya V2 Canary Relay", docs_url=None, redoc_url=None)
 
+    async def runtime_identity_ready() -> bool:
+        try:
+            return (await identity_probe()) is True
+        except Exception:
+            return False
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {
             "status": "alive",
             "canary_route": (
-                "eligible" if clock() < cutover_deadline else "legacy_only"
+                "eligible"
+                if cutover_deadline is None or clock() < cutover_deadline
+                else "legacy_only"
             ),
         }
+
+    @app.get("/readyz")
+    async def readyz() -> Response:
+        if not await runtime_identity_ready():
+            return JSONResponse(status_code=503, content={"status": "unready"})
+        return JSONResponse(status_code=200, content={"status": "ready"})
 
     @app.post("/webhook/manychat")
     async def manychat(request: Request) -> Response:
@@ -278,9 +300,19 @@ def build_app(
         except (UnicodeError, json.JSONDecodeError, ValueError):
             return JSONResponse(status_code=400, content={"status": "invalid"})
 
+        if not await runtime_identity_ready():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "runtime_identity_rejected"},
+            )
+
         is_canary_target = subscriber_id == allowed_subscriber_id
         select_v2 = is_canary_target
-        if is_canary_target and clock() >= cutover_deadline:
+        if (
+            is_canary_target
+            and cutover_deadline is not None
+            and clock() >= cutover_deadline
+        ):
             return JSONResponse(status_code=503, content={"status": "canary_closed"})
         if select_v2:
             try:
@@ -317,6 +349,17 @@ def build_app(
                 "X-Hermes-Webhook-Secret": shared_secret,
                 "Content-Type": "application/json",
             }
+        if not await runtime_identity_ready():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "runtime_identity_rejected"},
+            )
+        if (
+            select_v2
+            and cutover_deadline is not None
+            and clock() >= cutover_deadline
+        ):
+            return JSONResponse(status_code=503, content={"status": "canary_closed"})
         try:
             status, response_body, content_type = await forward(
                 target, outbound_body, outbound_headers
@@ -332,7 +375,23 @@ def build_app(
 
 def create_app_from_env() -> FastAPI:
     max_body = int(os.environ.get("CANARY_MAX_BODY_BYTES", "65536"))
-    deadline = _parse_time(os.environ["CANARY_CUTOVER_DEADLINE"])
+    deadline_text = os.environ.get("CANARY_CUTOVER_DEADLINE", "").strip()
+    deadline = _parse_time(deadline_text) if deadline_text else None
+
+    async def identity_probe() -> bool:
+        try:
+            verify_runtime_identity_file(
+                expected_git_sha=os.environ["CANARY_EXPECTED_GIT_SHA"],
+                expected_image_ref=os.environ["CANARY_EXPECTED_IMAGE_REF"],
+                expected_image_digest=os.environ["CANARY_EXPECTED_IMAGE_DIGEST"],
+                metadata_path=Path(
+                    os.environ["CANARY_RUNTIME_IDENTITY_METADATA_PATH"]
+                ),
+            )
+        except (OSError, RuntimeIdentityError):
+            return False
+        return True
+
     return build_app(
         shared_secret=os.environ["CANARY_WEBHOOK_SECRET"],
         allowed_subscriber_id=os.environ["CANARY_SUBSCRIBER_ID"],
@@ -340,6 +399,7 @@ def create_app_from_env() -> FastAPI:
         v2_ready_url=os.environ["CANARY_V2_READY_URL"],
         legacy_url=os.environ["CANARY_LEGACY_URL"],
         cutover_deadline=deadline,
+        identity_probe=identity_probe,
         max_body_bytes=max_body,
     )
 

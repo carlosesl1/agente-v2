@@ -9,13 +9,14 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.v2.yaml"
 PROMPT = ROOT / "config/v2_luna_system_prompt.txt"
+WORKFLOW = ROOT / ".github/workflows/phase8.yml"
 
 
 def _environment() -> dict[str, object]:
     payload = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     assert type(payload) is dict
     services = payload["services"]
-    assert set(services) == {"api", "worker"}
+    assert set(services) == {"router", "api", "worker"}
     api = services["api"]
     worker = services["worker"]
     api_environment = api["environment"]
@@ -43,19 +44,67 @@ def test_compose_pins_image_and_runtime_identity() -> None:
             "${V2_IMAGE_REF:?set V2_IMAGE_REF to an immutable repository@sha256 digest}"
         )
         assert service["user"] == "${V2_RUNTIME_UID:-1001}:${V2_RUNTIME_GID:-1001}"
-        assert "${V2_STATE_DIR:?set V2_STATE_DIR}:/data" in service["volumes"]
-        assert (
-            "${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}:"
-            "/run/v2/public-authority.json:ro"
-        ) in service["volumes"]
+    router = payload["services"]["router"]
     api = payload["services"]["api"]
     worker = payload["services"]["worker"]
-    assert "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes" not in api[
-        "volumes"
-    ]
-    assert "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes" in worker[
-        "volumes"
-    ]
+    assert router["ports"] == ["127.0.0.1:${V2_BIND_PORT:-18090}:8080"]
+    assert "ports" not in api
+    assert "ports" not in worker
+    assert set(router["networks"]) == {"v2-edge", "v2-backend"}
+    assert api["networks"] == ["v2-backend"]
+    assert worker["networks"] == ["v2-backend"]
+    assert set(payload["networks"]) == {"v2-edge", "v2-backend"}
+    for service in (api, worker):
+        targets = {volume["target"] for volume in service["volumes"]}
+        assert {"/data", "/run/v2/public-authority.json"} <= targets
+    worker_targets = {volume["target"] for volume in worker["volumes"]}
+    api_targets = {volume["target"] for volume in api["volumes"]}
+    assert "/hermes" not in api_targets
+    assert "/hermes" in worker_targets
+
+
+def test_router_composition_binds_immutable_identity_before_forwarding() -> None:
+    payload = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    router = payload["services"]["router"]
+    assert router["environment"] == {
+        "CANARY_WEBHOOK_SECRET": "${V2_MANYCHAT_WEBHOOK_SECRET:?set V2_MANYCHAT_WEBHOOK_SECRET}",
+        "CANARY_SUBSCRIBER_ID": "1873018537",
+        "CANARY_V2_URL": "http://api:8080/webhook/manychat",
+        "CANARY_V2_READY_URL": "http://api:8080/readyz",
+        "CANARY_LEGACY_URL": "${V2_LEGACY_URL:?set private legacy webhook URL}",
+        "CANARY_CUTOVER_DEADLINE": "${V2_CANARY_CUTOVER_DEADLINE:-}",
+        "CANARY_EXPECTED_GIT_SHA": "${V2_CANDIDATE_GIT_SHA:?set frozen candidate git sha}",
+        "CANARY_EXPECTED_IMAGE_REF": "${V2_IMAGE_REF:?set V2_IMAGE_REF to an immutable repository@sha256 digest}",
+        "CANARY_EXPECTED_IMAGE_DIGEST": "${V2_CANDIDATE_IMAGE_DIGEST:?set immutable image digest}",
+        "CANARY_RUNTIME_IDENTITY_METADATA_PATH": "/run/v2/runtime-identity.json",
+        "CANARY_MAX_BODY_BYTES": "${V2_MAX_WEBHOOK_BODY_BYTES:-65536}",
+    }
+    assert router["depends_on"] == {"api": {"condition": "service_healthy"}}
+    assert {volume["target"] for volume in router["volumes"]} == {
+        "/run/v2/runtime-identity.json"
+    }
+
+
+def test_ci_contract_covers_hermetic_operational_gates() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    for literal in (
+        "maya-v2-gap-remediation",
+        "docker compose --env-file \"$COMPOSE_TMP/compose.env\" -f compose.v2.yaml config --quiet",
+        "docker build",
+        "--network none",
+        "--read-only",
+        "TestClient(create_app_from_env())",
+        "CANARY_RUNTIME_IDENTITY_METADATA_PATH=/run/v2/runtime-identity.json",
+        "chmod 0444 \"$IDENTITY_FILE\"",
+        "tests/test_v2_canary_router.py",
+        "tests/test_v2_runtime_identity.py",
+        "tests/test_v2_worker_main.py",
+        "tests/test_v2_stripe_reconciliation.py",
+        "tests/test_v2_rollback_harness.py",
+    ):
+        assert literal in workflow
+    assert "/home/ubuntu/workspace" not in workflow
+    assert "agente-v2-deploy" not in workflow
 
 
 def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:

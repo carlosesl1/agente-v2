@@ -32,10 +32,61 @@ x-v2-runtime: &v2-runtime
     - ALL
 
 x-v2-state-volumes: &v2-state-volumes
-  - "${V2_STATE_DIR:?set V2_STATE_DIR}:/data"
-  - "${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}:/run/v2/public-authority.json:ro"
+  - type: bind
+    source: ${V2_STATE_DIR:?set V2_STATE_DIR}
+    target: /data
+  - type: bind
+    source: ${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}
+    target: /run/v2/public-authority.json
+    read_only: true
 
 services:
+  router:
+    <<: *v2-runtime
+    entrypoint: ["python", "-m", "uvicorn"]
+    command:
+      - deploy.canary_router:create_app_from_env
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    environment:
+      CANARY_WEBHOOK_SECRET: "${V2_MANYCHAT_WEBHOOK_SECRET:?set V2_MANYCHAT_WEBHOOK_SECRET}"
+      CANARY_SUBSCRIBER_ID: "1873018537"
+      CANARY_V2_URL: http://api:8080/webhook/manychat
+      CANARY_V2_READY_URL: http://api:8080/readyz
+      CANARY_LEGACY_URL: "${V2_LEGACY_URL:?set private legacy webhook URL}"
+      CANARY_CUTOVER_DEADLINE: "${V2_CANARY_CUTOVER_DEADLINE:-}"
+      CANARY_EXPECTED_GIT_SHA: "${V2_CANDIDATE_GIT_SHA:?set frozen candidate git sha}"
+      CANARY_EXPECTED_IMAGE_REF: "${V2_IMAGE_REF:?set V2_IMAGE_REF to an immutable repository@sha256 digest}"
+      CANARY_EXPECTED_IMAGE_DIGEST: "${V2_CANDIDATE_IMAGE_DIGEST:?set immutable image digest}"
+      CANARY_RUNTIME_IDENTITY_METADATA_PATH: /run/v2/runtime-identity.json
+      CANARY_MAX_BODY_BYTES: "${V2_MAX_WEBHOOK_BODY_BYTES:-65536}"
+    volumes:
+      - type: bind
+        source: ${V2_RUNTIME_IDENTITY_METADATA_HOST_PATH:?set runtime identity metadata path}
+        target: /run/v2/runtime-identity.json
+        read_only: true
+    ports:
+      - "127.0.0.1:${V2_BIND_PORT:-18090}:8080"
+    networks: [v2-edge, v2-backend]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json,urllib.request;
+          assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/readyz'))['status']=='ready'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   api:
     <<: *v2-runtime
     command: []
@@ -46,9 +97,8 @@ services:
       V2_API_HOST: 0.0.0.0
       V2_API_PORT: "8080"
       V2_MAX_WEBHOOK_BODY_BYTES: "${V2_MAX_WEBHOOK_BODY_BYTES:-65536}"
-    ports:
-      - "127.0.0.1:${V2_BIND_PORT:-18090}:8080"
     volumes: *v2-state-volumes
+    networks: [v2-backend]
     healthcheck:
       test:
         - CMD
@@ -111,6 +161,18 @@ services:
       V2_WORKER_FACTORY: v2_host.production:build_worker_set
       V2_WORKER_INTERVAL_SECONDS: "${V2_WORKER_INTERVAL_SECONDS:-0.25}"
     volumes:
-      - "${V2_STATE_DIR:?set V2_STATE_DIR}:/data"
-      - "${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}:/hermes"
-      - "${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}:/run/v2/public-authority.json:ro"
+      - type: bind
+        source: ${V2_STATE_DIR:?set V2_STATE_DIR}
+        target: /data
+      - type: bind
+        source: ${V2_HERMES_HOME_PATH:?set V2_HERMES_HOME_PATH}
+        target: /hermes
+      - type: bind
+        source: ${V2_PUBLIC_AUTHORITY_MANIFEST_HOST_PATH:?set authority manifest path}
+        target: /run/v2/public-authority.json
+        read_only: true
+    networks: [v2-backend]
+
+networks:
+  v2-edge: {}
+  v2-backend: {}

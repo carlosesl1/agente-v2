@@ -158,9 +158,10 @@ def test_api_and_worker_roles_have_least_privilege_and_concrete_readiness(
 def test_compose_uses_one_hardened_image_for_distinct_api_and_worker_roles() -> None:
     root = Path(__file__).resolve().parents[1]
     manifest = yaml.safe_load((root / "compose.v2.yaml").read_text())
+    router = manifest["services"]["router"]
     api = manifest["services"]["api"]
     worker = manifest["services"]["worker"]
-    assert api["image"] == worker["image"]
+    assert router["image"] == api["image"] == worker["image"]
     assert "V2_IMAGE_REF" in api["image"]
     assert "sha256" in api["image"]
     assert "build" not in api
@@ -170,7 +171,10 @@ def test_compose_uses_one_hardened_image_for_distinct_api_and_worker_roles() -> 
     assert api["security_opt"] == worker["security_opt"] == ["no-new-privileges:true"]
     assert "V2_WORKER_FACTORY" in worker["environment"]
     assert worker["environment"]["V2_WORKER_FACTORY"] == "v2_host.production:build_worker_set"
-    assert manifest["services"].keys() == {"api", "worker"}
+    assert set(manifest["services"]) == {"router", "api", "worker"}
+    assert "ports" in router
+    assert "ports" not in api
+    assert "ports" not in worker
 
 
 def test_runtime_image_excludes_test_tooling_and_carries_oci_identity() -> None:
