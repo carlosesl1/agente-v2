@@ -530,7 +530,12 @@ def _approval_basis(value: object) -> ApprovalBasis | None:
         raise InvalidModelProposal("approval basis is invalid") from exc
 
 
-def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
+def _proposal(
+    payload: bytes,
+    source_event_id: str,
+    *,
+    require_v7: bool = False,
+) -> ModelProposal:
     try:
         decoded = json.loads(payload, object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, UnicodeError) as exc:
@@ -538,6 +543,8 @@ def _proposal(payload: bytes, source_event_id: str) -> ModelProposal:
     if type(decoded) is not dict:
         raise InvalidModelProposal("model response fields mismatch")
     schema = decoded.get("schema")
+    if require_v7 and schema != "v2-model-proposal-v7":
+        raise InvalidModelProposal("model response schema mismatch")
 
     if schema == "v2-model-proposal-v1":
         expected_fields = _RESPONSE_FIELDS_V1
@@ -880,7 +887,11 @@ class HermesModelAdapter:
         )
         try:
             proposal = (
-                _proposal(response, request.source_event_id)
+                _proposal(
+                    response,
+                    request.source_event_id,
+                    require_v7=bool(request.public_reply_correction_reasons),
+                )
                 if decode is None
                 else decode(response)
             )

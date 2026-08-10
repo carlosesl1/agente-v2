@@ -1174,6 +1174,268 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
     )
 
 
+def _versioned_proposal_payload(
+    schema_version: int,
+    source_event_id: str,
+    *,
+    reply_chunks: tuple[str, ...],
+    facts: tuple[dict[str, str], ...] = (),
+) -> bytes:
+    payload: dict[str, object] = {
+        "schema": f"v2-model-proposal-v{schema_version}",
+        "source_event_id": source_event_id,
+        "intent": "inform",
+        "reply_chunks": list(reply_chunks),
+        "facts": list(facts),
+        "read_requests": [],
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "confirmed_summary_version": None,
+    }
+    if schema_version >= 2:
+        payload["target_offer_ids"] = []
+    if schema_version >= 3:
+        payload["confirmed_action_kinds"] = []
+        payload["approval_basis"] = None
+    if schema_version >= 4:
+        payload["selection_requested"] = False
+    if schema_version >= 5:
+        payload["pending_disposition"] = None
+    if schema_version >= 6:
+        payload["passengers"] = []
+    if schema_version >= 7:
+        payload["clarification_question"] = None
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+@pytest.mark.parametrize("legacy_schema_version", range(1, 7))
+def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
+    legacy_schema_version: int,
+) -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = ModelRequest(
+        request_id=f"request:correction-legacy-v{legacy_schema_version}",
+        lead_id=f"manychat:correction-legacy-v{legacy_schema_version}",
+        source_event_id=f"batch:correction-legacy-v{legacy_schema_version}",
+        message="Corrija a resposta mantendo a autoria da Maya.",
+        locale="pt-BR",
+        state_version=6,
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    legacy = _versioned_proposal_payload(
+        legacy_schema_version,
+        request.source_event_id,
+        reply_chunks=(f"Resposta legada v{legacy_schema_version} não publicável.",),
+    )
+    repaired_chunks = (
+        "Resposta corrigida pela Maya sem repetir dados privados.",
+        "Posso continuar ajudando por aqui.",
+    )
+    repaired = _versioned_proposal_payload(
+        7,
+        request.source_event_id,
+        reply_chunks=repaired_chunks,
+    )
+    responses = [legacy, repaired]
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("public reply correction attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"legacy-correction-transcript-key-01",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert len(seen) == 2
+    assert responses == []
+    assert len(turn.frames) == 2
+    assert [frame.response_bytes for frame in turn.frames] == [legacy, repaired]
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+    assert not turn.closure.ephemeral_session_id.startswith("deterministic:")
+    assert turn.proposal.source_event_id == request.source_event_id
+    assert turn.proposal.reply_chunks == repaired_chunks
+    assert turn.proposal.effect_proposals == ()
+    assert seen[0][1] == seen[1][1]
+    assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
+    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
+        ["private_value_exposure"],
+        ["private_value_exposure"],
+    ]
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
+
+
+@pytest.mark.parametrize("legacy_schema_version", range(1, 7))
+def test_ordinary_request_accepts_each_legacy_proposal_schema(
+    legacy_schema_version: int,
+) -> None:
+    request = ModelRequest(
+        request_id=f"request:ordinary-legacy-v{legacy_schema_version}",
+        lead_id=f"manychat:ordinary-legacy-v{legacy_schema_version}",
+        source_event_id=f"batch:ordinary-legacy-v{legacy_schema_version}",
+        message="Quero informações sobre o passeio.",
+        locale="pt-BR",
+        state_version=6,
+    )
+    reply_chunks = (f"Resposta comum no schema v{legacy_schema_version}.",)
+    response = _versioned_proposal_payload(
+        legacy_schema_version,
+        request.source_event_id,
+        reply_chunks=reply_chunks,
+        facts=({"name": "service", "value": "activity"},),
+    )
+    responses = [response]
+    seen: list[dict[str, object]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("ordinary legacy proposal attempted an unexpected child call")
+        envelope = json.loads(kwargs["input"])
+        seen.append(json.loads(envelope["messages"][-1][1]))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stderr=b"",
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"ordinary-legacy-transcript-key-0001",
+        run=run,
+        environ={},
+    )
+
+    turn = adapter.complete_audited(request)
+
+    assert len(seen) == 1
+    assert responses == []
+    assert seen[0]["public_reply_correction_reasons"] == []
+    assert len(turn.frames) == 1
+    assert turn.frames[0].response_bytes == response
+    assert turn.closure.ephemeral_session_id.startswith("uds:")
+    assert turn.proposal.reply_chunks == reply_chunks
+    assert turn.proposal.facts == (ModelFact("service", "activity"),)
+
+
+def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reason_type = model_contracts.PublicReplyCorrectionReason
+    request = ModelRequest(
+        request_id="request:correction-two-legacy-frames",
+        lead_id="manychat:correction-two-legacy-frames",
+        source_event_id="batch:correction-two-legacy-frames",
+        message="Corrija a resposta sem substituir a voz da Maya.",
+        locale="pt-BR",
+        state_version=6,
+        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+    )
+    legacy_frames = [
+        _versioned_proposal_payload(
+            1,
+            request.source_event_id,
+            reply_chunks=("Primeira resposta legada não publicável.",),
+        ),
+        _versioned_proposal_payload(
+            6,
+            request.source_event_id,
+            reply_chunks=("Segunda resposta legada não publicável.",),
+        ),
+    ]
+    responses = list(legacy_frames)
+    returned_frames: list[bytes] = []
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        if not responses:
+            pytest.fail("public reply correction attempted an unexpected third child call")
+        envelope = json.loads(kwargs["input"])
+        current = json.loads(envelope["messages"][-1][1])
+        seen.append((envelope["system_prompt"], current))
+        response = responses.pop(0)
+        returned_frames.append(response)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"PHASE8_RESULT\x00" + response,
+            stderr=b"",
+        )
+
+    def forbid_deterministic_proposal(*args, **kwargs):
+        pytest.fail("legacy correction exhaustion attempted a deterministic proposal")
+
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_fallback_proposal",
+        staticmethod(forbid_deterministic_proposal),
+    )
+    monkeypatch.setattr(
+        HermesModelAdapter,
+        "_recursive_read_fallback",
+        staticmethod(forbid_deterministic_proposal),
+    )
+    adapter = HermesModelAdapter(
+        command=("synthetic-tool-free-child",),
+        system_prompt="closed prompt",
+        timeout=10,
+        transcript_key=b"two-legacy-correction-key-00000001",
+        run=run,
+        environ={},
+    )
+
+    with pytest.raises(InvalidModelProposal) as captured:
+        adapter.complete_audited(request)
+
+    assert type(captured.value) is InvalidModelProposal
+    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
+    assert len(seen) == 2
+    assert responses == []
+    assert returned_frames == legacy_frames
+    assert all(
+        not frame.startswith(b"V2_DETERMINISTIC_FALLBACK")
+        for frame in returned_frames
+    )
+    assert all(json.loads(frame)["effect_proposals"] == [] for frame in returned_frames)
+    assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
+    assert seen[0][1] == seen[1][1]
+    assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
+    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
+        ["private_value_exposure"],
+        ["private_value_exposure"],
+    ]
+    for _, current in seen:
+        assert current["progress_review_required"] is False
+        assert current["confirmation_review_required"] is False
+        assert current["selection_review_required"] is False
+        assert current["recap_reuse_required"] is False
+
+
 def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() -> None:
     reason_type = model_contracts.PublicReplyCorrectionReason
     request = ModelRequest(
