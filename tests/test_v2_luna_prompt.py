@@ -85,6 +85,14 @@ def test_payer_correction_preserves_private_holder_and_commercial_gate() -> None
     )
 
 
+def test_private_holder_name_parts_never_enter_public_reply() -> None:
+    assert (
+        "não repita nomes inteiros, prenomes, sobrenomes nem qualquer parte do nome privado"
+        in PROMPT
+    )
+    assert "refira-se apenas como titular, pagador ou acompanhante" in PROMPT
+
+
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
     assert "`active_execution_status`" in PROMPT
     assert "uma reserva já está em processamento" in PROMPT
