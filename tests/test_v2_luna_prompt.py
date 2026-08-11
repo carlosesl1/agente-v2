@@ -7,6 +7,16 @@ PROMPT = (
 ).read_text(encoding="utf-8")
 
 
+def test_prompt_requires_direct_grounded_atendimento_process() -> None:
+    assert "Responda primeiro à pergunta direta do lead" in PROMPT
+    assert "não peça permissão para fazer uma consulta" in PROMPT
+    assert "Nunca deduza privacidade, banheiro, silêncio" in PROMPT
+    assert "preserve cada duração, distância, quantidade e etapa" in PROMPT
+    assert "não some trechos consecutivos" in PROMPT
+    assert "Só prometa verificar depois" in PROMPT
+    assert "acomodação restrita por gênero" in PROMPT
+
+
 def test_agency_card_link_is_bound_to_twenty_percent_fee_inclusive_deposit() -> None:
     assert "sinal obrigatório de 20% sobre o total final observado já com a taxa" in PROMPT
     assert "link de reserva no cartão cobra somente esse sinal de 20%" in PROMPT

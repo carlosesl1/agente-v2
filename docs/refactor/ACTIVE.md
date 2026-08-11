@@ -24,7 +24,9 @@
 - Plan: `docs/superpowers/plans/2026-08-11-maya-agent-process-and-read-enrichment.md`
 - Starting candidate: `496799ed0d8c30f9d966fdea9e9c86b546ac992e`; the audited candidate and its historical conversation root remain immutable.
 - Baseline affected gate: `114 passed` on the starting candidate. The global Python initially lacked pytest; the isolated worktree environment was created with `uv sync --extra runtime --extra dev` and no runtime service was changed.
-- Exact next gate: witness focused RED tests for official hostel knowledge, model process instructions, and the Cloudbeds room-description public name; then implement only the approved bounded changes. No push, deploy, restart, canary, OCI build, provider write, outbound message, payment initiation, or promotion is authorized.
+- Focused RED evidence: the shared-dorm query returned `conexao_feira_vindo_sul`; the new prompt process assertion was absent; and the Cloudbeds room-description payload lacked `room_public_name`.
+- Implemented affected gate: `121 passed` across prompt, Cérebro, Bókun reads, Cloudbeds/provider transports, and Hermes model adapter; `git diff --check` passed.
+- Exact next gate: freeze this bounded green increment, then run static checks and the canonical full test suite once. No push, deploy, restart, canary, OCI build, provider write, outbound message, payment initiation, or promotion is authorized.
 
 ## Required invariants
 

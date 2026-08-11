@@ -1086,6 +1086,15 @@ class CloudbedsHTTPTransport:
         )
         if selected is None:
             raise ProviderHTTPError("Cloudbeds room type no longer exists")
+        public_name = _first(
+            selected,
+            "roomTypeName",
+            "roomName",
+            "room_type_name",
+            "name",
+        )
+        if public_name is None:
+            raise ProviderHTTPError("Cloudbeds room type public name is unavailable")
         description = _first(selected, "roomTypeDescription", "roomDescription", "description") or "Descrição indisponível"
         raw_amenities = selected.get("amenities") or selected.get("roomTypeFeatures") or []
         amenities = []
@@ -1094,7 +1103,11 @@ class CloudbedsHTTPTransport:
                 value = _first(item, "name", "title") if isinstance(item, Mapping) else _text(item)
                 if value:
                     amenities.append(value)
-        return {"description": description, "amenities": amenities[:30]}
+        return {
+            "room_public_name": public_name,
+            "description": description,
+            "amenities": amenities[:30],
+        }
 
 
 class BokunGETAuditTransport:

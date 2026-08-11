@@ -184,6 +184,9 @@ class CloudbedsReadAdapter:
         )
         public = {
             "offer_id": request.offer_id,
+            "room_public_name": text(
+                response.get("room_public_name"), "room_public_name"
+            ),
             "description": text(response.get("description"), "description"),
             "amenities": response.get("amenities", []),
         }

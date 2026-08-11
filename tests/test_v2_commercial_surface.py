@@ -132,3 +132,46 @@ def test_versioned_cerebro_answers_through_productive_knowledge_adapter() -> Non
     assert observation.observed_at == NOW
     assert observation.public_payload["sources"]
     assert "check-in" in observation.public_payload["answer"].lower()
+
+
+def test_versioned_cerebro_answers_shared_dorm_and_private_room_questions() -> None:
+    adapter = KnowledgeReadAdapter(
+        transport=FileKnowledgeTransport((ROOT / "config/cerebro_faq.yaml").resolve()),
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+
+    shared = adapter.read(
+        ReadRequest(
+            request_id="read:knowledge:shared-dorm",
+            kind=ReadKind.KNOWLEDGE,
+            query="Nunca fiquei em hostel. Como funciona esse negócio de quarto compartilhado?",
+            locale="pt-BR",
+        )
+    )
+    private = adapter.read(
+        ReadRequest(
+            request_id="read:knowledge:private-room",
+            kind=ReadKind.KNOWLEDGE,
+            query="Quero um quarto só para o casal. Vocês têm quarto privativo?",
+            locale="pt-BR",
+        )
+    )
+    late_arrival = adapter.read(
+        ReadRequest(
+            request_id="read:knowledge:late-arrival",
+            kind=ReadKind.KNOWLEDGE,
+            query="Meu ônibus chega de madrugada. Como funciona o check-in fora do horário?",
+            locale="pt-BR",
+        )
+    )
+
+    assert shared.public_payload["sources"][0] == "hostel_quarto_compartilhado"
+    assert "4, 6 ou 8 camas" in shared.public_payload["answer"]
+    assert "armários individuais" in shared.public_payload["answer"]
+    assert private.public_payload["sources"][0] == "hostel_quarto_privativo"
+    assert "banheiro privativo" in private.public_payload["answer"]
+    assert "não garante silêncio" in private.public_payload["answer"]
+    assert late_arrival.public_payload["sources"][0] == "hostel_chegada_fora_recepcao"
+    assert "portaria funciona 24 horas" in late_arrival.public_payload["answer"]
+    assert "recepção é de 7h a 22h" in late_arrival.public_payload["answer"]

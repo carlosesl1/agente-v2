@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
 import httpx
 
+from v2_adapters.cloudbeds import CloudbedsReadAdapter
 from v2_adapters.manychat import ManyChatDeliveryAdapter, ManyChatTransportResponse
 from v2_adapters.provider_http import (
     BokunHTTPTransport,
     CloudbedsHTTPTransport,
     ManyChatHTTPTransport,
 )
+from v2_contracts.providers import ReadKind, ReadRequest
 
 
 def test_cloudbeds_transport_calls_native_read_endpoints_and_normalizes() -> None:
@@ -83,6 +86,87 @@ def test_cloudbeds_transport_calls_native_read_endpoints_and_normalizes() -> Non
     query = parse_qs(seen[0].url.query.decode())
     assert query["propertyID"] == ["property-1"]
     assert query["detailedRates"] == ["true"]
+
+
+def test_cloudbeds_room_description_exposes_selected_public_room_name() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getAvailableRoomTypes"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "propertyCurrency": {"currencyCode": "BRL"},
+                            "propertyRooms": [
+                                {
+                                    "roomTypeID": "rt-suite",
+                                    "roomRateID": "rr-suite",
+                                    "roomTypeName": "Suite Casal",
+                                    "roomsAvailable": 1,
+                                    "totalRate": "450.00",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        if request.url.path.endswith("getRoomTypes"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "roomTypeID": "rt-suite",
+                            "roomTypeName": "Suite Casal",
+                            "roomTypeDescription": "Quarto com cama de casal e banheiro privativo.",
+                            "roomTypeFeatures": ["Wi-Fi", "Banheiro privativo"],
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(200, request=request, json={"data": []})
+
+    transport = CloudbedsHTTPTransport(
+        api_key="cloudbeds-secret",
+        property_id="property-1",
+        base_url="https://api.cloudbeds.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter = CloudbedsReadAdapter(
+        transport=transport,
+        clock=SimpleNamespace(
+            now=lambda: datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+        ),
+        ttl=timedelta(minutes=5),
+    )
+    lodging = adapter.read(
+        ReadRequest(
+            request_id="read:lodging:room-description",
+            kind=ReadKind.LODGING,
+            check_in=date(2026, 8, 20),
+            check_out=date(2026, 8, 22),
+            adults=2,
+            children=0,
+        )
+    )
+    description = adapter.read(
+        ReadRequest(
+            request_id="read:room-description",
+            kind=ReadKind.ROOM_DESCRIPTION,
+            offer_id=lodging.public_payload["options"][0]["offer_id"],
+        )
+    )
+
+    assert description.public_payload == {
+        "offer_id": lodging.public_payload["options"][0]["offer_id"],
+        "room_public_name": "Suite Casal",
+        "description": "Quarto com cama de casal e banheiro privativo.",
+        "amenities": ["Wi-Fi", "Banheiro privativo"],
+    }
 
 
 def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map() -> None:

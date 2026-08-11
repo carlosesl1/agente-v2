@@ -1,6 +1,6 @@
 {
-  "version": "2026-07-18-payment-instructions-owned-by-hermes",
-  "source": "old_n8n_cerebro",
+  "version": "2026-08-11-hostel-official-facts",
+  "source": "old_n8n_cerebro+chapada_backpackers_public_site",
   "entries": [
     {
       "id": "cancelamento_48h_reembolso",
@@ -291,6 +291,57 @@
       ],
       "question": "A diária inclui café da manhã e quanto custa adicionar?",
       "answer": "O café da manhã é opcional, não está incluído automaticamente na diária e custa R$ 30,00 por pessoa, por dia."
+    },
+    {
+      "id": "hostel_quarto_compartilhado",
+      "topic": "hostel",
+      "tags": [
+        "quarto compartilhado",
+        "dormitório",
+        "dormitorio",
+        "beliche",
+        "hostel pela primeira vez",
+        "4 camas",
+        "6 camas",
+        "8 camas",
+        "feminino",
+        "misto",
+        "armário individual",
+        "banheiro privativo"
+      ],
+      "question": "Como funciona o quarto compartilhado do hostel?",
+      "answer": "No quarto compartilhado, cada hóspede reserva uma cama em um dormitório e divide o quarto com outros viajantes. O hostel oferece dormitórios femininos e mistos de 4, 6 ou 8 camas, com beliches confortáveis, armários individuais e banheiro privativo no próprio dormitório. Há também duas cozinhas compartilhadas equipadas, áreas comuns, chuveiro quente e WiFi."
+    },
+    {
+      "id": "hostel_quarto_privativo",
+      "topic": "hostel",
+      "tags": [
+        "quarto privativo",
+        "quarto privado",
+        "suíte",
+        "suite",
+        "casal",
+        "banheiro privativo",
+        "silêncio",
+        "silencioso"
+      ],
+      "question": "O hostel tem quarto privativo para casal e é silencioso?",
+      "answer": "O hostel oferece quartos privados, quartos familiares e suítes; as suítes são apresentadas com cama de casal e banheiro privativo. A informação pública não garante silêncio. Para afirmar comodidades ou características de uma opção disponível, consulte a descrição atual daquele quarto."
+    },
+    {
+      "id": "hostel_chegada_fora_recepcao",
+      "topic": "hostel",
+      "tags": [
+        "chegada tardia",
+        "chegar tarde",
+        "madrugada",
+        "check-in",
+        "recepção",
+        "portaria",
+        "fora do horário"
+      ],
+      "question": "Posso chegar tarde ou de madrugada para fazer check-in?",
+      "answer": "O check-in começa às 12:00. A portaria funciona 24 horas e o horário informado da recepção é de 7h a 22h. Para chegada fora do horário da recepção, as instruções específicas precisam ser confirmadas pela equipe com o horário previsto do hóspede."
     },
     {
       "id": "passeio_pos_confirmacao_whatsapp_dia_anterior",
