@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
@@ -139,7 +139,7 @@ def test_cloudbeds_room_description_exposes_selected_public_room_name() -> None:
     adapter = CloudbedsReadAdapter(
         transport=transport,
         clock=SimpleNamespace(
-            now=lambda: datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+            now=lambda: datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
         ),
         ttl=timedelta(minutes=5),
     )

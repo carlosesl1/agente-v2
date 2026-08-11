@@ -26,7 +26,7 @@
 - Baseline affected gate: `114 passed` on the starting candidate. The global Python initially lacked pytest; the isolated worktree environment was created with `uv sync --extra runtime --extra dev` and no runtime service was changed.
 - Focused RED evidence: the shared-dorm query returned `conexao_feira_vindo_sul`; the new prompt process assertion was absent; and the Cloudbeds room-description payload lacked `room_public_name`.
 - Implemented affected gate: `121 passed` across prompt, Cérebro, Bókun reads, Cloudbeds/provider transports, and Hermes model adapter; `git diff --check` passed.
-- Exact next gate: freeze this bounded green increment, then run static checks and the canonical full test suite once. No push, deploy, restart, canary, OCI build, provider write, outbound message, payment initiation, or promotion is authorized.
+- Exact next gate: the bounded increment is frozen at `b6a2262b2c495fb458738bb7a449d497ef38b681` / tree `a55dc5a770eded4f226fc296ddf9624d2aaaa66d`. `compileall` and committed-diff checks passed. Repository-wide Ruff reports 497 historical findings; the same changed-file selection reports 17 findings on the base and 17 on the successor, delta zero. Freeze the test-only Ruff cleanup, then run the canonical full test suite once. No push, deploy, restart, canary, OCI build, provider write, outbound message, payment initiation, or promotion is authorized.
 
 ## Required invariants
 
