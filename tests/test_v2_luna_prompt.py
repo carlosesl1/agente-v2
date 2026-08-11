@@ -14,6 +14,7 @@ def test_prompt_requires_direct_grounded_atendimento_process() -> None:
     assert "preserve cada duração, distância, quantidade e etapa" in PROMPT
     assert "não some trechos consecutivos" in PROMPT
     assert "Só prometa verificar depois" in PROMPT
+    assert "não acrescente elogios, popularidade, adequação ou benefícios comerciais" in PROMPT
     assert "acomodação restrita por gênero" in PROMPT
 
 
