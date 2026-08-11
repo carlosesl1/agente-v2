@@ -139,6 +139,13 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
     assert env["V2_HERMES_TRANSCRIPT_KEY_HEX"].startswith("${")
 
 
+def test_phase8_child_bootstraps_candidate_root_before_structured_contract_import() -> None:
+    source = (ROOT / "scripts/phase8_hermes_child.py").read_text(encoding="utf-8")
+    assert source.index("sys.path.insert") < source.index(
+        "from v2_host.structured_output import"
+    )
+
+
 def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> None:
     prompt = PROMPT.read_text(encoding="utf-8")
     for literal in (
