@@ -65,6 +65,12 @@ def _v8_request(
 
 
 def _v8_bytes(**changes: object) -> bytes:
+    if "reply_chunks" in changes:
+        chunks = changes["reply_chunks"]
+        if type(chunks) is list and all(type(item) is str for item in chunks):
+            changes["reply_chunks"] = [
+                {"text": item, "expects_reply": False} for item in chunks
+            ]
     return json.dumps(
         _v8_payload(**changes),
         ensure_ascii=False,
@@ -413,55 +419,29 @@ def test_v7_parser_preserves_matching_unicode_clarification_byte_exact() -> (
     assert turn.clarification_question == raw_question
 
 
-def test_clarification_mismatch_invokes_protocol_repair_and_parser_rejects() -> None:
+def test_v8_question_is_written_once_without_protocol_repair() -> None:
     request = ModelRequest(
-        request_id="request:typed-question-mismatch",
-        lead_id="manychat:typed-question-mismatch",
-        source_event_id="batch:typed-question-mismatch",
+        request_id="request:typed-question-once",
+        lead_id="manychat:typed-question-once",
+        source_event_id="batch:typed-question-once",
         message="Somos dois adultos.",
         locale="pt-BR",
         state_version=0,
     )
-
-    def payload(*, clarification_question: str) -> bytes:
-        return json.dumps(
-            {
-                "schema": "v2-model-proposal-v7",
-                "source_event_id": request.source_event_id,
-                "intent": "inform",
-                "reply_chunks": [
-                    "Dados recebidos sem repeti-los.",
-                    "Haverá alguma criança no grupo?",
-                ],
-                "facts": [],
-                "read_requests": [],
-                "effect_proposals": [],
-                "target_offer_id": None,
-                "target_offer_ids": [],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
-                "selection_requested": False,
-                "pending_disposition": None,
-                "passengers": [],
-                "clarification_question": clarification_question,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-
-    mismatched = payload(clarification_question="Qual é a idade da criança?")
-    repaired = payload(clarification_question="Haverá alguma criança no grupo?")
+    response = _v8_bytes(
+        reply_chunks=[
+            {"text": "Dados recebidos sem repeti-los.", "expects_reply": False},
+            {"text": "Haverá alguma criança no grupo?", "expects_reply": True},
+        ]
+    )
     prompts: list[str] = []
-    responses = [mismatched, repaired]
 
     def run(command, **kwargs):
         envelope = json.loads(kwargs["input"])
         prompts.append(envelope["system_prompt"])
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
+            stdout=b"PHASE8_RESULT\x00" + response,
             stderr=b"",
         )
 
@@ -469,26 +449,20 @@ def test_clarification_mismatch_invokes_protocol_repair_and_parser_rejects() -> 
         command=("synthetic-tool-free-child",),
         system_prompt="closed prompt",
         timeout=10,
-        transcript_key=b"typed-question-mismatch-key-0001",
+        transcript_key=b"typed-question-once-key-00000001",
         run=run,
         environ={},
     )
 
     turn = adapter.complete_audited(request)
 
-    assert len(prompts) == 2
+    assert len(prompts) == 1
     assert _PROTOCOL_REPAIR_SUFFIX not in prompts[0]
-    assert _PROTOCOL_REPAIR_SUFFIX in prompts[1]
     assert turn.proposal.reply_chunks == (
         "Dados recebidos sem repeti-los.",
         "Haverá alguma criança no grupo?",
     )
     assert turn.proposal.clarification_question == "Haverá alguma criança no grupo?"
-    with pytest.raises(
-        InvalidModelProposal,
-        match="clarification_question must be an exact reply chunk",
-    ):
-        _proposal(mismatched, request.source_event_id)
 
 
 def _pending_action() -> PendingCriticalActionContext:
@@ -632,7 +606,8 @@ The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
 Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
-Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
+Return one valid V8 frame with the eight conversational fields. Write each public chunk
+once; the parent will bind mechanical authority and will not rewrite the text."""
 
     assert set(envelope) == {"system_prompt", "messages"}
     assert current["public_reply_correction_reasons"] == [
@@ -888,7 +863,7 @@ def test_original_private_context_reaches_maya_with_holder_semantics() -> None:
     assert "phone_e164" in prompt
     assert "do not guess" in prompt
     assert "correction wins" in prompt
-    assert "pending_disposition=revoke" in prompt
+    assert "pending_action_disposition=revoke" in prompt
     assert "bracketed private-field markers" not in prompt
 
 
@@ -1111,30 +1086,25 @@ def _confirmation_review_request() -> ModelRequest:
 
 
 def _confirmation_proposal_payload(**overrides: object) -> bytes:
-    payload: dict[str, object] = {
-        "schema": "v2-model-proposal-v7",
-        "source_event_id": "batch:contextual-confirmation-review",
-        "intent": "confirm",
-        "reply_chunks": [
-            "Confirmação entendida exatamente como você descreveu.",
-            "Vou seguir somente com o resumo pendente.",
+    payload = _v8_payload(
+        intent="confirm",
+        reply_chunks=[
+            {
+                "text": "Confirmação entendida exatamente como você descreveu.",
+                "expects_reply": False,
+            },
+            {
+                "text": "Vou seguir somente com o resumo pendente.",
+                "expects_reply": False,
+            },
         ],
-        "facts": [],
-        "read_requests": [],
-        "effect_proposals": [],
-        "target_offer_id": None,
-        "target_offer_ids": [],
-        "confirmed_summary_version": 1,
-        "confirmed_action_kinds": ["book_activity", "initiate_payment"],
-        "approval_basis": "contextual_reference",
-        "selection_requested": False,
-        "pending_disposition": None,
-        "passengers": [],
-        "clarification_question": None,
-    }
+    )
     payload.update(overrides)
-    if payload["schema"] == "v2-model-proposal-v6":
-        payload.pop("clarification_question")
+    chunks = payload.get("reply_chunks")
+    if type(chunks) is list and all(type(item) is str for item in chunks):
+        payload["reply_chunks"] = [
+            {"text": item, "expects_reply": False} for item in chunks
+        ]
     return json.dumps(
         payload,
         ensure_ascii=False,
@@ -1156,7 +1126,7 @@ def _decision_only_review_payload(decision: str = "approve") -> bytes:
     ).encode()
 
 
-def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() -> None:
+def test_confirmation_review_wire_is_minimal_public_only_and_requests_v8() -> None:
     envelope = json.loads(
         _confirmation_review_wire(
             _confirmation_review_request(),
@@ -1178,7 +1148,8 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() 
         "public_summary": _pending_action().public_summary,
         "expires_at": "2026-07-28T06:30:00+00:00",
     }
-    assert "v2-model-proposal-v7" in envelope["system_prompt"]
+    assert "V8 JSON" in envelope["system_prompt"]
+    assert "source_event_id exactly" not in envelope["system_prompt"]
     assert "reply_chunks" in envelope["system_prompt"]
     assert "v2-contextual-confirmation-review-v1" not in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
@@ -1215,10 +1186,7 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() 
                 "reply_chunks": [
                     "Entendi a mudança e não vou usar o resumo anterior.",
                 ],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
-                "pending_disposition": "revoke",
+                "pending_action_disposition": "revoke",
             },
             ("Entendi a mudança e não vou usar o resumo anterior.",),
             "adjust",
@@ -1230,9 +1198,7 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() 
                 "reply_chunks": [
                     "Ainda preciso que você esclareça se aprova todo o resumo.",
                 ],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
+                "pending_action_disposition": None,
             },
             ("Ainda preciso que você esclareça se aprova todo o resumo.",),
             "inform",
@@ -1240,7 +1206,7 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_full_v7() 
         ),
     ),
 )
-def test_confirmation_review_returns_exact_maya_authored_bound_v7_proposal(
+def test_confirmation_review_returns_exact_maya_authored_parent_bound_v8_proposal(
     overrides: dict[str, object],
     reply_chunks: tuple[str, ...],
     expected_intent: str,
@@ -1490,7 +1456,7 @@ def test_invalid_confirmation_reviews_fail_closed_after_bounded_attempts(
     assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX in prompts[1]
     assert [frame.response_bytes for frame in attempted_frames] == invalid_frames
     assert all(
-        json.loads(frame.response_bytes)["effect_proposals"] == []
+        "effect_proposals" not in json.loads(frame.response_bytes)
         for frame in attempted_frames
     )
 
@@ -1603,28 +1569,13 @@ def test_adapter_revises_structural_noop_once_with_same_complete_context() -> No
     )
 
     def payload(*, reply: str, question: str | None) -> bytes:
-        return json.dumps(
-            {
-                "schema": "v2-model-proposal-v7",
-                "source_event_id": request.source_event_id,
-                "intent": "inform",
-                "reply_chunks": [reply],
-                "facts": [],
-                "read_requests": [],
-                "effect_proposals": [],
-                "target_offer_id": None,
-                "target_offer_ids": [],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
-                "selection_requested": False,
-                "pending_disposition": None,
-                "passengers": [],
-                "clarification_question": question,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
+        if question is not None:
+            assert question == reply
+        return _v8_bytes(
+            reply_chunks=[
+                {"text": reply, "expects_reply": question is not None},
+            ]
+        )
 
     responses = [
         payload(reply="I am ready to help.", question=None),
@@ -1673,28 +1624,7 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
         locale="en",
         state_version=0,
     )
-    no_op = json.dumps(
-        {
-            "schema": "v2-model-proposal-v7",
-            "source_event_id": request.source_event_id,
-            "intent": "inform",
-            "reply_chunks": ["I am ready to help."],
-            "facts": [],
-            "read_requests": [],
-            "effect_proposals": [],
-            "target_offer_id": None,
-            "target_offer_ids": [],
-            "confirmed_summary_version": None,
-            "confirmed_action_kinds": [],
-            "approval_basis": None,
-            "selection_requested": False,
-            "pending_disposition": None,
-            "passengers": [],
-            "clarification_question": None,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
+    no_op = _v8_bytes(reply_chunks=["I am ready to help."])
     responses = [b"{}", no_op, b"{}"]
     review_flags: list[bool] = []
 
@@ -1768,7 +1698,7 @@ def _versioned_proposal_payload(
 
 
 @pytest.mark.parametrize("legacy_schema_version", range(1, 7))
-def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
+def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v8(
     legacy_schema_version: int,
 ) -> None:
     reason_type = model_contracts.PublicReplyCorrectionReason
@@ -1790,11 +1720,7 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
         "Resposta corrigida pela Maya com pergunta tipada válida.",
         "Posso continuar ajudando por aqui.",
     )
-    repaired = _versioned_proposal_payload(
-        7,
-        request.source_event_id,
-        reply_chunks=repaired_chunks,
-    )
+    repaired = _v8_bytes(reply_chunks=list(repaired_chunks))
     responses = [legacy, repaired]
     seen: list[tuple[str, dict[str, object]]] = []
 
@@ -1845,7 +1771,7 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
 
 
 @pytest.mark.parametrize("legacy_schema_version", range(1, 7))
-def test_ordinary_request_accepts_each_legacy_proposal_schema(
+def test_ordinary_request_rejects_each_legacy_schema_and_repairs_with_v8(
     legacy_schema_version: int,
 ) -> None:
     request = ModelRequest(
@@ -1856,19 +1782,23 @@ def test_ordinary_request_accepts_each_legacy_proposal_schema(
         locale="pt-BR",
         state_version=6,
     )
-    reply_chunks = (f"Resposta comum no schema v{legacy_schema_version}.",)
-    response = _versioned_proposal_payload(
+    reply_chunks = (f"Resposta comum reparada após v{legacy_schema_version}.",)
+    legacy = _versioned_proposal_payload(
         legacy_schema_version,
         request.source_event_id,
-        reply_chunks=reply_chunks,
+        reply_chunks=(f"Resposta comum no schema v{legacy_schema_version}.",),
         facts=({"name": "service", "value": "activity"},),
     )
-    responses = [response]
+    repaired = _v8_bytes(
+        reply_chunks=list(reply_chunks),
+        facts=[{"name": "service", "value": "activity"}],
+    )
+    responses = [legacy, repaired]
     seen: list[dict[str, object]] = []
 
     def run(command, **kwargs):
         if not responses:
-            pytest.fail("ordinary legacy proposal attempted an unexpected child call")
+            pytest.fail("ordinary legacy proposal attempted an unexpected third child call")
         envelope = json.loads(kwargs["input"])
         seen.append(json.loads(envelope["messages"][-1][1]))
         return SimpleNamespace(
@@ -1888,11 +1818,10 @@ def test_ordinary_request_accepts_each_legacy_proposal_schema(
 
     turn = adapter.complete_audited(request)
 
-    assert len(seen) == 1
+    assert len(seen) == 2
     assert responses == []
-    assert seen[0]["public_reply_correction_reasons"] == []
-    assert len(turn.frames) == 1
-    assert turn.frames[0].response_bytes == response
+    assert len(turn.frames) == 2
+    assert [frame.response_bytes for frame in turn.frames] == [legacy, repaired]
     assert turn.closure.ephemeral_session_id.startswith("uds:")
     assert turn.proposal.reply_chunks == reply_chunks
     assert turn.proposal.facts == (ModelFact("service", "activity"),)
@@ -2003,29 +1932,9 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
         state_version=5,
         public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
-    repaired = json.dumps(
-        {
-            "schema": "v2-model-proposal-v7",
-            "source_event_id": request.source_event_id,
-            "intent": "inform",
-            "reply_chunks": ["Posso continuar com a pergunta tipada correta."],
-            "facts": [],
-            "read_requests": [],
-            "effect_proposals": [],
-            "target_offer_id": None,
-            "target_offer_ids": [],
-            "confirmed_summary_version": None,
-            "confirmed_action_kinds": [],
-            "approval_basis": None,
-            "selection_requested": False,
-            "pending_disposition": None,
-            "passengers": [],
-            "clarification_question": None,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
+    repaired = _v8_bytes(
+        reply_chunks=["Posso continuar com a pergunta tipada correta."]
+    )
     responses = [b"{}", repaired]
     seen: list[tuple[str, dict[str, object]]] = []
 
@@ -2109,35 +2018,15 @@ def test_public_reply_correction_repairs_recursive_read_after_observation() -> N
         reply_chunks: tuple[str, ...],
         read_requests: list[dict[str, object]],
     ) -> bytes:
-        return json.dumps(
-            {
-                "schema": "v2-model-proposal-v7",
-                "source_event_id": request.source_event_id,
-                "intent": "inform",
-                "reply_chunks": list(reply_chunks),
-                "facts": [],
-                "read_requests": read_requests,
-                "effect_proposals": [],
-                "target_offer_id": None,
-                "target_offer_ids": [],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
-                "selection_requested": False,
-                "pending_disposition": None,
-                "passengers": [],
-                "clarification_question": None,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
+        return _v8_bytes(
+            reply_chunks=list(reply_chunks),
+            read_requests=read_requests,
+        )
 
     recursive = payload(
         reply_chunks=("Vou consultar novamente a descrição do passeio.",),
         read_requests=[
             {
-                "request_id": repeated_read.request_id,
                 "kind": repeated_read.kind.value,
                 "product_id": repeated_read.product_id,
             }
@@ -2353,11 +2242,7 @@ def test_current_observation_rejects_recursive_read_and_keeps_maya_repair() -> N
         "As duas opções consultadas estão indisponíveis nessas datas.",
         "Nada foi reservado; posso ajudar a avaliar outras datas.",
     )
-    repaired = _versioned_proposal_payload(
-        7,
-        request.source_event_id,
-        reply_chunks=repaired_chunks,
-    )
+    repaired = _v8_bytes(reply_chunks=list(repaired_chunks))
     responses = [recursive, repaired]
     prompts: list[str] = []
 

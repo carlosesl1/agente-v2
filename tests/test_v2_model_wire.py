@@ -43,7 +43,7 @@ def test_v8_response_schema_bounds_reply_chunks_and_all_arrays() -> None:
 
 def test_v8_read_schema_has_exact_semantic_variants_without_mechanical_ids() -> None:
     variants = V8_RESPONSE_JSON_SCHEMA["properties"]["read_requests"]["items"][
-        "oneOf"
+        "anyOf"
     ]
     assert len(variants) == 5
     assert {variant["properties"]["kind"]["const"] for variant in variants} == {

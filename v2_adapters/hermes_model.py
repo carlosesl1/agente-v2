@@ -75,58 +75,58 @@ _RESPONSE_FIELDS_V7: Final = frozenset(
 _CONFIRMATION_REVIEW_SYSTEM_PROMPT: Final = """
 You are Maya reviewing one pending critical action. You have no tools and no authority
 to execute anything. Compare the complete current message with the complete pending
-public summary and author the customer-facing response. Return exactly one
-v2-model-proposal-v7 JSON object with every field required by that schema and no
-commentary or extra field. Copy source_event_id exactly. reply_chunks must contain one
-or two non-empty trimmed customer-facing strings written by Maya.
+public summary and author the customer-facing response. Return exactly one V8 JSON
+object with only these fields: intent, reply_chunks, facts, read_requests,
+selected_choice_refs, selection_requested, pending_action_disposition, and passengers.
+Return no commentary or extra field. Each reply_chunks item is exactly
+{"text":"...","expects_reply":false}; write one or two customer-facing messages.
 
 The only supported intents are confirm, adjust, and inform. facts, read_requests,
-effect_proposals, target_offer_ids, and passengers must be empty; target_offer_id and
-clarification_question must be null; selection_requested must be false.
+selected_choice_refs, and passengers must be empty; selection_requested must be false;
+no reply chunk may expect a customer reply.
 
 Use confirm only when the complete message unconditionally approves the exact pending
 summary without changing, narrowing, postponing, or conditioning any material term or
-action. For confirm, copy pending_action.summary_version and action_kinds exactly, set
-approval_basis to contextual_reference, and set pending_disposition to null.
+action. For confirm set pending_action_disposition to null. The parent binds the exact
+summary version, actions, source event and approval basis; never copy those values.
 
 Use adjust for refusal, cancellation, postponement, withdrawal, a new condition, or a
-material change. For adjust, set confirmed_summary_version and approval_basis to null,
-confirmed_action_kinds to an empty list, and pending_disposition to revoke.
+material change. For adjust set pending_action_disposition to revoke.
 
 Use inform for a question, ambiguity, hesitation, unrelated text, or insufficient
-evidence. For inform, set confirmed_summary_version, approval_basis, and
-pending_disposition to null and confirmed_action_kinds to an empty list. Judge the
-complete message semantically in context; never decide from a word, token, emoji,
-substring, fixed expression, regex, or alias.
+evidence. For inform set pending_action_disposition to null. Judge the complete message
+semantically in context; never decide from a word, token, emoji, substring, fixed
+expression, regex, or alias.
 """.strip()
 _CONFIRMATION_REVIEW_REPAIR_SUFFIX: Final = """
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one complete v2-model-proposal-v7 JSON object under the supplied
-confirmation contract. Copy source_event_id exactly and write the customer-facing
-reply_chunks as Maya. Use only confirm with the exact pending binding, adjust with
-pending_disposition revoke and no confirmation binding, or inform with neither a
-confirmation binding nor pending disposition. Return no commentary or extra field.
+Return exactly one complete V8 object under the supplied confirmation contract. Write
+customer-facing reply_chunks once. Use only confirm with parent-owned binding, adjust
+with pending_action_disposition revoke, or inform with null disposition. Return no
+commentary, mechanical ID, authority field, or extra field.
 """.strip()
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one v2-model-proposal-v7 JSON object and no commentary. reply_chunks
-must contain one or two non-empty trimmed customer-facing strings. Do not add tools,
-effects, IDs, or facts that are not justified by the original request and observations.
+Return exactly one V8 object with only intent, reply_chunks, facts, read_requests,
+selected_choice_refs, selection_requested, pending_action_disposition, and passengers.
+Each reply_chunks item contains text and expects_reply. Write each public message once;
+mark at most the final chunk as expects_reply=true. Do not add tools, effects, mechanical
+IDs, or facts not justified by the original request and observations.
 When observations are present in the request, use them and return read_requests as an
 empty list; the parent permits only one provider-read round per turn. selection_requested
 must be false by default; it may be true only on an inform proposal with a fresh read when
 the current message unambiguously asks to prepare or reserve the current option. It is
 false for questions, hypotheticals, uncertainty or informational availability checks.
-pending_disposition must be null except for adjust: preserve keeps an unchanged pending
-summary during questions or recap requests; revoke is for refusal or material change.
-clarification_question must be null unless you need one explicit customer answer to
-continue. When non-null, copy that exact question into customer-facing reply_chunks.
+pending_action_disposition must be null except for adjust: preserve keeps an unchanged
+pending summary during questions or recap requests; revoke is for refusal or material
+change. If exactly one answer is needed, write that question once in the final reply chunk
+and mark expects_reply=true.
 When pending_action is present, classify the latest message in relation to that exact
 public summary. Uma confirmação semântica curta como “Sim”, “Pode reservar”,
-“Confirmado” ou “Isso mesmo” pode usar intent=confirm; copy summary_version and
-action_kinds exactly and set approval_basis to contextual_reference. Sem pending_action,
-ou diante de dúvida, pergunta, recusa ou mudança material, não use intent=confirm.
+“Confirmado” ou “Isso mesmo” pode usar intent=confirm; the parent binds the exact pending
+authority. Sem pending_action, ou diante de dúvida, pergunta, recusa ou mudança material,
+não use intent=confirm.
 """.strip()
 
 
@@ -143,8 +143,9 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
   hostel, property, agency, or other third party is not the holder by default. Use another
   person's values only when the customer explicitly says that person is or will be the
   reservation holder.
-- If holder attribution is genuinely ambiguous, do not guess. Ask one natural
-  clarification question and emit no guessed private fact, selection, confirmation, or
+- If holder attribution is genuinely ambiguous, do not guess. Write one natural question
+  in the final reply chunk with expects_reply=true and emit no guessed private fact,
+  selection, confirmation, or
   effect. A complete availability/price query may still emit its provider read in the
   same frame; holder identity is a write-boundary requirement, not a read prerequisite.
 - Never output phone_e164 from conversational text. Authenticated phone identity exists
@@ -153,7 +154,7 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
 - Newly interpreted holder facts may accompany a read request in the same proposal. The
   parent validates and persists them before dispatching any provider read.
 - If one message both corrects holder data and appears to confirm an older summary, the
-  correction wins: emit adjust with pending_disposition=revoke, never confirm. A fresh
+  correction wins: emit adjust with pending_action_disposition=revoke, never confirm. A fresh
   summary and a later natural confirmation are required.
 - Customer data voluntarily supplied in the current message may be repeated naturally in
   reply_chunks. Never mention schemas, providers, payloads, state, bindings, or technical validation.
@@ -182,15 +183,14 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
   payment, handoff, delivery, or effect.
 - For a package, resolve the customer's lodging and activity references semantically
   against current observations. When both are unambiguous and all selection requirements
-  are complete, select exactly the two matching public offer IDs atomically.
+  are complete, select exactly the two matching public choice_ref values atomically.
 - When selection_review_required is true and observations are present, this is a post-read
   semantic adjudication pass. Re-read the complete customer message against the observed
   options. If the customer unambiguously committed to one lodging option and one activity
-  option, return intent=select with exactly those two public IDs in target_offer_ids;
+  option, return intent=select with exactly those two values in selected_choice_refs;
   otherwise remain inform. Do not emit new or changed facts: for select, repeat only the
-  exact commercial facts required by the select contract. Emit no passenger updates, new
-  reads, or effects, and never choose by list position unless the customer requested that
-  criterion.
+  exact commercial facts required by the select contract. Emit no passenger updates or
+  new reads, and never choose by list position unless the customer requested that criterion.
 """.strip()
 
 
@@ -202,15 +202,16 @@ FINAL TURN COMPLETION RULES (highest salience):
   complete current message semantically against dialogue, state facts and observations.
 - If the current message already completes a safe informational query, emit all typed facts
   and the required read_requests now. Do not answer with readiness or ask for the same data.
-- If exactly one customer answer is missing, set clarification_question to that exact
-  customer-facing question and include it in reply_chunks. Otherwise set it to null.
+- If exactly one customer answer is missing, write that exact customer-facing question once
+  in the final reply chunk and mark expects_reply=true. Otherwise no chunk expects a reply.
 - handoff_status is verified operational state, not a generic active flag. requested,
   active and acknowledgement_pending prove only internal/pending relay; never claim a human
   received or is following. acknowledged proves the external handoff operation was accepted,
   not that a person read it. completed may be described as completed; manual_review and
   cancelled must be stated without inventing delivery.
 - When progress_review_required=true, the preceding valid proposal had no structured
-  progression and no typed clarification. Reinterpret once. Advance now, ask the one
+  progression and no reply chunk marked as awaiting a customer answer. Reinterpret once.
+  Advance now, ask the one
   necessary clarification, or give a conclusive grounded answer. Never fabricate a read,
   fact, effect, delivery or human acknowledgement.
 """.strip()
@@ -231,7 +232,7 @@ COMMITTED CONSULTATION HISTORY PROTOCOL:
   payment, handoff, or any effect. Those paths require a fresh provider read in the current
   turn and the normal typed authority gates. Only observations contains current-turn reads.
 - When the current message asks to select, reserve, or act on a historical option, request
-  the corresponding fresh provider read; do not emit a historical offer ID or invent one.
+  the corresponding fresh provider read; do not emit a historical choice_ref or invent one.
 """.strip()
 
 _ACTIVE_EXECUTION_SYSTEM_SUFFIX: Final = """
@@ -269,7 +270,8 @@ The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
 Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
-Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it.
+Return one valid V8 frame with the eight conversational fields. Write each public chunk
+once; the parent will bind mechanical authority and will not rewrite the text.
 """.strip()
 
 
@@ -761,8 +763,11 @@ def _proposal(
     source_event_id: str | ModelRequest,
     *,
     require_v7: bool = False,
+    require_v8: bool = False,
     normalize_legacy_inform_preserve: bool = True,
 ) -> ModelProposal:
+    if require_v7 and require_v8:
+        raise ValueError("proposal cannot require both V7 and V8")
     try:
         decoded = json.loads(payload, object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, UnicodeError) as exc:
@@ -773,10 +778,12 @@ def _proposal(
     schema = decoded.get("schema")
     if schema is None and request is not None:
         if require_v7:
-            raise InvalidModelProposal("model response schema mismatch")
+            raise InvalidModelProposal("model response must use proposal V7")
         return _v8_proposal(decoded, request)
+    if require_v8:
+        raise InvalidModelProposal("productive model response must use proposal V8")
     if require_v7 and schema != "v2-model-proposal-v7":
-        raise InvalidModelProposal("model response schema mismatch")
+        raise InvalidModelProposal("model response must use proposal V7")
 
     if schema == "v2-model-proposal-v1":
         expected_fields = _RESPONSE_FIELDS_V1
@@ -917,9 +924,8 @@ def _confirmation_proposal(payload: bytes, request: ModelRequest) -> ModelPropos
         )
     proposal = _proposal(
         payload,
-        request.source_event_id,
-        require_v7=True,
-        normalize_legacy_inform_preserve=False,
+        request,
+        require_v8=True,
     )
     if not 1 <= len(proposal.reply_chunks) <= 2:
         raise InvalidModelProposal(
@@ -1093,7 +1099,7 @@ class HermesModelAdapter:
                 _proposal(
                     response,
                     request,
-                    require_v7=bool(request.public_reply_correction_reasons),
+                    require_v8=True,
                 )
                 if decode is None
                 else decode(response)

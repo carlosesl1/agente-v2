@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 
@@ -8,7 +9,8 @@ import pytest
 import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import _request_wire
 from v2_contracts.model import ModelRequest
-from v2_host.hermes_child import run
+from v2_host.hermes_child import run, run_structured
+from v2_host.structured_output import maya_v8_request_overrides
 
 
 @dataclass
@@ -27,6 +29,124 @@ def _wire() -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
+
+
+def _v8_result() -> dict[str, object]:
+    return {
+        "intent": "inform",
+        "reply_chunks": [{"text": "Olá", "expects_reply": False}],
+        "facts": [],
+        "read_requests": [],
+        "selected_choice_refs": [],
+        "selection_requested": False,
+        "pending_action_disposition": None,
+        "passengers": [],
+    }
+
+
+def test_structured_child_uses_profile_model_provider_and_closed_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Agent:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        async def run_conversation(
+            self, prompt: str, *, system_message: str
+        ) -> dict[str, object]:
+            captured["prompt"] = prompt
+            captured["system_message"] = system_message
+            return {"final_response": json.dumps(_v8_result(), ensure_ascii=False)}
+
+        async def close(self) -> None:
+            captured["closed"] = True
+
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("HERMES_PROFILE", raising=False)
+    output = asyncio.run(
+        run_structured(
+            (
+                "hermes",
+                "--profile",
+                "leads",
+                "-m",
+                "gpt-5.6-luna",
+                "--provider",
+                "openai-codex",
+                "--safe-mode",
+            ),
+            _wire(),
+            agent_factory=Agent,
+            profile_resolver=lambda profile: f"/tmp/hermes-profile-{profile}",
+            session_db_factory=lambda path: {"path": str(path)},
+        )
+    )
+
+    assert output.startswith(b"PHASE8_RESULT\x00")
+    assert json.loads(output.split(b"\x00", 1)[1]) == _v8_result()
+    kwargs = captured["kwargs"]
+    assert kwargs["api_key"] is None
+    assert kwargs["model"] == "gpt-5.6-luna"
+    assert kwargs["provider"] == "openai-codex"
+    assert captured["system_message"] == (
+        "Return V2 JSON.\n\nYou are running as a tool-free child. "
+        "Do not call tools or perform effects. Return exactly one JSON object "
+        "matching this system contract."
+    )
+    assert kwargs["max_iterations"] == 1
+    assert kwargs["enabled_toolsets"] == []
+    assert kwargs["request_overrides"] == maya_v8_request_overrides()
+    assert kwargs["quiet_mode"] is True
+    assert kwargs["skip_context_files"] is True
+    assert kwargs["load_soul_identity"] is False
+    assert kwargs["skip_memory"] is True
+    assert kwargs["platform"] == "tool"
+    assert kwargs["session_db"]["path"].endswith("/session.db")
+    assert captured["prompt"] == 'CURRENT REQUEST JSON:\n{"source_event_id":"batch:1"}'
+    assert captured["closed"] is True
+    assert __import__("os").environ["HERMES_HOME"] == "/tmp/hermes-profile-leads"
+    assert __import__("os").environ["HERMES_PROFILE"] == "leads"
+
+
+def test_structured_child_supports_installed_sync_agent_api() -> None:
+    captured: dict[str, object] = {}
+
+    class SyncAgent:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run_conversation(
+            self, prompt: str, *, system_message: str
+        ) -> dict[str, object]:
+            captured["prompt"] = prompt
+            captured["system_message"] = system_message
+            return {"final_response": json.dumps(_v8_result())}
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    output = asyncio.run(
+        run_structured(
+            (
+                "hermes",
+                "--profile",
+                "leads",
+                "-m",
+                "gpt-5.6-luna",
+                "--provider",
+                "openai-codex",
+            ),
+            _wire(),
+            agent_factory=SyncAgent,
+            profile_resolver=lambda _profile: "/tmp/hermes-profile-leads",
+            session_db_factory=lambda path: {"path": str(path)},
+        )
+    )
+
+    assert json.loads(output.split(b"\x00", 1)[1]) == _v8_result()
+    assert captured["closed"] is True
 
 
 def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> None:
@@ -134,7 +254,8 @@ The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
 Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
-Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
+Return one valid V8 frame with the eight conversational fields. Write each public chunk
+once; the parent will bind mechanical authority and will not rewrite the text."""
     child_wrapper = (
         "\n\nYou are running as a tool-free child. Do not call tools or perform effects. "
         "Return exactly one JSON object matching the supplied system contract, with no "

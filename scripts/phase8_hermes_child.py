@@ -14,6 +14,8 @@ import tempfile
 from hermes_state import SessionDB
 from run_agent import AIAgent
 
+from v2_host.structured_output import maya_v8_request_overrides
+
 
 _RESULT_MARKER = b"PHASE8_RESULT\x00"
 
@@ -85,12 +87,13 @@ def main() -> int:
                     model=args.model,
                     enabled_toolsets=[],
                     quiet_mode=True,
-                    max_iterations=2,
+                    max_iterations=1,
                     skip_context_files=True,
                     load_soul_identity=False,
                     skip_memory=True,
                     session_db=SessionDB(Path(tmp) / "session.db"),
                     platform="tool",
+                    request_overrides=maya_v8_request_overrides(),
                 )
                 # API failures must not create request dumps in the operational
                 # Hermes home.  The child owns only this disposable directory.

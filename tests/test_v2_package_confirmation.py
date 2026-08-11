@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_contracts.model import InvalidModelProposal, ModelFact, ModelProposal, ModelRequest
+from v2_contracts.providers import ReadObservation
 
 
 def _base_proposal(**overrides: object) -> dict[str, object]:
@@ -71,10 +72,10 @@ def test_model_cannot_mix_single_and_package_targets() -> None:
 
 def test_hermes_adapter_parses_closed_v2_package_response() -> None:
     raw = {
-        "schema": "v2-model-proposal-v2",
-        "source_event_id": "event:package-contract",
         "intent": "select",
-        "reply_chunks": ["Encontrei as duas opções."],
+        "reply_chunks": [
+            {"text": "Encontrei as duas opções.", "expects_reply": False}
+        ],
         "facts": [
             {"name": "language", "value": "pt-BR"},
             {"name": "service", "value": "package"},
@@ -86,10 +87,10 @@ def test_hermes_adapter_parses_closed_v2_package_response() -> None:
             {"name": "payment_method", "value": "stripe"},
         ],
         "read_requests": [],
-        "effect_proposals": [],
-        "target_offer_id": None,
-        "target_offer_ids": ["offer:lodging-public", "offer:activity-public"],
-        "confirmed_summary_version": None,
+        "selected_choice_refs": ["lodging:1", "activity:1"],
+        "selection_requested": False,
+        "pending_action_disposition": None,
+        "passengers": [],
     }
     encoded = json.dumps(raw, sort_keys=True).encode()
 
@@ -117,6 +118,26 @@ def test_hermes_adapter_parses_closed_v2_package_response() -> None:
             message="Quero o pacote",
             locale="pt-BR",
             state_version=0,
+            observations=(
+                ReadObservation(
+                    request_hash="a" * 64,
+                    provider="cloudbeds",
+                    observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    expires_at=datetime(2026, 8, 1, tzinfo=timezone.utc)
+                    + timedelta(minutes=5),
+                    public_payload={"offer_id": "offer:lodging-public"},
+                    private_binding_hash="c" * 64,
+                ),
+                ReadObservation(
+                    request_hash="b" * 64,
+                    provider="bokun",
+                    observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    expires_at=datetime(2026, 8, 1, tzinfo=timezone.utc)
+                    + timedelta(minutes=5),
+                    public_payload={"offer_id": "offer:activity-public"},
+                    private_binding_hash="d" * 64,
+                ),
+            ),
         )
     )
 

@@ -209,15 +209,16 @@ def test_hermes_adapter_exposes_only_public_observation_to_tool_free_child() -> 
     captured = {}
     response = json.dumps(
         {
-            "schema": "v2-model-proposal-v1",
-            "source_event_id": "batch-001",
             "intent": "inform",
-            "reply_chunks": ["A suíte está disponível."],
+            "reply_chunks": [
+                {"text": "A suíte está disponível.", "expects_reply": False}
+            ],
             "facts": [],
             "read_requests": [],
-            "effect_proposals": [],
-            "target_offer_id": None,
-            "confirmed_summary_version": None,
+            "selected_choice_refs": [],
+            "selection_requested": False,
+            "pending_action_disposition": None,
+            "passengers": [],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -360,22 +361,14 @@ def test_hermes_adapter_preserves_valid_reply_bytes_and_fails_closed_after_repai
     def proposal(reply: str) -> bytes:
         return json.dumps(
             {
-                "schema": "v2-model-proposal-v7",
-                "source_event_id": "event:normalize-001",
                 "intent": "inform",
-                "reply_chunks": [reply],
+                "reply_chunks": [{"text": reply, "expects_reply": False}],
                 "facts": [],
                 "read_requests": [],
-                "effect_proposals": [],
-                "target_offer_id": None,
-                "target_offer_ids": [],
-                "confirmed_summary_version": None,
-                "confirmed_action_kinds": [],
-                "approval_basis": None,
+                "selected_choice_refs": [],
                 "selection_requested": False,
-                "pending_disposition": None,
+                "pending_action_disposition": None,
                 "passengers": [],
-                "clarification_question": None,
             },
             sort_keys=True,
             separators=(",", ":"),

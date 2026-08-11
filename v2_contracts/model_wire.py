@@ -97,16 +97,16 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
             "type": "array",
             "maxItems": 5,
             "items": {
-                "oneOf": [
+                "anyOf": [
                     _object(
                         {
-                            "kind": {"const": "knowledge"},
+                            "kind": {"type": "string", "const": "knowledge"},
                             "query": dict(_TEXT),
                         }
                     ),
                     _object(
                         {
-                            "kind": {"const": "lodging"},
+                            "kind": {"type": "string", "const": "lodging"},
                             "check_in": dict(_ISO_DATE),
                             "check_out": dict(_ISO_DATE),
                             "adults": {"type": "integer", "minimum": 1},
@@ -115,7 +115,7 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
                     ),
                     _object(
                         {
-                            "kind": {"const": "activity"},
+                            "kind": {"type": "string", "const": "activity"},
                             "product_id": dict(_PRODUCT_ID),
                             "activity_date": dict(_ISO_DATE),
                             "adults": {"type": "integer", "minimum": 1},
@@ -124,13 +124,13 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
                     ),
                     _object(
                         {
-                            "kind": {"const": "room_description"},
+                            "kind": {"type": "string", "const": "room_description"},
                             "choice_ref": dict(_CHOICE_REF),
                         }
                     ),
                     _object(
                         {
-                            "kind": {"const": "activity_description"},
+                            "kind": {"type": "string", "const": "activity_description"},
                             "product_id": dict(_PRODUCT_ID),
                         }
                     ),
@@ -140,7 +140,6 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
         "selected_choice_refs": {
             "type": "array",
             "maxItems": 2,
-            "uniqueItems": True,
             "items": dict(_CHOICE_REF),
         },
         "selection_requested": {"type": "boolean"},
