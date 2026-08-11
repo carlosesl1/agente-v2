@@ -27,14 +27,14 @@ def test_pending_tour_schedule_question_never_uses_unrelated_hostel_hours() -> N
 def test_private_profile_marker_prevents_reasking_authenticated_contact() -> None:
     assert "private_profile_complete=true" in PROMPT
     assert "autenticou nome, e-mail e telefone do contato principal" in PROMPT
-    assert "validou o país canônico do binding privado ou de um fato tipado persistido" in PROMPT
+    assert "validou o país canônico do binding ou de um fato tipado persistido" in PROMPT
     assert "autenticou nome, e-mail, telefone e país do contato principal" not in PROMPT
     assert "país explicitamente informado na mensagem atual" in PROMPT
     assert "Estados Unidos (US)" in PROMPT
     assert "country_code=US" in PROMPT
     assert "mesmo com intent=inform" in PROMPT
     assert "não peça novamente esses dados do contato" in PROMPT
-    assert "não contém nem autoriza revelar os valores privados" in PROMPT
+    assert "lista canônica que informa quais campos já existem" in PROMPT
     assert "Mesmo quando a mensagem principal for uma pergunta" in PROMPT
     assert "17 May 1991" in PROMPT
     assert "1991-05-17" in PROMPT
@@ -78,31 +78,23 @@ def test_typed_question_is_never_a_suffix_inside_an_explanatory_chunk() -> None:
 
 def test_payer_correction_preserves_private_holder_and_commercial_gate() -> None:
     assert "Quem paga não substitui semanticamente quem é o titular" in PROMPT
-    assert "não repita nomes nem e-mail do corpus privado" in PROMPT
     assert (
         "continue perguntando apenas o dado comercial faltante antes de qualquer novo read"
         in PROMPT
     )
 
 
-def test_private_holder_name_parts_never_enter_public_reply() -> None:
-    assert (
-        "não repita nomes inteiros, prenomes, sobrenomes nem qualquer parte do nome privado"
-        in PROMPT
-    )
-    assert "refira-se apenas como titular, pagador ou acompanhante" in PROMPT
+def test_voluntarily_supplied_customer_data_may_be_repeated_in_public_reply() -> None:
+    assert "Dados que o lead enviou voluntariamente" in PROMPT
+    assert "podem ser repetidos" in PROMPT
+    assert "não repita nomes inteiros, prenomes, sobrenomes" not in PROMPT
+    assert "não repita nomes nem e-mail do corpus privado" not in PROMPT
 
 
-def test_final_emission_check_rewrites_private_name_fragments_before_json() -> None:
-    heading = "CHECAGEM FINAL OBRIGATÓRIA ANTES DE EMITIR O JSON"
-    assert heading in PROMPT
-    assert "releia cada reply_chunk e clarification_question" in PROMPT
-    assert (
-        "qualquer nome inteiro, prenome, sobrenome ou fragmento identificável"
-        in PROMPT
-    )
-    assert "reescreva o chunk usando somente titular, pagador ou acompanhante" in PROMPT
-    assert PROMPT.rfind(heading) > PROMPT.rfind("PRIVACIDADE E SEGURANÇA")
+def test_prompt_has_no_privacy_rewrite_pass() -> None:
+    assert "CHECAGEM FINAL OBRIGATÓRIA ANTES DE EMITIR O JSON" not in PROMPT
+    assert "releia cada reply_chunk e clarification_question" not in PROMPT
+    assert "reescreva o chunk usando somente titular, pagador ou acompanhante" not in PROMPT
 
 
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:

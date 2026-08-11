@@ -154,8 +154,8 @@ PRIVATE RESERVATION HOLDER PROTOCOL:
 - If one message both corrects holder data and appears to confirm an older summary, the
   correction wins: emit adjust with pending_disposition=revoke, never confirm. A fresh
   summary and a later natural confirmation are required.
-- Avoid unnecessarily echoing exact private values in customer-facing reply_chunks. Never
-  mention schemas, providers, payloads, state, bindings, or technical validation.
+- Customer data voluntarily supplied in the current message may be repeated naturally in
+  reply_chunks. Never mention schemas, providers, payloads, state, bindings, or technical validation.
 """.strip()
 
 
@@ -266,7 +266,7 @@ _PUBLIC_REPLY_CORRECTION_SUFFIX: Final = """
 PUBLIC REPLY CORRECTION
 The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
-Do not repeat private values. Do not request another read after observations.
+Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
 Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it.
 """.strip()

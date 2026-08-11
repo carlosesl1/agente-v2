@@ -58,7 +58,7 @@ def _model_request() -> ModelRequest:
         request_id="model-request:correction-contract",
         lead_id="manychat:correction-contract",
         source_event_id="event:correction-contract",
-        message="Continue sem repetir dados privados.",
+        message="Continue com a resposta tipada correta.",
         locale="pt-BR",
         state_version=3,
     )
@@ -77,7 +77,6 @@ def test_public_reply_correction_reason_catalog_is_exact_and_default_is_empty() 
     reason_type = model_contracts.PublicReplyCorrectionReason
 
     assert tuple((item.name, item.value) for item in reason_type) == (
-        ("PRIVATE_VALUE_EXPOSURE", "private_value_exposure"),
         ("TYPED_CLARIFICATION_MISMATCH", "typed_clarification_mismatch"),
         ("UNSUPPORTED_OBSERVATION_CLAIM", "unsupported_observation_claim"),
         ("OPERATIONAL_STATUS_CONFLICT", "operational_status_conflict"),
@@ -123,7 +122,7 @@ def test_public_reply_correction_is_mutually_exclusive_with_every_semantic_revie
     reason_type = model_contracts.PublicReplyCorrectionReason
     request = replace(
         _model_request(),
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     conflicting_fields = (
         {"progress_review_required": True},

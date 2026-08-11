@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 from dataclasses import fields, replace
 from datetime import date, datetime
+from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
@@ -446,6 +447,24 @@ class Phase8GenesisEvidenceTests(unittest.TestCase):
 
 
 class Phase8KnowledgeEvidenceTests(unittest.TestCase):
+    def test_offer_label_may_repeat_customer_data_without_rewriting(self) -> None:
+        label = "Contato lead@example.invalid, telefone +5575999990199"
+
+        offer = SanitizedOffer(
+            offer_id="offer:" + "a" * 64,
+            service=ReadService.LODGING,
+            public_label=label,
+            start_date=date(2026, 8, 10),
+            end_date=date(2026, 8, 12),
+            start_time=None,
+            adults=1,
+            children=0,
+            total_amount=Decimal("100.00"),
+            currency="BRL",
+        )
+
+        self.assertEqual(offer.public_label, label)
+
     def test_public_policy_probes_and_knowledge_known_answers_are_exact(self) -> None:
         fixture = _fixture()
         probes = fixture["policy_probes"]
@@ -572,6 +591,12 @@ class Phase8LookupProjectionTests(unittest.TestCase):
 
         self.assertEqual(positive.offers, tuple(sorted(positive.offers, key=lambda x: x.offer_id)))
         self.assertEqual(uncertain.failure_codes, (LookupFailureCode.TRANSPORT_ERROR,))
+        customer_label = "Contato: (75) 99999-9999"
+        customer_data_offer = replace(
+            positive.offers[0],
+            public_label=customer_label,
+        )
+        self.assertEqual(customer_data_offer.public_label, customer_label)
         for mutation in (
             lambda: replace(positive, offers=()),
             lambda: replace(negative, offers=positive.offers),
@@ -580,10 +605,6 @@ class Phase8LookupProjectionTests(unittest.TestCase):
             lambda: replace(
                 positive,
                 offers=(positive.offers[0], positive.offers[0]),
-            ),
-            lambda: replace(
-                positive.offers[0],
-                public_label="Contato: (75) 99999-9999",
             ),
         ):
             with self.subTest(mutation=mutation):

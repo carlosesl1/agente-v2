@@ -152,7 +152,7 @@ A compact `TURN COMPLETION PRIORITY` suffix is always the final part of the effe
 
 The suffix does not contain customer keyword lists and grants read-only semantic authority only.
 
-## 6. Privacy and integrity
+## 6. Dialogue integrity
 
 - Private dialogue DB mode remains `0600` and is a distinct durable owner from public artifacts.
 - Dataclasses carrying raw dialogue use `repr=False`.
@@ -160,7 +160,7 @@ The suffix does not contain customer keyword lists and grants read-only semantic
 - Hashes bind exact source turn, event hash, customer message, public reply chunks, and timestamp.
 - Replays with divergent content fail closed.
 - No raw context enters `model_calls`, boundary artifacts, evidence, exceptions, or logs; existing transcript frames continue storing commitments/hashes only.
-- Current customer PII may reach the model because the model must interpret the original message; it never becomes public state unless Maya semantically assigns it and the private owner validates/persists it under the existing contract.
+- Customer data may reach the model through the original message and may be repeated in Maya-authored public text. Dialogue storage rules do not authorize output inspection, correction, redaction, or blocking.
 
 ## 7. Completion and stability criteria
 
@@ -169,6 +169,6 @@ The successor may be called qualified only when:
 1. causal RED tests prove all four baseline failures and then pass;
 2. no new customer-text regex, alias table, substring test, token allowlist, or keyword branch exists in controller/application code;
 3. focused tests, full pytest, Ruff, compileall, boundary checks, Compose validation, and CI-equivalent jobs pass;
-4. repeated real-Hermes/fake-provider conversations complete target journeys without no-op, lost context, false human acknowledgement, duplicate read/effect, PII leakage, or external receipt;
+4. repeated real-Hermes/fake-provider conversations complete target journeys without no-op, lost context, false human acknowledgement, duplicate read/effect, output privacy intervention, or external receipt;
 5. provider POST count and external effect count remain zero during qualification;
 6. the new commit/tree/OCI identity is frozen and the rollout decision is reported separately.

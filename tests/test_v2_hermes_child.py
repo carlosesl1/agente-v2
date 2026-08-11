@@ -115,7 +115,7 @@ def test_child_transports_public_reply_correction_without_changing_current_reque
         message="Continue com uma resposta corrigida.",
         locale="pt-BR",
         state_version=2,
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     wire = _request_wire(request, "Return V2 JSON.")
     envelope = json.loads(wire)
@@ -132,7 +132,7 @@ def test_child_transports_public_reply_correction_without_changing_current_reque
     correction_suffix = """PUBLIC REPLY CORRECTION
 The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
-Do not repeat private values. Do not request another read after observations.
+Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
 Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
     child_wrapper = (
@@ -143,7 +143,7 @@ Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
     current_request_delimiter = "\n\nCURRENT REQUEST JSON:\n"
     assert set(envelope) == {"system_prompt", "messages"}
     assert json.loads(current_request)["public_reply_correction_reasons"] == [
-        "private_value_exposure"
+        "typed_clarification_mismatch"
     ]
     assert envelope["system_prompt"].endswith(correction_suffix)
     assert prompt.startswith(envelope["system_prompt"] + child_wrapper)

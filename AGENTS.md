@@ -22,6 +22,14 @@ Este repositório é a trilha limpa e auditável da refatoração Agente v2. O s
 - Não execute provider write dentro do orçamento restante do turno da LLM.
 - Ledger de efeito comercial e outbox de comunicação são mecanismos separados.
 
+## Regra geral de privacidade/PII e autoria da Maya
+
+- É proibido iniciar, prolongar ou recomendar trabalho de privacidade/PII sem pedido explícito de Carlos no chat atual. Um pedido explícito deve ter escopo fechado e término verificável; investigação indeterminada é proibida.
+- Dados enviados voluntariamente pelo lead podem ser repetidos pela Maya. Nome, partes de nome, e-mail, telefone, país, nascimento, gênero ou dados de passageiros nunca podem, por motivo de privacidade/PII, alterar, mascarar, redigir, substituir, corrigir, bloquear, atrasar ou provocar retry/fail-closed da resposta.
+- O controlador nunca inspeciona texto da Maya para detectar PII e nunca cria corpus, parser, regex, lista de partículas, extrator ou gate de exposição. `reply_chunks` e `clarification_question` aceitos permanecem byte a byte como a Maya escreveu.
+- Armazenamento tipado, contratos de efeitos e autoridade transacional podem continuar separados da conversa, mas não autorizam reescrever a Maya.
+- Trabalho deve avançar em rodadas curtas: um invariante causal por rodada, teste focal antes da próxima e nenhum ciclo aberto de revisão/correção sem limite explícito.
+
 ## Segurança
 
 Nunca versionar:

@@ -768,7 +768,7 @@ _PUBLIC_READ_PATTERNS: Final = tuple(
 )
 
 
-def validate_public_text(value: object, *, limit: int) -> str:
+def _validate_read_text_structure(value: object, *, limit: int) -> str:
     if type(value) is not str or not value:
         raise ValueError("public text must be a non-empty exact string")
     if unicodedata.normalize("NFKC", value) != value:
@@ -777,6 +777,12 @@ def validate_public_text(value: object, *, limit: int) -> str:
         raise ValueError("public text normalization mismatch")
     if len(value) > limit:
         raise ValueError("public text exceeds its code-point limit")
+    return value
+
+
+def validate_public_text(value: object, *, limit: int) -> str:
+    """Validate the frozen v1 evidence policy used by historical receipts."""
+    _validate_read_text_structure(value, limit=limit)
     if any(pattern.search(value) for pattern in _PUBLIC_READ_PATTERNS):
         raise ValueError("public text contains forbidden private or active content")
     return value
@@ -944,7 +950,7 @@ class SanitizedKnowledgeResult:
             )
         if type(self.locale) is not str or _LOCALE_RE.fullmatch(self.locale) is None:
             raise ValueError("SanitizedKnowledgeResult.locale must be canonical")
-        validate_public_text(self.answer_text, limit=4096)
+        _validate_read_text_structure(self.answer_text, limit=4096)
         if type(self.evidence_receipt) is not ReadEvidenceReceipt:
             raise TypeError("SanitizedKnowledgeResult.evidence_receipt must be exact")
         if self.evidence_receipt.request_hash != self.request_hash:
@@ -1135,7 +1141,7 @@ class SanitizedOffer:
             raise ValueError("SanitizedOffer.offer_id must be canonical")
         if type(self.service) is not ReadService:
             raise TypeError("SanitizedOffer.service must be exact")
-        validate_public_text(self.public_label, limit=256)
+        _validate_read_text_structure(self.public_label, limit=256)
         _require_exact_date(self.start_date, "SanitizedOffer.start_date")
         if self.end_date is not None:
             _require_exact_date(self.end_date, "SanitizedOffer.end_date")

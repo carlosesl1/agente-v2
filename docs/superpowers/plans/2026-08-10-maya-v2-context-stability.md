@@ -2,6 +2,8 @@
 
 > Execute in `/home/ubuntu/agente-v2/.worktrees/maya-v2-context-stability`. Use strict TDD. No deploy or real business-provider effect.
 
+> **2026-08-11 supersession:** Do not start or recommend privacy/PII work without an explicit current-chat request. Customer data may be repeated in Maya text, and no privacy/PII gate may alter or block that text. Work only in short bounded rounds.
+
 **Goal:** Give Maya bounded private dialogue, one model-owned semantic progress review, exact handoff lifecycle context, and granular typed-question grounding so she advances journeys without deterministic NLU or keyword triggers.
 
 **Architecture:** Extend the private customer owner with a four-exchange integrity-bound journal, project it through `ModelRequest`, upgrade the model protocol to v7 with `clarification_question`, replace boolean handoff state with the exact durable status, and remove prose classification from positive grounding. Trigger one progress review solely from closed proposal structure.
@@ -114,7 +116,7 @@
 
 ## Task 8 — Independent review and controlled conversations
 
-1. Request independent code review of the final diff for privacy, replay/idempotency, provider authority, and absence of deterministic NLU.
+1. Request independent code review of the final diff for replay/idempotency, provider authority, exact Maya text preservation, and absence of deterministic NLU.
 2. Build a new immutable OCI labeled with the exact successor commit.
 3. Run repeated tool-free real-Hermes conversations with fake/no business providers for:
    - English foreign lodging request;
@@ -122,6 +124,6 @@
    - ambiguous reservation holder with preserved question;
    - discount handoff pending without false human receipt;
    - package choice through summary/confirmation boundaries;
-   - replay/idempotency and PII artifact scans.
+   - replay/idempotency and exact Maya-text preservation.
 4. Require repeated stability and zero external effects/receipts.
 5. Freeze SHA/tree/OCI and write a qualification report. Do not promote or deploy.

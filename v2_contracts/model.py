@@ -77,7 +77,6 @@ class InvalidModelProposal(ValueError):
 
 
 class PublicReplyCorrectionReason(str, Enum):
-    PRIVATE_VALUE_EXPOSURE = "private_value_exposure"
     TYPED_CLARIFICATION_MISMATCH = "typed_clarification_mismatch"
     UNSUPPORTED_OBSERVATION_CLAIM = "unsupported_observation_claim"
     OPERATIONAL_STATUS_CONFLICT = "operational_status_conflict"

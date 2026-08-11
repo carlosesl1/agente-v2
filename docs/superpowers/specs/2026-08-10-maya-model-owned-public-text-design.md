@@ -2,15 +2,15 @@
 
 **Date:** 2026-08-10
 
-**Status:** Approved for local implementation by Carlos Eduardo
+**Status:** Superseded in part by Carlos Eduardo on 2026-08-11
 
-**Authority:** Carlos selected the global option: remove every controller rewrite of customer-facing Maya text. When asked how to handle an invalid reply, the UI timed out with an explicit instruction to use best judgment and proceed. This design chooses one bounded model-owned correction, then fail closed with no customer delivery.
+**Current authority:** Maya remains the sole author of customer-facing text. The 2026-08-11 decision cancels every privacy/PII output check or correction described below: voluntarily supplied data may be repeated, and privacy/PII may not alter, block, retry, redact, or fail a Maya reply. Privacy/PII work must not be started or recommended without an explicit current-chat request.
 
 **Starting candidate:** `7123994605e934e1688b14b0489d3759252d65a8`
 
 ## 1. Problem
 
-The V2 parent currently treats `reply_chunks` as mutable after Maya has produced a valid closed proposal. Multiple application and adapter branches replace those chunks with controller-authored phrases for privacy, grounding, selection failure, active execution, consultation reuse, confirmation review, deterministic fallback, and completion projection.
+The V2 parent currently treats `reply_chunks` as mutable after Maya has produced a valid closed proposal. Multiple application and adapter branches replace those chunks with controller-authored phrases for grounding, selection failure, active execution, consultation reuse, confirmation review, deterministic fallback, and completion projection.
 
 A real-model/fake-provider run proved the concrete failure:
 
@@ -20,13 +20,13 @@ A real-model/fake-provider run proved the concrete failure:
 4. The customer never saw the question.
 5. A later turn proceeded with `children=0` without an explicit answer.
 
-This violates the active authority chain: Maya owns conversation semantics; the controller owns contracts, consistency, permissions, privacy, effects, observations, receipts, and commits.
+This violates the active authority chain: Maya owns conversation semantics and text; the controller owns contracts, consistency, permissions, effects, observations, receipts, and commits.
 
 ## 2. Decision
 
 Every customer-facing V2 text is model-owned.
 
-Once a model proposal has been accepted as the final proposal for a turn, its `reply_chunks` are immutable through planning, privacy partition, reads, reduction, commit, replay, and delivery. Parent code may:
+Once a model proposal has been accepted as the final proposal for a turn, its `reply_chunks` are immutable through planning, structured-fact partition, reads, reduction, commit, replay, and delivery. Parent code may:
 
 - reject a proposal;
 - remove private structured facts from public state;
@@ -76,13 +76,11 @@ The parser may normalize JSON transport representation and reject invalid shape,
 
 A private-fact update does not weaken this rule. Private structured facts are partitioned and persisted, while the model's question remains unchanged.
 
-### 4.3 Private values
+### 4.3 Customer-supplied values
 
-The parent continues to remove private structured facts from public projections and artifacts. It also performs exact-value leak checks against accepted private values as a privacy boundary, not as language interpretation.
+Structured customer facts may retain their existing typed owner, but this ownership never controls Maya's prose. The parent performs no exact-value, substring, component, regex, semantic, or corpus comparison between customer data and `reply_chunks`/`clarification_question`.
 
-If a model reply contains an exact protected private value that is not explicitly authorized for public repetition, the parent does not redact or replace it. It requests one model-owned correction with a closed `private_value_exposure` reason. Repeated exposure fails closed.
-
-The correction request carries the original customer message in the existing private model boundary, exact private field names, and exposure categories. Technical logs and public evidence never receive private values.
+Maya may repeat any voluntarily supplied name, name component, e-mail, phone, country, birth date, gender, or passenger value. Such repetition causes no correction request, redaction, masking, retry, response suppression, or fail-closed path.
 
 ## 5. Model-owned correction protocol
 
@@ -103,7 +101,6 @@ The correction contains only typed, bounded information:
 
 Closed reasons cover structural or authority failures, including:
 
-- `private_value_exposure`;
 - `typed_clarification_mismatch`;
 - `unsupported_observation_claim`;
 - `operational_status_conflict`;
@@ -203,7 +200,7 @@ A public-text correction failure causes:
 - a categorical technical failure artifact containing only reason enums and commitments;
 - exact idempotent retry behavior for the same inbound event.
 
-Private facts already accepted from the original message remain in their private journal under the existing crash/retry contract; they do not become a conversational progress gate and are not exposed publicly.
+Customer facts already accepted from the original message remain in their typed owner under the existing crash/retry contract; they do not become a conversational progress gate and may also appear in Maya-authored public text.
 
 ## 10. Testing strategy
 
@@ -215,7 +212,7 @@ Add an executor test reproducing the exact shape:
 - Maya emits typed private facts plus `clarification_question="Haverá alguma criança no grupo?"`;
 - no read/effect is proposed;
 - expected final public reply is exactly Maya's question;
-- private values are persisted privately and absent from public artifacts;
+- customer facts are persisted by their typed owner while Maya's exact question remains public;
 - no command, relay, or external effect exists.
 
 The test must fail on the starting candidate because the final reply is the controller's generic collection text.
@@ -237,7 +234,7 @@ Add an AST/source boundary test forbidding application/adapter assignment of cus
 
 Prove:
 
-- private exact-value exposure triggers correction, not redaction;
+- voluntarily supplied customer data in Maya text triggers no correction, redaction, retry, or failure;
 - a failed correction creates no public/command/relay/delivery rows;
 - observations remain required for price/availability claims;
 - pending handoff cannot be described as human receipt;
@@ -271,7 +268,7 @@ The successor is acceptable only when:
 1. the reproduced private-holder clarification test passes after a witnessed RED;
 2. every post-model customer-text rewrite is removed or converted to bounded model-owned correction;
 3. accepted final `reply_chunks` are byte-identical from final model frame through commit and replay;
-4. all safety and privacy gates remain deterministic and at least as strict as the starting candidate;
+4. no privacy/PII gate, parser, corpus, prompt instruction, or correction reason can affect Maya text;
 5. focused and full regression gates pass;
 6. repeated real-model/fake-provider qualification passes with manual review;
 7. the candidate is frozen under a new commit/tree/image identity;

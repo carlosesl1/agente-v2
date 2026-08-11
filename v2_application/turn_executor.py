@@ -116,11 +116,7 @@ from v2_contracts.model import (
     PRIVATE_CUSTOMER_FACT_ORDER,
     PublicReplyCorrectionReason,
 )
-from v2_contracts.passengers import (
-    PASSENGER_FIELD_ORDER,
-    PassengerInput,
-    PassengerManifestStatus,
-)
+from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -128,28 +124,6 @@ from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _ZERO_HASH: Final = "0" * 64
-_PRIVATE_NAME_PARTICLES: Final = frozenset(
-    (
-        "al",
-        "bin",
-        "da",
-        "das",
-        "de",
-        "del",
-        "di",
-        "do",
-        "dos",
-        "du",
-        "e",
-        "el",
-        "ibn",
-        "la",
-        "le",
-        "van",
-        "von",
-        "y",
-    )
-)
 
 
 class TurnExecutionError(RuntimeError):
@@ -260,33 +234,6 @@ class _PublicReplyCorrectionBudget:
     consumed: bool = False
 
 
-@dataclass(slots=True, repr=False)
-class _PrivateValueCorpus:
-    values: tuple[str, ...] = ()
-    bounded_values: tuple[str, ...] = ()
-
-    def extend(self, values: tuple[str, ...]) -> None:
-        if type(values) is not tuple or any(
-            type(value) is not str or not value for value in values
-        ):
-            raise TypeError("private value corpus requires an exact string tuple")
-        self.values = tuple(dict.fromkeys((*self.values, *values)))
-
-    def extend_full_names(self, values: tuple[str, ...]) -> None:
-        if type(values) is not tuple or any(
-            type(value) is not str or not value for value in values
-        ):
-            raise TypeError("private name corpus requires an exact string tuple")
-        self.extend(values)
-        name_components = tuple(
-            part
-            for value in values
-            for part in value.split()
-            if len(part) > 1 and part.casefold() not in _PRIVATE_NAME_PARTICLES
-        )
-        self.bounded_values = tuple(
-            dict.fromkeys((*self.bounded_values, *name_components))
-        )
 
 
 def _canonical(schema: str, data: object) -> bytes:
@@ -966,255 +913,6 @@ def _private_update_no_command_proposal(
         pending_disposition=None,
     )
 
-
-def _private_scalar_text(value: object) -> str | None:
-    if type(value) is str:
-        return value or None
-    if type(value) is date:
-        return value.isoformat()
-    return None
-
-
-def _private_country_values(value: str | None) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if type(value) is not str or len(value) != 2 or not value.isascii():
-        raise TypeError("private country exposure guard requires an ISO alpha-2 string")
-    return tuple(dict.fromkeys((value, value.lower())))
-
-
-def _private_snapshot_values(
-    snapshot: PrivateCustomerFactSnapshot,
-) -> tuple[str, ...]:
-    if type(snapshot) is not PrivateCustomerFactSnapshot:
-        raise TypeError("private snapshot exposure guard requires an exact snapshot")
-    values = (
-        snapshot.full_name,
-        snapshot.email,
-        snapshot.country_code,
-        snapshot.birth_date,
-        snapshot.gender,
-    )
-    values = tuple(
-        text
-        for value in values
-        if (text := _private_scalar_text(value)) is not None
-    )
-    return (*values, *_private_country_values(snapshot.country_code))
-
-
-def _private_profile_values(
-    profile: PrivateCustomerBinding,
-    *,
-    now: datetime,
-) -> tuple[str, ...]:
-    if type(profile) is not PrivateCustomerBinding or type(now) is not datetime:
-        raise TypeError("private profile exposure guard requires exact contracts")
-    if not profile.observed_at <= now < profile.expires_at:
-        return ()
-    values = tuple(
-        value
-        for value in (
-            profile.full_name,
-            profile.email,
-            profile.phone_e164,
-            profile.country_code,
-        )
-        if value is not None
-    )
-    return (*values, *_private_country_values(profile.country_code))
-
-
-def _accepted_private_fact_values(
-    proposed: tuple[ModelFact, ...],
-    accepted: tuple[ModelFact, ...],
-) -> tuple[str, ...]:
-    if (
-        type(proposed) is not tuple
-        or type(accepted) is not tuple
-        or any(type(item) is not ModelFact for item in (*proposed, *accepted))
-    ):
-        raise TypeError("accepted private exposure guard requires exact facts")
-    accepted_names = {item.name for item in accepted}
-    values = (
-        *(item.value for item in proposed if item.name in accepted_names),
-        *(item.value for item in accepted),
-    )
-    return tuple(
-        text
-        for value in values
-        if (text := _private_scalar_text(value)) is not None
-    )
-
-
-def _accepted_private_full_names(
-    proposed: tuple[ModelFact, ...],
-    accepted: tuple[ModelFact, ...],
-) -> tuple[str, ...]:
-    if (
-        type(proposed) is not tuple
-        or type(accepted) is not tuple
-        or any(type(item) is not ModelFact for item in (*proposed, *accepted))
-    ):
-        raise TypeError("accepted private name guard requires exact facts")
-    if not any(item.name == "full_name" for item in accepted):
-        return ()
-    return tuple(
-        dict.fromkeys(
-            item.value
-            for item in (*proposed, *accepted)
-            if item.name == "full_name" and type(item.value) is str and item.value
-        )
-    )
-
-
-def _passenger_input_private_values(
-    passengers: tuple[PassengerInput, ...],
-) -> tuple[str, ...]:
-    if type(passengers) is not tuple or any(
-        type(passenger) is not PassengerInput for passenger in passengers
-    ):
-        raise TypeError("passenger exposure guard requires exact inputs")
-    values: list[str] = []
-    for passenger in passengers:
-        for name in PASSENGER_FIELD_ORDER:
-            value = getattr(passenger, name)
-            text = _private_scalar_text(value)
-            if text is not None:
-                values.append(text)
-            if name == "country_code":
-                values.extend(_private_country_values(value))
-    return tuple(values)
-
-
-def _passenger_input_full_names(
-    passengers: tuple[PassengerInput, ...],
-) -> tuple[str, ...]:
-    if type(passengers) is not tuple or any(
-        type(passenger) is not PassengerInput for passenger in passengers
-    ):
-        raise TypeError("passenger name guard requires exact inputs")
-    return tuple(
-        passenger.full_name
-        for passenger in passengers
-        if passenger.full_name is not None
-    )
-
-
-def _projection_passenger_private_rows(
-    projection: ConversationProjection,
-) -> tuple[dict[str, object], ...]:
-    if type(projection) is not ConversationProjection:
-        raise TypeError("passenger exposure guard requires an exact projection")
-    manifest = projection_manifest_fact(projection)
-    if manifest is None:
-        return ()
-    manifest_json = manifest.value.value
-    if type(manifest_json) is not str:
-        raise TurnExecutionError("passenger manifest private values are invalid")
-    try:
-        decoded = json.loads(manifest_json)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        raise TurnExecutionError("passenger manifest private values are invalid") from exc
-    if type(decoded) is not dict or type(decoded.get("passengers")) is not list:
-        raise TurnExecutionError("passenger manifest private values are invalid")
-    if any(type(passenger) is not dict for passenger in decoded["passengers"]):
-        raise TurnExecutionError("passenger manifest private values are invalid")
-    return tuple(decoded["passengers"])
-
-
-def _projection_passenger_private_values(
-    projection: ConversationProjection,
-) -> tuple[str, ...]:
-    values: list[str] = []
-    for passenger in _projection_passenger_private_rows(projection):
-        for name in PASSENGER_FIELD_ORDER:
-            value = passenger.get(name)
-            if value is None:
-                continue
-            if type(value) is not str or not value:
-                raise TurnExecutionError("passenger manifest private values are invalid")
-            values.append(value)
-            if name == "country_code":
-                values.extend(_private_country_values(value))
-    return tuple(values)
-
-
-def _projection_passenger_full_names(
-    projection: ConversationProjection,
-) -> tuple[str, ...]:
-    names: list[str] = []
-    for passenger in _projection_passenger_private_rows(projection):
-        value = passenger.get("full_name")
-        if value is None:
-            continue
-        if type(value) is not str or not value:
-            raise TurnExecutionError("passenger manifest private values are invalid")
-        names.append(value)
-    return tuple(names)
-
-
-def _reply_chunk_contains_literal_value(chunk: str, private_value: str) -> bool:
-    if type(chunk) is not str or type(private_value) is not str or not private_value:
-        raise TypeError("private literal check requires exact strings")
-    if len(private_value) > 3:
-        return private_value in chunk
-    cursor = 0
-    while True:
-        position = chunk.find(private_value, cursor)
-        if position < 0:
-            return False
-        end = position + len(private_value)
-        left_is_boundary = position == 0 or not chunk[position - 1].isalnum()
-        right_is_boundary = end == len(chunk) or not chunk[end].isalnum()
-        if left_is_boundary and right_is_boundary:
-            return True
-        cursor = position + 1
-
-
-def _reply_chunk_contains_bounded_value(chunk: str, private_value: str) -> bool:
-    if type(chunk) is not str or type(private_value) is not str or not private_value:
-        raise TypeError("bounded private literal check requires exact strings")
-    cursor = 0
-    while True:
-        position = chunk.find(private_value, cursor)
-        if position < 0:
-            return False
-        end = position + len(private_value)
-        left_is_boundary = position == 0 or not chunk[position - 1].isalnum()
-        right_is_boundary = end == len(chunk) or not chunk[end].isalnum()
-        if left_is_boundary and right_is_boundary:
-            return True
-        cursor = position + 1
-
-
-def _proposal_exposes_private_values(
-    proposal: ModelProposal,
-    private_values: tuple[str, ...],
-    bounded_private_values: tuple[str, ...] = (),
-) -> bool:
-    if (
-        type(proposal) is not ModelProposal
-        or type(private_values) is not tuple
-        or type(bounded_private_values) is not tuple
-        or any(type(item) is not str or not item for item in private_values)
-        or any(type(item) is not str or not item for item in bounded_private_values)
-    ):
-        raise TypeError("private-value exposure check requires exact contracts")
-    return (
-        any(
-            _reply_chunk_contains_literal_value(chunk, private_value)
-            for private_value in private_values
-            for chunk in proposal.reply_chunks
-        )
-        or any(
-            _reply_chunk_contains_bounded_value(chunk, private_value)
-            for private_value in bounded_private_values
-            for chunk in proposal.reply_chunks
-        )
-    )
-
-
 def _same_terminal_structure(
     expected: ModelProposal,
     corrected: ModelProposal,
@@ -1248,18 +946,12 @@ def _request_public_reply_correction(
     audited: AuditedModelTurn,
     expected: ModelProposal,
     reason: PublicReplyCorrectionReason,
-    private_values: tuple[str, ...],
-    bounded_private_values: tuple[str, ...] = (),
 ) -> tuple[ModelProposal, AuditedModelTurn]:
     if (
         type(request) is not ModelRequest
         or type(audited) is not AuditedModelTurn
         or type(expected) is not ModelProposal
         or type(reason) is not PublicReplyCorrectionReason
-        or type(private_values) is not tuple
-        or type(bounded_private_values) is not tuple
-        or any(type(item) is not str or not item for item in private_values)
-        or any(type(item) is not str or not item for item in bounded_private_values)
     ):
         raise TypeError("public reply correction requires exact contracts")
     correction_request = replace(
@@ -1283,14 +975,7 @@ def _request_public_reply_correction(
         corrected = validate_productive_proposal(corrected_audited.proposal)
     except InvalidModelProposal as exc:
         raise TurnExecutionError("public reply correction remained invalid") from exc
-    if (
-        not _same_terminal_structure(expected, corrected)
-        or _proposal_exposes_private_values(
-            corrected,
-            private_values,
-            bounded_private_values,
-        )
-    ):
+    if not _same_terminal_structure(expected, corrected):
         raise TurnExecutionError("public reply correction remained invalid")
     return corrected, AuditedModelTurn.combine((audited, corrected_audited))
 
@@ -1754,7 +1439,6 @@ class V2TurnExecutor:
 
         last_conflict: ConcurrencyConflict | None = None
         correction_budget = _PublicReplyCorrectionBudget()
-        private_value_corpus = _PrivateValueCorpus()
         for _ in range(self._max_commit_attempts):
             try:
                 prepared, expected_version, fencing_token = self._prepare(
@@ -1762,7 +1446,6 @@ class V2TurnExecutor:
                     sources=sources,
                     event_hash=event_hash,
                     correction_budget=correction_budget,
-                    private_value_corpus=private_value_corpus,
                 )
                 if prepared.private_profile_material_hash is not None:
                     profile_now = self._clock.now()
@@ -1856,12 +1539,9 @@ class V2TurnExecutor:
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
         correction_budget: _PublicReplyCorrectionBudget,
-        private_value_corpus: _PrivateValueCorpus,
     ) -> tuple[_PreparedTurn, int, int]:
         if type(correction_budget) is not _PublicReplyCorrectionBudget:
             raise TypeError("public reply correction budget must be exact")
-        if type(private_value_corpus) is not _PrivateValueCorpus:
-            raise TypeError("private value corpus must be exact")
         now = self._clock.now()
         try:
             self._store.load_state(batch.lead_id)
@@ -1953,25 +1633,6 @@ class V2TurnExecutor:
             ),
             active_execution_status=active_execution_status(current.state),
         )
-        private_value_corpus.extend(
-            (
-                *_private_snapshot_values(private_facts),
-                *_private_profile_values(profile, now=now),
-                *_projection_passenger_private_values(projection),
-            )
-        )
-        private_value_corpus.extend_full_names(
-            (
-                *((private_facts.full_name,) if private_facts.full_name else ()),
-                *(
-                    (profile.full_name,)
-                    if profile.full_name is not None
-                    and profile.observed_at <= now < profile.expires_at
-                    else ()
-                ),
-                *_projection_passenger_full_names(projection),
-            )
-        )
 
         def request_public_reply_correction(
             expected: ModelProposal,
@@ -2001,8 +1662,6 @@ class V2TurnExecutor:
                 audited=audited,
                 expected=expected,
                 reason=reason,
-                private_values=private_value_corpus.values,
-                bounded_private_values=private_value_corpus.bounded_values,
             )
             return corrected
 
@@ -2028,24 +1687,6 @@ class V2TurnExecutor:
         first_public_facts = _authoritative_language_facts(
             first_public_facts,
             projection.locale,
-        )
-        private_value_corpus.extend(
-            _accepted_private_fact_values(
-                first_proposal.facts,
-                first_private_facts,
-            )
-        )
-        private_value_corpus.extend_full_names(
-            _accepted_private_full_names(
-                first_proposal.facts,
-                first_private_facts,
-            )
-        )
-        private_value_corpus.extend(
-            _passenger_input_private_values(first_proposal.passengers)
-        )
-        private_value_corpus.extend_full_names(
-            _passenger_input_full_names(first_proposal.passengers)
         )
         if first_private_facts:
             private_facts = _persist_private_collection(
@@ -2178,24 +1819,6 @@ class V2TurnExecutor:
             review_public_facts = _authoritative_language_facts(
                 review_public_facts,
                 projection.locale,
-            )
-            private_value_corpus.extend(
-                _accepted_private_fact_values(
-                    review_proposal.facts,
-                    review_private_facts,
-                )
-            )
-            private_value_corpus.extend_full_names(
-                _accepted_private_full_names(
-                    review_proposal.facts,
-                    review_private_facts,
-                )
-            )
-            private_value_corpus.extend(
-                _passenger_input_private_values(review_proposal.passengers)
-            )
-            private_value_corpus.extend_full_names(
-                _passenger_input_full_names(review_proposal.passengers)
             )
             if review_private_facts:
                 private_facts = _persist_private_collection(
@@ -2343,28 +1966,6 @@ class V2TurnExecutor:
                 first_proposal,
                 first_audited,
                 PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-            )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
-        if _proposal_exposes_private_values(
-            first_proposal,
-            private_value_corpus.values,
-            private_value_corpus.bounded_values,
-        ):
-            read_requests = ()
-            derived_confirmation_reads = False
-            first_proposal = replace(
-                first_proposal,
-                read_requests=(),
-                selection_requested=False,
-            )
-            first_proposal, first_audited = request_public_reply_correction(
-                first_proposal,
-                first_audited,
-                PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
             )
             first_audited = AuditedModelTurn.from_frames(
                 proposal=first_proposal,
@@ -2531,24 +2132,6 @@ class V2TurnExecutor:
                 second_public_facts,
                 projection.locale,
             )
-            private_value_corpus.extend(
-                _accepted_private_fact_values(
-                    proposal.facts,
-                    second_private_facts,
-                )
-            )
-            private_value_corpus.extend_full_names(
-                _accepted_private_full_names(
-                    proposal.facts,
-                    second_private_facts,
-                )
-            )
-            private_value_corpus.extend(
-                _passenger_input_private_values(proposal.passengers)
-            )
-            private_value_corpus.extend_full_names(
-                _passenger_input_full_names(proposal.passengers)
-            )
             if second_private_facts:
                 private_facts = _persist_private_collection(
                     self._private_customer_facts,
@@ -2654,28 +2237,6 @@ class V2TurnExecutor:
                         selection_review_public_facts,
                         projection.locale,
                     )
-                    private_value_corpus.extend(
-                        _accepted_private_fact_values(
-                            selection_review_proposal.facts,
-                            selection_review_private_facts,
-                        )
-                    )
-                    private_value_corpus.extend_full_names(
-                        _accepted_private_full_names(
-                            selection_review_proposal.facts,
-                            selection_review_private_facts,
-                        )
-                    )
-                    private_value_corpus.extend(
-                        _passenger_input_private_values(
-                            selection_review_proposal.passengers
-                        )
-                    )
-                    private_value_corpus.extend_full_names(
-                        _passenger_input_full_names(
-                            selection_review_proposal.passengers
-                        )
-                    )
                     if selection_review_private_facts:
                         private_facts = _persist_private_collection(
                             self._private_customer_facts,
@@ -2747,12 +2308,6 @@ class V2TurnExecutor:
             audited = first_audited
             proposal = first_proposal
 
-        private_value_corpus.extend(
-            _projection_passenger_private_values(projection)
-        )
-        private_value_corpus.extend_full_names(
-            _projection_passenger_full_names(projection)
-        )
         if private_update_turn and not collection_only:
             proposal = _private_update_no_command_proposal(
                 proposal,
@@ -2777,16 +2332,6 @@ class V2TurnExecutor:
                 proposal,
                 audited,
                 PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-            )
-        if _proposal_exposes_private_values(
-            proposal,
-            private_value_corpus.values,
-            private_value_corpus.bounded_values,
-        ):
-            proposal, audited = request_public_reply_correction(
-                proposal,
-                audited,
-                PublicReplyCorrectionReason.PRIVATE_VALUE_EXPOSURE,
             )
         proposal = apply_positive_grounding(
             proposal,

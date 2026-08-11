@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Maya the sole author of every conversational `reply_chunks` value while keeping the controller authoritative for validation, privacy, observations, permissions, receipts, idempotency, and effects.
+**Goal:** Make Maya the sole author of every conversational `reply_chunks` value while keeping the controller authoritative for validation, observations, permissions, receipts, idempotency, and effects.
+
+**2026-08-11 supersession:** Every privacy/PII output step in this historical plan is cancelled. Do not implement or recommend it. Voluntarily supplied customer data may be repeated; no privacy/PII mechanism may inspect, alter, correct, block, retry, redact, or fail Maya text. Execute any future change in short bounded rounds only.
 
 **Architecture:** The final accepted model frame supplies immutable public chunks. Controller branches may preserve those chunks, request one closed model-owned correction, or fail before public commit; they may never synthesize or replace prose. Canonical transactional material and asynchronous provider payloads remain parent-owned typed artifacts, but any conversational explanation of them must come from Maya.
 
@@ -13,7 +15,7 @@
 - Starting implementation commit: `5e8208b2e901e90e1c6bf52496c02ae78ccc0d79`.
 - Design authority: `docs/superpowers/specs/2026-08-10-maya-model-owned-public-text-design.md`.
 - No deterministic NLU, date/person/country/intent extractor, regex interpretation, customer-text alias matching, or keyword trigger.
-- The controller may accept, reject, persist, validate, execute, and request one model-owned correction; it may not write customer-facing Maya prose.
+- The controller may accept, reject, persist, validate, execute, and request one model-owned correction for non-privacy structural/operational reasons; it may not write customer-facing Maya prose or request correction for privacy/PII.
 - A failed correction creates no public reply, command relay, channel delivery, or provider write.
 - Existing Stripe, Wise, Pix, Cloudbeds, Bókun, handoff, idempotency, writer/reconciler, receipt, and replay gates remain closed and authoritative.
 - Context remains at most four prior exchanges, nine wire messages including the current request, and 64 KiB aggregate dialogue bytes.
@@ -162,7 +164,6 @@ Use this closed enum:
 
 ```python
 class PublicReplyCorrectionReason(str, Enum):
-    PRIVATE_VALUE_EXPOSURE = "private_value_exposure"
     TYPED_CLARIFICATION_MISMATCH = "typed_clarification_mismatch"
     UNSUPPORTED_OBSERVATION_CLAIM = "unsupported_observation_claim"
     OPERATIONAL_STATUS_CONFLICT = "operational_status_conflict"
@@ -196,7 +197,7 @@ Serialize only reason enum values and the existing typed state/observations. Do 
 PUBLIC REPLY CORRECTION
 The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
-Do not repeat private values. Do not request another read after observations.
+Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
 Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it.
 ```
@@ -292,9 +293,9 @@ return replace(
 
 Do not pass `reply_chunks` or `clarification_question` to `replace()`.
 
-- [ ] **Step 2: Add exact private-value exposure correction**
+- [x] **Step 2: Cancelled by the 2026-08-11 authority**
 
-Check accepted private string values against candidate chunks as exact values, solely as a privacy boundary. If exposed, request one model-owned correction with `PRIVATE_VALUE_EXPOSURE`. After correction, repeat the exact leak check; a second exposure raises `TurnExecutionError` before commit. Never redact or substitute text.
+No private-value exposure correction exists. Customer values in Maya text are accepted exactly as authored.
 
 - [ ] **Step 3: Make positive grounding text-preserving**
 

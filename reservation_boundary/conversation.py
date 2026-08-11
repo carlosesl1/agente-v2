@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -71,6 +72,18 @@ def _require_exact_int(value: object, name: str, *, minimum: int) -> int:
         raise TypeError(f"{name} must be an exact integer")
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
+    return value
+
+
+def _require_conversation_text(value: object, name: str, *, limit: int) -> str:
+    if type(value) is not str or not value:
+        raise ValueError(f"{name} must be a non-empty exact string")
+    if unicodedata.normalize("NFKC", value) != value:
+        raise ValueError(f"{name} must already use NFKC")
+    if value != value.strip() or "\r" in value or "\t" in value or "  " in value:
+        raise ValueError(f"{name} normalization mismatch")
+    if len(value) > limit:
+        raise ValueError(f"{name} exceeds its code-point limit")
     return value
 
 
@@ -715,7 +728,7 @@ class PublicReplyType(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class PublicReplyChunk:
-    """Exact public bytes produced by the deterministic parent splitter/guard."""
+    """Exact public bytes authored by Maya or an authenticated system artifact."""
 
     aggregate_turn_id: str
     ordinal: int
@@ -730,10 +743,7 @@ class PublicReplyChunk:
     def __post_init__(self) -> None:
         _require_id_token(self.aggregate_turn_id, "PublicReplyChunk.aggregate_turn_id")
         _require_exact_int(self.ordinal, "PublicReplyChunk.ordinal", minimum=0)
-        # Keep one accepted public-text policy without creating a module import cycle.
-        from reservation_boundary.reads import validate_public_text
-
-        validate_public_text(self.text, limit=4096)
+        _require_conversation_text(self.text, "PublicReplyChunk.text", limit=4096)
         _require_sha256(
             self.source_closure_hash,
             "PublicReplyChunk.source_closure_hash",

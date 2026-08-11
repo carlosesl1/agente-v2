@@ -317,7 +317,7 @@ def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
     reasons = tuple(
         sorted(
             (
-                reason_type.PRIVATE_VALUE_EXPOSURE,
+                reason_type.TYPED_CLARIFICATION_MISMATCH,
                 reason_type.UNSUPPORTED_OBSERVATION_CLAIM,
             ),
             key=lambda item: item.value,
@@ -350,7 +350,7 @@ def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
     expected_suffix = """PUBLIC REPLY CORRECTION
 The previous candidate could not be published for the listed closed reasons.
 You, Maya, must write the corrected customer-facing reply.
-Do not repeat private values. Do not request another read after observations.
+Do not request another read after observations.
 Do not strengthen operational status beyond exact receipts.
 Return one valid v2-model-proposal-v7 frame. The parent will not rewrite it."""
 
@@ -1499,7 +1499,7 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
         message="Corrija a resposta mantendo a autoria da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     legacy = _versioned_proposal_payload(
         legacy_schema_version,
@@ -1507,7 +1507,7 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
         reply_chunks=(f"Resposta legada v{legacy_schema_version} não publicável.",),
     )
     repaired_chunks = (
-        "Resposta corrigida pela Maya sem repetir dados privados.",
+        "Resposta corrigida pela Maya com pergunta tipada válida.",
         "Posso continuar ajudando por aqui.",
     )
     repaired = _versioned_proposal_payload(
@@ -1554,8 +1554,8 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v7(
     assert seen[0][1] == seen[1][1]
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
     assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["private_value_exposure"],
-        ["private_value_exposure"],
+        ["typed_clarification_mismatch"],
+        ["typed_clarification_mismatch"],
     ]
     for _, current in seen:
         assert current["progress_review_required"] is False
@@ -1629,7 +1629,7 @@ def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
         message="Corrija a resposta sem substituir a voz da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     legacy_frames = [
         _versioned_proposal_payload(
@@ -1702,8 +1702,8 @@ def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
     assert seen[0][1] == seen[1][1]
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
     assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["private_value_exposure"],
-        ["private_value_exposure"],
+        ["typed_clarification_mismatch"],
+        ["typed_clarification_mismatch"],
     ]
     for _, current in seen:
         assert current["progress_review_required"] is False
@@ -1718,17 +1718,17 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
         request_id="request:bounded-public-reply-correction",
         lead_id="manychat:bounded-public-reply-correction",
         source_event_id="batch:bounded-public-reply-correction",
-        message="Continue o atendimento sem expor dados privados.",
+        message="Continue o atendimento com a pergunta tipada correta.",
         locale="pt-BR",
         state_version=5,
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     repaired = json.dumps(
         {
             "schema": "v2-model-proposal-v7",
             "source_event_id": request.source_event_id,
             "intent": "inform",
-            "reply_chunks": ["Posso continuar o atendimento sem repetir esses dados."],
+            "reply_chunks": ["Posso continuar com a pergunta tipada correta."],
             "facts": [],
             "read_requests": [],
             "effect_proposals": [],
@@ -1774,15 +1774,15 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
     assert len(seen) == 2
     assert len(turn.frames) == 2
     assert turn.proposal.reply_chunks == (
-        "Posso continuar o atendimento sem repetir esses dados.",
+        "Posso continuar com a pergunta tipada correta.",
     )
     assert _PROTOCOL_REPAIR_SUFFIX not in seen[0][0]
     assert _PROTOCOL_REPAIR_SUFFIX in seen[1][0]
     assert all(prompt.endswith(correction_suffix) for prompt, _ in seen)
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
     assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["private_value_exposure"],
-        ["private_value_exposure"],
+        ["typed_clarification_mismatch"],
+        ["typed_clarification_mismatch"],
     ]
     for _, current in seen:
         assert current["progress_review_required"] is False
@@ -1928,7 +1928,7 @@ def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None
         message="Corrija a resposta sem substituir a voz da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.PRIVATE_VALUE_EXPOSURE,),
+        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
     )
     responses = [b"{}", b"{}"]
     seen: list[tuple[str, dict[str, object]]] = []

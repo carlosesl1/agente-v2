@@ -570,12 +570,19 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             chunk_type.from_canonical_bytes(system.to_canonical_bytes()),
             system,
         )
+        customer_text = "Telefone informado voluntariamente: (75) 99999-9999"
+        customer_data_chunk = chunk_type(
+            aggregate_turn_id="turn-1",
+            ordinal=2,
+            text=customer_text,
+            source_closure_hash="a" * 64,
+        )
+        self.assertEqual(customer_data_chunk.text, customer_text)
         for override in (
             {"aggregate_turn_id": "Turn-1"},
             {"ordinal": True},
             {"ordinal": -1},
             {"text": ""},
-            {"text": "Telefone pessoal: (75) 99999-9999"},
             {"text": "  espaço"},
             {"source_closure_hash": "A" * 64},
         ):

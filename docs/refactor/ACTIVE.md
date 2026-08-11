@@ -2,9 +2,10 @@
 
 ## Authority
 
-- Authorized by Carlos Eduardo on 2026-08-10: implement a stable Maya V2 that receives bounded conversational context and semantically guides the journey to completion, clarification, or real handoff.
+- Authorized by Carlos Eduardo on 2026-08-11: preserve the stable Maya V2 context work, but remove every privacy/PII mechanism that inspects, changes, corrects, blocks, retries, or fails a Maya reply. Voluntarily supplied customer data may be repeated.
 - Explicit prohibition: no deterministic natural-language extractor, no regex/substring/alias logic for customer intent, facts, progression, confirmation, selection, or handoff decisions; no keyword triggers.
-- Model remains the semantic owner. Parent code may validate closed schemas, typed facts, structural progress, authenticated provider observations, receipts, idempotency, privacy, and transaction authority.
+- Model remains the semantic and textual owner. Parent code may validate closed schemas, typed facts, structural progress, authenticated provider observations, receipts, idempotency, and transaction authority, but never PII in Maya text.
+- Privacy/PII work is forbidden unless Carlos requests it explicitly in the current chat. Do not recommend it. Open-ended privacy work is forbidden.
 - No deploy, restart, canary promotion, broad rollout, production provider POST, or real external effect is authorized by this phase.
 
 ## Immutable base
@@ -20,26 +21,26 @@
 - Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-context-stability`
 - Design: `docs/superpowers/specs/2026-08-10-maya-model-owned-public-text-design.md`
 - Plan: `docs/superpowers/plans/2026-08-10-maya-model-owned-public-text.md`
-- Pre-qualification implementation candidate: `1977494d820f6963dd65cb37ad71d85d77186259`
-- Candidate tree: `66831dc989d185db14a940f0de04e3831815a9f9`
-- Causal REDs closed: controller replacement of Maya questions; private values lost across retry/review; post-read semantic-review PII; reducer copy substitution; approval-expiry false confirmation; async authorship omission; adapter NFKC/strip mutation.
-- Exact next gate: canonical full suite, mechanical audit, immutable local image, and isolated real-model/fake-provider qualification. Promotion remains unauthorized.
+- Previous local candidate: `9165a516f83e`.
+- Reversal result: voluntarily supplied name, e-mail and phone are committed exactly as Maya wrote them with one model call and no privacy correction; provider labels follow the same rule.
+- Qualification: directly affected gate `193 passed`; causal boundary gate `2 passed`; canonical clean-environment gate `1731 passed, 7 deselected, 2938 subtests passed`. The seven exact deselections are unchanged stale Phase 7/index contracts outside this diff.
+- Exact next gate: freeze this staged tree in one local commit. No push, deploy, restart, canary, OCI build, real-model run, or promotion is authorized.
 
 ## Required invariants
 
 1. The complete current customer message remains untouched and model-owned.
-2. Recent dialogue is private, bounded, integrity-checked, and model-only; raw values never enter public state, artifacts, logs, or evidence.
+2. Recent dialogue is bounded, integrity-checked model context. The parent does not parse customer language or inspect Maya text for personal data.
 3. Commercial facts, intent, reads, clarification, selection, confirmation, and handoff remain semantic model outputs under closed contracts.
 4. A structurally empty frame may trigger at most one model-owned progress review. Parent code never derives customer semantics from text.
 5. Provider results are grounded from accepted typed observations. Granular grounding preserves a separately typed clarification question without parsing prose.
 6. Handoff language is derived from the exact durable lifecycle status. Pending relay is never represented as human acknowledgement or active human monitoring.
-7. One read round, confirmation binding, private-profile authority, provider write gates, idempotency, outbox, writer/reconciler, Stripe/Wise/Pix boundaries, and public-artifact PII rules remain at least as strict as the base.
+7. One read round, profile authority, confirmation binding, provider write gates, idempotency, outbox, writer/reconciler, and Stripe/Wise/Pix boundaries remain authoritative without changing Maya text for privacy/PII.
 8. Tests and model evaluations use fake business providers and no workers that can create external effects.
 
 ## Execution gates
 
 - RED tests must fail for the intended causal reason before implementation.
-- Focused tests, full pytest, Ruff, compileall, boundary checks, Compose validation, and secret/PII scans must pass before candidate freeze.
+- For this bounded reversal, focused causal tests, the directly affected gate, canonical clean-environment pytest, `git diff --check`, and a zero-reference scan for the removed output mechanism must pass before the local commit.
 - Real-model evaluation is allowed only in a controlled sandbox with tool-free Hermes and fake/no business providers.
 - A new immutable commit/tree/OCI may be frozen only after repeated conversational qualification.
 - Promotion remains blocked until Carlos explicitly authorizes it after reviewing evidence.
