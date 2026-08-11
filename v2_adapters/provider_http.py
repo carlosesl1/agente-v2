@@ -1086,15 +1086,20 @@ class CloudbedsHTTPTransport:
         )
         if selected is None:
             raise ProviderHTTPError("Cloudbeds room type no longer exists")
-        public_name = _first(
-            selected,
-            "roomTypeName",
-            "roomName",
-            "room_type_name",
-            "name",
-        )
-        if public_name is None:
-            raise ProviderHTTPError("Cloudbeds room type public name is unavailable")
+        public_name: object | None = None
+        for key in ("roomTypeName", "roomName", "room_type_name", "name"):
+            if key not in selected or selected[key] is None:
+                continue
+            public_name = selected[key]
+            break
+        if (
+            type(public_name) is not str
+            or not public_name
+            or public_name != public_name.strip()
+        ):
+            raise ProviderHTTPError(
+                "Cloudbeds room type public name must be a non-empty exact string"
+            )
         description = _first(selected, "roomTypeDescription", "roomDescription", "description") or "Descrição indisponível"
         raw_amenities = selected.get("amenities") or selected.get("roomTypeFeatures") or []
         amenities = []

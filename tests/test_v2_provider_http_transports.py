@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 
 from v2_adapters.cloudbeds import CloudbedsReadAdapter
 from v2_adapters.manychat import ManyChatDeliveryAdapter, ManyChatTransportResponse
@@ -13,6 +14,7 @@ from v2_adapters.provider_http import (
     BokunHTTPTransport,
     CloudbedsHTTPTransport,
     ManyChatHTTPTransport,
+    ProviderHTTPError,
 )
 from v2_contracts.providers import ReadKind, ReadRequest
 
@@ -167,6 +169,38 @@ def test_cloudbeds_room_description_exposes_selected_public_room_name() -> None:
         "description": "Quarto com cama de casal e banheiro privativo.",
         "amenities": ["Wi-Fi", "Banheiro privativo"],
     }
+
+
+@pytest.mark.parametrize("invalid_name", (123, " Suite Casal "))
+def test_cloudbeds_room_description_rejects_noncanonical_public_name(
+    invalid_name: object,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "success": True,
+                "data": [
+                    {
+                        "roomTypeID": "rt-suite",
+                        "roomTypeName": invalid_name,
+                        "roomTypeDescription": "Descrição válida.",
+                    }
+                ],
+            },
+        )
+
+    transport = CloudbedsHTTPTransport(
+        api_key="cloudbeds-secret",
+        property_id="property-1",
+        base_url="https://api.cloudbeds.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    transport._offer_room_types["offer:test"] = "rt-suite"
+
+    with pytest.raises(ProviderHTTPError, match="public name"):
+        transport("room_description", {"offer_id": "offer:test"})
 
 
 def test_bokun_transport_signs_exact_native_paths_and_uses_canonical_product_map() -> None:
