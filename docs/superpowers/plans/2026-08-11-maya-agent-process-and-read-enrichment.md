@@ -31,7 +31,7 @@
 - Consumes: `FileKnowledgeTransport(Path)` and `KnowledgeReadAdapter`.
 - Produces: focused sources `hostel_quarto_compartilhado`, `hostel_quarto_privativo`, and `hostel_chegada_fora_recepcao`.
 
-- [ ] **Step 1: Add failing retrieval tests**
+- [x] **Step 1: Add failing retrieval tests**
 
 Add a helper that executes the productive knowledge adapter and assert:
 
@@ -47,7 +47,7 @@ assert "banheiro privativo" in private.public_payload["answer"]
 assert "silêncio" in private.public_payload["answer"]
 ```
 
-- [ ] **Step 2: Witness RED**
+- [x] **Step 2: Witness RED**
 
 Run:
 
@@ -57,11 +57,11 @@ venv/bin/python -m pytest -q tests/test_v2_commercial_surface.py -k 'shared_dorm
 
 Expected: FAIL because the new source IDs/facts do not exist.
 
-- [ ] **Step 3: Add only official factual entries**
+- [x] **Step 3: Add only official factual entries**
 
 Add the three entries under topic `hostel`, preserving the existing JSON-compatible YAML shape. State that room descriptions do not guarantee silence unless a specific provider description confirms it.
 
-- [ ] **Step 4: Run focused GREEN**
+- [x] **Step 4: Run focused GREEN**
 
 ```bash
 venv/bin/python -m pytest -q tests/test_v2_commercial_surface.py
@@ -81,7 +81,7 @@ Expected: PASS.
 - Consumes: existing V8 read kinds `knowledge`, `room_description`, and `activity_description`.
 - Produces: model-owned process instructions only; no runtime API.
 
-- [ ] **Step 1: Add failing prompt contract tests**
+- [x] **Step 1: Add failing prompt contract tests**
 
 Assert exact high-salience requirements:
 
@@ -95,7 +95,7 @@ assert "Só prometa verificar depois" in PROMPT
 assert "acomodação restrita por gênero" in PROMPT
 ```
 
-- [ ] **Step 2: Witness RED**
+- [x] **Step 2: Witness RED**
 
 ```bash
 venv/bin/python -m pytest -q tests/test_v2_luna_prompt.py -k 'direct_question or room_characteristics or quantitative_segments or future_verification'
@@ -103,11 +103,11 @@ venv/bin/python -m pytest -q tests/test_v2_luna_prompt.py -k 'direct_question or
 
 Expected: FAIL because the instructions are absent.
 
-- [ ] **Step 3: Add compact process instructions**
+- [x] **Step 3: Add compact process instructions**
 
 Extend `ATENDIMENTO E PROGRESSÃO` and `CONSULTAS` without changing schemas, enums, controller behavior, or effect language. Route generic hostel operation to knowledge, room-specific claims to `room_description`, and product detail claims to `activity_description`.
 
-- [ ] **Step 4: Run focused GREEN**
+- [x] **Step 4: Run focused GREEN**
 
 ```bash
 venv/bin/python -m pytest -q tests/test_v2_luna_prompt.py
@@ -129,11 +129,11 @@ Expected: PASS.
 - Consumes: the selected `/api/v1.3/getRoomTypes` record bound to `offer_id`.
 - Produces: `{"room_public_name": str, "description": str, "amenities": list[str]}` from transport and the same public fields plus `offer_id` from `CloudbedsReadAdapter`.
 
-- [ ] **Step 1: Add failing transport/adapter tests**
+- [x] **Step 1: Add failing transport/adapter tests**
 
 Add a `getRoomTypes` fixture with `roomTypeName="Suite Casal"`, a description, and amenities. Assert the transport returns `room_public_name` and the adapter exposes it.
 
-- [ ] **Step 2: Witness RED**
+- [x] **Step 2: Witness RED**
 
 ```bash
 venv/bin/python -m pytest -q tests/test_v2_provider_http_transports.py -k room_description
@@ -141,11 +141,11 @@ venv/bin/python -m pytest -q tests/test_v2_provider_http_transports.py -k room_d
 
 Expected: FAIL because `room_public_name` is missing.
 
-- [ ] **Step 3: Implement exact provider projection**
+- [x] **Step 3: Implement exact provider projection**
 
 Read `roomTypeName|roomName|room_type_name|name` from the already selected record. Validate it through the existing `text()` boundary. Do not derive room type, privacy, gender, quietness, or technical identity.
 
-- [ ] **Step 4: Run focused GREEN**
+- [x] **Step 4: Run focused GREEN**
 
 ```bash
 venv/bin/python -m pytest -q tests/test_v2_provider_http_transports.py tests/test_v2_hermes_model_adapter.py
@@ -164,7 +164,7 @@ Expected: PASS.
 **Interfaces:**
 - Produces: one locally verified successor candidate; rollout remains blocked.
 
-- [ ] **Step 1: Run the affected gate**
+- [x] **Step 1: Run the affected gate**
 
 ```bash
 venv/bin/python -m pytest -q \
@@ -175,7 +175,7 @@ venv/bin/python -m pytest -q \
   tests/test_v2_hermes_model_adapter.py
 ```
 
-- [ ] **Step 2: Run static gates**
+- [x] **Step 2: Run static gates**
 
 ```bash
 venv/bin/python -m compileall -q v2_adapters tests
@@ -186,16 +186,16 @@ git diff --check
 
 If Ruff is not installed by project dependencies, run the repository's documented Ruff executable or install it only into the isolated venv.
 
-- [ ] **Step 3: Run the canonical full test gate once**
+- [x] **Step 3: Run the canonical full test gate once**
 
 ```bash
 venv/bin/python -m pytest -q
 ```
 
-- [ ] **Step 4: Re-audit zero effects**
+- [x] **Step 4: Re-audit zero effects**
 
 Confirm no worker or provider-write command was run, no new laboratory effect directory exists, and the historical curated root remains blocked.
 
-- [ ] **Step 5: Record exact outcome in `ACTIVE.md`**
+- [x] **Step 5: Record exact outcome in `ACTIVE.md`**
 
 Record commit/tree, commands, counts, open risks, and explicit NO-GO for deploy/provider effects.
