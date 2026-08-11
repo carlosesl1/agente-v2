@@ -21,10 +21,10 @@
 - Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-context-stability`
 - Design: `docs/superpowers/specs/2026-08-10-maya-model-owned-public-text-design.md`
 - Plan: `docs/superpowers/plans/2026-08-10-maya-model-owned-public-text.md`
-- Previous local candidate: `9165a516f83e`.
-- Reversal result: voluntarily supplied name, e-mail and phone are committed exactly as Maya wrote them with one model call and no privacy correction; provider labels follow the same rule.
-- Qualification: directly affected gate `193 passed`; causal boundary gate `2 passed`; canonical clean-environment gate `1731 passed, 7 deselected, 2938 subtests passed`. The seven exact deselections are unchanged stale Phase 7/index contracts outside this diff.
-- Exact next gate: freeze this staged tree in one local commit. No push, deploy, restart, canary, OCI build, real-model run, or promotion is authorized.
+- Reversal commit: `8b6c26b3d172c78f4dc304fe66a7d59801adfb0f`.
+- Review successor: customer-provided data remains accepted exactly as Maya wrote it, while the independent active-content contract still rejects HTML, Markdown links, internal provider references, technical credential markers, URLs, and control characters.
+- Qualification: affected gate `36 passed, 175 subtests passed`; canonical clean-environment gate `1731 passed, 7 deselected, 2953 subtests passed`. The seven exact deselections are unchanged stale Phase 7/index contracts outside this diff.
+- Exact next gate: authenticate and independently review this successor, then freeze one local commit. No push, deploy, restart, canary, OCI build, real-model run, or promotion is authorized.
 
 ## Required invariants
 

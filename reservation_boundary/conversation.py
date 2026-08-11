@@ -743,7 +743,10 @@ class PublicReplyChunk:
     def __post_init__(self) -> None:
         _require_id_token(self.aggregate_turn_id, "PublicReplyChunk.aggregate_turn_id")
         _require_exact_int(self.ordinal, "PublicReplyChunk.ordinal", minimum=0)
-        _require_conversation_text(self.text, "PublicReplyChunk.text", limit=4096)
+        # Keep active/technical content out without inspecting customer data.
+        from reservation_boundary.reads import validate_public_text
+
+        validate_public_text(self.text, limit=4096)
         _require_sha256(
             self.source_closure_hash,
             "PublicReplyChunk.source_closure_hash",

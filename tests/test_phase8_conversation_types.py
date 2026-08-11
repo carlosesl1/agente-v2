@@ -578,6 +578,21 @@ class Phase8ConversationTypeTests(unittest.TestCase):
             source_closure_hash="a" * 64,
         )
         self.assertEqual(customer_data_chunk.text, customer_text)
+        for active_content in (
+            "<strong>synthetic</strong>",
+            "[synthetic](https://example.invalid)",
+            "cloudbeds.property.synthetic",
+            "api_key: synthetic",
+            "https://example.invalid",
+        ):
+            with self.subTest(active_content=active_content):
+                with self.assertRaises(ValueError):
+                    chunk_type(
+                        aggregate_turn_id="turn-1",
+                        ordinal=3,
+                        text=active_content,
+                        source_closure_hash="a" * 64,
+                    )
         for override in (
             {"aggregate_turn_id": "Turn-1"},
             {"ordinal": True},

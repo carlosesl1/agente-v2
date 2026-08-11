@@ -722,16 +722,10 @@ class LegacyGenesisEvidenceRecord:
 
 _PUBLIC_READ_POLICY: Final = {
     "forbidden_patterns": {
-        "br_phone": r"(?<![0-9])(?:\+?55[\s.-]?)?(?:\(?[1-9][0-9]\)?[\s.-]?)?(?:9[0-9]{4}|[2-8][0-9]{3})[\s.-]?[0-9]{4}(?![0-9])",
         "control": r"[\u0000-\u0008\u000b-\u001f\u007f]",
-        "cpf": r"(?<![0-9])(?:[0-9]{3}[.\s-]?){2}[0-9]{3}[-.\s]?[0-9]{2}(?![0-9])",
-        "e164": r"(?<![0-9])\+[1-9][0-9]{7,14}(?![0-9])",
-        "email": r"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]+\.[A-Z]{2,63}(?![A-Z0-9._%+-])",
         "html": r"<[A-Za-z!/][^>]*>",
         "markdown_link": r"!?\[[^\]]*\]\([^)]+\)",
-        "pan": r"(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])",
         "provider_ref": r"(?:cloudbeds\.property\.|bokun\.product\.)",
-        "random_payment_key": r"(?i)(?<![0-9A-F])[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}(?![0-9A-F])",
         "secret_marker": r"(?i)\b(?:api[_-]?key|access[_-]?token|bearer)\b\s*[:=]",
         "url": r"(?i)(?:https?://|www\.)\S+",
     },
@@ -743,11 +737,11 @@ _PUBLIC_READ_POLICY: Final = {
         "tab": "forbidden",
         "unicode": "NFKC",
     },
-    "schema": "phase8-public-read-sanitization-policy",
-    "version": 1,
+    "schema": "phase8-public-read-operational-policy",
+    "version": 2,
 }
-PUBLIC_READ_POLICY_ID: Final = "public-read-v1"
-PUBLIC_READ_POLICY_DOMAIN: Final = "phase8-public-read-sanitization-policy-v1"
+PUBLIC_READ_POLICY_ID: Final = "public-read-v2"
+PUBLIC_READ_POLICY_DOMAIN: Final = "phase8-public-read-operational-policy-v2"
 PUBLIC_READ_POLICY_BYTES: Final = json.dumps(
     _PUBLIC_READ_POLICY,
     ensure_ascii=False,
@@ -760,8 +754,15 @@ PUBLIC_READ_POLICY_HASH: Final = hashlib.sha256(
     + b"\x00"
     + PUBLIC_READ_POLICY_BYTES
 ).hexdigest()
-if PUBLIC_READ_POLICY_HASH != "2a3f36953a7d1020df4d3d5f2471df8767be4f99f23413f9effc38d03ac7b637":
+if PUBLIC_READ_POLICY_HASH != "a9a68520bda28bf22b0733fe124299d295abbaf1448ca5d30c03ef10719f4dfb":
     raise RuntimeError("public read policy identity drift")
+_LEGACY_PUBLIC_READ_POLICY: Final = (
+    "public-read-v1",
+    "2a3f36953a7d1020df4d3d5f2471df8767be4f99f23413f9effc38d03ac7b637",
+)
+_ACCEPTED_PUBLIC_READ_POLICIES: Final = frozenset(
+    (_LEGACY_PUBLIC_READ_POLICY, (PUBLIC_READ_POLICY_ID, PUBLIC_READ_POLICY_HASH))
+)
 _PUBLIC_READ_PATTERNS: Final = tuple(
     re.compile(pattern)
     for pattern in _PUBLIC_READ_POLICY["forbidden_patterns"].values()
@@ -781,10 +782,10 @@ def _validate_read_text_structure(value: object, *, limit: int) -> str:
 
 
 def validate_public_text(value: object, *, limit: int) -> str:
-    """Validate the frozen v1 evidence policy used by historical receipts."""
+    """Reject only active/technical content; customer-provided data is allowed."""
     _validate_read_text_structure(value, limit=limit)
     if any(pattern.search(value) for pattern in _PUBLIC_READ_PATTERNS):
-        raise ValueError("public text contains forbidden private or active content")
+        raise ValueError("public text contains forbidden active content")
     return value
 
 
@@ -828,7 +829,7 @@ class ReadEvidenceReceipt:
             self.source_evidence_hash,
             "ReadEvidenceReceipt.source_evidence_hash",
         )
-        if self.policy_id != PUBLIC_READ_POLICY_ID or self.policy_hash != PUBLIC_READ_POLICY_HASH:
+        if (self.policy_id, self.policy_hash) not in _ACCEPTED_PUBLIC_READ_POLICIES:
             raise ValueError("ReadEvidenceReceipt policy identity mismatch")
         if type(self.disposition) is not ReadEvidenceDisposition:
             raise TypeError("ReadEvidenceReceipt.disposition must be exact")
@@ -950,7 +951,7 @@ class SanitizedKnowledgeResult:
             )
         if type(self.locale) is not str or _LOCALE_RE.fullmatch(self.locale) is None:
             raise ValueError("SanitizedKnowledgeResult.locale must be canonical")
-        _validate_read_text_structure(self.answer_text, limit=4096)
+        validate_public_text(self.answer_text, limit=4096)
         if type(self.evidence_receipt) is not ReadEvidenceReceipt:
             raise TypeError("SanitizedKnowledgeResult.evidence_receipt must be exact")
         if self.evidence_receipt.request_hash != self.request_hash:
@@ -1141,7 +1142,7 @@ class SanitizedOffer:
             raise ValueError("SanitizedOffer.offer_id must be canonical")
         if type(self.service) is not ReadService:
             raise TypeError("SanitizedOffer.service must be exact")
-        _validate_read_text_structure(self.public_label, limit=256)
+        validate_public_text(self.public_label, limit=256)
         _require_exact_date(self.start_date, "SanitizedOffer.start_date")
         if self.end_date is not None:
             _require_exact_date(self.end_date, "SanitizedOffer.end_date")

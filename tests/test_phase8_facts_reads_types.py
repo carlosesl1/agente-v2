@@ -464,6 +464,16 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
         )
 
         self.assertEqual(offer.public_label, label)
+        for active_content in (
+            "<strong>synthetic</strong>",
+            "[synthetic](https://example.invalid)",
+            "cloudbeds.property.synthetic",
+            "api_key: synthetic",
+            "https://example.invalid",
+        ):
+            with self.subTest(active_content=active_content):
+                with self.assertRaises(ValueError):
+                    replace(offer, public_label=active_content)
 
     def test_public_policy_probes_and_knowledge_known_answers_are_exact(self) -> None:
         fixture = _fixture()
@@ -472,11 +482,23 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
             with self.subTest(accepted=text):
                 self.assertEqual(validate_public_text(text, limit=4096), text)
         for probe in probes["rejected"]:
-            with self.subTest(rejected=probe):
+            with self.subTest(customer_data=probe):
+                self.assertEqual(
+                    validate_public_text(probe["text"], limit=4096),
+                    probe["text"],
+                )
+        for active_content in (
+            "<strong>synthetic</strong>",
+            "[synthetic](https://example.invalid)",
+            "cloudbeds.property.synthetic",
+            "api_key: synthetic",
+            "https://example.invalid",
+        ):
+            with self.subTest(active_content=active_content):
                 with self.assertRaises(ValueError):
-                    validate_public_text(probe["text"], limit=4096)
+                    validate_public_text(active_content, limit=4096)
 
-        self.assertEqual(
+        self.assertNotEqual(
             PUBLIC_READ_POLICY_HASH,
             fixture["auxiliary_preimages"]["public_read_policy"]["domain_hash"],
         )
@@ -502,7 +524,9 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
                 )
                 self.assertEqual(result.canonical_hash(), result_item["canonical_hash"])
 
-    def test_knowledge_result_rejects_pii_subject_and_evidence_swaps(self) -> None:
+    def test_knowledge_result_rejects_active_content_subject_and_evidence_swaps(
+        self,
+    ) -> None:
         examples = _fixture()["examples"]
         public_result = SanitizedKnowledgeResult.from_canonical_bytes(
             examples["result.knowledge_public_safe"]["canonical_utf8"].encode("utf-8")
@@ -519,8 +543,8 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
             ReadEvidenceDisposition.PRIVATE_ONLY,
         )
 
-        with self.assertRaises(ValueError):
-            replace(public_result, answer_text="Telefone pessoal: (75) 99999-9999")
+        with self.assertRaisesRegex(ValueError, "forbidden active content"):
+            replace(public_result, answer_text="<strong>synthetic</strong>")
         with self.assertRaises(ValueError):
             replace(public_result, subject_id="offer:" + "a" * 64)
         self.assertEqual(
