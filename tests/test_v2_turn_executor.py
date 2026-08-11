@@ -5399,6 +5399,14 @@ def test_previously_persisted_private_value_still_requires_model_correction(
             "Ana dos Santos",
             "Entendi: Ana continua como titular da hospedagem.",
         ),
+        (
+            "Ana Silva",
+            "Entendi: Silva continua como titular da hospedagem.",
+        ),
+        (
+            "Li Wei",
+            "Entendi: Li continua como titular da hospedagem.",
+        ),
     ),
 )
 def test_persisted_full_name_component_requires_model_owned_correction(

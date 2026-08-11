@@ -128,6 +128,28 @@ from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _ZERO_HASH: Final = "0" * 64
+_PRIVATE_NAME_PARTICLES: Final = frozenset(
+    (
+        "al",
+        "bin",
+        "da",
+        "das",
+        "de",
+        "del",
+        "di",
+        "do",
+        "dos",
+        "du",
+        "e",
+        "el",
+        "ibn",
+        "la",
+        "le",
+        "van",
+        "von",
+        "y",
+    )
+)
 
 
 class TurnExecutionError(RuntimeError):
@@ -256,13 +278,14 @@ class _PrivateValueCorpus:
         ):
             raise TypeError("private name corpus requires an exact string tuple")
         self.extend(values)
-        first_name_components = tuple(
-            parts[0]
+        name_components = tuple(
+            part
             for value in values
-            if len(parts := value.split()) > 1 and len(parts[0]) > 1
+            for part in value.split()
+            if len(part) > 1 and part.casefold() not in _PRIVATE_NAME_PARTICLES
         )
         self.bounded_values = tuple(
-            dict.fromkeys((*self.bounded_values, *first_name_components))
+            dict.fromkeys((*self.bounded_values, *name_components))
         )
 
 
