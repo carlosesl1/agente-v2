@@ -43,7 +43,7 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
     prompt = (ROOT / "config/v2_luna_system_prompt.txt").read_text()
 
     assert len(prompt.encode()) < 65_536
-    assert "uma ou duas strings não vazias" in prompt
+    assert "`reply_chunks` contém uma ou duas mensagens" in prompt
     assert '"kind":"knowledge"' in prompt
     assert '"kind":"lodging"' in prompt
     assert '"kind":"room_description"' in prompt
@@ -61,23 +61,21 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
 def test_hermes_adapter_parses_closed_knowledge_request_from_live_contract() -> None:
     response = json.dumps(
         {
-            "schema": "v2-model-proposal-v2",
-            "source_event_id": "event:knowledge-contract",
             "intent": "inform",
-            "reply_chunks": ["Vou confirmar essa informação."],
+            "reply_chunks": [
+                {"text": "Vou confirmar essa informação.", "expects_reply": False}
+            ],
             "facts": [],
             "read_requests": [
                 {
-                    "request_id": "event:knowledge-contract:read:knowledge",
                     "kind": "knowledge",
                     "query": "Qual é o horário de check-in?",
-                    "locale": "pt-BR",
                 }
             ],
-            "effect_proposals": [],
-            "target_offer_id": None,
-            "target_offer_ids": [],
-            "confirmed_summary_version": None,
+            "selected_choice_refs": [],
+            "selection_requested": False,
+            "pending_action_disposition": None,
+            "passengers": [],
         },
         sort_keys=True,
         separators=(",", ":"),

@@ -40,28 +40,21 @@ def test_sandbox_validator_checks_typed_semantics_without_printing_messages() ->
         intent = expected[user["message"]]
         response = json.dumps(
             {
-                "schema": "v2-model-proposal-v7",
-                "source_event_id": user["source_event_id"],
                 "intent": intent,
-                "reply_chunks": ["Synthetic contextual review result."],
+                "reply_chunks": [
+                    {
+                        "text": "Synthetic contextual review result.",
+                        "expects_reply": False,
+                    }
+                ],
                 "facts": [],
                 "read_requests": [],
-                "effect_proposals": [],
-                "target_offer_id": None,
-                "target_offer_ids": [],
-                "confirmed_summary_version": 1 if intent == "confirm" else None,
-                "confirmed_action_kinds": (
-                    ["initiate_payment", "reserve_lodging"]
-                    if intent == "confirm"
-                    else []
-                ),
-                "approval_basis": (
-                    "contextual_reference" if intent == "confirm" else None
-                ),
+                "selected_choice_refs": [],
                 "selection_requested": False,
-                "pending_disposition": "revoke" if intent == "adjust" else None,
+                "pending_action_disposition": (
+                    "revoke" if intent == "adjust" else None
+                ),
                 "passengers": [],
-                "clarification_question": None,
             },
             sort_keys=True,
             separators=(",", ":"),
