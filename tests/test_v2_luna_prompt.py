@@ -56,24 +56,18 @@ def test_adult_count_never_implies_zero_children_for_lodging_read() -> None:
     )
 
 
-def test_every_public_missing_data_question_is_typed_byte_exact() -> None:
-    assert (
-        "Toda pergunta pública para obter um dado faltante deve aparecer byte a byte "
-        "em clarification_question"
-    ) in PROMPT
-    assert (
-        "clarification_question=null é inválido quando reply_chunks pede um dado"
-        in PROMPT
-    )
+def test_every_public_missing_data_question_is_written_once_in_reply_chunks() -> None:
+    assert "Escreva cada mensagem pública uma única vez" in PROMPT
+    assert '`{"text":"...","expects_reply":true|false}`' in PROMPT
+    assert "marque `expects_reply=true` somente no último chunk" in PROMPT
+    assert "Toda pergunta pública para obter um dado faltante deve aparecer byte a byte" not in PROMPT
+    assert "clarification_question" not in PROMPT
 
 
-def test_typed_question_is_never_a_suffix_inside_an_explanatory_chunk() -> None:
-    assert "clarification_question nunca pode ser apenas um trecho do chunk" in PROMPT
-    assert (
-        "se quiser explicar algo antes da pergunta, use dois reply_chunks"
-        in PROMPT
-    )
-    assert "o segundo deve ser exatamente clarification_question" in PROMPT
+def test_explanation_and_question_need_no_duplicate_protocol_field() -> None:
+    assert "Se precisar explicar antes de perguntar" in PROMPT
+    assert "um chunk explicativo e um último chunk com `expects_reply=true`" in PROMPT
+    assert "o segundo deve ser exatamente clarification_question" not in PROMPT
 
 
 def test_payer_correction_preserves_private_holder_and_commercial_gate() -> None:
@@ -166,7 +160,8 @@ def test_model_owns_dynamic_language_and_atomic_package_selection() -> None:
     assert "única responsável pela interpretação semântica" in PROMPT
     assert "o pai não usa palavras-chave ou regex" in PROMPT
     assert "referências naturais do lead" in PROMPT
-    assert "selecione atomicamente os dois offer_id" in PROMPT
+    assert "selecione atomicamente as duas `choice_ref`" in PROMPT
+    assert "não copie `offer_id`" in PROMPT
     assert "não troque pela primeira opção mostrada" in PROMPT
     assert "adjudicação semântica pós-consulta" in PROMPT
     assert "não crie nem altere fatos" in PROMPT
@@ -181,23 +176,23 @@ def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
 
 
-def test_luna_prompt_requires_contextual_v7_critical_approval() -> None:
-    assert "v2-model-proposal-v7" in PROMPT
+def test_luna_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
+    assert "oito campos conversacionais" in PROMPT
+    assert (
+        "intent,reply_chunks,facts,read_requests,selected_choice_refs,"
+        "selection_requested,pending_action_disposition,passengers"
+    ) in PROMPT
+    assert "v2-model-proposal-v7" not in PROMPT
     assert "v2-model-proposal-v6" not in PROMPT
-    assert "v2-model-proposal-v5" not in PROMPT
-    assert "v2-model-proposal-v4" not in PROMPT
-    assert "v2-model-proposal-v3" not in PROMPT
-    assert "v2-model-proposal-v2" not in PROMPT
     assert "pending_action" in PROMPT
-    assert "confirmed_action_kinds" in PROMPT
-    assert "approval_basis" in PROMPT
-    assert "contextual_reference" in PROMPT
+    assert "Apenas reconheça semanticamente a confirmação com `intent=confirm`" in PROMPT
+    assert "O pai vincula a confirmação" in PROMPT
+    assert "Não copie versão, tipos de ação, approval ou IDs" in PROMPT
     assert "Uma confirmação afirmativa curta é válida" in PROMPT
     assert "`confirmation_review_required: bool`" in PROMPT
     assert "`selection_review_required: bool`" in PROMPT
     assert "`progress_review_required: bool`" in PROMPT
-    assert "clarification_question" in PROMPT
-    assert "pending_disposition" in PROMPT
+    assert "pending_action_disposition" in PROMPT
     assert '"preserve"' in PROMPT
     assert '"revoke"' in PROMPT
     assert "nunca devolva saudação genérica" in PROMPT
