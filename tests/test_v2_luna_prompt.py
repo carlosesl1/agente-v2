@@ -17,6 +17,7 @@ def test_prompt_requires_direct_grounded_atendimento_process() -> None:
     assert "não acrescente elogios, popularidade, adequação ou benefícios comerciais" in PROMPT
     assert "A classificação canônica acima é a única justificativa disponível" in PROMPT
     assert "nunca pergunte se deve fazer a consulta que já ocorreu" in PROMPT
+    assert "rótulo que declara explicitamente o público feminino, masculino ou misto" in PROMPT
     assert "acomodação restrita por gênero" in PROMPT
 
 
