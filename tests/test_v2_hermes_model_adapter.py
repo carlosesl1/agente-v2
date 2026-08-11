@@ -33,6 +33,156 @@ from v2_contracts.model import (
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
+def _v8_payload(**changes: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "intent": "inform",
+        "reply_chunks": [{"text": "Olá! Como posso ajudar?", "expects_reply": False}],
+        "facts": [],
+        "read_requests": [],
+        "selected_choice_refs": [],
+        "selection_requested": False,
+        "pending_action_disposition": None,
+        "passengers": [],
+    }
+    payload.update(changes)
+    return payload
+
+
+def _v8_request(
+    *,
+    source_event_id: str = "batch:v8-minimal",
+    pending_action: PendingCriticalActionContext | None = None,
+) -> ModelRequest:
+    return ModelRequest(
+        request_id="request:v8-minimal",
+        lead_id="manychat:v8-minimal",
+        source_event_id=source_event_id,
+        message="Preciso de ajuda.",
+        locale="pt-BR",
+        state_version=0,
+        pending_action=pending_action,
+    )
+
+
+def _v8_bytes(**changes: object) -> bytes:
+    return json.dumps(
+        _v8_payload(**changes),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def test_v8_question_is_authored_once_and_parent_binds_source_event() -> None:
+    request = _v8_request(source_event_id="batch:v8-question")
+    question = "Qual será a data de saída?"
+
+    proposal = _proposal(
+        _v8_bytes(
+            reply_chunks=[
+                {
+                    "text": "A saída precisa ser posterior à entrada.",
+                    "expects_reply": False,
+                },
+                {"text": question, "expects_reply": True},
+            ]
+        ),
+        request,
+    )
+
+    assert proposal.source_event_id == request.source_event_id
+    assert proposal.reply_chunks == (
+        "A saída precisa ser posterior à entrada.",
+        question,
+    )
+    assert proposal.clarification_question == question
+
+
+@pytest.mark.parametrize(
+    "reply_chunks",
+    (
+        [
+            {"text": "Primeira pergunta?", "expects_reply": True},
+            {"text": "Segunda pergunta?", "expects_reply": True},
+        ],
+        [
+            {"text": "Pergunta antes do fim?", "expects_reply": True},
+            {"text": "Mensagem final.", "expects_reply": False},
+        ],
+    ),
+)
+def test_v8_rejects_multiple_or_nonfinal_expects_reply_chunks(
+    reply_chunks: list[dict[str, object]],
+) -> None:
+    with pytest.raises(InvalidModelProposal):
+        _proposal(_v8_bytes(reply_chunks=reply_chunks), _v8_request())
+
+
+def test_v8_rejects_every_removed_mechanical_field() -> None:
+    removed_fields = {
+        "schema": "v2-model-proposal-v8",
+        "source_event_id": "batch:forbidden-copy",
+        "effect_proposals": [],
+        "target_offer_id": None,
+        "target_offer_ids": [],
+        "confirmed_summary_version": None,
+        "confirmed_action_kinds": [],
+        "approval_basis": None,
+        "clarification_question": None,
+    }
+
+    for name, value in removed_fields.items():
+        with pytest.raises(InvalidModelProposal):
+            _proposal(_v8_bytes(**{name: value}), _v8_request())
+
+
+def test_v8_read_identity_and_locale_are_parent_owned() -> None:
+    request = _v8_request(source_event_id="batch:v8-read")
+
+    proposal = _proposal(
+        _v8_bytes(
+            read_requests=[
+                {"kind": "knowledge", "query": "Qual é o horário de check-in?"}
+            ]
+        ),
+        request,
+    )
+
+    assert proposal.read_requests == (
+        ReadRequest(
+            request_id="batch:v8-read:read:knowledge",
+            kind=ReadKind.KNOWLEDGE,
+            query="Qual é o horário de check-in?",
+            locale="pt-BR",
+        ),
+    )
+
+
+def test_v8_confirm_binding_is_parent_owned() -> None:
+    pending = _pending_action()
+    proposal = _proposal(
+        _v8_bytes(
+            intent="confirm",
+            reply_chunks=[
+                {"text": "Perfeito, vou seguir com essa proposta.", "expects_reply": False}
+            ],
+        ),
+        _v8_request(source_event_id="batch:v8-confirm", pending_action=pending),
+    )
+
+    assert proposal.confirmed_summary_version == pending.summary_version
+    assert proposal.confirmed_action_kinds == pending.action_kinds
+    assert proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
+
+    with pytest.raises(InvalidModelProposal):
+        _proposal(_v8_bytes(intent="confirm"), _v8_request())
+
+
+def test_v8_has_no_model_effect_output_and_internal_effects_are_empty() -> None:
+    proposal = _proposal(_v8_bytes(), _v8_request())
+    assert proposal.effect_proposals == ()
+
+
 def test_model_public_reply_chunks_preserve_valid_unicode_byte_exact() -> None:
     raw_text = "Opc\u0327a\u0303o econo\u0302mica disponi\u0301vel."
     assert raw_text != unicodedata.normalize("NFKC", raw_text)
