@@ -99,22 +99,29 @@ def test_v8_question_is_authored_once_and_parent_binds_source_event() -> None:
 
 
 @pytest.mark.parametrize(
-    "reply_chunks",
+    ("reply_chunks", "message"),
     (
-        [
-            {"text": "Primeira pergunta?", "expects_reply": True},
-            {"text": "Segunda pergunta?", "expects_reply": True},
-        ],
-        [
-            {"text": "Pergunta antes do fim?", "expects_reply": True},
-            {"text": "Mensagem final.", "expects_reply": False},
-        ],
+        (
+            [
+                {"text": "Primeira pergunta?", "expects_reply": True},
+                {"text": "Segunda pergunta?", "expects_reply": True},
+            ],
+            "v8 may expect one customer reply",
+        ),
+        (
+            [
+                {"text": "Pergunta antes do fim?", "expects_reply": True},
+                {"text": "Mensagem final.", "expects_reply": False},
+            ],
+            "v8 reply expectation must be on the final chunk",
+        ),
     ),
 )
 def test_v8_rejects_multiple_or_nonfinal_expects_reply_chunks(
     reply_chunks: list[dict[str, object]],
+    message: str,
 ) -> None:
-    with pytest.raises(InvalidModelProposal):
+    with pytest.raises(InvalidModelProposal, match=message):
         _proposal(_v8_bytes(reply_chunks=reply_chunks), _v8_request())
 
 

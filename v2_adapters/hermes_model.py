@@ -23,6 +23,7 @@ from v2_contracts.model import (
     ModelRequest,
     proposal_requires_progress_review,
 )
+from v2_contracts.model_wire import V8_RESPONSE_FIELDS
 from v2_contracts.providers import ReadKind, ReadRequest
 from v2_contracts.passengers import PassengerInput
 
@@ -532,9 +533,157 @@ def _approval_basis(value: object) -> ApprovalBasis | None:
         raise InvalidModelProposal("approval basis is invalid") from exc
 
 
+def _v8_reply_chunks(value: object) -> tuple[tuple[str, ...], str | None]:
+    raw_chunks = _tuple_items(value, "reply_chunks")
+    if not 1 <= len(raw_chunks) <= 2:
+        raise InvalidModelProposal("v8 reply_chunks must contain one or two items")
+    chunks: list[str] = []
+    reply_index: int | None = None
+    for index, item in enumerate(raw_chunks):
+        if type(item) is not dict or set(item) != {"text", "expects_reply"}:
+            raise InvalidModelProposal("v8 reply chunk fields mismatch")
+        text = item["text"]
+        expects_reply = item["expects_reply"]
+        if type(text) is not str or not text or text != text.strip():
+            raise InvalidModelProposal("v8 reply text must be non-empty exact text")
+        if type(expects_reply) is not bool:
+            raise InvalidModelProposal("v8 expects_reply must be an exact boolean")
+        if expects_reply:
+            if reply_index is not None:
+                raise InvalidModelProposal("v8 may expect one customer reply")
+            reply_index = index
+        chunks.append(text)
+    if reply_index is not None and reply_index != len(chunks) - 1:
+        raise InvalidModelProposal("v8 reply expectation must be on the final chunk")
+    clarification = chunks[-1] if reply_index is not None else None
+    return tuple(chunks), clarification
+
+
+def _v8_date(value: object, name: str) -> date:
+    if type(value) is not str:
+        raise InvalidModelProposal(f"{name} must be an ISO date")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise InvalidModelProposal(f"{name} is invalid") from exc
+
+
+def _v8_read_request(value: object, request: ModelRequest) -> ReadRequest:
+    if type(value) is not dict:
+        raise InvalidModelProposal("v8 read request must be an exact object")
+    kind_value = value.get("kind")
+    try:
+        kind = ReadKind(kind_value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelProposal("v8 read kind is invalid") from exc
+    suffixes = {
+        ReadKind.KNOWLEDGE: "knowledge",
+        ReadKind.LODGING: "lodging",
+        ReadKind.ACTIVITY: "activity",
+        ReadKind.ROOM_DESCRIPTION: "room-description",
+        ReadKind.ACTIVITY_DESCRIPTION: "activity-description",
+    }
+    fields: dict[str, object] = {
+        "request_id": f"{request.source_event_id}:read:{suffixes[kind]}",
+        "kind": kind,
+    }
+    if kind is ReadKind.KNOWLEDGE:
+        expected = {"kind", "query"}
+        fields.update(query=value.get("query"), locale=request.locale)
+    elif kind is ReadKind.LODGING:
+        expected = {"kind", "check_in", "check_out", "adults", "children"}
+        fields.update(
+            check_in=_v8_date(value.get("check_in"), "check_in"),
+            check_out=_v8_date(value.get("check_out"), "check_out"),
+            adults=value.get("adults"),
+            children=value.get("children"),
+        )
+    elif kind is ReadKind.ACTIVITY:
+        expected = {
+            "kind",
+            "product_id",
+            "activity_date",
+            "adults",
+            "children",
+        }
+        fields.update(
+            product_id=value.get("product_id"),
+            activity_date=_v8_date(value.get("activity_date"), "activity_date"),
+            adults=value.get("adults"),
+            children=value.get("children"),
+            locale=request.locale,
+        )
+    elif kind is ReadKind.ACTIVITY_DESCRIPTION:
+        expected = {"kind", "product_id"}
+        fields.update(product_id=value.get("product_id"), locale=request.locale)
+    else:
+        raise InvalidModelProposal(
+            "v8 room description requires a current choice reference"
+        )
+    if set(value) != expected:
+        raise InvalidModelProposal("v8 read request fields mismatch")
+    try:
+        return ReadRequest(**fields)
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelProposal("v8 read request is invalid") from exc
+
+
+def _v8_proposal(decoded: dict[str, object], request: ModelRequest) -> ModelProposal:
+    if set(decoded) != V8_RESPONSE_FIELDS:
+        raise InvalidModelProposal("v8 model response fields mismatch")
+    reply_chunks, clarification_question = _v8_reply_chunks(decoded["reply_chunks"])
+    intent = decoded["intent"]
+    pending = request.pending_action
+    if intent == "confirm":
+        if pending is None:
+            raise InvalidModelProposal("v8 confirmation requires a pending action")
+        confirmed_summary_version = pending.summary_version
+        confirmed_action_kinds = pending.action_kinds
+        approval_basis = ApprovalBasis.CONTEXTUAL_REFERENCE
+    else:
+        confirmed_summary_version = None
+        confirmed_action_kinds = ()
+        approval_basis = None
+    selected_refs = _tuple_items(
+        decoded["selected_choice_refs"], "selected_choice_refs"
+    )
+    if selected_refs:
+        raise InvalidModelProposal("v8 selected choices require current observations")
+    try:
+        return ModelProposal(
+            source_event_id=request.source_event_id,
+            intent=intent,
+            reply_chunks=reply_chunks,
+            facts=tuple(
+                _fact(item) for item in _tuple_items(decoded["facts"], "facts")
+            ),
+            read_requests=tuple(
+                _v8_read_request(item, request)
+                for item in _tuple_items(decoded["read_requests"], "read_requests")
+            ),
+            effect_proposals=(),
+            target_offer_id=None,
+            confirmed_summary_version=confirmed_summary_version,
+            target_offer_ids=(),
+            confirmed_action_kinds=confirmed_action_kinds,
+            approval_basis=approval_basis,
+            selection_requested=decoded["selection_requested"],
+            pending_disposition=decoded["pending_action_disposition"],
+            passengers=tuple(
+                _passenger(item)
+                for item in _tuple_items(decoded["passengers"], "passengers")
+            ),
+            clarification_question=clarification_question,
+        )
+    except (TypeError, ValueError) as exc:
+        if type(exc) is InvalidModelProposal:
+            raise
+        raise InvalidModelProposal("v8 model proposal is invalid") from exc
+
+
 def _proposal(
     payload: bytes,
-    source_event_id: str,
+    source_event_id: str | ModelRequest,
     *,
     require_v7: bool = False,
     normalize_legacy_inform_preserve: bool = True,
@@ -545,7 +694,12 @@ def _proposal(
         raise InvalidModelProposal("model response is not valid JSON") from exc
     if type(decoded) is not dict:
         raise InvalidModelProposal("model response fields mismatch")
+    request = source_event_id if type(source_event_id) is ModelRequest else None
     schema = decoded.get("schema")
+    if schema is None and request is not None:
+        if require_v7:
+            raise InvalidModelProposal("model response schema mismatch")
+        return _v8_proposal(decoded, request)
     if require_v7 and schema != "v2-model-proposal-v7":
         raise InvalidModelProposal("model response schema mismatch")
 
@@ -567,7 +721,10 @@ def _proposal(
         raise InvalidModelProposal("model response schema mismatch")
     if set(decoded) != expected_fields:
         raise InvalidModelProposal("model response fields mismatch")
-    if decoded["source_event_id"] != source_event_id:
+    expected_source_event_id = (
+        request.source_event_id if request is not None else source_event_id
+    )
+    if decoded["source_event_id"] != expected_source_event_id:
         raise InvalidModelProposal("model response source event mismatch")
     pending_disposition = (
         decoded["pending_disposition"]
@@ -860,7 +1017,7 @@ class HermesModelAdapter:
             proposal = (
                 _proposal(
                     response,
-                    request.source_event_id,
+                    request,
                     require_v7=bool(request.public_reply_correction_reasons),
                 )
                 if decode is None
