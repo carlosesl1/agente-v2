@@ -190,6 +190,129 @@ def test_v8_has_no_model_effect_output_and_internal_effects_are_empty() -> None:
     assert proposal.effect_proposals == ()
 
 
+def _v8_choice_request() -> ModelRequest:
+    observed_at = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    return ModelRequest(
+        request_id="request:v8-choices",
+        lead_id="manychat:v8-choices",
+        source_event_id="batch:v8-choices",
+        message="Quero o segundo quarto e o passeio.",
+        locale="pt-BR",
+        state_version=2,
+        observations=(
+            ReadObservation(
+                request_hash="1" * 64,
+                provider="cloudbeds",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "options": [
+                        {
+                            "offer_id": "offer:lodging-one",
+                            "room_public_name": "Quarto 1",
+                            "total_amount": "100.00",
+                            "currency": "BRL",
+                        },
+                        {
+                            "offer_id": "offer:lodging-two",
+                            "room_public_name": "Quarto 2",
+                            "total_amount": "120.00",
+                            "currency": "BRL",
+                        },
+                    ]
+                },
+                private_binding_hash="2" * 64,
+            ),
+            ReadObservation(
+                request_hash="3" * 64,
+                provider="bokun",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "offer_id": "offer:activity-one",
+                    "product_public_name": "Buracão",
+                    "total_amount": "300.00",
+                    "currency": "BRL",
+                },
+                private_binding_hash="4" * 64,
+            ),
+        ),
+    )
+
+
+def test_v8_wire_replaces_offer_ids_with_bounded_choice_refs() -> None:
+    current = json.loads(
+        json.loads(_request_wire(_v8_choice_request(), "Closed prompt."))["messages"][-1][
+            1
+        ]
+    )
+    serialized = json.dumps(current["observations"], ensure_ascii=False)
+
+    assert "offer_id" not in serialized
+    assert "offer:lodging-one" not in serialized
+    assert "offer:lodging-two" not in serialized
+    assert "offer:activity-one" not in serialized
+    assert current["observations"][0]["public_payload"]["options"][0][
+        "choice_ref"
+    ] == "lodging:1"
+    assert current["observations"][0]["public_payload"]["options"][1][
+        "choice_ref"
+    ] == "lodging:2"
+    assert current["observations"][1]["public_payload"]["choice_ref"] == "activity:1"
+
+
+def test_v8_selected_choice_refs_project_to_exact_current_offer_ids() -> None:
+    request = _v8_choice_request()
+
+    proposal = _proposal(
+        _v8_bytes(
+            intent="select",
+            selected_choice_refs=["lodging:2", "activity:1"],
+            facts=[
+                {"name": "service", "value": "package"},
+                {"name": "activity_date", "value": "2026-08-19"},
+            ],
+        ),
+        request,
+    )
+
+    assert proposal.target_offer_id is None
+    assert proposal.target_offer_ids == (
+        "offer:lodging-two",
+        "offer:activity-one",
+    )
+
+
+@pytest.mark.parametrize(
+    "selected",
+    (["lodging:3"], ["activity:1", "activity:1"], ["lodging:1"] * 3),
+)
+def test_v8_rejects_unknown_duplicate_or_unbounded_choice_refs(
+    selected: list[str],
+) -> None:
+    with pytest.raises(InvalidModelProposal):
+        _proposal(_v8_bytes(intent="select", selected_choice_refs=selected), _v8_choice_request())
+
+
+def test_v8_room_description_read_projects_choice_ref_to_offer_id() -> None:
+    proposal = _proposal(
+        _v8_bytes(
+            read_requests=[
+                {"kind": "room_description", "choice_ref": "lodging:2"}
+            ]
+        ),
+        _v8_choice_request(),
+    )
+
+    assert proposal.read_requests == (
+        ReadRequest(
+            request_id="batch:v8-choices:read:room-description",
+            kind=ReadKind.ROOM_DESCRIPTION,
+            offer_id="offer:lodging-two",
+        ),
+    )
+
+
 def test_model_public_reply_chunks_preserve_valid_unicode_byte_exact() -> None:
     raw_text = "Opc\u0327a\u0303o econo\u0302mica disponi\u0301vel."
     assert raw_text != unicodedata.normalize("NFKC", raw_text)

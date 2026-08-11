@@ -299,16 +299,70 @@ def _read_wire(request: ReadRequest) -> dict[str, object]:
     return json.loads(request.to_canonical_bytes())
 
 
+def _choice_projection(
+    observations: tuple[object, ...],
+) -> tuple[list[dict[str, object]], dict[str, str]]:
+    provider_kinds = {"cloudbeds": "lodging", "bokun": "activity"}
+    counters = {"lodging": 0, "activity": 0}
+    offer_refs: dict[tuple[str, str], str] = {}
+    ref_offers: dict[str, str] = {}
+
+    def transform(value: object, *, kind: str | None) -> object:
+        if type(value) is list:
+            return [transform(item, kind=kind) for item in value]
+        if type(value) is not dict:
+            return value
+        result: dict[str, object] = {}
+        offer_id = value.get("offer_id")
+        choice_ref: str | None = None
+        if offer_id is not None:
+            if kind is None:
+                raise InvalidModelProposal("offer identity has no model choice kind")
+            if type(offer_id) is not str or not offer_id or offer_id != offer_id.strip():
+                raise InvalidModelProposal("offer identity is invalid")
+            if "choice_ref" in value:
+                raise InvalidModelProposal("observation already contains a choice reference")
+            offer_key = (kind, offer_id)
+            choice_ref = offer_refs.get(offer_key)
+            if choice_ref is None:
+                counters[kind] += 1
+                choice_ref = f"{kind}:{counters[kind]}"
+                offer_refs[offer_key] = choice_ref
+                ref_offers[choice_ref] = offer_id
+        for key, item in value.items():
+            if key == "offer_id":
+                continue
+            result[key] = transform(item, kind=kind)
+        if choice_ref is not None:
+            result["choice_ref"] = choice_ref
+        return result
+
+    projected: list[dict[str, object]] = []
+    for observation in observations:
+        provider = getattr(observation, "provider", None)
+        payload = getattr(observation, "public_payload", None)
+        if type(provider) is not str or type(payload) is not dict:
+            raise InvalidModelProposal("model observation is invalid")
+        public_payload = transform(payload, kind=provider_kinds.get(provider))
+        if type(public_payload) is not dict:
+            raise InvalidModelProposal("model observation payload is invalid")
+        projected.append(public_payload)
+    return projected, ref_offers
+
+
 def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
+    projected_payloads, _ = _choice_projection(request.observations)
     observations = [
         {
             "request_hash": item.request_hash,
             "provider": item.provider,
             "observed_at": item.observed_at.isoformat(),
             "expires_at": item.expires_at.isoformat(),
-            "public_payload": item.public_payload,
+            "public_payload": public_payload,
         }
-        for item in request.observations
+        for item, public_payload in zip(
+            request.observations, projected_payloads, strict=True
+        )
     ]
     consultation_history = [
         {
@@ -617,9 +671,16 @@ def _v8_read_request(value: object, request: ModelRequest) -> ReadRequest:
         expected = {"kind", "product_id"}
         fields.update(product_id=value.get("product_id"), locale=request.locale)
     else:
-        raise InvalidModelProposal(
-            "v8 room description requires a current choice reference"
-        )
+        expected = {"kind", "choice_ref"}
+        choice_ref = value.get("choice_ref")
+        _, ref_offers = _choice_projection(request.observations)
+        if (
+            type(choice_ref) is not str
+            or not choice_ref.startswith("lodging:")
+            or choice_ref not in ref_offers
+        ):
+            raise InvalidModelProposal("v8 room choice reference is invalid")
+        fields.update(offer_id=ref_offers[choice_ref])
     if set(value) != expected:
         raise InvalidModelProposal("v8 read request fields mismatch")
     try:
@@ -647,8 +708,22 @@ def _v8_proposal(decoded: dict[str, object], request: ModelRequest) -> ModelProp
     selected_refs = _tuple_items(
         decoded["selected_choice_refs"], "selected_choice_refs"
     )
-    if selected_refs:
-        raise InvalidModelProposal("v8 selected choices require current observations")
+    if (
+        len(selected_refs) > 2
+        or any(type(item) is not str for item in selected_refs)
+        or len(set(selected_refs)) != len(selected_refs)
+    ):
+        raise InvalidModelProposal("v8 selected choice references are invalid")
+    _, ref_offers = _choice_projection(request.observations)
+    if any(item not in ref_offers for item in selected_refs):
+        raise InvalidModelProposal("v8 selected choice is not current")
+    if len(selected_refs) == 2 and {
+        item.split(":", 1)[0] for item in selected_refs
+    } != {"lodging", "activity"}:
+        raise InvalidModelProposal("v8 package choices require lodging and activity")
+    selected_offers = tuple(ref_offers[item] for item in selected_refs)
+    target_offer_id = selected_offers[0] if len(selected_offers) == 1 else None
+    target_offer_ids = selected_offers if len(selected_offers) == 2 else ()
     try:
         return ModelProposal(
             source_event_id=request.source_event_id,
@@ -662,9 +737,9 @@ def _v8_proposal(decoded: dict[str, object], request: ModelRequest) -> ModelProp
                 for item in _tuple_items(decoded["read_requests"], "read_requests")
             ),
             effect_proposals=(),
-            target_offer_id=None,
+            target_offer_id=target_offer_id,
             confirmed_summary_version=confirmed_summary_version,
-            target_offer_ids=(),
+            target_offer_ids=target_offer_ids,
             confirmed_action_kinds=confirmed_action_kinds,
             approval_basis=approval_basis,
             selection_requested=decoded["selection_requested"],
