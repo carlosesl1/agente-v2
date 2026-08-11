@@ -1,4 +1,4 @@
-# Refactor control — Maya V2 conversational context stability
+# Refactor control — Maya V2 agent process and read enrichment
 
 ## Authority
 
@@ -7,24 +7,24 @@
 - Model remains the semantic and textual owner. Parent code may validate closed schemas, typed facts, structural progress, authenticated provider observations, receipts, idempotency, and transaction authority, but never PII in Maya text.
 - Privacy/PII work is forbidden unless Carlos requests it explicitly in the current chat. Do not recommend it. Open-ended privacy work is forbidden.
 - No deploy, restart, canary promotion, broad rollout, production provider POST, or real external effect is authorized by this phase.
+- Authorized by Carlos Eduardo on 2026-08-11 after the natural-conversation audit: continue with the prompt/skill/process and provider-information approach before adding controller complexity. The approved implementation reuses the existing prompt and read tools; it adds no new skill inventory or controller gate.
 
 ## Immutable base
 
-- Base commit: `9d3be1a45a5798a1982f906e1fdf192695e01973`
-- Base tree: `9e6a6ac084d377052d8360d4393f2c3af95a83bb`
-- Base OCI: `ghcr.io/carlosesl1/agente-v2@sha256:b74fc973c43260199d068921597a6d46e7af43aebb0b7ba7d2a74374e9a43b1b`
+- Base commit: `496799ed0d8c30f9d966fdea9e9c86b546ac992e`
+- Base tree: `cde291f6f5b4df015e2609c0470fda2e2805b9fd`
+- No new OCI has been built for this phase.
 - The base candidate remains immutable. All changes belong to the successor branch below.
 
 ## Active successor
 
-- Branch: `maya-v2-context-stability`
-- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-context-stability`
-- Design: `docs/superpowers/specs/2026-08-10-maya-model-owned-public-text-design.md`
-- Plan: `docs/superpowers/plans/2026-08-10-maya-model-owned-public-text.md`
-- Reversal commit: `8b6c26b3d172c78f4dc304fe66a7d59801adfb0f`.
-- Review successor: customer-provided data remains accepted exactly as Maya wrote it, while the independent active-content contract still rejects HTML, Markdown links, internal provider references, technical credential markers, URLs, and control characters.
-- Qualification: affected gate `36 passed, 175 subtests passed`; canonical clean-environment gate `1731 passed, 7 deselected, 2953 subtests passed`. The seven exact deselections are unchanged stale Phase 7/index contracts outside this diff.
-- Exact next gate: authenticate and independently review this successor, then freeze one local commit. No push, deploy, restart, canary, OCI build, real-model run, or promotion is authorized.
+- Branch: `maya-v2-agent-process-refinement`
+- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-agent-process-refinement`
+- Design: `docs/superpowers/specs/2026-08-11-maya-agent-process-and-read-enrichment-design.md`
+- Plan: `docs/superpowers/plans/2026-08-11-maya-agent-process-and-read-enrichment.md`
+- Starting candidate: `496799ed0d8c30f9d966fdea9e9c86b546ac992e`; the audited candidate and its historical conversation root remain immutable.
+- Baseline affected gate: `114 passed` on the starting candidate. The global Python initially lacked pytest; the isolated worktree environment was created with `uv sync --extra runtime --extra dev` and no runtime service was changed.
+- Exact next gate: witness focused RED tests for official hostel knowledge, model process instructions, and the Cloudbeds room-description public name; then implement only the approved bounded changes. No push, deploy, restart, canary, OCI build, provider write, outbound message, payment initiation, or promotion is authorized.
 
 ## Required invariants
 
