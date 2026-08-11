@@ -235,12 +235,23 @@ class BokunReadAdapter:
             "Bókun description",
         )
         provider_product_id = text(response.get("bokun_product_id"), "bokun_product_id")
+        age_guidance = response.get("age_guidance")
+        suitability_guidance = response.get("suitability_guidance")
         public = {
             "product_id": request.product_id,
             "product_public_name": text(
                 response.get("product_public_name"), "product_public_name"
             ),
             "description": text(response.get("description"), "description"),
+            "age_guidance": (
+                None if age_guidance is None else text(age_guidance, "age_guidance")
+            ),
+            "suitability_guidance": (
+                None
+                if suitability_guidance is None
+                else text(suitability_guidance, "suitability_guidance")
+            ),
+            "grounding_review_required": True,
         }
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         return ReadObservation(

@@ -142,28 +142,38 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
 def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> None:
     prompt = PROMPT.read_text(encoding="utf-8")
     for literal in (
+        "oito campos conversacionais",
+        "selected_choice_refs",
+        "pending_action_disposition",
+        "pending_action",
+        "passengers",
+        "progress_review_required",
+        "product:buracao",
+        "Nunca exponha choice_ref",
+        "Não invente valor",
+        "Não execute reserva",
+        "age_guidance=null",
+    ):
+        assert literal in prompt
+    for legacy_output_field in (
         "v2-model-proposal-v7",
-        "source_event_id",
+        "v2-model-proposal-v6",
+        "v2-model-proposal-v5",
+        "v2-model-proposal-v4",
+        "v2-model-proposal-v3",
+        "v2-model-proposal-v2",
         "target_offer_id",
         "target_offer_ids",
         "confirmed_summary_version",
         "confirmed_action_kinds",
         "approval_basis",
         "pending_disposition",
-        "pending_action",
         "contextual_reference",
-        "passengers",
         "clarification_question",
-        "progress_review_required",
-        "effect_proposals deve ser sempre []",
-        "product:buracao",
-        "Nunca exponha offer_id",
-        "Nunca invente preço",
-        "Não execute reserva",
+        "effect_proposals",
     ):
-        assert literal in prompt
-    assert "v2-model-proposal-v6" not in prompt
-    assert "v2-model-proposal-v5" not in prompt
+        assert legacy_output_field not in prompt
+    assert "source_event_id" in prompt
     assert "A mensagem atual e o fato `language` em state_facts vencem" not in prompt
     assert (
         "O locale do request, derivado do telefone ManyChat autenticado, é autoritativo"

@@ -16,6 +16,39 @@ from v2_contracts.providers import ReadKind, ReadRequest
 NOW = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
 
 
+def test_bokun_activity_description_marks_missing_material_guidance_explicitly() -> None:
+    def transport(operation: str, payload: dict[str, object]) -> dict[str, object]:
+        assert operation == "activity_description"
+        assert payload == {"product_id": "product:buracao", "locale": "pt-BR"}
+        return {
+            "bokun_product_id": "buracao-provider-id",
+            "product_public_name": "Buracão",
+            "description": "Passeio por trilhas e cânions.",
+        }
+
+    observation = BokunReadAdapter(
+        transport=transport,
+        clock=SimpleNamespace(now=lambda: NOW),
+        ttl=timedelta(minutes=5),
+    ).read(
+        ReadRequest(
+            request_id="read:buracao-description",
+            kind=ReadKind.ACTIVITY_DESCRIPTION,
+            product_id="product:buracao",
+            locale="pt-BR",
+        )
+    )
+
+    assert observation.public_payload == {
+        "product_id": "product:buracao",
+        "product_public_name": "Buracão",
+        "description": "Passeio por trilhas e cânions.",
+        "age_guidance": None,
+        "suitability_guidance": None,
+        "grounding_review_required": True,
+    }
+
+
 def test_activity_read_request_binds_adult_child_composition_and_keeps_legacy() -> None:
     mixed = ReadRequest(
         request_id="read:party-aware",

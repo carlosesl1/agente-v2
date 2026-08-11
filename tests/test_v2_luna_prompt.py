@@ -176,6 +176,13 @@ def test_healthy_adult_suitability_question_stays_in_automation() -> None:
     assert "não abre handoff só porque não faz trilha com frequência" in PROMPT
 
 
+def test_missing_age_or_suitability_guidance_never_becomes_reassurance() -> None:
+    assert "age_guidance=null ou suitability_guidance=null" in PROMPT
+    assert "não existe orientação autenticada para essa afirmação" in PROMPT
+    assert "não conclua que a idade não impede" in PROMPT.casefold()
+    assert "pergunte naturalmente pelo contexto relevante" in PROMPT
+
+
 def test_luna_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
     assert "oito campos conversacionais" in PROMPT
     assert (

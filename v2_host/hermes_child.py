@@ -13,7 +13,10 @@ import sys
 import tempfile
 from typing import Final
 
-from v2_host.structured_output import maya_v8_request_overrides
+from v2_host.structured_output import (
+    grounding_review_request_overrides,
+    maya_v8_request_overrides,
+)
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
 _MAX_INPUT: Final = 512 * 1024
@@ -119,6 +122,18 @@ def _required_option(argv: Sequence[str], names: tuple[str, ...], label: str) ->
     return matches[0]
 
 
+def _response_contract(argv: Sequence[str]) -> str:
+    indexes = [index for index, item in enumerate(argv) if item == "--contract"]
+    if not indexes:
+        return "maya-v8"
+    if len(indexes) != 1 or indexes[0] + 1 >= len(argv):
+        raise ValueError("response contract is invalid")
+    value = argv[indexes[0] + 1]
+    if value not in {"maya-v8", "grounding-v1"}:
+        raise ValueError("response contract is invalid")
+    return value
+
+
 def _structured_system_prompt(request: dict[str, object]) -> str:
     return (
         request["system_prompt"]
@@ -180,6 +195,12 @@ async def run_structured(
     profile = _required_option(argv, ("--profile", "-p"), "Hermes profile")
     model = _required_option(argv, ("--model", "-m"), "model")
     provider = _required_option(argv, ("--provider",), "provider")
+    response_contract = _response_contract(argv)
+    request_overrides = (
+        grounding_review_request_overrides()
+        if response_contract == "grounding-v1"
+        else maya_v8_request_overrides()
+    )
     hermes_home = profile_resolver(profile)
     if type(hermes_home) is not str or not hermes_home:
         raise ValueError("Hermes profile home is invalid")
@@ -195,7 +216,7 @@ async def run_structured(
             provider=provider,
             max_iterations=1,
             enabled_toolsets=[],
-            request_overrides=maya_v8_request_overrides(),
+            request_overrides=request_overrides,
             quiet_mode=True,
             skip_context_files=True,
             load_soul_identity=False,
