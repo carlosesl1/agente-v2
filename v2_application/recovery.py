@@ -347,7 +347,8 @@ class ManualReviewHandoffProjector:
         *,
         execution: SQLiteUnitOfWork,
         coordinator: HandoffCoordinator,
-        lead_id: str,
+        lead_id: str = "",
+        lead_resolver: object | None = None,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
@@ -355,7 +356,16 @@ class ManualReviewHandoffProjector:
             raise TypeError("coordinator must be exact HandoffCoordinator")
         self._execution = execution
         self._coordinator = coordinator
-        self._lead_id = _id(lead_id, "lead_id")
+        if type(lead_id) is not str:
+            raise TypeError("lead_id must be exact text")
+        if lead_resolver is not None and not callable(
+            getattr(lead_resolver, "lead_id_for_command", None)
+        ):
+            raise TypeError("lead_resolver must resolve command owners")
+        if bool(lead_id) == (lead_resolver is not None):
+            raise ValueError("handoff projection requires one fixed or durable lead source")
+        self._lead_id = _id(lead_id, "lead_id") if lead_id else None
+        self._lead_resolver = lead_resolver
 
     def run_once(self, *, now: datetime) -> ManualReviewHandoffProjection:
         created = 0
@@ -369,8 +379,15 @@ class ManualReviewHandoffProjector:
                 + b"\0"
                 + ledger.outcome_hash.encode("ascii")
             ).hexdigest()
+            lead_id = (
+                self._lead_resolver.lead_id_for_command(command.command_id)
+                if self._lead_resolver is not None
+                else self._lead_id
+            )
+            if lead_id is None:
+                raise RuntimeError("manual review does not have a durable lead owner")
             result = self._coordinator.open_exception_once(
-                lead_id=self._lead_id,
+                lead_id=lead_id,
                 workflow_id=command.workflow_id,
                 source_event_id=f"event:manual-review:{digest[:40]}",
                 reason_code=HandoffReasonCode.PROVIDER_UNCERTAIN,

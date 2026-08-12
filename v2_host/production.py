@@ -40,6 +40,7 @@ from v2_adapters.stripe import (
 )
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.lead_identity import DurableLeadResolver
 from v2_application.bokun_audit import (
     BokunAuditProjector,
     BokunAuditStatus,
@@ -76,7 +77,10 @@ from v2_contracts.critical_actions import CriticalActionKind
 from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
-from v2_host.public_authority import ManifestPublicAuthorityResolver
+from v2_host.public_authority import (
+    GeneralAvailabilityPublicAuthorityResolver,
+    ManifestPublicAuthorityResolver,
+)
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import (
     WorkerFailureReason,
@@ -131,7 +135,8 @@ class ControlledEffectGuard:
         if type(workflow_id) is not str or not workflow_id:
             return False
         return (
-            self._settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+            self._settings.runtime_mode
+            in {RuntimeMode.CONTROLLED_WRITE, RuntimeMode.GENERAL_AVAILABILITY}
             and self._settings.write_window_is_open(now=self._clock.now())
         )
 
@@ -169,6 +174,7 @@ class ReconciliationStage:
         container: V2Container,
         reads: V2ReadService | None = None,
         settings: V2Settings | None = None,
+        lead_resolver: DurableLeadResolver | None = None,
     ) -> None:
         if type(container) is not V2Container or container.role is not V2Role.WORKER:
             raise TypeError("reconciliation requires an exact worker container")
@@ -196,15 +202,33 @@ class ReconciliationStage:
                 base_url=settings.bokun_base_url,
             )
         self._manual_handoff = None
-        if settings is not None and settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
-            if len(settings.allowed_subscriber_ids) != 1:
+        if settings is not None and settings.runtime_mode in {
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        }:
+            if (
+                settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                and len(settings.allowed_subscriber_ids) != 1
+            ):
                 raise ValueError(
                     "manual-review handoff requires one allowlisted subscriber"
+                )
+            if (
+                settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+                and lead_resolver is None
+            ):
+                raise ValueError(
+                    "general-availability handoff requires durable lead ownership"
                 )
             self._manual_handoff = ManualReviewHandoffProjector(
                 execution=container.execution,
                 coordinator=HandoffCoordinator(store=container.followup),
-                lead_id=f"manychat:{settings.allowed_subscriber_ids[0]}",
+                lead_id=(
+                    f"manychat:{settings.allowed_subscriber_ids[0]}"
+                    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                    else ""
+                ),
+                lead_resolver=lead_resolver,
             )
         self._next_probe_at: datetime | None = None
         self._probe_healthy = False
@@ -518,15 +542,21 @@ def _build_inbox_worker(
 ) -> InboxTurnWorker:
     if container.boundary is None or container.inbox is None:
         raise ValueError("shadow inbox durable owners are unavailable")
-    if settings.public_authority_manifest_path is None:
-        raise ValueError("shadow public authority manifest is unavailable")
     clock = UTCClock()
-    authority = ManifestPublicAuthorityResolver(
-        store=container.boundary,
-        manifest_path=settings.public_authority_manifest_path,
-        hmac_key=settings.public_authority_hmac_key,
-        now=clock.now(),
-    )
+    if settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
+        authority: object = GeneralAvailabilityPublicAuthorityResolver(
+            store=container.boundary,
+            hmac_key=settings.public_authority_hmac_key,
+        )
+    else:
+        if settings.public_authority_manifest_path is None:
+            raise ValueError("shadow public authority manifest is unavailable")
+        authority = ManifestPublicAuthorityResolver(
+            store=container.boundary,
+            manifest_path=settings.public_authority_manifest_path,
+            hmac_key=settings.public_authority_hmac_key,
+            now=clock.now(),
+        )
     container.register_public_authority_resolver(authority)
     profile = ManyChatProfileAdapter(
         transport=ManyChatHTTPTransport(
@@ -653,13 +683,22 @@ def _build_payment_worker(
     *,
     container: V2Container,
     settings: V2Settings,
+    lead_resolver: DurableLeadResolver | None = None,
 ) -> PaymentInitiationWorker:
     if container.payment_initiation is None:
         raise ValueError("payment initiation owner is unavailable")
     if not settings.enabled_payment_methods:
         raise ValueError("payment worker requires at least one explicit method gate")
-    if len(settings.allowed_subscriber_ids) != 1:
-        raise ValueError("payment worker requires one allowlisted subscriber")
+    if (
+        settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+        and len(settings.allowed_subscriber_ids) != 1
+    ):
+        raise ValueError("controlled payment worker requires one allowlisted subscriber")
+    if (
+        settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+        and lead_resolver is None
+    ):
+        raise ValueError("general-availability payment worker requires durable lead ownership")
     clock = UTCClock()
     profiles = {
         BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
@@ -682,7 +721,11 @@ def _build_payment_worker(
             ),
             account_profiles=profiles,
             enabled=True,
-            subscriber_id=settings.allowed_subscriber_ids[0],
+            subscriber_id=(
+                settings.allowed_subscriber_ids[0]
+                if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                else ""
+            ),
             payment_percentages=percentages_by_unit,
         )
         stripe_reconciler = StripeLinkReconciliationAdapter(
@@ -691,7 +734,11 @@ def _build_payment_worker(
                 base_url=settings.stripe_base_url,
             ),
             account_profiles=profiles,
-            subscriber_id=settings.allowed_subscriber_ids[0],
+            subscriber_id=(
+                settings.allowed_subscriber_ids[0]
+                if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                else ""
+            ),
             payment_percentages=percentages_by_unit,
         )
     else:
@@ -728,6 +775,7 @@ def _build_payment_worker(
         lease_ttl=timedelta(seconds=30),
         effect_guard=effect_guard,
         stripe_reconciler=stripe_reconciler,
+        lead_resolver=lead_resolver,
     )
 
 
@@ -741,8 +789,21 @@ def build_worker_set(
     if settings.runtime_mode is RuntimeMode.API_ONLY:
         raise ValueError("api_only runtime cannot start a worker process")
     reads = build_read_service(settings)
+    lead_resolver = (
+        DurableLeadResolver(
+            boundary=container.boundary,
+            execution=container.execution,
+            followup=container.followup,
+        )
+        if settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+        else None
+    )
     inbox_worker: object
-    if settings.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}:
+    if settings.runtime_mode in {
+        RuntimeMode.SHADOW,
+        RuntimeMode.CONTROLLED_WRITE,
+        RuntimeMode.GENERAL_AVAILABILITY,
+    }:
         inbox_worker = _build_inbox_worker(
             container=container,
             settings=settings,
@@ -775,9 +836,15 @@ def build_worker_set(
         else ClosedCapabilityWorker("reservation_writes")
     )
     payment_enabled = bool(settings.enabled_payment_methods)
-    completion_enabled = bool(settings.allowed_subscriber_ids)
+    completion_enabled = bool(settings.allowed_subscriber_ids) or (
+        settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+    )
     payment_worker: object = (
-        _build_payment_worker(container=container, settings=settings)
+        _build_payment_worker(
+            container=container,
+            settings=settings,
+            lead_resolver=lead_resolver,
+        )
         if payment_enabled
         else ClosedCapabilityWorker("payment_initiation")
     )
@@ -801,7 +868,6 @@ def build_worker_set(
             execution=container.execution,
             payment_store=container.payment_initiation,
             public_store=container.public_outbox,
-            subscriber_id=settings.allowed_subscriber_ids[0],
             account_profiles=(
                 {
                     BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
@@ -810,6 +876,12 @@ def build_worker_set(
                 if payment_enabled
                 else None
             ),
+            subscriber_id=(
+                settings.allowed_subscriber_ids[0]
+                if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                else ""
+            ),
+            lead_resolver=lead_resolver,
             include_payment_offers=payment_enabled,
         )
         if completion_enabled
@@ -826,7 +898,11 @@ def build_worker_set(
             completion=container.public_outbox,
             delivery=ManyChatFlowDeliveryAdapter(
                 transport=manychat_transport,
-                allowed_subscriber_id=settings.allowed_subscriber_ids[0],
+                allowed_subscriber_id=(
+                    settings.allowed_subscriber_ids[0]
+                    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                    else None
+                ),
                 reply_field_id=settings.manychat_reply_field_id,
                 reply_flow_ns=settings.manychat_reply_flow_ns,
                 payment_link_field_id=settings.manychat_payment_link_field_id,
@@ -851,10 +927,15 @@ def build_worker_set(
             store=container.followup,
             delivery=ManyChatHandoffDeliveryAdapter(
                 transport=handoff_transport,
-                subscriber_id=settings.allowed_subscriber_ids[0],
                 tag_id=settings.manychat_handoff_tag_id,
                 flow_ns=settings.manychat_handoff_flow_ns,
                 clock=UTCClock(),
+                subscriber_id=(
+                    settings.allowed_subscriber_ids[0]
+                    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                    else ""
+                ),
+                lead_resolver=lead_resolver,
             ),
             worker_id="worker:manychat-handoff",
             lease_ttl=timedelta(seconds=30),
@@ -876,10 +957,14 @@ def build_worker_set(
             container=container,
             reads=reads,
             settings=settings,
+            lead_resolver=lead_resolver,
         ),
     }
     controlled_ingress_status = "closed"
-    if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+    if settings.runtime_mode in {
+        RuntimeMode.CONTROLLED_WRITE,
+        RuntimeMode.GENERAL_AVAILABILITY,
+    }:
         controlled_ingress_status = (
             "ready"
             if container.controlled_public_ingress_reason(now=UTCClock().now()) is None
@@ -895,19 +980,31 @@ def build_worker_set(
             "hermes_model": (
                 "ready"
                 if settings.runtime_mode
-                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                in {
+                    RuntimeMode.SHADOW,
+                    RuntimeMode.CONTROLLED_WRITE,
+                    RuntimeMode.GENERAL_AVAILABILITY,
+                }
                 else "closed"
             ),
             "inbox_turns": (
                 "ready"
                 if settings.runtime_mode
-                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                in {
+                    RuntimeMode.SHADOW,
+                    RuntimeMode.CONTROLLED_WRITE,
+                    RuntimeMode.GENERAL_AVAILABILITY,
+                }
                 else "closed"
             ),
             "manychat_profile": (
                 "ready"
                 if settings.runtime_mode
-                in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}
+                in {
+                    RuntimeMode.SHADOW,
+                    RuntimeMode.CONTROLLED_WRITE,
+                    RuntimeMode.GENERAL_AVAILABILITY,
+                }
                 else "closed"
             ),
             "boundary_relay": "ready",

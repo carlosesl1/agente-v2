@@ -551,7 +551,7 @@ class StripeLinkReconciliationAdapter:
         *,
         transport: StripeTestReconciliationTransport,
         account_profiles: dict[BusinessUnit, str],
-        subscriber_id: str,
+        subscriber_id: str = "",
         payment_percentages: dict[BusinessUnit, int],
     ) -> None:
         if type(transport) is not StripeTestReconciliationTransport:
@@ -560,8 +560,8 @@ class StripeLinkReconciliationAdapter:
             raise ValueError("account_profiles must bind every business unit exactly once")
         if any(type(value) is not str or not value for value in account_profiles.values()):
             raise ValueError("account profile ids must be exact non-empty strings")
-        if type(subscriber_id) is not str or not subscriber_id or "\x00" in subscriber_id:
-            raise ValueError("subscriber_id must be exact non-empty NUL-free text")
+        if type(subscriber_id) is not str or "\x00" in subscriber_id:
+            raise ValueError("subscriber_id must be exact NUL-free text")
         if type(payment_percentages) is not dict or set(payment_percentages) != set(
             BusinessUnit
         ):
@@ -675,6 +675,7 @@ class StripeLinkReconciliationAdapter:
         receipts: tuple[StripeStepReceipt, ...],
         *,
         initiation_id: str,
+        subscriber_id: str = "",
     ) -> StripeReconciliationResult:
         if (
             type(selection) is not PaymentSelection
@@ -683,10 +684,17 @@ class StripeLinkReconciliationAdapter:
             raise TypeError("Stripe reconciliation requires exact Stripe selection")
         if type(receipts) is not tuple or not receipts:
             raise ValueError("Stripe reconciliation requires durable step receipts")
+        effective_fingerprint = self._subscriber_fingerprint
+        if subscriber_id:
+            if type(subscriber_id) is not str or not subscriber_id.isdecimal():
+                raise ValueError("subscriber_id must be exact decimal text")
+            effective_fingerprint = hashlib.sha256(subscriber_id.encode()).hexdigest()
+        if not effective_fingerprint:
+            raise ValueError("Stripe reconciliation requires a subscriber binding")
         request = _stripe_link_request(
             selection.obligation,
             account_profiles=self._profiles,
-            subscriber_fingerprint=self._subscriber_fingerprint,
+            subscriber_fingerprint=effective_fingerprint,
             payment_percentages=self._percentages,
             initiation_id=initiation_id,
         )
@@ -1000,6 +1008,7 @@ class StripeLinkAdapter:
         initiation_id: str,
         journal_worker_id: str,
         journal_fencing_token: int,
+        subscriber_id: str = "",
     ) -> StripePaymentLink:
         if type(initiation_id) is not str or not initiation_id:
             raise ValueError("journaled Stripe create requires initiation_id")
@@ -1008,6 +1017,7 @@ class StripeLinkAdapter:
             initiation_id=initiation_id,
             journal_worker_id=journal_worker_id,
             journal_fencing_token=journal_fencing_token,
+            subscriber_id=subscriber_id,
         )
 
     def create_link(
@@ -1017,6 +1027,7 @@ class StripeLinkAdapter:
         initiation_id: str = "",
         journal_worker_id: str = "",
         journal_fencing_token: int = 0,
+        subscriber_id: str = "",
     ) -> StripePaymentLink:
         if type(obligation) is not PaymentObligation:
             raise TypeError("obligation must be exact PaymentObligation")
@@ -1026,10 +1037,15 @@ class StripeLinkAdapter:
             raise ValueError("Stripe link creation requires display_details")
         if obligation.display_details.customer_language is None:
             raise ValueError("Stripe link creation requires customer_language")
+        effective_fingerprint = self._subscriber_fingerprint
+        if subscriber_id:
+            if type(subscriber_id) is not str or not subscriber_id.isdecimal():
+                raise ValueError("subscriber_id must be exact decimal text")
+            effective_fingerprint = hashlib.sha256(subscriber_id.encode()).hexdigest()
         request = _stripe_link_request(
             obligation,
             account_profiles=self._profiles,
-            subscriber_fingerprint=self._subscriber_fingerprint,
+            subscriber_fingerprint=effective_fingerprint,
             payment_percentages=self._percentages,
             initiation_id=initiation_id,
             journal_worker_id=journal_worker_id,

@@ -311,6 +311,194 @@ class ManifestPublicAuthorityResolver:
         return min(counts)
 
 
+class GeneralAvailabilityPublicAuthorityResolver:
+    """Install one finite, subscriber-bound dispatch generation per inbound turn."""
+
+    def __init__(
+        self,
+        *,
+        store: SQLiteBoundaryStore,
+        hmac_key: bytes,
+        turn_ttl: timedelta = timedelta(hours=24),
+    ) -> None:
+        if type(store) is not SQLiteBoundaryStore:
+            raise TypeError("authority resolver requires exact SQLiteBoundaryStore")
+        if type(hmac_key) is not bytes or len(hmac_key) < 32:
+            raise ValueError("authority HMAC key must contain at least 32 bytes")
+        if type(turn_ttl) is not timedelta or turn_ttl <= timedelta(0):
+            raise ValueError("turn_ttl must be a positive exact timedelta")
+        self._store = store
+        self._key = hmac_key
+        self._turn_ttl = turn_ttl
+
+    def _digest(self, purpose: str, *parts: object) -> str:
+        return hmac.new(
+            self._key,
+            purpose.encode("ascii")
+            + b"\0"
+            + b"\0".join(str(part).encode("utf-8") for part in parts),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def resolve(
+        self,
+        batch: InboundBatch,
+        *,
+        chunk_count: int,
+        now: datetime,
+    ) -> PublicTurnAuthority:
+        if type(batch) is not InboundBatch:
+            raise TypeError("authority resolver requires exact InboundBatch")
+        if type(chunk_count) is not int or not 1 <= chunk_count <= 32:
+            raise ValueError("public chunk count is outside the finite authority range")
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+            raise ValueError("authority resolution now must be exact UTC")
+        if (
+            batch.lead_id != f"manychat:{batch.subscriber_id}"
+            or not batch.subscriber_id.isdecimal()
+        ):
+            raise ValueError("general availability requires a bound ManyChat subscriber")
+
+        turn_digest = self._digest(
+            "general-availability-turn-v1",
+            batch.batch_id,
+            batch.lead_id,
+            batch.subscriber_id,
+        )
+        authorization_id = f"authority:production:{turn_digest[:32]}"
+        channel_scope = f"manychat:subscriber-{batch.subscriber_id}"
+        generation = 1
+        target_binding_hash = self._digest(
+            "general-availability-target-v1", batch.subscriber_id
+        )
+        capability_digest = self._digest(
+            "general-availability-capability-v1", "manychat-public-delivery"
+        )
+        effect_digest = self._digest(
+            "general-availability-effect-v1", batch.batch_id, batch.subscriber_id
+        )
+        contract_digest = self._digest(
+            "general-availability-contract-v1", batch.batch_id, chunk_count
+        )
+        allocations = tuple(
+            (
+                "allocation:production:"
+                + self._digest(
+                    "general-availability-allocation-v1",
+                    batch.batch_id,
+                    ordinal,
+                )[:32],
+                ordinal,
+            )
+            for ordinal in range(chunk_count)
+        )
+        allocation_manifest_hash = hashlib.sha256(
+            _canonical(
+                [
+                    {"allocation_id": allocation_id, "ordinal": ordinal}
+                    for allocation_id, ordinal in allocations
+                ]
+            )
+        ).hexdigest()
+        common = (
+            authorization_id,
+            batch.subscriber_id,
+            channel_scope,
+            generation,
+            "conversation_test",
+            None,
+            None,
+            contract_digest,
+            effect_digest,
+            capability_digest,
+            target_binding_hash,
+            allocation_manifest_hash,
+        )
+
+        with self._store._transaction():
+            existing = self._store._connection.execute(
+                "SELECT contract_digest,allocation_manifest_hash,created_at "
+                "FROM boundary_dispatch_authority WHERE authorization_id=? "
+                "AND scope_subject_id=? AND channel_scope=? AND generation=? "
+                "AND allocation_id='__header__'",
+                common[:4],
+            ).fetchone()
+            if existing is None:
+                created_at = now
+                self._store._connection.execute(
+                    "INSERT INTO boundary_dispatch_authority "
+                    "(authorization_id,scope_subject_id,channel_scope,generation,allocation_id,"
+                    "row_kind,authorization_kind,qualification_id,scenario_id,contract_digest,"
+                    "effect_authorization_binding_digest,capability_policy_digest,target_binding_hash,"
+                    "allowed_chunk_ordinal,allocation_manifest_hash,state,public_row_id,cas_revision,"
+                    "closure_receipt_hash,created_at,updated_at,fenced_at) "
+                    "VALUES (?,?,?,?,?,'generation_header',?,?,?,?,?,?,?,?,?,'open',NULL,0,NULL,?,?,NULL)",
+                    common[:4]
+                    + ("__header__",)
+                    + common[4:11]
+                    + (None, common[11], now.isoformat(), now.isoformat()),
+                )
+                for allocation_id, ordinal in allocations:
+                    self._store._connection.execute(
+                        "INSERT INTO boundary_dispatch_authority "
+                        "(authorization_id,scope_subject_id,channel_scope,generation,allocation_id,"
+                        "row_kind,authorization_kind,qualification_id,scenario_id,contract_digest,"
+                        "effect_authorization_binding_digest,capability_policy_digest,target_binding_hash,"
+                        "allowed_chunk_ordinal,allocation_manifest_hash,state,public_row_id,cas_revision,"
+                        "closure_receipt_hash,created_at,updated_at,fenced_at) "
+                        "VALUES (?,?,?,?,?,'allocation',?,?,?,?,?,?,?,?,?,'available',NULL,0,NULL,?,?,NULL)",
+                        common[:4]
+                        + (allocation_id,)
+                        + common[4:11]
+                        + (ordinal, common[11], now.isoformat(), now.isoformat()),
+                    )
+            else:
+                if tuple(existing[:2]) != (contract_digest, allocation_manifest_hash):
+                    raise ValueError(
+                        "installed production authority conflicts with turn identity"
+                    )
+                created_at = datetime.fromisoformat(existing[2])
+                rows = tuple(
+                    self._store._connection.execute(
+                        "SELECT allocation_id,allowed_chunk_ordinal "
+                        "FROM boundary_dispatch_authority WHERE authorization_id=? "
+                        "AND scope_subject_id=? AND channel_scope=? AND generation=? "
+                        "AND row_kind='allocation' ORDER BY allowed_chunk_ordinal",
+                        common[:4],
+                    )
+                )
+                if rows != allocations:
+                    raise ValueError(
+                        "installed production allocations diverge from turn identity"
+                    )
+
+        deadline = created_at + self._turn_ttl
+        if now >= deadline:
+            raise ValueError("production public authority expired before commit")
+        return PublicTurnAuthority(
+            authorization_kind="conversation_test",
+            authorization_id=authorization_id,
+            scope_subject_id=batch.subscriber_id,
+            target_binding_hash=target_binding_hash,
+            channel_id="manychat:production-v2",
+            channel_scope=channel_scope,
+            immutable_generation=generation,
+            allocation_ids=tuple(allocation_id for allocation_id, _ in allocations),
+            capability_policy_digest=capability_digest,
+            effect_authorization_binding_digest=effect_digest,
+            contract_digest=contract_digest,
+            allocation_manifest_hash=allocation_manifest_hash,
+            deadline_at=deadline,
+        )
+
+    def available_turn_capacity(self, subscriber_id: str, *, now: datetime) -> int:
+        if type(subscriber_id) is not str or not subscriber_id.isdecimal():
+            raise ValueError("subscriber_id must be exact decimal text")
+        if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
+            raise ValueError("authority capacity now must be exact UTC")
+        return 1
+
+
 def active_authority_reason(
     *,
     manifest_path: Path,
@@ -343,4 +531,8 @@ def active_authority_reason(
     return None
 
 
-__all__ = ["ManifestPublicAuthorityResolver", "active_authority_reason"]
+__all__ = [
+    "GeneralAvailabilityPublicAuthorityResolver",
+    "ManifestPublicAuthorityResolver",
+    "active_authority_reason",
+]

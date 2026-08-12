@@ -23,10 +23,14 @@ def _transport(handler) -> ManyChatHTTPTransport:
     )
 
 
-def _adapter(transport: ManyChatHTTPTransport) -> ManyChatFlowDeliveryAdapter:
+def _adapter(
+    transport: ManyChatHTTPTransport,
+    *,
+    allowed_subscriber_id: str | None = "1873018537",
+) -> ManyChatFlowDeliveryAdapter:
     return ManyChatFlowDeliveryAdapter(
         transport=transport,
-        allowed_subscriber_id="1873018537",
+        allowed_subscriber_id=allowed_subscriber_id,
         reply_field_id=101,
         reply_flow_ns="flow:reply:v2",
         payment_link_field_id=201,

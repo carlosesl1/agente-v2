@@ -188,7 +188,7 @@ class ManyChatFlowDeliveryAdapter:
         self,
         *,
         transport: object,
-        allowed_subscriber_id: str,
+        allowed_subscriber_id: str | None,
         reply_field_id: int,
         reply_flow_ns: str,
         payment_link_field_id: int,
@@ -198,11 +198,11 @@ class ManyChatFlowDeliveryAdapter:
         for method in ("set_custom_field", "set_custom_fields", "trigger_flow"):
             if not callable(getattr(transport, method, None)):
                 raise TypeError(f"transport must expose {method}")
-        if (
+        if allowed_subscriber_id is not None and (
             type(allowed_subscriber_id) is not str
             or not allowed_subscriber_id.isdecimal()
         ):
-            raise ValueError("allowed_subscriber_id must be exact decimal text")
+            raise ValueError("allowed_subscriber_id must be decimal text or None")
         for name, value in (
             ("reply_field_id", reply_field_id),
             ("payment_link_field_id", payment_link_field_id),
@@ -245,7 +245,10 @@ class ManyChatFlowDeliveryAdapter:
             raise PublicDeliveryNotCalled("claim lacks a stable outbox identity")
         if type(subscriber_id) is not str or not subscriber_id.isdecimal():
             raise PublicDeliveryNotCalled("claim lacks a decimal ManyChat subscriber")
-        if subscriber_id != self._allowed_subscriber_id:
+        if (
+            self._allowed_subscriber_id is not None
+            and subscriber_id != self._allowed_subscriber_id
+        ):
             raise PublicDeliveryRejected("subscriber is outside the delivery allowlist")
         if type(text) is not str or not text.strip():
             raise PublicDeliveryNotCalled("claim lacks public text")

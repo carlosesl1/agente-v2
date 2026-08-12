@@ -23,6 +23,7 @@ class RuntimeMode(str, Enum):
     DARK_READ_ONLY = "dark_read_only"
     SHADOW = "shadow"
     CONTROLLED_WRITE = "controlled_write"
+    GENERAL_AVAILABILITY = "general_availability"
 
 
 class StripeEnvironment(str, Enum):
@@ -315,8 +316,13 @@ class V2Settings:
             raise TypeError("real effect gates must be exact booleans")
         if any(gates) and self.real_effects_ack != _REAL_EFFECTS_ACK:
             raise ValueError("real effects require exact operational acknowledgment")
-        if self.runtime_mode is not RuntimeMode.CONTROLLED_WRITE and any(gates):
-            raise ValueError("real effect gates require controlled_write runtime mode")
+        if self.runtime_mode not in {
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        } and any(gates):
+            raise ValueError(
+                "real effect gates require controlled_write or general_availability runtime mode"
+            )
         if type(self.global_kill_switch_engaged) is not bool:
             raise TypeError("global kill switch must be exact bool")
         if self.write_window_end is not None and (
@@ -335,14 +341,21 @@ class V2Settings:
         if self.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
             if len(self.allowed_subscriber_ids) != 1:
                 raise ValueError("controlled_write requires exactly one subscriber")
+        if self.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
+            if self.allowed_subscriber_ids:
+                raise ValueError("general_availability requires an empty subscriber allowlist")
+        if self.runtime_mode in {
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        }:
             if owns_worker and self.hermes_model != _CONTROLLED_MODEL:
-                raise ValueError("controlled_write requires openai-codex/gpt-5.6-luna")
+                raise ValueError("write runtime requires openai-codex/gpt-5.6-luna")
             if not _GIT_SHA_RE.fullmatch(self.candidate_git_sha):
                 raise ValueError("candidate git sha must be an immutable 40-character lowercase hex sha")
             if not _IMAGE_DIGEST_RE.fullmatch(self.candidate_image_digest):
                 raise ValueError("candidate image digest must be an immutable sha256 digest")
             if self.stripe_environment is not StripeEnvironment.TEST:
-                raise ValueError("controlled_write requires the Stripe test environment")
+                raise ValueError("write runtime requires the Stripe test environment")
         if any(gates):
             if self.global_kill_switch_engaged:
                 raise ValueError("real effects require the global kill switch to be released")
@@ -502,6 +515,7 @@ class V2Settings:
             RuntimeMode.DARK_READ_ONLY,
             RuntimeMode.SHADOW,
             RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
         }:
             missing = []
             if not self.cloudbeds_api_key or not self.cloudbeds_property_id:
@@ -529,7 +543,11 @@ class V2Settings:
                     raise ValueError("read probe product must be a configured canonical ID")
             if missing:
                 raise ValueError("read runtime requires " + ", ".join(missing))
-        if self.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE}:
+        if self.runtime_mode in {
+            RuntimeMode.SHADOW,
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        }:
             missing = []
             if owns_worker:
                 if not self.manychat_api_key:
@@ -538,7 +556,10 @@ class V2Settings:
                     missing.append("Hermes model command/prompt/transcript key")
                 if self.knowledge_base_path is None:
                     missing.append("knowledge base")
-            if self.public_authority_manifest_path is None or len(self.public_authority_hmac_key) < 32:
+            if self.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
+                if len(self.public_authority_hmac_key) < 32:
+                    missing.append("general-availability public authority key")
+            elif self.public_authority_manifest_path is None or len(self.public_authority_hmac_key) < 32:
                 missing.append("authenticated public authority manifest")
             if missing:
                 raise ValueError("shadow runtime requires " + ", ".join(missing))

@@ -88,6 +88,7 @@ class PaymentService:
         initiation_id: str = "",
         journal_worker_id: str = "",
         journal_fencing_token: int = 0,
+        subscriber_id: str = "",
     ) -> PaymentMethodOffer:
         if type(obligation) is not PaymentObligation:
             raise TypeError("obligation must be exact PaymentObligation")
@@ -103,12 +104,14 @@ class PaymentService:
                     None,
                 )
                 if callable(journaled_create):
-                    return journaled_create(
-                        obligation,
-                        initiation_id=initiation_id,
-                        journal_worker_id=journal_worker_id,
-                        journal_fencing_token=journal_fencing_token,
-                    )
+                    journal_kwargs = {
+                        "initiation_id": initiation_id,
+                        "journal_worker_id": journal_worker_id,
+                        "journal_fencing_token": journal_fencing_token,
+                    }
+                    if subscriber_id:
+                        journal_kwargs["subscriber_id"] = subscriber_id
+                    return journaled_create(obligation, **journal_kwargs)
             return self._stripe.create_link(obligation)
         if method is PaymentMethod.WISE:
             return self._wise.instruction(obligation)
@@ -1216,6 +1219,7 @@ class PaymentInitiationWorker:
         lease_ttl: timedelta,
         effect_guard: object | None = None,
         stripe_reconciler: object | None = None,
+        lead_resolver: object | None = None,
     ) -> None:
         if type(store) is not SQLitePaymentInitiationStore:
             raise TypeError("store must be exact SQLitePaymentInitiationStore")
@@ -1235,6 +1239,11 @@ class PaymentInitiationWorker:
         ):
             raise TypeError("stripe_reconciler must expose reconcile")
         self._stripe_reconciler = stripe_reconciler
+        if lead_resolver is not None and not callable(
+            getattr(lead_resolver, "subscriber_id_for_payment", None)
+        ):
+            raise TypeError("lead_resolver must resolve payment owners")
+        self._lead_resolver = lead_resolver
 
     def run_once(self, *, now: datetime) -> PaymentInitiationResult:
         if self._stripe_reconciler is not None:
@@ -1245,10 +1254,22 @@ class PaymentInitiationWorker:
             )
             if reconciliation is not None:
                 try:
+                    subscriber_id = (
+                        self._lead_resolver.subscriber_id_for_payment(
+                            reconciliation.selection.obligation.payment_id
+                        )
+                        if self._lead_resolver is not None
+                        else ""
+                    )
+                    reconciliation_kwargs = {
+                        "initiation_id": reconciliation.initiation_id,
+                    }
+                    if subscriber_id:
+                        reconciliation_kwargs["subscriber_id"] = subscriber_id
                     reconciled = self._stripe_reconciler.reconcile(
                         reconciliation.selection,
                         reconciliation.receipts,
-                        initiation_id=reconciliation.initiation_id,
+                        **reconciliation_kwargs,
                     )
                     if type(reconciled) is not StripeReconciliationResult:
                         raise TypeError("Stripe reconciler returned the wrong contract")
@@ -1283,12 +1304,20 @@ class PaymentInitiationWorker:
             return PaymentInitiationResult(PaymentInitiationDisposition.IDLE)
         self._store.fence(claim, now=now)
         try:
+            subscriber_id = (
+                self._lead_resolver.subscriber_id_for_payment(
+                    claim.selection.obligation.payment_id
+                )
+                if self._lead_resolver is not None
+                else ""
+            )
             offer = self._payments.initiate(
                 claim.selection.obligation,
                 claim.selection.method,
                 initiation_id=claim.initiation_id,
                 journal_worker_id=claim.worker_id,
                 journal_fencing_token=claim.fencing_token,
+                subscriber_id=subscriber_id,
             )
         except Exception:
             self._store.mark_unknown(claim, now=now)

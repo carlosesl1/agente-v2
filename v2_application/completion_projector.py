@@ -51,8 +51,9 @@ class CompletionProjector:
         execution: SQLiteUnitOfWork,
         payment_store: SQLitePaymentInitiationStore | None,
         public_store: PublicOutboxStore,
-        subscriber_id: str,
         account_profiles: dict[BusinessUnit, str] | None,
+        subscriber_id: str = "",
+        lead_resolver: object | None = None,
         include_payment_offers: bool = True,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
@@ -61,8 +62,17 @@ class CompletionProjector:
             raise TypeError("payment_store must be exact SQLitePaymentInitiationStore or None")
         if type(public_store) is not PublicOutboxStore:
             raise TypeError("public_store must be exact PublicOutboxStore")
-        if type(subscriber_id) is not str or not subscriber_id.isdecimal():
-            raise ValueError("subscriber_id must be exact decimal text")
+        if type(subscriber_id) is not str or (
+            subscriber_id and not subscriber_id.isdecimal()
+        ):
+            raise ValueError("subscriber_id must be empty or exact decimal text")
+        if lead_resolver is not None and (
+            not callable(getattr(lead_resolver, "lead_id_for_command", None))
+            or not callable(getattr(lead_resolver, "lead_id_for_payment", None))
+        ):
+            raise TypeError("lead_resolver must resolve command and payment owners")
+        if bool(subscriber_id) == (lead_resolver is not None):
+            raise ValueError("completion requires exactly one fixed or durable lead source")
         if type(include_payment_offers) is not bool:
             raise TypeError("include_payment_offers must be an exact bool")
         profiles = {} if account_profiles is None else account_profiles
@@ -79,7 +89,8 @@ class CompletionProjector:
         self._execution = execution
         self._payment_store = payment_store
         self._public_store = public_store
-        self._lead_id = f"manychat:{subscriber_id}"
+        self._lead_id = f"manychat:{subscriber_id}" if subscriber_id else None
+        self._lead_resolver = lead_resolver
         self._include_payment_offers = include_payment_offers
         self._unit_by_profile = {
             profile: unit for unit, profile in profiles.items()
@@ -90,28 +101,43 @@ class CompletionProjector:
         inserted = 0
         attempted = 0
         grouped: dict[
-            tuple[str, int],
+            tuple[str, str, int],
             list[tuple[ReservationCommand, LedgerSnapshot]],
         ] = defaultdict(list)
         for command, ledger in self._execution.list_outcome_projection_inputs():
-            grouped[(command.draft_id, command.draft_version)].append(
+            grouped[(
+                command.payload.customer.customer_ref,
+                command.draft_id,
+                command.draft_version,
+            )].append(
                 (command, ledger)
             )
-        for (draft_id, draft_version), members in grouped.items():
+        for (customer_ref, draft_id, draft_version), members in grouped.items():
             if not _confirmed_group(members):
                 continue
             attempted += 1
             release_id = _opaque(
                 "release:00-reservation",
+                customer_ref,
                 draft_id,
                 str(draft_version),
             )
+            lead_ids = {
+                self._lead_resolver.lead_id_for_command(command.command_id)
+                if self._lead_resolver is not None
+                else self._lead_id
+                for command, _ in members
+            }
+            if len(lead_ids) != 1 or None in lead_ids:
+                raise RuntimeError("confirmed group does not have one durable lead owner")
+            lead_id = next(iter(lead_ids))
             inserted += self._public_store.enqueue(
                 PublicReply(
                     release_id=release_id,
-                    lead_id=self._lead_id,
+                    lead_id=lead_id,
                     message_id=_opaque(
                         "message:reservation-confirmed",
+                        customer_ref,
                         draft_id,
                         str(draft_version),
                     ),
@@ -148,11 +174,18 @@ class CompletionProjector:
                     offer.payment_id,
                 )
                 text = offer.public_text
+            lead_id = (
+                self._lead_resolver.lead_id_for_payment(offer.payment_id)
+                if self._lead_resolver is not None
+                else self._lead_id
+            )
+            if lead_id is None:
+                raise RuntimeError("payment offer does not have a durable lead owner")
             attempted += 1
             inserted += self._public_store.enqueue(
                 PublicReply(
                     release_id=_opaque("release:10-payment", offer.payment_id),
-                    lead_id=self._lead_id,
+                    lead_id=lead_id,
                     message_id=message_id,
                     channel="manychat",
                     chunks=(text,),

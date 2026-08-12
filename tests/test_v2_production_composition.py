@@ -544,6 +544,83 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         handoff_container.close()
 
 
+def test_general_availability_builds_full_multi_lead_worker_graph(
+    tmp_path: Path,
+) -> None:
+    knowledge = tmp_path / "cerebro-ga.yaml"
+    knowledge.write_text(
+        "entries:\n  - id: faq-1\n    topic: geral\n    question: Oi?\n    answer: Olá.\n",
+        encoding="utf-8",
+    )
+    settings = _settings(
+        tmp_path,
+        runtime_mode=RuntimeMode.GENERAL_AVAILABILITY,
+        allowed_subscriber_ids=(),
+        hermes_model="openai-codex/gpt-5.6-luna",
+        candidate_git_sha="a" * 40,
+        candidate_image_digest="sha256:" + "b" * 64,
+        manychat_api_key="manychat-secret",
+        hermes_command=("python", "-m", "v2_host.hermes_child", "hermes"),
+        hermes_system_prompt="Return the exact V2 proposal contract.",
+        hermes_transcript_key=b"transcript-key-for-ga-test-00000001",
+        public_authority_hmac_key=b"general-authority-key-for-test-000001",
+        knowledge_base_path=knowledge,
+        cloudbeds_writes_enabled=True,
+        bokun_writes_enabled=True,
+        stripe_links_enabled=True,
+        wise_instructions_enabled=True,
+        pix_instructions_enabled=True,
+        manychat_delivery_enabled=True,
+        manychat_handoff_enabled=True,
+        real_effects_ack=REAL_EFFECTS_ACK,
+        global_kill_switch_engaged=False,
+        write_window_end=None,
+        stripe_hostel_account_profile_id="stripe-account:hostel:test",
+        stripe_agency_account_profile_id="stripe-account:agency:test",
+        stripe_hostel_secret_key="rk_test_hostel",
+        stripe_agency_secret_key="rk_test_agency",
+        payment_result_store_key=b"p" * 32,
+        payment_instruction_path=(
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / "v2_payment_instructions.json"
+        ),
+        manychat_reply_field_id=101,
+        manychat_reply_flow_ns="flow:reply:v2",
+        manychat_payment_link_field_id=201,
+        manychat_payment_description_field_id=202,
+        manychat_payment_flow_ns="flow:payment:v2",
+        manychat_handoff_tag_id=301,
+        manychat_handoff_flow_ns="flow:handoff:v2",
+    )
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        workers = build_worker_set(container=container, settings=settings)
+        assert type(workers[WorkerQueue.INBOX]).__name__ == "InboxTurnWorker"
+        assert type(workers[WorkerQueue.RESERVATION]) is V2ReservationWorker
+        assert type(workers[WorkerQueue.PAYMENT_INITIATION]) is PaymentInitiationWorker
+        assert type(workers[WorkerQueue.OUTCOME_PROJECTOR]) is ReservationOutcomeProjector
+        assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert type(workers[WorkerQueue.PUBLIC_DELIVERY]) is CombinedPublicDeliveryWorker
+        assert type(workers[WorkerQueue.HANDOFF]) is HandoffOutboxWorker
+        assert workers[WorkerQueue.POST_PAYMENT]._lead_id is None
+        assert workers[WorkerQueue.POST_PAYMENT]._lead_resolver is not None
+        delivery = workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
+        assert delivery._allowed_subscriber_id is None
+        handoff = workers[WorkerQueue.HANDOFF]._delivery
+        assert handoff._subscriber_id == ""
+        assert handoff._lead_resolver is not None
+        readiness = container.readiness()
+        assert readiness.status == "ready"
+        assert readiness.capabilities["controlled_public_ingress"] == "ready"
+        assert readiness.capabilities["manychat_delivery"] == "ready"
+        assert readiness.capabilities["manychat_handoff"] == "ready"
+        assert readiness.capabilities["payment_initiation"] == "ready"
+        assert readiness.capabilities["reservation_writes"] == "ready"
+    finally:
+        container.close()
+
+
 def test_shadow_mode_fails_closed_without_model_profile_and_authority(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="shadow runtime requires"):
         _settings(tmp_path, runtime_mode=RuntimeMode.SHADOW)

@@ -20,16 +20,25 @@ class ManyChatHandoffDeliveryAdapter:
         self,
         *,
         transport: object,
-        subscriber_id: str,
         tag_id: int,
         flow_ns: str,
         clock: object,
+        subscriber_id: str = "",
+        lead_resolver: object | None = None,
     ) -> None:
         for method in ("add_tag", "trigger_flow"):
             if not callable(getattr(transport, method, None)):
                 raise TypeError(f"transport must expose {method}")
-        if type(subscriber_id) is not str or not subscriber_id.isdecimal():
-            raise ValueError("subscriber_id must be exact decimal text")
+        if type(subscriber_id) is not str or (
+            subscriber_id and not subscriber_id.isdecimal()
+        ):
+            raise ValueError("subscriber_id must be empty or exact decimal text")
+        if lead_resolver is not None and not callable(
+            getattr(lead_resolver, "subscriber_id_for_handoff", None)
+        ):
+            raise TypeError("lead_resolver must resolve handoff owners")
+        if bool(subscriber_id) == (lead_resolver is not None):
+            raise ValueError("handoff delivery requires one fixed or durable lead source")
         if type(tag_id) is not int or tag_id < 1:
             raise ValueError("tag_id must be a positive exact integer")
         if type(flow_ns) is not str or not flow_ns or "\x00" in flow_ns:
@@ -38,6 +47,7 @@ class ManyChatHandoffDeliveryAdapter:
             raise TypeError("clock must expose now")
         self._transport = transport
         self._subscriber_id = subscriber_id
+        self._lead_resolver = lead_resolver
         self._tag_id = tag_id
         self._flow_ns = flow_ns
         self._clock = clock
@@ -47,10 +57,20 @@ class ManyChatHandoffDeliveryAdapter:
             raise TypeError("message must be exact HandoffEffectJob")
         if message.kind is not HandoffEffectKind.CUSTOMER_ACKNOWLEDGEMENT:
             raise RuntimeError("ManyChat handoff adapter forbids internal e-mail")
+        try:
+            subscriber_id = (
+                self._lead_resolver.subscriber_id_for_handoff(message.handoff_id)
+                if self._lead_resolver is not None
+                else self._subscriber_id
+            )
+        except Exception as exc:
+            raise HandoffDeliveryUnknown(
+                "ManyChat handoff lacks one durable subscriber owner"
+            ) from exc
         tagged = False
         try:
             tag = self._transport.add_tag(
-                subscriber_id=self._subscriber_id,
+                subscriber_id=subscriber_id,
                 tag_id=self._tag_id,
                 idempotency_key=message.effect_id + ":tag",
             )
@@ -58,7 +78,7 @@ class ManyChatHandoffDeliveryAdapter:
                 raise RuntimeError("ManyChat tag receipt is invalid")
             tagged = True
             flow = self._transport.trigger_flow(
-                subscriber_id=self._subscriber_id,
+                subscriber_id=subscriber_id,
                 flow_ns=self._flow_ns,
                 idempotency_key=message.effect_id + ":flow",
             )

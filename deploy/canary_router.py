@@ -218,7 +218,7 @@ async def _http_ready(target: str) -> bool:
 def build_app(
     *,
     shared_secret: str,
-    allowed_subscriber_id: str,
+    allowed_subscriber_id: str | None,
     v2_url: str,
     v2_ready_url: str,
     legacy_url: str,
@@ -231,8 +231,11 @@ def build_app(
 ) -> FastAPI:
     if not shared_secret or "\x00" in shared_secret:
         raise ValueError("shared webhook secret is required")
-    if not allowed_subscriber_id.isdecimal():
-        raise ValueError("allowed subscriber must be decimal")
+    if allowed_subscriber_id is not None and (
+        type(allowed_subscriber_id) is not str
+        or not allowed_subscriber_id.isdecimal()
+    ):
+        raise ValueError("allowed subscriber must be decimal or None")
     if (
         not v2_url.startswith("http://")
         or not v2_ready_url.startswith("http://")
@@ -306,7 +309,10 @@ def build_app(
                 content={"status": "runtime_identity_rejected"},
             )
 
-        is_canary_target = subscriber_id == allowed_subscriber_id
+        is_canary_target = (
+            allowed_subscriber_id is None
+            or subscriber_id == allowed_subscriber_id
+        )
         select_v2 = is_canary_target
         if (
             is_canary_target
@@ -394,7 +400,9 @@ def create_app_from_env() -> FastAPI:
 
     return build_app(
         shared_secret=os.environ["CANARY_WEBHOOK_SECRET"],
-        allowed_subscriber_id=os.environ["CANARY_SUBSCRIBER_ID"],
+        allowed_subscriber_id=(
+            os.environ.get("CANARY_SUBSCRIBER_ID", "").strip() or None
+        ),
         v2_url=os.environ["CANARY_V2_URL"],
         v2_ready_url=os.environ["CANARY_V2_READY_URL"],
         legacy_url=os.environ["CANARY_LEGACY_URL"],

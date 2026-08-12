@@ -23,6 +23,7 @@ from reservation_followup.types import (
     BusinessUnit as FollowupBusinessUnit,
     ConfirmedReservationAnchor,
 )
+from v2_application.lead_identity import payment_id_for_command
 from v2_application.payments import SQLitePaymentInitiationStore
 from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.payments import (
@@ -30,8 +31,8 @@ from v2_contracts.payments import (
     CheckoutService,
     DueKind,
     PaymentDisplayDetails,
-    PaymentObligation,
     PaymentMethod,
+    PaymentObligation,
     PaymentSelection,
     ReservationPaymentContext,
 )
@@ -95,11 +96,15 @@ class ReservationOutcomeProjector:
     def run_once(self, *, now: datetime) -> OutcomeProjectionResult:
         instant = _utc(now)
         grouped: dict[
-            tuple[str, int],
+            tuple[str, str, int],
             list[tuple[ReservationCommand, LedgerSnapshot]],
         ] = defaultdict(list)
         for command, ledger in self._execution.list_outcome_projection_inputs():
-            grouped[(command.draft_id, command.draft_version)].append(
+            grouped[(
+                command.payload.customer.customer_ref,
+                command.draft_id,
+                command.draft_version,
+            )].append(
                 (command, ledger)
             )
 
@@ -202,7 +207,7 @@ class ReservationOutcomeProjector:
             ),
         )
         anchor_id = _opaque("reservation-anchor", command.command_id)
-        payment_id = _opaque("payment", command.command_id, unit.value)
+        payment_id = payment_id_for_command(command)
         payment_target_id = _opaque("payment-target", command.command_id)
         if ledger.outcome_hash != hashlib.sha256(
             dumps_outcome(outcome).encode("utf-8")

@@ -339,7 +339,10 @@ class V2Container:
                 )
                 if heartbeat_reason is not None:
                     reasons.append(heartbeat_reason)
-            if self.settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+            if self.settings.runtime_mode in {
+                RuntimeMode.CONTROLLED_WRITE,
+                RuntimeMode.GENERAL_AVAILABILITY,
+            }:
                 ingress_reason = self.controlled_public_ingress_reason(
                     now=datetime.now(timezone.utc),
                 )
@@ -410,7 +413,14 @@ class V2Container:
     def controlled_public_ingress_reason(self, *, now: datetime) -> str | None:
         if type(now) is not datetime or now.tzinfo is None or now.utcoffset() != timedelta(0):
             raise ValueError("controlled ingress now must be exact UTC")
-        if self.settings.runtime_mode is not RuntimeMode.CONTROLLED_WRITE:
+        if self.settings.runtime_mode not in {
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        }:
+            return None
+        if self.settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
+            if len(self.settings.public_authority_hmac_key) < 32:
+                return "public_authority_invalid"
             return None
         if self.settings.public_authority_manifest_path is None:
             return "public_authority_missing"
@@ -447,7 +457,10 @@ class V2Container:
             return "worker_heartbeat_stale"
         if status != "healthy":
             return "worker_heartbeat_degraded"
-        if self.settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+        if self.settings.runtime_mode in {
+            RuntimeMode.CONTROLLED_WRITE,
+            RuntimeMode.GENERAL_AVAILABILITY,
+        }:
             if value.get("public_ingress_ready") is not True:
                 reason = value.get("public_ingress_reason")
                 return (
@@ -455,9 +468,10 @@ class V2Container:
                     if type(reason) is str and reason
                     else "worker_public_ingress_not_ready"
                 )
-            capacity = value.get("public_turn_capacity")
-            if type(capacity) is not int or capacity < 1:
-                return "public_authority_allocations_exhausted"
+            if self.settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE:
+                capacity = value.get("public_turn_capacity")
+                if type(capacity) is not int or capacity < 1:
+                    return "public_authority_allocations_exhausted"
         return None
 
     def close(self) -> None:

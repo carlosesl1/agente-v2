@@ -64,6 +64,59 @@ def test_idle_controlled_canary_loads_with_all_effects_closed(tmp_path: Path) ->
     assert settings.critical_approval_ttl_seconds == 1800
 
 
+def test_general_availability_requires_empty_allowlist_and_accepts_open_gates(
+    tmp_path: Path,
+) -> None:
+    env = _controlled_env(tmp_path)
+    env.update(
+        {
+            "V2_RUNTIME_MODE": "general_availability",
+            "V2_ALLOWED_SUBSCRIBER_IDS": "",
+            "V2_PUBLIC_AUTHORITY_MANIFEST_PATH": "",
+            "V2_ENABLE_CLOUDBEDS_WRITES": "true",
+            "V2_ENABLE_BOKUN_WRITES": "true",
+            "V2_ENABLE_STRIPE_LINKS": "true",
+            "V2_ENABLE_MANYCHAT_DELIVERY": "true",
+            "V2_ENABLE_MANYCHAT_HANDOFF": "true",
+            "V2_REAL_EFFECTS_ACK": "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST",
+            "V2_GLOBAL_KILL_SWITCH": "false",
+            "V2_WRITE_WINDOW_END": "",
+            "V2_CLOUDBEDS_SOURCE_ID": "source-live",
+            "V2_STRIPE_HOSTEL_ACCOUNT_PROFILE_ID": "stripe-account:hostel:test",
+            "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
+            "V2_STRIPE_HOSTEL_SECRET_KEY": "rk_test_hostel",
+            "V2_STRIPE_AGENCY_SECRET_KEY": "rk_test_agency",
+            "V2_PAYMENT_RESULT_STORE_KEY_HEX": "cd" * 32,
+            "V2_MANYCHAT_REPLY_FIELD_ID": "101",
+            "V2_MANYCHAT_REPLY_FLOW_NS": "reply-flow",
+            "V2_MANYCHAT_PAYMENT_LINK_FIELD_ID": "102",
+            "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID": "103",
+            "V2_MANYCHAT_PAYMENT_FLOW_NS": "payment-flow",
+            "V2_MANYCHAT_HANDOFF_TAG_ID": "301",
+            "V2_MANYCHAT_HANDOFF_FLOW_NS": "handoff-flow",
+        }
+    )
+
+    settings = V2Settings.from_env(env)
+
+    assert settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+    assert settings.allowed_subscriber_ids == ()
+    assert settings.write_window_end is None
+    assert settings.write_window_is_open(datetime.now(timezone.utc)) is True
+    assert settings.real_effect_gates == {
+        "cloudbeds_writes": True,
+        "bokun_writes": True,
+        "stripe_links": True,
+        "wise_instructions": False,
+        "pix_instructions": False,
+        "manychat_delivery": True,
+        "manychat_handoff": True,
+    }
+
+    with pytest.raises(ValueError, match="empty subscriber allowlist"):
+        replace(settings, allowed_subscriber_ids=("1873018537",))
+
+
 def test_critical_approval_ttl_is_configurable_and_strict(tmp_path: Path) -> None:
     env = _controlled_env(tmp_path)
     env["V2_CRITICAL_APPROVAL_TTL_SECONDS"] = "900"
