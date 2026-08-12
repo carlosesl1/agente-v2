@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from v2_contracts.channel import InboundBatch, InboundEvent
 from v2_host.public_authority import GeneralAvailabilityPublicAuthorityResolver
+from v2_host.composition import V2Container, V2Role
+from v2_host.settings import RuntimeMode, V2ProcessRole, V2Settings
 
 
 NOW = datetime(2026, 8, 12, 20, 0, tzinfo=timezone.utc)
@@ -69,3 +72,44 @@ def test_general_availability_installs_finite_isolated_turn_authority() -> None:
         )
     finally:
         store.close()
+
+
+def test_general_availability_reports_on_demand_turn_capacity(tmp_path: Path) -> None:
+    knowledge = (tmp_path / "knowledge.sqlite3").resolve()
+    knowledge.touch()
+    settings = V2Settings(
+        webhook_secret="",
+        sqlite_path=(tmp_path / "inbox.sqlite3").resolve(),
+        process_role=V2ProcessRole.WORKER,
+        runtime_mode=RuntimeMode.GENERAL_AVAILABILITY,
+        hermes_model="openai-codex/gpt-5.6-luna",
+        candidate_git_sha="a" * 40,
+        candidate_image_digest="sha256:" + "b" * 64,
+        cloudbeds_api_key="cloudbeds-secret",
+        cloudbeds_property_id="property-1",
+        bokun_access_key="bokun-access",
+        bokun_secret_key="bokun-secret",
+        bokun_product_map={"product:buracao": "913372"},
+        manychat_api_key="manychat-secret",
+        hermes_command=("python", "hermes_child.py", "hermes"),
+        hermes_system_prompt="closed prompt",
+        hermes_transcript_key=b"general-availability-transcript-key",
+        knowledge_base_path=knowledge,
+        read_probe_check_in="2026-08-05",
+        read_probe_check_out="2026-08-06",
+        read_probe_activity_date="2026-08-05",
+        read_probe_product_id="product:buracao",
+        public_authority_hmac_key=KEY,
+    )
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        resolver = GeneralAvailabilityPublicAuthorityResolver(
+            store=container.boundary,
+            hmac_key=KEY,
+        )
+        container.register_public_authority_resolver(resolver)
+
+        assert container.public_turn_capacity(now=NOW) == 1
+        assert container.controlled_public_ingress_reason(now=NOW) is None
+    finally:
+        container.close()

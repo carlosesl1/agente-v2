@@ -401,6 +401,13 @@ class V2Container:
             raise ValueError("public capacity now must be exact UTC")
         if self._public_authority_resolver is None:
             return 0
+        if self.settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
+            # GA provisions one finite authority generation per authenticated turn.
+            # Capacity is therefore on demand, not a pre-installed allowlist total.
+            return self._public_authority_resolver.available_turn_capacity(
+                "0",
+                now=now,
+            )
         capacities = tuple(
             self._public_authority_resolver.available_turn_capacity(
                 subscriber,
