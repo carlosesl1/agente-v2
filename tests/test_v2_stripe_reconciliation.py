@@ -700,6 +700,102 @@ def test_unknown_payment_link_requires_exactly_one_test_mode_match(
     assert [request.method for request in seen].count("GET") == 3
 
 
+def test_accepted_final_link_reconciliation_expands_line_items_without_post_replay(
+    tmp_path: Path,
+) -> None:
+    link_form: dict[str, str] = {}
+
+    def write_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/products":
+            return httpx.Response(200, request=request, json=_product_payload())
+        if request.url.path == "/v1/prices":
+            return httpx.Response(
+                200,
+                request=request,
+                json={"id": "price_test_reconcile", "livemode": False},
+            )
+        assert request.url.path == "/v1/payment_links"
+        link_form.update(
+            {
+                key: values[0]
+                for key, values in parse_qs(request.content.decode()).items()
+            }
+        )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "plink_test_expand",
+                "livemode": False,
+                "active": True,
+                "url": "https://buy.stripe.com/test_expand",
+            },
+        )
+
+    def read_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/products/prod_test_reconcile":
+            return httpx.Response(200, request=request, json=_product_payload())
+        if request.url.path == "/v1/prices/price_test_reconcile":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "price_test_reconcile",
+                    "livemode": False,
+                    "active": True,
+                    "product": "prod_test_reconcile",
+                    "currency": "brl",
+                    "unit_amount": 15300,
+                },
+            )
+        assert request.url.path == "/v1/payment_links/plink_test_expand"
+        metadata = {
+            key.removeprefix("metadata[").removesuffix("]"): value
+            for key, value in link_form.items()
+            if key.startswith("metadata[")
+        }
+        payload: dict[str, object] = {
+            "id": "plink_test_expand",
+            "livemode": False,
+            "active": True,
+            "url": "https://buy.stripe.com/test_expand",
+            "metadata": metadata,
+        }
+        if request.url.params.get("expand[]") == "line_items":
+            payload["line_items"] = {
+                "data": [{"price": "price_test_reconcile"}]
+            }
+        return httpx.Response(200, request=request, json=payload)
+
+    worker, store, seen = _build_worker(
+        tmp_path,
+        write_handler=write_handler,
+        read_handler=read_handler,
+    )
+
+    accepted = worker.run_once(now=NOW + timedelta(seconds=1))
+    audit = worker.run_once(now=NOW + timedelta(seconds=2))
+
+    assert accepted.disposition is PaymentInitiationDisposition.COMPLETED
+    assert audit.disposition is PaymentInitiationDisposition.COMPLETED
+    assert audit.offer == accepted.offer
+    assert worker.run_once(now=NOW + timedelta(seconds=3)).disposition is (
+        PaymentInitiationDisposition.IDLE
+    )
+    assert [request.method for request in seen].count("POST") == 3
+    link_reads = [
+        request
+        for request in seen
+        if request.method == "GET"
+        and request.url.path == "/v1/payment_links/plink_test_expand"
+    ]
+    assert len(link_reads) == 1
+    assert link_reads[0].url.params.get("expand[]") == "line_items"
+    assert store._connection.execute(
+        "SELECT status FROM stripe_reconciliations"
+    ).fetchone() == ("matched",)
+
+
 def test_accepted_final_link_is_immediate_and_later_get_mismatch_never_downgrades(
     tmp_path: Path,
 ) -> None:

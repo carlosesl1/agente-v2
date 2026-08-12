@@ -790,6 +790,7 @@ class StripeLinkReconciliationAdapter:
                         "/v1/payment_links/"
                         + quote(link_receipt.provider_object_id, safe="")
                     ),
+                    params={"expand[]": "line_items"},
                 )
                 link_values = self._link_values(
                     link_payload,
@@ -919,6 +920,7 @@ class StripeLinkReconciliationAdapter:
                     "/v1/payment_links/"
                     + quote(link_receipt.provider_object_id, safe="")
                 ),
+                params={"expand[]": "line_items"},
             )
             values = self._link_values(
                 payload,
