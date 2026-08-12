@@ -112,6 +112,160 @@ def test_query_hash_is_stable_across_new_request_id_but_request_hash_is_not() ->
     assert reread.query_hash() == LODGING_REQUEST.query_hash()
 
 
+def test_activity_commercial_query_hash_excludes_presentation_locale() -> None:
+    portuguese = replace(
+        ACTIVITY_REQUEST,
+        request_id="read-activity-pt",
+        locale="pt-BR",
+        adults=2,
+        children=0,
+        participants=None,
+    )
+    english = replace(
+        portuguese,
+        request_id="read-activity-en",
+        locale="en",
+    )
+    unlocalized = replace(
+        portuguese,
+        request_id="read-activity-worker",
+        locale=None,
+    )
+    portuguese_knowledge = replace(
+        KNOWLEDGE_REQUEST,
+        request_id="read-knowledge-pt",
+    )
+    english_knowledge = replace(
+        portuguese_knowledge,
+        request_id="read-knowledge-en",
+        locale="en",
+    )
+
+    assert len(
+        {
+            portuguese.canonical_hash(),
+            english.canonical_hash(),
+            unlocalized.canonical_hash(),
+        }
+    ) == 3
+    assert portuguese.query_hash() == english.query_hash() == unlocalized.query_hash()
+    assert portuguese_knowledge.query_hash() != english_knowledge.query_hash()
+
+
+def test_localized_bokun_offer_survives_fresh_worker_composition() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    provider_state = {"rate_id": "rate-private-001"}
+
+    def transport(operation: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((operation, payload))
+        return {
+            "product_id": payload["product_id"],
+            "bokun_product_id": "bokun-private-001",
+            "start_time_id": "start-private-001",
+            "start_time": "08:30",
+            "rate_id": provider_state["rate_id"],
+            "adult_pricing_category_id": "category-private-001",
+            "product_public_name": "Buracão",
+            "base_amount": "400.00",
+            "booking_fee_amount": "0.00",
+            "total_amount": "400.00",
+            "price_includes_booking_fee": True,
+            "currency": "BRL",
+            "available": True,
+        }
+
+    conversation_request = replace(
+        ACTIVITY_REQUEST,
+        request_id="read-activity-conversation",
+        locale="pt-BR",
+        adults=2,
+        children=0,
+        participants=None,
+    )
+    conversation_adapter = BokunReadAdapter(
+        transport=transport,
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+    observation = conversation_adapter.read(conversation_request)
+    worker_query = replace(
+        conversation_request,
+        request_id="read-activity-worker",
+        locale=None,
+    )
+    component = OfferSnapshot(
+        offer_id=observation.public_payload["offer_id"],
+        lookup_id=(
+            f"lookup:{conversation_request.product_id}:{worker_query.query_hash()}"
+        ),
+        service=ServiceKind.ACTIVITY,
+        provider_ref=observation.private_binding_hash,
+        public_label=observation.public_payload["product_public_name"],
+        start_date=conversation_request.activity_date,
+        end_date=None,
+        start_time=observation.public_payload["start_time"],
+        party=Party(*conversation_request.activity_party()),
+        total=Money(amount=Decimal("400.00"), currency="BRL"),
+        available=True,
+    )
+    worker_adapter = BokunReadAdapter(
+        transport=transport,
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+
+    binding = PrivateOfferBindingResolver(
+        {ServiceKind.ACTIVITY: worker_adapter}
+    ).resolve(component, now=NOW)
+
+    assert binding.query.binding_hash == observation.private_binding_hash
+    assert binding.query.offer_id == observation.public_payload["offer_id"]
+    assert binding.private_payload() == {
+        "adult_pricing_category_id": "category-private-001",
+        "bokun_product_id": "bokun-private-001",
+        "rate_id": "rate-private-001",
+        "start_time_id": "start-private-001",
+    }
+    assert len(calls) == 2
+    assert calls[0][1]["locale"] == "pt-BR"
+    assert "locale" not in calls[1][1]
+    assert calls[0][1]["quote_scope"] == calls[1][1]["quote_scope"]
+
+    provider_state["rate_id"] = "rate-private-002"
+    with pytest.raises(PrivateBindingMismatch, match="commercial binding"):
+        PrivateOfferBindingResolver(
+            {ServiceKind.ACTIVITY: worker_adapter}
+        ).resolve(component, now=NOW)
+
+    provider_state["rate_id"] = "rate-private-001"
+    calls_before_tamper = len(calls)
+    for changed in (
+        replace(
+            component,
+            lookup_id=component.lookup_id.replace(
+                conversation_request.product_id,
+                "not-a-canonical-product",
+                1,
+            ),
+        ),
+        replace(
+            component,
+            lookup_id=component.lookup_id.replace(
+                conversation_request.product_id,
+                "product:other-activity",
+                1,
+            ),
+        ),
+        replace(component, start_date=date(2026, 8, 12)),
+        replace(component, party=Party(adults=3, children=0)),
+    ):
+        with pytest.raises(PrivateBindingMismatch, match="lookup identity"):
+            PrivateOfferBindingResolver(
+                {ServiceKind.ACTIVITY: worker_adapter}
+            ).resolve(changed, now=NOW)
+    assert len(calls) == calls_before_tamper
+
+
 def test_private_reread_accepts_observation_created_after_read_started() -> None:
     def transport(operation, payload):
         assert operation == "lodging"

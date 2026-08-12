@@ -11,7 +11,12 @@ from v2_contracts.private_offers import (
     PrivateOfferQuery,
     PrivateOfferReadPort,
 )
-from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
+from v2_contracts.providers import (
+    InvalidReadRequest,
+    ReadKind,
+    ReadObservation,
+    ReadRequest,
+)
 
 
 class ReadPortUnavailable(RuntimeError):
@@ -50,6 +55,33 @@ def _utc(value: object, name: str) -> datetime:
     return value
 
 
+def _activity_query_hashes(
+    component: OfferSnapshot, canonical_product_id: str
+) -> frozenset[str]:
+    shared = {
+        "kind": ReadKind.ACTIVITY,
+        "product_id": canonical_product_id,
+        "activity_date": component.start_date,
+    }
+    hashes = {
+        ReadRequest(
+            request_id="private-reread",
+            adults=component.party.adults,
+            children=component.party.children,
+            **shared,
+        ).query_hash()
+    }
+    if component.party.children == 0:
+        hashes.add(
+            ReadRequest(
+                request_id="private-reread-legacy",
+                participants=component.party.adults,
+                **shared,
+            ).query_hash()
+        )
+    return frozenset(hashes)
+
+
 def _query_from_component(component: OfferSnapshot) -> PrivateOfferQuery:
     lookup = component.lookup_id
     canonical_product_id = None
@@ -63,6 +95,18 @@ def _query_from_component(component: OfferSnapshot) -> PrivateOfferQuery:
         if not lookup.startswith(prefix) or ":" not in lookup.removeprefix(prefix):
             raise PrivateBindingMismatch("activity lookup identity is invalid")
         canonical_product_id, request_hash = lookup.removeprefix(prefix).rsplit(":", 1)
+        try:
+            expected_hashes = _activity_query_hashes(
+                component, canonical_product_id
+            )
+        except InvalidReadRequest as exc:
+            raise PrivateBindingMismatch(
+                "activity lookup identity is invalid"
+            ) from exc
+        if request_hash not in expected_hashes:
+            raise PrivateBindingMismatch(
+                "activity lookup identity disagrees with the commercial component"
+            )
     try:
         return PrivateOfferQuery(
             service=component.service.value,

@@ -16,7 +16,30 @@
 - No new OCI has been built for this phase.
 - The base candidate remains immutable. All changes belong to the successor branch below.
 
-## Active successor
+## Active successor — Bókun commercial query binding
+
+- Authorized by Carlos Eduardo on 2026-08-12: investigate and permanently correct `private_binding_mismatch`, simplifying the conversation-to-worker path without relaxing confirmation or effect safety.
+- Branch: `maya-v2-bokun-commercial-binding`
+- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-bokun-commercial-binding`
+- Immutable base: `89f50d3b038f1f2f9c61704c43f4a118665e870a`; tree `7c96c2192424258d3396afd54fb5229433cd5446`.
+- Design: `docs/superpowers/specs/2026-08-12-bokun-commercial-query-binding-design.md`.
+- Plan: `docs/superpowers/plans/2026-08-12-bokun-commercial-query-binding.md`.
+- Root cause: localized conversation reads include `locale` in `ReadRequest.query_hash()`, while `_offer_and_query()` persists a reconstructed no-locale hash in `lookup_id`; a fresh worker therefore hashes identical Bókun private fields under different query identities.
+- Owner: `v2_contracts.providers.ReadRequest.query_hash()`; exact request identity remains `canonical_hash()`.
+- Baseline focused gate: `75 passed` across reads, Bókun party/provider transports, and reservation preparation.
+- RED evidence: both causal tests failed on the immutable base — localized/non-localized activity `query_hash()` values differed and a fresh resolver raised `PrivateBindingMismatch`.
+- Minimum implementation: `ReadRequest.query_hash()` excludes `locale` only for `ReadKind.ACTIVITY`; exact request hashes and knowledge query hashes remain locale-sensitive. `_query_from_component()` reconstructs the Bókun activity query identity from the component and rejects product/date/party disagreement with `lookup_id` before provider I/O, while preserving both current `adults`/`children` and no-children legacy `participants` shapes.
+- Focused GREEN evidence: `4 passed` on locale identity, fresh-composition survival, executable-rate mutation rejection, and knowledge locale behavior; final affected gate `119 passed`. Product/date/party mutation regression confirms zero provider calls on incoherence. `compileall`, `git diff --check`, boundary-import guard, and secret guard passed.
+- Retrospective compatibility audit: applying the new activity identity to the seven persisted Bókun commands in the blocked refreshed corpus produced `7/7` exact localized-vs-lookup query-hash matches. Historical commands and blocked roots were not modified, promoted, reauthorized, or executed.
+- Superseded evidence: one broadened pytest invocation used nonexistent `tests/test_v2_knowledge_contract.py`, exited 4, and ran zero tests; it was replaced by the valid 119-test gate. A repository-wide run without the canonical deselections produced `1769 passed` plus the same 7 historical closeout/package failures reproduced on the immutable base; a later canonical run was intentionally killed at 17% after a test-only mutation made that collection stale.
+- Real-provider read-only proof: `/home/ubuntu/maya-v2-bokun-binding-fix-proof-20260812/REAL_READ_ONLY_PROOF.json`; schema v2; `pt-BR` and `en` each survived a fresh transport/adapter composition; 8 signed GETs, 0 non-GET calls, 0 reservation/payment workers, 0 bookings, and 0 payment links. Report SHA-256 `1c580feca0b637645d48ee55d810ce84259ff07eac9f0b17ff4a7954e030c845`; harness SHA-256 `ca1f145fdaa8c18d85867129b0037e29e2e80af6047322fe98fdc224611d65e9`.
+- Canonical gate before bounded review: frozen full diff SHA-256 `ee4d9a3c8bc7756cde037e0549a9ba49390eef7a35775c3ea66c7fc4254b703c` / functional diff SHA-256 `a408e04a681a773795d313b847e63b935ce977bb72fc8dce077d10ca68bcad0f`; clean-environment pytest passed with `1769 passed, 7 deselected, 1 warning, 2953 subtests passed` in 201.96s.
+- Bounded-review finding and resolution: a malformed canonical product embedded in `lookup_id` failed before provider I/O but escaped as `InvalidReadRequest`, outside the reservation adapter's normal `PrivateBindingMismatch` classification. A causal RED reproduced it; `_query_from_component()` now catches only `InvalidReadRequest` from activity-query reconstruction and raises `PrivateBindingMismatch("activity lookup identity is invalid")`. The four causal tests, final affected gate (`119 passed`), and GET-only proof all passed afterward.
+- Canonical post-review gate on staged tree `025cb9a591c76fd72309d26494f400f4b910d697`, full staged diff SHA-256 `9e647a29b1ad5769c96360574a39b81105e022bb480fabfcdcc6182abf8318ee`, and functional staged diff SHA-256 `21285a9d253fbc66f827a1fff030bf084d6ebc3e0d4da43be88b20a9f1ba8b7c`: clean-environment pytest passed with `1769 passed, 7 deselected, 1 warning, 2953 subtests passed` in 200.61s.
+- Local completion decision: **GO for a local commit and preserving this branch/worktree; NO-GO for merge, push, deploy, restart, canary, provider write, booking, payment link, ManyChat, or handoff without a new explicit authorization**.
+- Exact NEXT after the local commit: keep `maya-v2-bokun-commercial-binding` and its worktree intact for review/integration. Any real control booking still requires separate authorization and must use one claim, one durable fence, one POST, provider GET reconciliation, and no Stripe link before the reconciled Bókun reference exists.
+
+## Historical successor — Maya V2 agent process and read enrichment
 
 - Branch: `maya-v2-agent-process-refinement`
 - Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-agent-process-refinement`

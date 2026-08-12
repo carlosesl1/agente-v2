@@ -256,9 +256,11 @@ class ReadRequest:
         ).hexdigest()
 
     def query_hash(self) -> str:
-        """Stable commercial query identity that deliberately excludes request_id."""
+        """Stable commercial query identity excluding activity presentation locale."""
         values = json.loads(self.to_canonical_bytes())
         del values["request_id"]
+        if self.kind is ReadKind.ACTIVITY:
+            values.pop("locale", None)
         payload = json.dumps(
             values,
             ensure_ascii=False,
