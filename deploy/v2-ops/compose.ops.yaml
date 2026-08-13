@@ -1,0 +1,56 @@
+name: agente-v2-ops
+
+services:
+  v2-ops:
+    image: ${V2_OPS_IMAGE:-agente-v2-ops:local}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ${V2_OPS_DATA_DIR:-./data}:/data/ops:ro
+    environment:
+      V2_OPS_USERNAME: ${V2_OPS_USERNAME:?required}
+      V2_OPS_PASSWORD_HASH: ${V2_OPS_PASSWORD_HASH:?required}
+      V2_OPS_SESSION_KEY_HEX: ${V2_OPS_SESSION_KEY_HEX:?required}
+      V2_OPS_TRACE_KEY_HEX: ${V2_OPS_TRACE_KEY_HEX:?required}
+      V2_OPS_TRACE_PATH: /data/ops/v2-ops-trace.sqlite3
+      V2_OPS_SECURE_COOKIE: "true"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/ops/healthz', timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 384M
+        reservations:
+          memory: 96M
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.v2-ops.rule=Host(`hermes.chapadabackpackers.com`) && (Path(`/ops`) || PathPrefix(`/ops/`))
+      - traefik.http.routers.v2-ops.entrypoints=https
+      - traefik.http.routers.v2-ops.tls=true
+      - traefik.http.routers.v2-ops.priority=200
+      - traefik.http.services.v2-ops.loadbalancer.server.port=8080
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true

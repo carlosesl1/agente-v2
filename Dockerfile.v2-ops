@@ -1,0 +1,34 @@
+FROM python:3.12-slim AS runtime
+
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG VERSION=0.8.0
+
+LABEL org.opencontainers.image.title="Chapada Agente V2 Ops" \
+      org.opencontainers.image.description="Authenticated read-only execution dashboard" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$VCS_REF" \
+      org.opencontainers.image.created="$BUILD_DATE"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+      "fastapi==0.133.1" \
+      "cryptography==46.0.7" \
+      "uvicorn==0.41.0" \
+    && addgroup --system --gid 10002 v2ops \
+    && adduser --system --uid 10002 --ingroup v2ops --home /nonexistent --no-create-home v2ops
+
+COPY v2_ops /app/v2_ops
+RUN python -m compileall -q v2_ops \
+    && chmod -R a+rX /app \
+    && mkdir -p /data/ops \
+    && chown -R v2ops:v2ops /data
+
+USER 10002:10002
+EXPOSE 8080
+ENTRYPOINT ["python", "-m", "uvicorn", "v2_ops.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips=*"]
