@@ -21,6 +21,9 @@ services:
       V2_OPS_TRACE_KEY_HEX: ${V2_OPS_TRACE_KEY_HEX:?required}
       V2_OPS_TRACE_PATH: /data/ops/v2-ops-trace.sqlite3
       V2_OPS_SECURE_COOKIE: "true"
+      V2_OPS_RELEASE_SHA: ${V2_OPS_RELEASE_SHA:?required}
+      V2_OPS_IMAGE_DIGEST: ${V2_OPS_IMAGE_DIGEST:?required}
+      V2_OPS_CONFIG_FINGERPRINT: ${V2_OPS_CONFIG_FINGERPRINT:?required}
     healthcheck:
       test:
         - CMD

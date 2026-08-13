@@ -71,6 +71,9 @@ def test_web_settings_load_strict_independent_credentials_and_absolute_store(
             "V2_OPS_SESSION_KEY_HEX": "6b" * 32,
             "V2_OPS_TRACE_PATH": str(trace_path),
             "V2_OPS_TRACE_KEY_HEX": "74" * 32,
+            "V2_OPS_RELEASE_SHA": "a" * 40,
+            "V2_OPS_IMAGE_DIGEST": "sha256:" + "b" * 64,
+            "V2_OPS_CONFIG_FINGERPRINT": "c" * 64,
         }
     )
 
@@ -78,6 +81,9 @@ def test_web_settings_load_strict_independent_credentials_and_absolute_store(
     assert settings.trace_path == trace_path
     assert settings.session_key == b"k" * 32
     assert settings.trace_key == b"t" * 32
+    assert settings.release_sha == "a" * 40
+    assert settings.image_digest == "sha256:" + "b" * 64
+    assert settings.config_fingerprint == "c" * 64
 
 
 @pytest.mark.parametrize(

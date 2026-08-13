@@ -55,6 +55,9 @@ def _build_client(tmp_path: Path) -> tuple[TestClient, str, str]:
         trace_path=path,
         trace_key=key,
         secure_cookie=True,
+        release_sha="a" * 40,
+        image_digest="sha256:" + "b" * 64,
+        config_fingerprint="c" * 64,
     )
     app = create_ops_app(settings, reader=SQLiteOpsTraceReader(path, key))
     return TestClient(app, base_url="https://testserver"), "event-1", node.node_id
@@ -82,11 +85,30 @@ def test_only_login_and_health_are_public(tmp_path: Path) -> None:
 
     assert client.get("/ops/healthz").status_code == 200
     assert client.get("/ops/login").status_code == 200
+    assert client.get("/ops", follow_redirects=False).headers["location"] == "/ops/"
     assert client.get("/ops/", follow_redirects=False).status_code == 303
     assert client.get("/ops/api/executions").status_code == 401
     assert client.get(f"/ops/api/executions/{execution_id}").status_code == 401
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+def test_authenticated_harness_and_release_metadata_are_bounded(tmp_path: Path) -> None:
+    client, _, _ = _build_client(tmp_path)
+    assert client.get("/ops/api/harness").status_code == 401
+    assert client.get("/ops/api/release").status_code == 401
+    _login(client)
+
+    harness = client.get("/ops/api/harness")
+    release = client.get("/ops/api/release")
+
+    assert harness.status_code == 200
+    assert harness.json() == {"available": False, "execution_id": None}
+    assert release.json() == {
+        "release_sha": "a" * 40,
+        "image_digest": "sha256:" + "b" * 64,
+        "config_fingerprint": "c" * 64,
+    }
 
 
 def test_authenticated_list_detail_nodes_full_and_etag_are_read_only(tmp_path: Path) -> None:

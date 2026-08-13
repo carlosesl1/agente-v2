@@ -28,6 +28,7 @@ class OpsExecutionTrace:
         recorder: OpsRecorder | None = None,
         full_content: bool = False,
         first_ordinal: int = 5,
+        initial_parent_node_id: str | None | object = ...,
     ) -> None:
         if type(execution_id) is not str or not execution_id:
             raise ValueError("execution_id must be non-empty exact text")
@@ -39,12 +40,17 @@ class OpsExecutionTrace:
         self._recorder = NullOpsRecorder() if recorder is None else recorder
         self._full_content = full_content
         self._next_ordinal = first_ordinal
-        self._parent_node_id: str | None = deterministic_node_id(
-            execution_id=execution_id,
-            node_type=NodeType.INBOX_CLAIM,
-            ordinal=4,
-            attempt=1,
-        )
+        if initial_parent_node_id is ...:
+            self._parent_node_id: str | None = deterministic_node_id(
+                execution_id=execution_id,
+                node_type=NodeType.INBOX_CLAIM,
+                ordinal=4,
+                attempt=1,
+            )
+        elif initial_parent_node_id is None:
+            self._parent_node_id = None
+        else:
+            raise TypeError("initial_parent_node_id supports only omitted or None")
 
     @property
     def current_node_id(self) -> str | None:
@@ -57,14 +63,17 @@ class OpsExecutionTrace:
         received_at: datetime,
         status: ExecutionStatus,
         terminal_reason: str,
+        trace_completeness: TraceCompleteness = TraceCompleteness.PARTIAL_TRACE,
     ) -> None:
+        if type(trace_completeness) is not TraceCompleteness:
+            raise TypeError("trace_completeness must be exact TraceCompleteness")
         try:
             item = OpsExecution(
                 execution_id=self.execution_id,
                 lead_id=lead_id,
                 received_at=received_at,
                 status=status,
-                trace_completeness=TraceCompleteness.PARTIAL_TRACE,
+                trace_completeness=trace_completeness,
                 current_node_id=self._parent_node_id,
                 completed_at=datetime.now(timezone.utc),
                 terminal_reason=terminal_reason,

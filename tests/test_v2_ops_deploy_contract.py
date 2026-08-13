@@ -39,6 +39,9 @@ def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
         "V2_OPS_TRACE_KEY_HEX",
         "V2_OPS_TRACE_PATH",
         "V2_OPS_SECURE_COOKIE",
+        "V2_OPS_RELEASE_SHA",
+        "V2_OPS_IMAGE_DIGEST",
+        "V2_OPS_CONFIG_FINGERPRINT",
     }
     for forbidden in ("cloudbeds", "bokun", "stripe", "manychat", "provider"):
         assert forbidden not in " ".join(environment).casefold()
@@ -70,4 +73,7 @@ def test_env_example_contains_only_ops_specific_names() -> None:
         "V2_OPS_SECURE_COOKIE",
         "V2_OPS_DATA_DIR",
         "V2_OPS_IMAGE",
+        "V2_OPS_RELEASE_SHA",
+        "V2_OPS_IMAGE_DIGEST",
+        "V2_OPS_CONFIG_FINGERPRINT",
     }

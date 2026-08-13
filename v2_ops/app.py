@@ -161,6 +161,10 @@ def create_ops_app(
     async def health() -> JSONResponse:
         return JSONResponse({"status": "alive", "mode": "read_only"})
 
+    @app.get("/ops")
+    async def ops_root() -> RedirectResponse:
+        return RedirectResponse("/ops/", status_code=307)
+
     @app.get("/ops/login")
     async def login_page(request: Request) -> Response:
         if claims(request) is not None:
@@ -295,6 +299,37 @@ def create_ops_app(
             return JSONResponse(status_code=503, content={"status": "source_unavailable"})
         return _etag_response(
             {"executions": [_execution(item) for item in page.executions], "next_cursor": page.next_cursor},
+            request,
+        )
+
+    @app.get("/ops/api/harness")
+    async def harness(request: Request) -> Response:
+        if type(require_api(request)) is not SessionClaims:
+            return require_api(request)
+        try:
+            page = trace_reader.list_executions(
+                lead_id="synthetic-harness:lead-001",
+                limit=1,
+                stale_after=settings.stale_after,
+            )
+        except OpsTraceStoreError:
+            return JSONResponse(status_code=503, content={"status": "source_unavailable"})
+        execution_id = page.executions[0].execution_id if page.executions else None
+        return _etag_response(
+            {"available": execution_id is not None, "execution_id": execution_id},
+            request,
+        )
+
+    @app.get("/ops/api/release")
+    async def release(request: Request) -> Response:
+        if type(require_api(request)) is not SessionClaims:
+            return require_api(request)
+        return _etag_response(
+            {
+                "release_sha": settings.release_sha,
+                "image_digest": settings.image_digest,
+                "config_fingerprint": settings.config_fingerprint,
+            },
             request,
         )
 

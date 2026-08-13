@@ -11,6 +11,9 @@ from v2_ops.auth import valid_password_hash
 from v2_ops.crypto import parse_trace_key_hex
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _hex_key(value: str, *, name: str) -> bytes:
@@ -35,6 +38,9 @@ class OpsWebSettings:
     session_ttl: timedelta = timedelta(hours=8)
     secure_cookie: bool = True
     stale_after: timedelta = timedelta(minutes=5)
+    release_sha: str = "unknown"
+    image_digest: str = "unknown"
+    config_fingerprint: str = "unknown"
 
     def __post_init__(self) -> None:
         if type(self.username) is not str or _USERNAME_RE.fullmatch(self.username) is None:
@@ -53,6 +59,12 @@ class OpsWebSettings:
             raise TypeError("secure_cookie must be an exact bool")
         if type(self.stale_after) is not timedelta or not timedelta(seconds=10) <= self.stale_after <= timedelta(hours=1):
             raise ValueError("stale_after is outside the closed range")
+        if self.release_sha != "unknown" and _SHA_RE.fullmatch(self.release_sha) is None:
+            raise ValueError("release SHA is outside the closed grammar")
+        if self.image_digest != "unknown" and _DIGEST_RE.fullmatch(self.image_digest) is None:
+            raise ValueError("image digest is outside the closed grammar")
+        if self.config_fingerprint != "unknown" and _FINGERPRINT_RE.fullmatch(self.config_fingerprint) is None:
+            raise ValueError("config fingerprint is outside the closed grammar")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "OpsWebSettings":
@@ -73,4 +85,7 @@ class OpsWebSettings:
             trace_key=parse_trace_key_hex(source.get("V2_OPS_TRACE_KEY_HEX")),
             session_ttl=timedelta(seconds=ttl),
             secure_cookie=secure_raw == "true",
+            release_sha=source.get("V2_OPS_RELEASE_SHA", "unknown"),
+            image_digest=source.get("V2_OPS_IMAGE_DIGEST", "unknown"),
+            config_fingerprint=source.get("V2_OPS_CONFIG_FINGERPRINT", "unknown"),
         )
