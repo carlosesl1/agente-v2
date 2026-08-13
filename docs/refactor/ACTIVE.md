@@ -16,7 +16,23 @@
 - No new OCI has been built for this phase.
 - The base candidate remains immutable. All changes belong to the successor branch below.
 
-## Active successor — Bókun commercial query binding
+## Active successor — Maya V2 operational execution dashboard
+
+- Authorized by Carlos Eduardo on 2026-08-13 after approving the dashboard specification: implement, verify, and publish the read-only operational dashboard at `https://hermes.chapadabackpackers.com/ops`.
+- Branch: `maya-v2-ops-dashboard`.
+- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-ops-dashboard`.
+- Immutable base: `9226d1b91cdf6007c8f5ce72d0a572e35c4f8a5b`; tree `8c64c013671474b521a2bd9228672477fa7211dc`.
+- Design: `docs/superpowers/specs/2026-08-13-maya-v2-ops-execution-dashboard-design.md`.
+- Plan: `docs/superpowers/plans/2026-08-13-maya-v2-ops-execution-dashboard.md`.
+- Product decision: one execution per inbound message/event, grouped by `lead_id`; recent executions plus exact Lead ID search; n8n-style canvas; Input and Output visible simultaneously; summaries by default and complete permitted content on demand.
+- Provider decision: show Maya query, provider request, provider response, and Maya observation as separate typed nodes. Cloudbeds, Bókun, Stripe, Pix/Wise, ManyChat, handoff, reconciliation, claims, leases, fences, and receipts appear only when present in trace or durable ledgers.
+- Security boundary: dashboard is read-only, has its own username/password session, receives no provider credentials, mounts operational state read-only, exposes no replay/retry/effect endpoint, and never sends raw authentication headers or secret provider payloads to the browser.
+- Instrumentation rule: capture only at typed runtime boundaries; do not inspect or infer customer intent from prose, do not change Maya output, do not add a runtime gate, and do not let trace failure trigger provider retry or alter commercial decisions.
+- Test rule: tests use fake model/provider transports and temporary SQLite stores; no real reservation, booking, Payment Link, charge, ManyChat delivery, or handoff is permitted during implementation or dashboard smoke tests.
+- Isolation rule: `/home/ubuntu/chapada-leads-v3` is outside scope and must not be edited, cleaned, reset, committed, or used as a source of V2 behavior.
+- Exact NEXT: implement the approved plan test-first, run focused and canonical gates, build an immutable candidate, deploy the dashboard route separately, then instrument the V2 worker only after proving the dashboard has no write/effect surface.
+
+## Preserved release branch — Bókun commercial query binding
 
 - Authorized by Carlos Eduardo on 2026-08-12: investigate and permanently correct `private_binding_mismatch`, simplifying the conversation-to-worker path without relaxing confirmation or effect safety.
 - Branch: `maya-v2-bokun-commercial-binding`
