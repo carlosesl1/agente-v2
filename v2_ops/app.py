@@ -88,15 +88,25 @@ def _etag_response(payload: object, request: Request) -> Response:
 def _same_origin(request: Request) -> bool:
     expected = f"{request.url.scheme}://{request.url.netloc}"
     origin = request.headers.get("origin")
-    if origin is not None:
+    if origin is not None and origin != "null":
         return hmac.compare_digest(origin.rstrip("/"), expected)
     referer = request.headers.get("referer")
     if referer is None:
-        # Browsers may omit both headers under no-referrer. The login POST still
-        # requires the unpredictable double-submit CSRF cookie and form token.
+        # Browsers and embedded webviews may omit both headers or send a null
+        # origin. The POST still requires the unpredictable double-submit CSRF
+        # cookie and form token; explicit foreign origins remain rejected.
         return True
     parsed = urlsplit(referer)
     return hmac.compare_digest(f"{parsed.scheme}://{parsed.netloc}", expected)
+
+
+def _cookie_values(request: Request, name: str) -> tuple[str, ...]:
+    values: list[str] = []
+    for part in request.headers.get("cookie", "").split(";"):
+        key, separator, value = part.strip().partition("=")
+        if separator and key == name:
+            values.append(value)
+    return tuple(values)
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -194,8 +204,8 @@ def create_ops_app(
         except ValueError:
             return JSONResponse(status_code=400, content={"status": "invalid_request"})
         csrf = form.get("csrf", "")
-        cookie_csrf = request.cookies.get(_CSRF_COOKIE, "")
-        if not csrf or not cookie_csrf or not hmac.compare_digest(csrf, cookie_csrf):
+        cookie_csrf_values = _cookie_values(request, _CSRF_COOKIE)
+        if not csrf or not any(hmac.compare_digest(csrf, value) for value in cookie_csrf_values):
             return JSONResponse(status_code=403, content={"status": "forbidden"})
         client_key = request.client.host if request.client is not None else "unknown"
         instant = _now()

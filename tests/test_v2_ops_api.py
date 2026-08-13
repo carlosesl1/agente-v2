@@ -179,6 +179,39 @@ def test_login_accepts_valid_csrf_when_browser_omits_origin_and_referer(tmp_path
     assert response.headers["location"] == "/ops/"
 
 
+def test_login_accepts_null_origin_with_valid_csrf(tmp_path: Path) -> None:
+    client, _, _ = _build_client(tmp_path)
+    page = client.get("/ops/login")
+    csrf = page.cookies["v2_ops_csrf"]
+
+    response = client.post(
+        "/ops/login",
+        data={"username": "ops", "password": "password-123", "csrf": csrf},
+        headers={"Origin": "null"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_login_accepts_matching_csrf_among_duplicate_browser_cookies(tmp_path: Path) -> None:
+    client, _, _ = _build_client(tmp_path)
+    page = client.get("/ops/login")
+    csrf = page.cookies["v2_ops_csrf"]
+
+    response = client.post(
+        "/ops/login",
+        data={"username": "ops", "password": "password-123", "csrf": csrf},
+        headers={
+            "Origin": "https://testserver",
+            "Cookie": f"v2_ops_csrf={csrf}; v2_ops_csrf=stale-browser-cookie",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
 def test_security_headers_and_sse_require_session(tmp_path: Path) -> None:
     client, _, _ = _build_client(tmp_path)
     unauthenticated = client.get("/ops/api/events")
