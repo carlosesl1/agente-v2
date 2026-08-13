@@ -886,15 +886,30 @@ def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
         fresh_at_turn_start=False,
         public_context={
             "service": "activity",
-            "status": "negative",
+            "status": "positive",
             "query": {
                 "product_id": "product:tour-4ps",
                 "activity_date": "2026-09-13",
                 "adults": 2,
                 "children": 0,
             },
-            "offers": [],
-            "offer_count": 0,
+            "offers": [
+                {
+                    "public_label": "Roteiro dos 4Ps",
+                    "start_date": "2026-09-13",
+                    "end_date": None,
+                    "start_time": "08:00",
+                    "adults": 2,
+                    "children": 0,
+                    "total_amount": "669.90",
+                    "currency": "BRL",
+                    "group_status": "matched",
+                    "existing_group": True,
+                    "group_participants": 4,
+                    "solo_group_booking": False,
+                }
+            ],
+            "offer_count": 1,
             "offers_truncated": False,
         },
     )
@@ -927,6 +942,11 @@ def test_consultation_history_wire_is_public_bounded_and_recap_only() -> None:
     assert "fresh provider read" in prompt
     assert "selection" in prompt
     assert "reservation" in prompt
+    assert user["consultation_history"][0]["usage"] == "recap_only"
+    history_json = json.dumps(user["consultation_history"], ensure_ascii=False)
+    assert '"group_status": "matched"' in history_json
+    assert "source_url" not in history_json
+    assert "raw_rows" not in history_json
     for forbidden in (
         history.observation_hash,
         "private_binding_hash",

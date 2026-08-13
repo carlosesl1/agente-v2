@@ -1102,6 +1102,10 @@ class FakeActivityReadPort:
                 "total_amount": "1300.00",
                 "currency": "BRL",
                 "available": True,
+                "group_status": "not_matched",
+                "existing_group": False,
+                "group_participants": None,
+                "solo_group_booking": False,
             },
             private_binding_hash="5" * 64,
         )
@@ -2423,7 +2427,7 @@ def test_private_update_with_positive_read_may_repeat_customer_data(
         store.close()
 
 
-def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only_history() -> None:
+def test_committed_group_activity_read_reaches_next_turn_as_recap_only_history() -> None:
     lodging = ReadRequest(
         request_id="read:history-lodging",
         kind=ReadKind.LODGING,
@@ -2441,7 +2445,7 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
         children=0,
     )
 
-    class NegativeActivityReadPort:
+    class GroupActivityReadPort:
         def __init__(self, store: SQLiteBoundaryStore) -> None:
             self.store = store
             self.calls: list[ReadRequest] = []
@@ -2455,12 +2459,20 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
                 observed_at=NOW,
                 expires_at=NOW + timedelta(minutes=5),
                 public_payload={
+                    "offer_id": "offer:" + "3" * 64,
                     "product_id": "product:tour-4ps",
                     "product_public_name": "Roteiro dos 4Ps",
                     "activity_date": "2026-09-13",
                     "adults": 2,
                     "children": 0,
-                    "available": False,
+                    "start_time": "08:00",
+                    "total_amount": "669.90",
+                    "currency": "BRL",
+                    "available": True,
+                    "group_status": "matched",
+                    "existing_group": True,
+                    "group_participants": 4,
+                    "solo_group_booking": False,
                 },
                 private_binding_hash="4" * 64,
             )
@@ -2474,7 +2486,8 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
         effect_proposals=(),
     )
     first_final = _proposal(
-        "Há uma suíte disponível por BRL 480.00; o Roteiro dos 4Ps está indisponível."
+        "Há uma suíte disponível por BRL 480.00 e o Roteiro dos 4Ps por BRL 669.90, "
+        "com grupo existente."
     )
     recap_event = replace(
         EVENT,
@@ -2495,7 +2508,7 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
         intent="inform",
         reply_chunks=(
             "A suíte consultada estava disponível por BRL 480.00 e o Roteiro dos "
-            "4Ps estava indisponível; nada foi reservado.",
+            "4Ps por BRL 669.90, com grupo existente; nada foi reservado.",
         ),
         facts=(),
         read_requests=(),
@@ -2510,7 +2523,7 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first_proposal, first_final, recap_final])
     lodging_port = ManyOptionLodgingReadPort(store)
-    activity_port = NegativeActivityReadPort(store)
+    activity_port = GroupActivityReadPort(store)
     _install_public_authority(store)
     _install_public_authority(store, recap_authority)
     executor = V2TurnExecutor(
@@ -2567,15 +2580,30 @@ def test_committed_positive_and_negative_reads_reach_the_next_turn_as_recap_only
             "Quarto Privativo 32"
         )
         activity_history = history["activity"]
-        assert activity_history.public_context["status"] == "negative"
+        assert activity_history.public_context["status"] == "positive"
         assert activity_history.public_context["query"] == {
             "product_id": "product:tour-4ps",
             "activity_date": "2026-09-13",
             "adults": 2,
             "children": 0,
         }
-        assert activity_history.public_context["offers"] == []
-        assert activity_history.public_context["offer_count"] == 0
+        assert activity_history.public_context["offers"] == [
+            {
+                "public_label": "Roteiro dos 4Ps",
+                "start_date": "2026-09-13",
+                "end_date": None,
+                "start_time": "08:00",
+                "adults": 2,
+                "children": 0,
+                "total_amount": "669.90",
+                "currency": "BRL",
+                "group_status": "matched",
+                "existing_group": True,
+                "group_participants": 4,
+                "solo_group_booking": False,
+            }
+        ]
+        assert activity_history.public_context["offer_count"] == 1
         assert activity_history.public_context["offers_truncated"] is False
         assert all(item.fresh_at_turn_start for item in history.values())
         assert store.load_recent_public_lookup_observations(

@@ -27,6 +27,7 @@ from reservation_boundary.conversation import (
 from reservation_boundary.reads import (
     Phase8ToolReadRequest,
     ReadObservation as BoundaryReadObservation,
+    ReadService,
     SanitizedLookupResult,
 )
 from reservation_boundary.serialization import semantic_hash
@@ -1143,8 +1144,9 @@ def _consultation_history_entry(
         }
     else:
         raise TurnExecutionError("consultation history read kind is unsupported")
-    all_offers = [
-        {
+    all_offers = []
+    for item in result.offers:
+        public_offer = {
             "public_label": item.public_label,
             "start_date": item.start_date.isoformat(),
             "end_date": item.end_date.isoformat() if item.end_date is not None else None,
@@ -1158,8 +1160,16 @@ def _consultation_history_entry(
             "total_amount": format(item.total_amount, "f"),
             "currency": item.currency,
         }
-        for item in result.offers
-    ]
+        if item.service is ReadService.ACTIVITY:
+            public_offer.update(
+                {
+                    "group_status": item.group_status,
+                    "existing_group": item.existing_group,
+                    "group_participants": item.group_participants,
+                    "solo_group_booking": item.solo_group_booking,
+                }
+            )
+        all_offers.append(public_offer)
     offers = all_offers[:32]
     return ConsultationHistoryEntry(
         observation_hash=observation.canonical_hash(),

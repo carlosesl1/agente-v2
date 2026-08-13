@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -1132,12 +1132,29 @@ class SanitizedOffer:
     children: int
     total_amount: Decimal
     currency: str
+    group_status: str | None = None
+    existing_group: bool | None = None
+    group_participants: int | None = None
+    solo_group_booking: bool | None = None
+    _wire_version: int = field(default=2, repr=False, compare=False)
+    _decoded_wire_version: InitVar[int | None] = None
 
     SCHEMA: ClassVar[str] = "phase8-sanitized-offer"
-    VERSION: ClassVar[int] = 1
-    DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v1"
+    VERSION: ClassVar[int] = 2
+    DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v2"
+    LEGACY_DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v1"
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, _decoded_wire_version: int | None) -> None:
+        if _decoded_wire_version not in (None, 1, 2):
+            raise ValueError("decoded wire version is invalid")
+        if (
+            _decoded_wire_version is None
+            and self.service is ReadService.ACTIVITY
+            and self._wire_version != 2
+        ):
+            raise ValueError("legacy activity offer wire is decoder-only")
+        if _decoded_wire_version is not None and self._wire_version != _decoded_wire_version:
+            raise ValueError("decoded offer wire version mismatch")
         if type(self.offer_id) is not str or _OFFER_ID_RE.fullmatch(self.offer_id) is None:
             raise ValueError("SanitizedOffer.offer_id must be canonical")
         if type(self.service) is not ReadService:
@@ -1158,11 +1175,60 @@ class SanitizedOffer:
         if self.service is ReadService.LODGING:
             if self.end_date is None or self.end_date <= self.start_date:
                 raise ValueError("lodging offer requires end_date after start_date")
+            if any(
+                value is not None
+                for value in (
+                    self.group_status,
+                    self.existing_group,
+                    self.group_participants,
+                    self.solo_group_booking,
+                )
+            ):
+                raise ValueError("lodging offer cannot carry activity group context")
+            if self._wire_version != 1:
+                object.__setattr__(self, "_wire_version", 1)
         elif self.end_date is not None:
             raise ValueError("activity offer requires null end_date")
+        else:
+            if self._wire_version == 1:
+                if any(
+                    value is not None
+                    for value in (
+                        self.group_status,
+                        self.existing_group,
+                        self.group_participants,
+                        self.solo_group_booking,
+                    )
+                ):
+                    raise ValueError("legacy activity offer cannot carry group context")
+                return
+            if self.group_status not in {"matched", "not_matched", "unavailable"}:
+                raise ValueError("activity offer group_status is invalid")
+            if type(self.existing_group) is not bool:
+                raise TypeError("activity offer existing_group must be exact bool")
+            if type(self.solo_group_booking) is not bool:
+                raise TypeError("activity offer solo_group_booking must be exact bool")
+            if self.group_status == "matched":
+                if not self.existing_group:
+                    raise ValueError("matched activity group must exist")
+                if (
+                    type(self.group_participants) is not int
+                    or self.group_participants < 1
+                ):
+                    raise ValueError("matched activity group requires participants")
+            elif self.existing_group or self.group_participants is not None:
+                raise ValueError("unmatched activity group context is contradictory")
+            if self.solo_group_booking and not (
+                self.group_status == "matched"
+                and self.existing_group
+                and self.adults + self.children == 1
+            ):
+                raise ValueError("solo activity group context is contradictory")
+            if self._wire_version != 2:
+                raise ValueError("new activity offers require wire v2")
 
     def _data(self) -> dict[str, object]:
-        return {
+        data = {
             "offer_id": self.offer_id,
             "service": self.service.value,
             "public_label": self.public_label,
@@ -1176,26 +1242,37 @@ class SanitizedOffer:
             "total_amount": format(self.total_amount, "f"),
             "currency": self.currency,
         }
+        if self._wire_version == 2:
+            data.update(
+                {
+                    "group_status": self.group_status,
+                    "existing_group": self.existing_group,
+                    "group_participants": self.group_participants,
+                    "solo_group_booking": self.solo_group_booking,
+                }
+            )
+        return data
 
     def to_canonical_bytes(self) -> bytes:
         return _canonical_envelope(
             schema=self.SCHEMA,
-            version=self.VERSION,
+            version=self._wire_version,
             data=self._data(),
         )
 
     def canonical_hash(self) -> str:
+        domain = self.DOMAIN if self._wire_version == 2 else self.LEGACY_DOMAIN
         return hashlib.sha256(
-            self.DOMAIN.encode("ascii") + b"\x00" + self.to_canonical_bytes()
+            domain.encode("ascii") + b"\x00" + self.to_canonical_bytes()
         ).hexdigest()
 
     @classmethod
     def from_canonical_bytes(cls, payload: bytes) -> "SanitizedOffer":
         envelope = _load_canonical_envelope(payload, "SanitizedOffer")
-        if envelope["schema"] != cls.SCHEMA or envelope["version"] != cls.VERSION:
+        if envelope["schema"] != cls.SCHEMA or envelope["version"] not in (1, 2):
             raise ValueError("SanitizedOffer envelope identity mismatch")
         data = envelope["data"]
-        expected = {
+        expected_v1 = {
             "offer_id",
             "service",
             "public_label",
@@ -1207,6 +1284,17 @@ class SanitizedOffer:
             "total_amount",
             "currency",
         }
+        expected = (
+            expected_v1
+            if envelope["version"] == 1
+            else expected_v1
+            | {
+                "group_status",
+                "existing_group",
+                "group_participants",
+                "solo_group_booking",
+            }
+        )
         if set(data) != expected or type(data["service"]) is not str:
             raise ValueError("SanitizedOffer fields mismatch")
         try:
@@ -1232,6 +1320,12 @@ class SanitizedOffer:
             children=data["children"],
             total_amount=_parse_decimal_2(data["total_amount"], "total_amount"),
             currency=data["currency"],
+            group_status=data.get("group_status"),
+            existing_group=data.get("existing_group"),
+            group_participants=data.get("group_participants"),
+            solo_group_booking=data.get("solo_group_booking"),
+            _wire_version=envelope["version"],
+            _decoded_wire_version=envelope["version"],
         )
         if offer.to_canonical_bytes() != payload:
             raise ValueError("SanitizedOffer is not byte-canonical")

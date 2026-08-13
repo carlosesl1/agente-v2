@@ -566,6 +566,124 @@ class Phase8KnowledgeEvidenceTests(unittest.TestCase):
 
 
 class Phase8LookupProjectionTests(unittest.TestCase):
+    def test_new_activity_offer_uses_v2_group_wire_and_v1_fixture_round_trips(self) -> None:
+        legacy_item = _fixture()["examples"]["sanitized_offer.lodging"]
+        legacy_bytes = legacy_item["canonical_utf8"].encode("utf-8")
+        legacy = SanitizedOffer.from_canonical_bytes(legacy_bytes)
+
+        self.assertEqual(legacy.to_canonical_bytes(), legacy_bytes)
+
+        offer = SanitizedOffer(
+            offer_id="offer:" + "d" * 64,
+            service=ReadService.ACTIVITY,
+            public_label="Buracão",
+            start_date=date(2026, 9, 13),
+            end_date=None,
+            start_time=None,
+            adults=1,
+            children=0,
+            total_amount=Decimal("334.95"),
+            currency="BRL",
+            group_status="matched",
+            existing_group=True,
+            group_participants=3,
+            solo_group_booking=True,
+        )
+
+        wire = json.loads(offer.to_canonical_bytes())
+        self.assertEqual(wire["version"], 2)
+        self.assertEqual(
+            {
+                name: wire["data"][name]
+                for name in (
+                    "group_status",
+                    "existing_group",
+                    "group_participants",
+                    "solo_group_booking",
+                )
+            },
+            {
+                "group_status": "matched",
+                "existing_group": True,
+                "group_participants": 3,
+                "solo_group_booking": True,
+            },
+        )
+        self.assertEqual(
+            SanitizedOffer.from_canonical_bytes(offer.to_canonical_bytes()),
+            offer,
+        )
+        with self.assertRaises((TypeError, ValueError)):
+            SanitizedOffer(
+                offer_id="offer:" + "f" * 64,
+                service=ReadService.ACTIVITY,
+                public_label="Buracão",
+                start_date=date(2026, 9, 13),
+                end_date=None,
+                start_time=None,
+                adults=1,
+                children=0,
+                total_amount=Decimal("334.95"),
+                currency="BRL",
+                _wire_version=1,
+            )
+        with self.assertRaises((TypeError, ValueError)):
+            replace(
+                offer,
+                group_status=None,
+                existing_group=None,
+                group_participants=None,
+                solo_group_booking=None,
+                _wire_version=1,
+            )
+
+    def test_group_context_invariants_and_lodging_exclusion_fail_closed(self) -> None:
+        activity = SanitizedOffer(
+            offer_id="offer:" + "e" * 64,
+            service=ReadService.ACTIVITY,
+            public_label="Roteiro dos 4Ps",
+            start_date=date(2026, 9, 13),
+            end_date=None,
+            start_time=None,
+            adults=2,
+            children=0,
+            total_amount=Decimal("669.90"),
+            currency="BRL",
+            group_status="not_matched",
+            existing_group=False,
+            group_participants=None,
+            solo_group_booking=False,
+        )
+        invalid_activity_changes = (
+            {"group_status": "other"},
+            {
+                "group_status": "matched",
+                "existing_group": False,
+                "group_participants": 3,
+            },
+            {"existing_group": True},
+            {"group_participants": 0},
+            {"solo_group_booking": True},
+        )
+        for changes in invalid_activity_changes:
+            with self.subTest(changes=changes):
+                with self.assertRaises((TypeError, ValueError)):
+                    replace(activity, **changes)
+
+        legacy_lodging = SanitizedOffer.from_canonical_bytes(
+            _fixture()["examples"]["sanitized_offer.lodging"]["canonical_utf8"].encode(
+                "utf-8"
+            )
+        )
+        with self.assertRaises((TypeError, ValueError)):
+            replace(
+                legacy_lodging,
+                group_status="matched",
+                existing_group=True,
+                group_participants=2,
+                solo_group_booking=False,
+            )
+
     def test_lookup_offer_and_result_known_answers_are_exact(self) -> None:
         examples = _fixture()["examples"]
         offer_item = examples["sanitized_offer.lodging"]

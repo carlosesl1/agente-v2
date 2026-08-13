@@ -119,7 +119,23 @@ def _offers(
     observation: V2ReadObservation,
 ) -> tuple[SanitizedOffer, ...]:
     result = []
+    group_keys = {
+        "group_status",
+        "existing_group",
+        "group_participants",
+        "solo_group_booking",
+    }
+    solo_group_products = {
+        "product:aguas-claras",
+        "product:buracao",
+        "product:mixila-1d",
+        "product:marimbus",
+        "product:pati-4d",
+        "product:pati-5d",
+    }
     for option in _payload_options(observation):
+        if request.kind is ReadKind.LODGING and group_keys.intersection(option):
+            raise ReadBridgeError("lodging offer cannot carry activity group context")
         if not _option_is_available(request, option):
             continue
         try:
@@ -149,7 +165,18 @@ def _offers(
                     children=children,
                     total_amount=Decimal(option["total_amount"]),
                     currency=option["currency"],
+                    group_status=option["group_status"],
+                    existing_group=option["existing_group"],
+                    group_participants=option["group_participants"],
+                    solo_group_booking=option["solo_group_booking"],
                 )
+                if (
+                    offer.solo_group_booking
+                    and request.product_id not in solo_group_products
+                ):
+                    raise ReadBridgeError(
+                        "solo activity group product is outside policy"
+                    )
             else:
                 raise ReadBridgeError("read kind is outside the availability bridge")
         except (KeyError, TypeError, ValueError) as exc:
