@@ -1329,6 +1329,29 @@ class BokunHTTPTransport:
         participants = adults + children
         if adults < 1 or children < 0:
             raise ProviderHTTPError("Bókun read party composition is invalid")
+        availability_only = payload.get("availability_only", False)
+        expected_product = payload.get("expected_bokun_product_id")
+        expected_rate = payload.get("expected_rate_id")
+        expected_adult_category = payload.get("expected_adult_category_id")
+        ignore_minimum = payload.get("ignore_minimum_participants", False)
+        selection_values = (expected_product, expected_rate, expected_adult_category)
+        exact_selection = any(value is not None for value in selection_values)
+        if type(availability_only) is not bool or type(ignore_minimum) is not bool:
+            raise ProviderHTTPError("Bókun internal read selection is invalid")
+        if availability_only and (exact_selection or ignore_minimum):
+            raise ProviderHTTPError("Bókun availability-only selection is invalid")
+        if exact_selection:
+            if (
+                adults != 1
+                or children != 0
+                or not ignore_minimum
+                or any(type(value) is not str or not value for value in selection_values)
+                or expected_product != provider_id
+                or _first(meta, "id", "activityId", "productId") != provider_id
+            ):
+                raise ProviderHTTPError("Bókun exact solo selection is invalid")
+        elif ignore_minimum:
+            raise ProviderHTTPError("Bókun exact solo selection is required")
         requested_start_time = payload.get("start_time")
         if requested_start_time is not None and (
             type(requested_start_time) is not str
@@ -1339,14 +1362,43 @@ class BokunHTTPTransport:
         selected = None
         selected_fields = None
         for item in _items(availability):
+            if exact_selection:
+                if item.get("date") != activity_date:
+                    continue
+            elif item.get("date") not in (None, activity_date):
+                continue
             if not self._available(item, participants):
                 continue
-            fields = self._activity_booking_fields(
-                item,
-                meta=meta,
-                adults=adults,
-                children=children,
-            )
+            if exact_selection:
+                if item.get("available") is not True:
+                    continue
+                capacity = item.get("availabilityCount")
+                if type(capacity) is not int or capacity < participants:
+                    continue
+                minimum = item.get("minParticipantsToBookNow")
+                if type(minimum) is not int or minimum != 2:
+                    raise ProviderHTTPError(
+                        "Bókun exact solo minimum-two selection is unavailable"
+                    )
+                fields = self._activity_booking_fields_exact(
+                    item,
+                    meta=meta,
+                    expected_rate_id=expected_rate,
+                    expected_adult_category_id=expected_adult_category,
+                )
+            else:
+                try:
+                    fields = self._activity_booking_fields(
+                        item,
+                        meta=meta,
+                        adults=adults,
+                        children=children,
+                    )
+                except ProviderHTTPError:
+                    if availability_only:
+                        selected = item
+                        break
+                    raise
             if (
                 requested_start_time is not None
                 and fields[0].get("start_time") != requested_start_time
@@ -1355,7 +1407,11 @@ class BokunHTTPTransport:
             selected = item
             selected_fields = fields
             break
-        if selected_fields is not None:
+        if availability_only:
+            amount = Decimal("0")
+            currency = "BRL"
+            private = {}
+        elif selected_fields is not None:
             private, amount, currency = selected_fields
         else:
             private, amount = {}, None
@@ -1370,9 +1426,17 @@ class BokunHTTPTransport:
             "product_public_name": self._title(meta) or canonical_id,
             "total_amount": f"{amount:.2f}",
             "currency": currency,
-            "available": selected is not None and self._quote_checkout_enabled,
+            "available": (
+                False
+                if availability_only
+                else selected is not None and self._quote_checkout_enabled
+            ),
             **private,
         }
+        if exact_selection and selected is None:
+            raise ProviderHTTPError("Bókun exact solo selection is unavailable")
+        if availability_only:
+            return result
         if selected is None or not self._quote_checkout_enabled:
             return result
         quote_scope = _text(payload.get("quote_scope"))
@@ -2534,6 +2598,80 @@ class BokunHTTPTransport:
         if self._booking_reference(readback) != booking_id:
             raise ProviderHTTPError("Bókun write read-back did not match")
         return {"status": "confirmed", "booking_id": booking_id}
+
+    @staticmethod
+    def _activity_booking_fields_exact(
+        item: Mapping[str, object],
+        *,
+        meta: Mapping[str, object],
+        expected_rate_id: object,
+        expected_adult_category_id: object,
+    ) -> tuple[dict[str, str], Decimal, str]:
+        if (
+            type(expected_rate_id) is not str
+            or not expected_rate_id
+            or type(expected_adult_category_id) is not str
+            or not expected_adult_category_id
+        ):
+            raise ProviderHTTPError("Bókun exact solo selection is invalid")
+        categories = meta.get("pricingCategories")
+        if not isinstance(categories, list):
+            raise ProviderHTTPError("Bókun exact solo category metadata is unavailable")
+        matches = [
+            category
+            for category in categories
+            if isinstance(category, Mapping)
+            and _first(category, "id", "pricingCategoryId")
+            == expected_adult_category_id
+            and (_text(category.get("ticketCategory")) or "").upper() == "ADULT"
+        ]
+        if len(matches) != 1:
+            raise ProviderHTTPError("Bókun exact solo category selection is unavailable")
+        start_time_id = _first(item, "startTimeId", "start_time_id")
+        start_time = _text(item.get("startTime"))
+        if start_time is not None and re.fullmatch(
+            r"(?:[01]\d|2[0-3]):[0-5]\d", start_time
+        ) is None:
+            raise ProviderHTTPError("Bókun availability start time is invalid")
+        if start_time_id is None and isinstance(item.get("startTime"), Mapping):
+            start_time_id = _first(item["startTime"], "id", "startTimeId")
+        rates = item.get("pricesByRate")
+        if not start_time_id or not isinstance(rates, list):
+            raise ProviderHTTPError("Bókun exact solo selection is unavailable")
+        rate_matches = [
+            rate
+            for rate in rates
+            if isinstance(rate, Mapping)
+            and _first(rate, "activityRateId", "rateId", "id") == expected_rate_id
+        ]
+        if len(rate_matches) != 1:
+            raise ProviderHTTPError("Bókun exact solo rate selection is unavailable")
+        units = rate_matches[0].get("pricePerCategoryUnit")
+        if not isinstance(units, list):
+            raise ProviderHTTPError("Bókun exact solo category selection is unavailable")
+        unit_matches = [
+            unit
+            for unit in units
+            if isinstance(unit, Mapping)
+            and _first(unit, "id", "pricingCategoryId") == expected_adult_category_id
+        ]
+        if len(unit_matches) != 1:
+            raise ProviderHTTPError("Bókun exact solo category selection is unavailable")
+        unit = unit_matches[0]
+        currency = BokunHTTPTransport._pricing_unit_currency(unit)
+        amount = _amount(unit.get("amount"))
+        if currency != "BRL":
+            raise ProviderHTTPError("Bókun exact solo selection currency is invalid")
+        if amount is None:
+            raise ProviderHTTPError("Bókun exact solo selection amount is invalid")
+        private = {
+            "start_time_id": start_time_id,
+            "rate_id": expected_rate_id,
+            "adult_pricing_category_id": expected_adult_category_id,
+        }
+        if start_time is not None:
+            private["start_time"] = start_time
+        return private, amount, currency
 
     @staticmethod
     def _activity_booking_fields(

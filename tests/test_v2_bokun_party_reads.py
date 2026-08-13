@@ -805,6 +805,344 @@ def test_bokun_http_transport_prefers_unique_public_age_qualified_adult_category
     assert result["currency"] == "BRL"
 
 
+def _solo_transport(
+    *,
+    metadata_changes: dict[str, object] | None = None,
+    availability_changes: dict[str, object] | None = None,
+    quote_enabled: bool = False,
+):
+    metadata = {
+        "id": 913372,
+        "title": "Buracão",
+        "pricingCategories": [
+            {"id": "1160099", "ticketCategory": "ADULT", "ageQualified": False},
+            {"id": "857489", "ticketCategory": "ADULT", "ageQualified": True},
+        ],
+    }
+    if metadata_changes:
+        metadata.update(metadata_changes)
+    availability = {
+        "date": "2026-11-18",
+        "startTimeId": "start-buracao",
+        "startTime": "07:30",
+        "available": True,
+        "soldOut": False,
+        "unavailable": False,
+        "availabilityCount": 4,
+        "minParticipantsToBookNow": 2,
+        "pricesByRate": [
+            {
+                "activityRateId": "2375672",
+                "pricePerCategoryUnit": [
+                    {
+                        "id": "1160099",
+                        "amount": {"amount": 300, "currency": "BRL"},
+                    }
+                ],
+            }
+        ],
+    }
+    if availability_changes:
+        availability.update(availability_changes)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/activity.json/913372"):
+            return httpx.Response(200, request=request, json=metadata)
+        if request.url.path.endswith("/availabilities"):
+            return httpx.Response(200, request=request, json=[availability])
+        raise AssertionError("solo selector must not reach quote endpoints in this fixture")
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:buracao": "913372"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-08-13 12:00:00",
+        quote_checkout_enabled=quote_enabled,
+    )
+    return transport, seen
+
+
+def test_bokun_http_transport_quotes_exact_solo_selection() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        call = len(seen)
+        if call == 1:
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": 913372,
+                    "title": "Buracão",
+                    "pricingCategories": [
+                        {
+                            "id": "1160099",
+                            "ticketCategory": "ADULT",
+                            "ageQualified": False,
+                        }
+                    ],
+                },
+            )
+        if call == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": "2026-11-18",
+                        "startTimeId": "start-buracao",
+                        "startTime": "07:30",
+                        "available": True,
+                        "availabilityCount": 4,
+                        "minParticipantsToBookNow": 2,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": "2375672",
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": "1160099",
+                                        "amount": {
+                                            "amount": 300,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        if call == 3:
+            session_id = request.url.path.split("/session/", 1)[1]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "sessionId": session_id,
+                    "size": 0,
+                    "activityBookings": [],
+                    "accommodationBookings": [],
+                    "routeBookings": [],
+                    "giftCardBookings": [],
+                },
+            )
+        if call == 4:
+            body = json.loads(request.content)
+            assert body["activityId"] == "913372"
+            assert body["rateId"] == "2375672"
+            assert body["pricingCategoryBookings"] == [
+                {"pricingCategoryId": "1160099"}
+            ]
+            session_id = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session_id,
+                    "activityBookings": [
+                        {
+                            "bookingId": "quote-solo",
+                            "activityId": "913372",
+                            "date": "2026-11-18",
+                            "startTimeId": "start-buracao",
+                            "rateId": "2375672",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-solo",
+                                    "pricingCategoryId": "1160099",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        assert call == 5
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "options": [
+                    {"invoice": {"remainingAmountAsText": "R$ 304,50"}}
+                ]
+            },
+        )
+
+    transport = BokunHTTPTransport(
+        access_key="access",
+        secret_key="secret",
+        product_map={"product:buracao": "913372"},
+        base_url="https://api.bokun.invalid",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        timestamp=lambda: "2026-08-13 12:00:00",
+        quote_checkout_enabled=True,
+    )
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:buracao",
+            "activity_date": "2026-11-18",
+            "adults": 1,
+            "children": 0,
+            "quote_scope": "f" * 64,
+            "expected_bokun_product_id": "913372",
+            "expected_rate_id": "2375672",
+            "expected_adult_category_id": "1160099",
+            "ignore_minimum_participants": True,
+        },
+    )
+
+    assert result["available"] is True
+    assert result["base_amount"] == "300.00"
+    assert result["booking_fee_amount"] == "4.50"
+    assert result["total_amount"] == "304.50"
+    assert result["rate_id"] == "2375672"
+    assert result["adult_pricing_category_id"] == "1160099"
+    assert len(seen) == 5
+
+
+def test_bokun_http_transport_availability_only_inspects_gets_without_quote() -> None:
+    transport, seen = _solo_transport(quote_enabled=True)
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:buracao",
+            "activity_date": "2026-11-18",
+            "adults": 1,
+            "children": 0,
+            "quote_scope": "a" * 64,
+            "availability_only": True,
+        },
+    )
+
+    assert result["available"] is False
+    assert result["total_amount"] == "0.00"
+    assert [request.method for request in seen] == ["GET", "GET"]
+    assert not any("shopping-cart" in request.url.path for request in seen)
+
+
+def test_bokun_http_transport_exact_solo_selection_bypasses_only_minimum() -> None:
+    transport, seen = _solo_transport()
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:buracao",
+            "activity_date": "2026-11-18",
+            "adults": 1,
+            "children": 0,
+            "expected_bokun_product_id": "913372",
+            "expected_rate_id": "2375672",
+            "expected_adult_category_id": "1160099",
+            "ignore_minimum_participants": True,
+        },
+    )
+
+    assert result["rate_id"] == "2375672"
+    assert result["adult_pricing_category_id"] == "1160099"
+    assert result["total_amount"] == "300.00"
+    assert [request.method for request in seen] == ["GET", "GET"]
+
+
+@pytest.mark.parametrize(
+    "payload_changes",
+    (
+        {"expected_bokun_product_id": "999999"},
+        {"expected_rate_id": "999999"},
+        {"expected_adult_category_id": "999999"},
+    ),
+)
+def test_bokun_http_transport_exact_solo_selection_rejects_id_drift(
+    payload_changes: dict[str, object],
+) -> None:
+    transport, _ = _solo_transport()
+    payload = {
+        "product_id": "product:buracao",
+        "activity_date": "2026-11-18",
+        "adults": 1,
+        "children": 0,
+        "expected_bokun_product_id": "913372",
+        "expected_rate_id": "2375672",
+        "expected_adult_category_id": "1160099",
+        "ignore_minimum_participants": True,
+    }
+    payload.update(payload_changes)
+
+    with pytest.raises(ProviderHTTPError, match="exact|selection|product"):
+        transport("activity", payload)
+
+
+@pytest.mark.parametrize(
+    "availability_changes",
+    (
+        {"available": False},
+        {"available": None},
+        {"soldOut": True},
+        {"availabilityCount": 0},
+        {"availabilityCount": None},
+        {"date": "2026-11-19"},
+        {"date": None},
+        {"minParticipantsToBookNow": 1},
+        {"minParticipantsToBookNow": 3},
+        {
+            "pricesByRate": [
+                {
+                    "activityRateId": "2375672",
+                    "pricePerCategoryUnit": [
+                        {
+                            "id": "1160099",
+                            "amount": {"amount": 300, "currency": "USD"},
+                        }
+                    ],
+                }
+            ]
+        },
+    ),
+)
+def test_bokun_http_transport_exact_solo_selection_keeps_other_gates_closed(
+    availability_changes: dict[str, object],
+) -> None:
+    transport, _ = _solo_transport(availability_changes=availability_changes)
+
+    with pytest.raises(ProviderHTTPError, match="exact|selection|unavailable|currency"):
+        transport(
+            "activity",
+            {
+                "product_id": "product:buracao",
+                "activity_date": "2026-11-18",
+                "adults": 1,
+                "children": 0,
+                "expected_bokun_product_id": "913372",
+                "expected_rate_id": "2375672",
+                "expected_adult_category_id": "1160099",
+                "ignore_minimum_participants": True,
+            },
+        )
+
+
+def test_bokun_http_transport_rejects_minimum_bypass_without_exact_solo_shape() -> None:
+    transport, _ = _solo_transport()
+    with pytest.raises(ProviderHTTPError, match="selection"):
+        transport(
+            "activity",
+            {
+                "product_id": "product:buracao",
+                "activity_date": "2026-11-18",
+                "adults": 2,
+                "children": 0,
+                "expected_bokun_product_id": "913372",
+                "expected_rate_id": "2375672",
+                "expected_adult_category_id": "1160099",
+                "ignore_minimum_participants": True,
+            },
+        )
+
+
 def test_bokun_http_transport_rejects_multiple_public_adult_categories() -> None:
     with pytest.raises(ProviderHTTPError, match="adult pricing category is ambiguous"):
         BokunHTTPTransport._activity_booking_fields(

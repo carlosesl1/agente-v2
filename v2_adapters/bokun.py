@@ -101,14 +101,50 @@ class BokunReadAdapter:
         raise TypeError("Bókun adapter supports only activity reads")
 
     def resolve(self, query: PrivateOfferQuery) -> PrivateOfferBinding:
+        return self._resolve(query)
+
+    def resolve_with_selection(
+        self,
+        query: PrivateOfferQuery,
+        *,
+        expected_bokun_product_id: str,
+        expected_rate_id: str,
+        expected_adult_category_id: str,
+    ) -> PrivateOfferBinding:
+        return self._resolve(
+            query,
+            expected_bokun_product_id=expected_bokun_product_id,
+            expected_rate_id=expected_rate_id,
+            expected_adult_category_id=expected_adult_category_id,
+            ignore_minimum_participants=True,
+        )
+
+    def _resolve(
+        self,
+        query: PrivateOfferQuery,
+        *,
+        expected_bokun_product_id: str | None = None,
+        expected_rate_id: str | None = None,
+        expected_adult_category_id: str | None = None,
+        ignore_minimum_participants: bool = False,
+    ) -> PrivateOfferBinding:
         if type(query) is not PrivateOfferQuery or query.service != "activity":
             raise TypeError("Bókun private resolver requires an activity query")
+        selection = self._selection_payload(
+            adults=query.adults,
+            children=query.children,
+            expected_bokun_product_id=expected_bokun_product_id,
+            expected_rate_id=expected_rate_id,
+            expected_adult_category_id=expected_adult_category_id,
+            ignore_minimum_participants=ignore_minimum_participants,
+        )
         payload = {
             "product_id": query.canonical_product_id,
             "activity_date": query.start_date.isoformat(),
             "adults": query.adults,
             "children": query.children,
             "quote_scope": query.request_hash,
+            **selection,
         }
         if query.start_time is not None:
             payload["start_time"] = query.start_time
@@ -163,20 +199,97 @@ class BokunReadAdapter:
         )
 
     def _activity(self, request: ReadRequest) -> ReadObservation:
+        return self._activity_with_options(request)
+
+    def read_availability_only(self, request: ReadRequest) -> ReadObservation:
+        return self._activity_with_options(request, availability_only=True)
+
+    def read_with_selection(
+        self,
+        request: ReadRequest,
+        *,
+        expected_bokun_product_id: str,
+        expected_rate_id: str,
+        expected_adult_category_id: str,
+    ) -> ReadObservation:
+        return self._activity_with_options(
+            request,
+            expected_bokun_product_id=expected_bokun_product_id,
+            expected_rate_id=expected_rate_id,
+            expected_adult_category_id=expected_adult_category_id,
+            ignore_minimum_participants=True,
+        )
+
+    @staticmethod
+    def _selection_payload(
+        *,
+        adults: int,
+        children: int,
+        expected_bokun_product_id: str | None,
+        expected_rate_id: str | None,
+        expected_adult_category_id: str | None,
+        ignore_minimum_participants: bool,
+    ) -> dict[str, object]:
+        values = (
+            expected_bokun_product_id,
+            expected_rate_id,
+            expected_adult_category_id,
+        )
+        selected = any(value is not None for value in values)
+        if not selected:
+            if ignore_minimum_participants:
+                raise TypeError("minimum bypass requires an exact Bókun selection")
+            return {}
+        if (
+            adults != 1
+            or children != 0
+            or not ignore_minimum_participants
+            or any(type(value) is not str or not value for value in values)
+        ):
+            raise TypeError("exact Bókun selection is restricted to one adult")
+        return {
+            "expected_bokun_product_id": expected_bokun_product_id,
+            "expected_rate_id": expected_rate_id,
+            "expected_adult_category_id": expected_adult_category_id,
+            "ignore_minimum_participants": True,
+        }
+
+    def _activity_with_options(
+        self,
+        request: ReadRequest,
+        *,
+        availability_only: bool = False,
+        expected_bokun_product_id: str | None = None,
+        expected_rate_id: str | None = None,
+        expected_adult_category_id: str | None = None,
+        ignore_minimum_participants: bool = False,
+    ) -> ReadObservation:
         adults, children = request.activity_party()
+        selection = self._selection_payload(
+            adults=adults,
+            children=children,
+            expected_bokun_product_id=expected_bokun_product_id,
+            expected_rate_id=expected_rate_id,
+            expected_adult_category_id=expected_adult_category_id,
+            ignore_minimum_participants=ignore_minimum_participants,
+        )
         query = {
             "product_id": request.product_id,
             "activity_date": request.activity_date.isoformat(),
             "adults": adults,
             "children": children,
             "quote_scope": request.query_hash(),
+            **selection,
         }
+        if availability_only:
+            if selection:
+                raise TypeError("availability-only inspection forbids Bókun selection")
+            query["availability_only"] = True
         if request.locale is not None:
             query["locale"] = request.locale
         response = exact_dict(self._transport("activity", query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
-        private = _private_booking_fields(response, children=children)
         amount = text(response.get("total_amount"), "total_amount")
         currency = text(response.get("currency"), "currency")
         available = response.get("available")
@@ -187,6 +300,37 @@ class BokunReadAdapter:
             raise ProviderReadError("Bókun amount or currency is not canonical")
         if type(available) is not bool:
             raise ProviderReadError("Bókun available must be an exact bool")
+        if availability_only:
+            if available:
+                raise ProviderReadError("Bókun availability-only inspection cannot offer")
+            private_hash = binding_hash(
+                {
+                    "request_hash": request.query_hash(),
+                    "availability_only": "true",
+                }
+            )
+            observed_at, expires_at = observed_window(self._clock, self._ttl)
+            return ReadObservation(
+                request_hash=request.canonical_hash(),
+                provider="bokun",
+                observed_at=observed_at,
+                expires_at=expires_at,
+                public_payload={
+                    "product_id": request.product_id,
+                    "activity_date": request.activity_date.isoformat(),
+                    "adults": adults,
+                    "children": children,
+                    "participants": adults + children,
+                    "product_public_name": text(
+                        response.get("product_public_name"), "product_public_name"
+                    ),
+                    "total_amount": amount,
+                    "currency": currency,
+                    "available": False,
+                },
+                private_binding_hash=private_hash,
+            )
+        private = _private_booking_fields(response, children=children)
         fee_fields = _fee_inclusive_public_fields(
             response,
             total_amount=amount,
