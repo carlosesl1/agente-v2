@@ -310,6 +310,20 @@ def test_signed_urls_and_provider_credentials_are_rejected_in_content(
         )
 
 
+def test_public_url_query_values_are_not_reparsed_as_new_secret_parameters() -> None:
+    node = OpsNodeStart(
+        execution_id="event-public-url",
+        node_type=NodeType.PROVIDER_READ_RESPONSE,
+        ordinal=1,
+        started_at=UTC_NOW,
+        input_full={
+            "public_url": "https://provider.invalid/search?q=docs%26token%3Dpublic-word"
+        },
+    )
+
+    assert node.input_full["public_url"].endswith("docs%26token%3Dpublic-word")
+
+
 def test_payload_byte_limits_are_enforced() -> None:
     assert 0 < MAX_SUMMARY_JSON_BYTES < MAX_FULL_JSON_BYTES
 

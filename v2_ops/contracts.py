@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from types import MappingProxyType
 from typing import Iterable, Mapping, TypeAlias
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 
 MAX_SUMMARY_JSON_BYTES = 16 * 1024
@@ -182,9 +182,9 @@ def _looks_like_signed_url(value: str) -> bool:
         parsed = urlsplit(candidate.rstrip(".,);]"))
         if parsed.username is not None or parsed.password is not None:
             return True
-        decoded_query = unquote(parsed.query)
-        for query_key, _ in parse_qsl(decoded_query, keep_blank_values=True):
-            if _normalized_key(query_key) in _SIGNED_QUERY_KEYS:
+        for query_key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+            key_prefix = query_key.split("=", 1)[0]
+            if _normalized_key(key_prefix) in _SIGNED_QUERY_KEYS:
                 return True
     return False
 
