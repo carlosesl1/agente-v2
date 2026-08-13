@@ -15,6 +15,8 @@ from v2_application.inbox import SQLiteInbox
 from v2_contracts.channel import AcceptDisposition
 from v2_host.app import create_app
 from v2_host.settings import V2Settings
+from v2_ops.recording import SQLiteOpsRecorder
+from v2_ops.store import SQLiteOpsTraceReader, SQLiteOpsTraceWriter
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "v2" / "manychat_text.json"
@@ -69,6 +71,52 @@ def test_webhook_accepts_once_and_never_calls_turn_inline(
     assert duplicate.status_code == 200
     assert duplicate.json() == {"status": "duplicate"}
     assert inbox.pending_count() == 1
+
+
+def test_webhook_records_sanitized_ingress_validation_and_acceptance(
+    inbox: SQLiteInbox,
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "ops.sqlite3"
+    key = b"i" * 32
+    writer = SQLiteOpsTraceWriter(trace_path, key)
+    recorder = SQLiteOpsRecorder(writer)
+    settings = V2Settings(
+        webhook_secret="test-secret",
+        sqlite_path=inbox.path,
+        max_body_bytes=4096,
+    )
+    with TestClient(create_app(settings, inbox, ops_recorder=recorder)) as traced:
+        response = traced.post("/webhook/manychat", headers=AUTH, json=TEXT_PAYLOAD)
+        duplicate = traced.post("/webhook/manychat", headers=AUTH, json=TEXT_PAYLOAD)
+        conflict = traced.post(
+            "/webhook/manychat",
+            headers=AUTH,
+            json={**TEXT_PAYLOAD, "message": "divergent-private-sentinel"},
+        )
+    writer.close()
+
+    reader = SQLiteOpsTraceReader(trace_path, key)
+    execution = reader.get_execution("mc-message-001")
+    nodes = reader.list_nodes("mc-message-001")
+    reader.close()
+
+    assert response.status_code == 202
+    assert duplicate.status_code == 200
+    assert conflict.status_code == 409
+    assert execution is not None
+    assert execution.lead_id == "manychat:mc-subscriber-001"
+    assert [item.node_type.value for item in nodes] == [
+        "manychat_webhook",
+        "router_validation",
+        "inbox_accept",
+    ]
+    rendered = repr(nodes)
+    assert "Olá, quero hospedagem" not in rendered
+    assert "test-secret" not in rendered
+    assert "mc-subscriber-001" not in rendered
+    assert "divergent-private-sentinel" not in rendered
+    assert len(nodes) == 3
 
 
 def test_same_event_id_with_different_payload_is_conflict(client: TestClient) -> None:

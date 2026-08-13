@@ -60,6 +60,8 @@ def build_api_app(
             financial_evidence_acceptor=acceptor,
             readiness=container.readiness,
             require_financial_webhooks=False,
+            ops_recorder=container.ops_recorder,
+            ops_full_content=settings.ops_trace_full_content,
         )
     except BaseException:
         container.close()

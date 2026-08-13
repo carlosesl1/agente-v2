@@ -73,7 +73,7 @@ def test_trace_path_is_distinct_from_every_business_owner(tmp_path: Path) -> Non
             )
 
 
-def test_api_environment_ignores_worker_trace_secret(tmp_path: Path) -> None:
+def test_api_environment_loads_only_common_ops_trace_configuration(tmp_path: Path) -> None:
     env = {
         "V2_SQLITE_PATH": str((tmp_path / "inbox.sqlite3").resolve()),
         "V2_MANYCHAT_WEBHOOK_SECRET": "api-ingress-secret",
@@ -84,9 +84,33 @@ def test_api_environment_ignores_worker_trace_secret(tmp_path: Path) -> None:
 
     settings = V2Settings.from_env(env, process_role=V2ProcessRole.API)
 
-    assert settings.ops_trace_path is None
-    assert settings.ops_trace_key == b""
-    assert settings.ops_trace_full_content is False
+    assert settings.ops_trace_path == (tmp_path / "ops.sqlite3").resolve()
+    assert settings.ops_trace_key == bytes.fromhex(KEY_HEX)
+    assert settings.ops_trace_full_content is True
+
+
+def test_api_container_owns_one_trace_writer_and_closes_it(tmp_path: Path) -> None:
+    trace_path = (tmp_path / "ops" / "trace.sqlite3").resolve()
+    settings = _settings(
+        tmp_path,
+        process_role=V2ProcessRole.API,
+        ops_trace_path=trace_path,
+        ops_trace_key=bytes.fromhex(KEY_HEX),
+    )
+
+    container = V2Container.open(settings=settings, role=V2Role.API)
+    recorder = container.ops_recorder
+    try:
+        assert type(recorder) is SQLiteOpsRecorder
+        assert trace_path.exists()
+        assert container.boundary is None
+        assert container.execution is None
+        assert container.followup is None
+        assert container.private_customer is None
+    finally:
+        container.close()
+
+    assert recorder._writer._connection is None
 
 
 def test_worker_container_owns_one_trace_writer_and_closes_it(tmp_path: Path) -> None:

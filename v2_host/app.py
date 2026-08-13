@@ -24,6 +24,8 @@ from v2_application.inbox import SQLiteInbox
 from v2_application.payments import EvidenceConflict, EvidenceDisposition
 from v2_contracts.channel import AcceptDisposition
 from v2_host.settings import V2Settings
+from v2_ops.ingress import record_ingress
+from v2_ops.recording import NullOpsRecorder, OpsRecorder
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -81,6 +83,8 @@ def create_app(
     financial_evidence_acceptor: object | None = None,
     readiness: Callable[[], object] | None = None,
     require_financial_webhooks: bool = False,
+    ops_recorder: OpsRecorder | None = None,
+    ops_full_content: bool = False,
 ) -> FastAPI:
     """Compose authenticated ingress with durable, role-owned acceptance."""
 
@@ -92,6 +96,9 @@ def create_app(
         raise ValueError("inbox path must match settings.sqlite_path")
     if type(require_financial_webhooks) is not bool:
         raise TypeError("require_financial_webhooks must be exact bool")
+    if type(ops_full_content) is not bool:
+        raise TypeError("ops_full_content must be an exact bool")
+    trace_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
     if financial_verifiers is None:
         normalized_verifiers = None
     else:
@@ -161,6 +168,12 @@ def create_app(
         except ManyChatPayloadError:
             return JSONResponse(status_code=422, content={"status": "invalid"})
         disposition = inbox.accept(event)
+        record_ingress(
+            trace_recorder,
+            event=event,
+            disposition=disposition,
+            full_content=ops_full_content,
+        )
         status_codes: dict[AcceptDisposition, int] = {
             AcceptDisposition.ACCEPTED: 202,
             AcceptDisposition.DUPLICATE: 200,

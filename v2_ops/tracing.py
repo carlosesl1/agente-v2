@@ -27,7 +27,7 @@ class OpsExecutionTrace:
         execution_id: str,
         recorder: OpsRecorder | None = None,
         full_content: bool = False,
-        first_ordinal: int = 2,
+        first_ordinal: int = 5,
     ) -> None:
         if type(execution_id) is not str or not execution_id:
             raise ValueError("execution_id must be non-empty exact text")
@@ -42,7 +42,7 @@ class OpsExecutionTrace:
         self._parent_node_id: str | None = deterministic_node_id(
             execution_id=execution_id,
             node_type=NodeType.INBOX_CLAIM,
-            ordinal=1,
+            ordinal=4,
             attempt=1,
         )
 

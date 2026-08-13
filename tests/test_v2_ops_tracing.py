@@ -105,7 +105,7 @@ def test_trace_persists_monotonic_encrypted_graph_in_real_sqlite(tmp_path) -> No
     claim = OpsNodeStart(
         execution_id=execution.execution_id,
         node_type=NodeType.INBOX_CLAIM,
-        ordinal=1,
+        ordinal=4,
         started_at=received_at,
     )
     recorder.start_node(claim)
@@ -153,7 +153,7 @@ def test_trace_persists_monotonic_encrypted_graph_in_real_sqlite(tmp_path) -> No
     assert stored is not None
     assert stored.status == "completed"
     assert stored.stored_status is ExecutionStatus.COMPLETED
-    assert [item.ordinal for item in nodes] == [1, 2]
+    assert [item.ordinal for item in nodes] == [4, 5]
     assert nodes[1].parent_node_id == nodes[0].node_id
     assert stored.current_node_id == nodes[1].node_id
     assert full.value["kind"] == "lodging"

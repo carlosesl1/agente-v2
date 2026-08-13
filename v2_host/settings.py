@@ -775,7 +775,7 @@ class V2Settings:
         authority_path = source.get("V2_PUBLIC_AUTHORITY_MANIFEST_PATH", "")
         knowledge_path = worker_source.get("V2_KNOWLEDGE_BASE_PATH", "")
         payment_instruction_path = worker_source.get("V2_PAYMENT_INSTRUCTION_PATH", "")
-        ops_trace_path = worker_source.get("V2_OPS_TRACE_PATH", "")
+        ops_trace_path = source.get("V2_OPS_TRACE_PATH", "")
         return cls(
             webhook_secret=api_source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
             sqlite_path=Path(raw_path),
@@ -904,12 +904,11 @@ class V2Settings:
             read_probe_interval_seconds=read_probe_interval,
             ops_trace_path=Path(ops_trace_path) if ops_trace_path else None,
             ops_trace_key=_ops_trace_key(
-                worker_source.get("V2_OPS_TRACE_KEY_HEX", "")
+                source.get("V2_OPS_TRACE_KEY_HEX", "")
             ),
             ops_trace_full_content=_env_bool(
-                worker_source,
+                source,
                 "V2_OPS_TRACE_FULL_CONTENT",
-                default=False,
             ),
         )
 

@@ -102,7 +102,7 @@ class InboxTurnWorker:
             node = OpsNodeStart(
                 execution_id=primary.event_id,
                 node_type=NodeType.INBOX_CLAIM,
-                ordinal=1,
+                ordinal=4,
                 started_at=now,
                 input_summary=summary,
                 input_full=full if self._ops_full_content else None,

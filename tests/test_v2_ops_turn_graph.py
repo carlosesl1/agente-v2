@@ -49,7 +49,7 @@ def test_executor_persists_causal_maya_reducer_commit_graph(tmp_path) -> None:
     claim = OpsNodeStart(
         execution_id=EVENT.event_id,
         node_type=NodeType.INBOX_CLAIM,
-        ordinal=1,
+        ordinal=4,
         started_at=NOW,
     )
     recorder.start_node(claim)
@@ -99,7 +99,7 @@ def test_executor_persists_causal_maya_reducer_commit_graph(tmp_path) -> None:
         NodeType.CONVERSATION_REDUCER,
         NodeType.TURN_COMMIT,
     ]
-    assert [item.ordinal for item in nodes] == [1, 2, 3, 4, 5]
+    assert [item.ordinal for item in nodes] == [4, 5, 6, 7, 8]
     assert all(
         node.parent_node_id == nodes[index - 1].node_id
         for index, node in enumerate(nodes[1:], start=1)

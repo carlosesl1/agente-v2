@@ -230,7 +230,11 @@ class V2Container:
             raise TypeError("role must be exact V2Role")
         paths = settings.sqlite_paths
         if role is V2Role.API:
-            owned_names = ("inbox",)
+            owned_names = (
+                ("inbox", "ops_trace")
+                if settings.ops_trace_path is not None
+                else ("inbox",)
+            )
         else:
             mutable_worker_owners = [
                 "inbox",
@@ -254,6 +258,13 @@ class V2Container:
             inbox = SQLiteInbox(paths["inbox"])
             opened.append(inbox)
             if role is V2Role.API:
+                ops_trace_writer = None
+                if settings.ops_trace_path is not None:
+                    ops_trace_writer = SQLiteOpsTraceWriter(
+                        settings.ops_trace_path,
+                        settings.ops_trace_key,
+                    )
+                    opened.append(ops_trace_writer)
                 return cls(
                     settings=settings,
                     role=role,
@@ -264,7 +275,7 @@ class V2Container:
                     payment_initiation=None,
                     public_outbox=None,
                     private_customer=None,
-                    ops_trace_writer=None,
+                    ops_trace_writer=ops_trace_writer,
                 )
             ops_trace_writer = None
             if settings.ops_trace_path is not None:

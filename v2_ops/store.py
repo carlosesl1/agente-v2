@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -351,12 +352,14 @@ class SQLiteOpsTraceWriter:
         self._path = _require_path(path, existing=False)
         self._busy_timeout_ms = _require_busy_timeout(busy_timeout_ms)
         self._cipher = AES256GCMCipher(key)
+        self._lock = threading.RLock()
         self._connection: sqlite3.Connection | None = None
         try:
             connection = sqlite3.connect(
                 self._path,
                 isolation_level=None,
                 timeout=self._busy_timeout_ms / 1000,
+                check_same_thread=False,
             )
             connection.row_factory = sqlite3.Row
             connection.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
@@ -387,9 +390,10 @@ class SQLiteOpsTraceWriter:
         self.close()
 
     def close(self) -> None:
-        connection, self._connection = self._connection, None
-        if connection is not None:
-            connection.close()
+        with self._lock:
+            connection, self._connection = self._connection, None
+            if connection is not None:
+                connection.close()
 
     def _db(self) -> sqlite3.Connection:
         if self._connection is None:
@@ -451,23 +455,24 @@ class SQLiteOpsTraceWriter:
             raise OpsTraceStoreError("operational trace store unavailable")
 
     def _transaction(self, operation) -> None:
-        connection = self._db()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            operation(connection)
-            connection.execute("COMMIT")
-        except OpsTraceConflictError:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        except (sqlite3.Error, OSError, TraceCryptoError) as exc:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise OpsTraceStoreError("operational trace store unavailable") from exc
-        except BaseException:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
+        with self._lock:
+            connection = self._db()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                operation(connection)
+                connection.execute("COMMIT")
+            except OpsTraceConflictError:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            except (sqlite3.Error, OSError, TraceCryptoError) as exc:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise OpsTraceStoreError("operational trace store unavailable") from exc
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def write_execution(self, item: OpsExecution) -> None:
         if type(item) is not OpsExecution:
