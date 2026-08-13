@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 
 
 _REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
@@ -201,6 +202,7 @@ class V2Settings:
     bokun_secret_key: str = ""
     bokun_product_map: dict[str, str] = field(default_factory=dict)
     bokun_base_url: str = "https://api.bokun.io"
+    bokun_groups_sheet_csv_url: str = ""
     manychat_api_key: str = ""
     manychat_base_url: str = "https://api.manychat.com"
     manychat_reply_field_id: int | None = None
@@ -297,6 +299,7 @@ class V2Settings:
             self.cloudbeds_source_id,
             self.bokun_access_key,
             self.bokun_secret_key,
+            self.bokun_groups_sheet_csv_url,
             self.manychat_api_key,
             self.stripe_secret_key,
             self.stripe_hostel_secret_key,
@@ -492,6 +495,34 @@ class V2Settings:
         ):
             raise ValueError("bokun_product_map must map exact non-empty strings")
         object.__setattr__(self, "bokun_product_map", dict(self.bokun_product_map))
+        if type(self.bokun_groups_sheet_csv_url) is not str:
+            raise TypeError("bokun_groups_sheet_csv_url must be exact text")
+        if self.bokun_groups_sheet_csv_url:
+            try:
+                groups_url = urlsplit(self.bokun_groups_sheet_csv_url)
+                groups_host = groups_url.hostname
+                groups_username = groups_url.username
+                groups_password = groups_url.password
+                groups_port = groups_url.port
+            except ValueError as exc:
+                raise ValueError(
+                    "V2_BOKUN_GROUPS_SHEET_CSV_URL must be an absolute HTTPS URL "
+                    "without userinfo, controls, or fragment"
+                ) from exc
+            if (
+                groups_url.scheme != "https"
+                or not groups_url.netloc
+                or not groups_host
+                or groups_port not in (None, 443)
+                or groups_username is not None
+                or groups_password is not None
+                or groups_url.fragment
+                or any(character.isspace() or ord(character) < 32 for character in self.bokun_groups_sheet_csv_url)
+            ):
+                raise ValueError(
+                    "V2_BOKUN_GROUPS_SHEET_CSV_URL must be an absolute HTTPS URL "
+                    "without userinfo, controls, or fragment"
+                )
         for name in (
             "cloudbeds_base_url",
             "bokun_base_url",
@@ -670,6 +701,14 @@ class V2Settings:
         )
 
     @property
+    def group_enriched_activity_configured(self) -> bool:
+        """Whether base read providers and the worker-owned group source are set."""
+
+        return bool(
+            self.read_providers_configured and self.bokun_groups_sheet_csv_url
+        )
+
+    @property
     def stripe_account_profiles(self) -> dict[str, str]:
         return {
             "hostel": self.stripe_hostel_account_profile_id,
@@ -824,6 +863,9 @@ class V2Settings:
                 "V2_BOKUN_PRODUCT_MAP_JSON",
             ),
             bokun_base_url=worker_source.get("V2_BOKUN_BASE_URL", "https://api.bokun.io"),
+            bokun_groups_sheet_csv_url=worker_source.get(
+                "V2_BOKUN_GROUPS_SHEET_CSV_URL", ""
+            ),
             manychat_api_key=worker_source.get("V2_MANYCHAT_API_KEY", ""),
             manychat_base_url=worker_source.get("V2_MANYCHAT_BASE_URL", "https://api.manychat.com"),
             manychat_reply_field_id=_optional_positive_int(

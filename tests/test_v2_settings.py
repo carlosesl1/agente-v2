@@ -6,13 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from v2_host.settings import RuntimeMode, StripeEnvironment, V2Settings
+from v2_host.settings import (
+    RuntimeMode,
+    StripeEnvironment,
+    V2ProcessRole,
+    V2Settings,
+)
 
 
 CANDIDATE_SHA = "a" * 40
 CANDIDATE_DIGEST = "sha256:" + "b" * 64
 TRANSCRIPT_KEY = "11" * 32
 AUTHORITY_KEY = "22" * 32
+GROUPS_SHEET_URL = "https://groups-private.example.test/published.csv?output=csv"
 
 
 def _controlled_env(tmp_path: Path) -> dict[str, str]:
@@ -25,6 +31,7 @@ def _controlled_env(tmp_path: Path) -> dict[str, str]:
         "V2_BOKUN_ACCESS_KEY": "bokun-read-key",
         "V2_BOKUN_SECRET_KEY": "bokun-read-secret",
         "V2_BOKUN_PRODUCT_MAP_JSON": '{"product:buracao":"12345"}',
+        "V2_BOKUN_GROUPS_SHEET_CSV_URL": GROUPS_SHEET_URL,
         "V2_READ_PROBE_CHECK_IN": "2099-08-01",
         "V2_READ_PROBE_CHECK_OUT": "2099-08-02",
         "V2_READ_PROBE_ACTIVITY_DATE": "2099-08-01",
@@ -62,6 +69,90 @@ def test_idle_controlled_canary_loads_with_all_effects_closed(tmp_path: Path) ->
     assert settings.stripe_environment is StripeEnvironment.TEST
     assert settings.all_real_effect_gates_closed is True
     assert settings.critical_approval_ttl_seconds == 1800
+
+
+@pytest.mark.parametrize(
+    "process_role",
+    (V2ProcessRole.WORKER, V2ProcessRole.COMBINED),
+)
+def test_worker_roles_load_group_sheet_url_for_productive_activity_composition(
+    tmp_path: Path,
+    process_role: V2ProcessRole,
+) -> None:
+    settings = V2Settings.from_env(
+        _controlled_env(tmp_path),
+        process_role=process_role,
+    )
+
+    assert settings.bokun_groups_sheet_csv_url == GROUPS_SHEET_URL
+    assert settings.group_enriched_activity_configured is True
+
+
+def test_api_role_ignores_group_sheet_url_even_when_environment_contains_it(
+    tmp_path: Path,
+) -> None:
+    env = _controlled_env(tmp_path)
+    env["V2_BOKUN_GROUPS_SHEET_CSV_URL"] = (
+        "http://api-must-not-retain.example.test/private.csv#fragment"
+    )
+
+    settings = V2Settings.from_env(env, process_role=V2ProcessRole.API)
+
+    assert settings.bokun_groups_sheet_csv_url == ""
+    assert settings.group_enriched_activity_configured is False
+
+
+@pytest.mark.parametrize(
+    "invalid_url",
+    (
+        "http://groups.example.test/published.csv",
+        "ftp://groups.example.test/published.csv",
+        "groups.example.test/published.csv",
+        "https:///published.csv",
+        "https://sheet-reader@groups.example.test/published.csv",
+        "https://sheet-reader:secret@groups.example.test/published.csv",
+        "https://groups.example.test/published.csv#private-tab",
+        "https://groups.example.test/private path.csv",
+        "https://groups.example.test/private\npath.csv",
+        "https://groups.example.test:70000/published.csv",
+    ),
+)
+def test_worker_rejects_non_absolute_https_or_disclosing_group_sheet_urls(
+    tmp_path: Path,
+    invalid_url: str,
+) -> None:
+    env = _controlled_env(tmp_path)
+    env["V2_BOKUN_GROUPS_SHEET_CSV_URL"] = invalid_url
+
+    with pytest.raises(ValueError, match="V2_BOKUN_GROUPS_SHEET_CSV_URL"):
+        V2Settings.from_env(env, process_role=V2ProcessRole.WORKER)
+
+
+def test_missing_group_sheet_url_preserves_base_reads_but_disables_group_composition(
+    tmp_path: Path,
+) -> None:
+    env = _controlled_env(tmp_path)
+    env.pop("V2_BOKUN_GROUPS_SHEET_CSV_URL")
+
+    settings = V2Settings.from_env(env, process_role=V2ProcessRole.WORKER)
+
+    assert settings.read_providers_configured is True
+    assert settings.group_enriched_activity_configured is False
+
+
+def test_settings_repr_never_discloses_loaded_group_sheet_url_or_host(
+    tmp_path: Path,
+) -> None:
+    settings = V2Settings.from_env(
+        _controlled_env(tmp_path),
+        process_role=V2ProcessRole.WORKER,
+    )
+
+    rendered = repr(settings)
+
+    assert settings.bokun_groups_sheet_csv_url == GROUPS_SHEET_URL
+    assert GROUPS_SHEET_URL not in rendered
+    assert "groups-private.example.test" not in rendered
 
 
 def test_general_availability_requires_empty_allowlist_and_accepts_open_gates(
