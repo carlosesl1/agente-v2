@@ -1362,15 +1362,27 @@ class BokunHTTPTransport:
         selected = None
         selected_fields = None
         for item in _items(availability):
+            item_date = _consistent_date_alias(
+                item,
+                ("date",),
+                error="Bókun availability date is invalid",
+            )
             if exact_selection:
-                if item.get("date") != activity_date:
+                if item_date != activity_date:
                     continue
-            elif item.get("date") not in (None, activity_date):
+            elif item_date not in (None, activity_date):
                 continue
             if not self._available(item, participants):
                 continue
             if exact_selection:
-                if item.get("available") is not True:
+                if "available" in item:
+                    explicitly_available = item.get("available") is True
+                else:
+                    explicitly_available = (
+                        item.get("soldOut") is False
+                        and item.get("unavailable") is False
+                    )
+                if not explicitly_available:
                     continue
                 capacity = item.get("availabilityCount")
                 if type(capacity) is not int or capacity < participants:
