@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -11,6 +12,23 @@ from v2_ops.contracts import ExecutionStatus, NodeType, OpsExecution, TraceCompl
 from v2_ops.recording import SQLiteOpsRecorder
 from v2_ops.store import SQLiteOpsTraceWriter
 from v2_ops.tracing import OpsExecutionTrace
+
+
+def _preserve_wal_sidecars(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        if connection.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+            raise RuntimeError("synthetic harness store is not in WAL mode")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.rollback()
+        wal_path = Path(f"{path}-wal")
+        shm_path = Path(f"{path}-shm")
+        wal_bytes = wal_path.read_bytes()
+        shm_bytes = shm_path.read_bytes()
+    finally:
+        connection.close()
+    wal_path.write_bytes(wal_bytes)
+    shm_path.write_bytes(shm_bytes)
 
 
 def create_synthetic_harness(path: Path, key: bytes) -> None:
@@ -93,7 +111,7 @@ def create_synthetic_harness(path: Path, key: bytes) -> None:
     trace.record_value(NodeType.MAYA_READ_REQUEST, read_request)
     trace.record_value(NodeType.PROVIDER_READ_REQUEST, read_request)
     observation = ReadObservation(
-        request_hash="b" * 64,
+        request_hash=read_request.canonical_hash(),
         provider="cloudbeds",
         observed_at=now,
         expires_at=now + timedelta(minutes=5),
@@ -112,6 +130,7 @@ def create_synthetic_harness(path: Path, key: bytes) -> None:
         trace_completeness=TraceCompleteness.COMPLETE_TRACE,
     )
     writer.close()
+    _preserve_wal_sidecars(path)
 
 
 def main() -> int:

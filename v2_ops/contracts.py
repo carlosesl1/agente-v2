@@ -100,6 +100,15 @@ _FORBIDDEN_KEY_PARTS = frozenset(
         "signature",
     }
 )
+_FORBIDDEN_CREDENTIAL_KEYS = frozenset(
+    {
+        "access_key",
+        "api_key",
+        "apikey",
+        "provider_api_key",
+        "x_api_key",
+    }
+)
 _FORBIDDEN_CONTACT_DOCUMENT_KEYS = frozenset(
     {
         "name",
@@ -168,7 +177,7 @@ def _normalized_key(key: str) -> str:
 def _validate_key(key: str) -> None:
     normalized = _normalized_key(key)
     parts = frozenset(part for part in normalized.split("_") if part)
-    if parts & _FORBIDDEN_KEY_PARTS:
+    if parts & _FORBIDDEN_KEY_PARTS or normalized in _FORBIDDEN_CREDENTIAL_KEYS:
         raise ValueError(f"forbidden key in trace JSON: {key!r}")
     if normalized in _FORBIDDEN_CONTACT_DOCUMENT_KEYS or (
         normalized.startswith("raw_")

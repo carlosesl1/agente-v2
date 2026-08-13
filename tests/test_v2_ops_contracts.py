@@ -266,6 +266,11 @@ def test_canonical_json_is_deterministic_and_accepts_only_closed_json() -> None:
     [
         "authorization",
         "access_token",
+        "api_key",
+        "apikey",
+        "access_key",
+        "provider_api_key",
+        "x_api_key",
         "client_secret",
         "password",
         "cookie",

@@ -774,6 +774,35 @@ def test_reader_uses_read_only_uri_query_only_and_rejects_mutation_matrix(
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+def test_reader_opens_preserved_wal_sidecars_from_read_only_directory(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "trace.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(execution())
+
+    connection = sqlite3.connect(path)
+    assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    connection.execute("BEGIN IMMEDIATE")
+    connection.rollback()
+    wal_path = Path(f"{path}-wal")
+    shm_path = Path(f"{path}-shm")
+    wal_bytes = wal_path.read_bytes()
+    shm_bytes = shm_path.read_bytes()
+    connection.close()
+    wal_path.write_bytes(wal_bytes)
+    shm_path.write_bytes(shm_bytes)
+    path.chmod(0o400)
+    wal_path.chmod(0o400)
+    shm_path.chmod(0o400)
+    tmp_path.chmod(0o500)
+    try:
+        with SQLiteOpsTraceReader(path, KEY) as reader:
+            assert reader.list_executions().executions[0].execution_id == "event-001"
+    finally:
+        tmp_path.chmod(0o700)
+
+
 def test_reader_rejects_unexpected_schema_objects(tmp_path: Path) -> None:
     path = (tmp_path / "unexpected.sqlite3").resolve()
     with SQLiteOpsTraceWriter(path, KEY):
