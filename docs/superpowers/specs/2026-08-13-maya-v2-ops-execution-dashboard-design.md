@@ -209,9 +209,11 @@ Os bancos são abertos por URI SQLite em modo read-only. O navegador nunca receb
 
 Os ledgers atuais não preservam, para todos os caminhos, cada request do modelo e cada request/response do provider como uma sequência visual completa. O worker passará a produzir um trace operacional dedicado:
 
-`/data/v2-ops-trace.sqlite3`
+`/data/ops/v2-ops-trace.sqlite3`
 
-O dashboard monta esse arquivo somente como leitura. O worker é o único writer.
+O worker/projector é o único writer. O dashboard monta o diretório dedicado
+`/data/ops` como `/state/ops:ro`, preservando os sidecars SQLite WAL/SHM sem
+expor o restante de `ga-state`.
 
 Tabelas conceituais:
 
@@ -256,6 +258,13 @@ Execuções anteriores ao trace dedicado são projetadas a partir dos ledgers at
 - `ledger_only`: somente marcos de ledger podem ser apresentados.
 
 A UI nunca fabrica um request ou response ausente.
+
+O projector roda no contexto writer/host, onde os ledgers já são acessíveis,
+e grava somente milestones tipados e sanitizados no banco ops dedicado. O
+processo web do dashboard nunca abre, monta ou consulta inbox, boundary,
+execution, payment, follow-up, public-outbox, audits ou o banco privado de
+cliente. Para o dark deploy anterior à instrumentação do worker, um projector
+one-shot gera a primeira projeção sanitizada no diretório ops.
 
 ## 6. Instrumentação
 
@@ -366,10 +375,10 @@ O serviço:
 
 - usa usuário não-root;
 - filesystem read-only;
-- monta individualmente, em modo read-only, somente o trace, inbox, boundary,
-  execution, payment-initiation, follow-up, public-outbox, audits e heartbeat
-  autorizados; o diretório `ga-state` inteiro e `v2-private-customer.sqlite3`
-  não entram no namespace do container;
+- monta somente o diretório dedicado `/data/ops` como `/state/ops:ro`, contendo
+  o trace e a projeção sanitizada com seus sidecars WAL/SHM; o diretório
+  `ga-state`, todos os ledgers de negócio e `v2-private-customer.sqlite3` não
+  entram no namespace do container web;
 - monta metadata de release em modo read-only;
 - usa tmpfs mínimo;
 - remove capabilities;
@@ -491,8 +500,8 @@ Polling é preferido ao SSE no MVP por simplicidade operacional. A API usa curso
 
 - compose renderiza;
 - serviço não recebe secrets de provider;
-- cada arquivo operacional autorizado é montado individualmente como `:ro`,
-  sem mount do diretório `ga-state` e sem o banco privado de cliente;
+- somente o diretório ops sanitizado é montado como `:ro`, sem mount de
+  `ga-state`, ledgers de negócio ou banco privado de cliente;
 - rota `/ops` exige login;
 - `/`, sessões e APIs existentes do WebUI continuam atendidas pelo WebUI;
 - webhook V2 continua saudável;

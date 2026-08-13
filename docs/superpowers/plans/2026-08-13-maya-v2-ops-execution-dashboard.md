@@ -295,7 +295,7 @@ git commit -am "feat(v2-ops): trace payment and public delivery stages"
 
 ---
 
-### Task 7: Project live trace, ledger-only history, harness, and release metadata
+### Task 7: Project live trace, ledger-only history, harness, and release metadata into the sanitized ops store
 
 **Files:**
 - Create: `v2_ops/projection.py`
@@ -317,9 +317,14 @@ Build small real temporary SQLite fixtures with the actual repository schemas. C
 - locked/missing DB maps to sanitized unavailable/degraded source, never write fallback;
 - projection emits no filesystem path, SQL, raw payload, subscriber/contact field, or secret.
 
-**Step 2: Implement bounded read-only source adapters**
+**Step 2: Implement bounded writer-side source adapters and projector**
 
-Use explicit SQL statements per known schema with table/column capability checks. No SQL comes from HTTP input. Enforce maximum row/node limits.
+Use explicit read-only SQL statements per known business schema with
+table/column capability checks. No SQL comes from HTTP input. Enforce maximum
+row/node limits. The projector runs only in the worker/host context and writes
+typed sanitized milestones, harness and release snapshots into
+`/data/ops/v2-ops-trace.sqlite3`. The dashboard web process reads only that ops
+store and must not open or mount any business ledger.
 
 **Step 3: Verify and commit**
 
@@ -442,10 +447,10 @@ Statically parse the Dockerfile/Compose and require:
 - read-only root filesystem;
 - `cap_drop: [ALL]`, `no-new-privileges`, tmpfs, bounded resources;
 - no Docker socket;
-- individual `:ro` mounts for only trace, inbox, boundary, execution,
-  payment-initiation, follow-up, public-outbox, Cloudbeds/Bókun audits,
-  heartbeat and release metadata; no whole-`ga-state` mount and no
-  `v2-private-customer.sqlite3` mount;
+- one `:ro` mount of the dedicated sanitized ops directory, including the
+  trace/projection SQLite WAL/SHM sidecars, plus release metadata if it is not
+  already projected; no `ga-state`, business-ledger or
+  `v2-private-customer.sqlite3` mount in the web container;
 - only independent ops username/password hash/session key/trace key env values;
 - no Cloudbeds/Bókun/Stripe/ManyChat/provider env names;
 - no host-published port;
@@ -455,10 +460,11 @@ Statically parse the Dockerfile/Compose and require:
 
 **Step 2: Implement container/manifest**
 
-The dashboard process is separate from API/worker/router. Each authorized
-trace/state file is mounted individually and read-only so unrelated databases
-are absent from the container namespace. The V2 writer image receives only
-trace path/key in addition to its existing runtime environment.
+The dashboard process is separate from API/worker/router. It mounts only the
+dedicated sanitized ops directory read-only so business databases are absent
+from the container namespace and SQLite sidecars remain visible. The V2 writer
+image receives only ops trace/projection path/key in addition to its existing
+runtime environment.
 
 **Step 3: Verify render and commit**
 
@@ -563,15 +569,18 @@ Capture:
 
 Generate a unique password, scrypt hash, session key and trace key. Store only in the ops deploy’s restricted env file. Do not print or commit plaintext credentials. Deliver the initial password to Carlos through the current trusted private surface only.
 
-**Step 3: Start dashboard against read-only state before worker instrumentation**
+**Step 3: Start dashboard against a one-shot sanitized projection before worker instrumentation**
 
-Mount existing ledgers read-only. Expect ledger-only/partial history. Verify:
+Run the bounded projector one-shot on the host against the existing ledgers in
+read-only mode, then mount only the generated ops directory into the dashboard.
+Expect ledger-only/partial history. Verify:
 - `/ops/login` returns login;
 - `/ops/` and APIs require auth;
 - authenticated list/harness/release work;
 - `/` remains WebUI;
 - V2 webhook health remains unchanged;
 - no provider credentials in dashboard container env;
+- no business ledger or private-customer database in dashboard mounts;
 - no business rows/call counters changed.
 
 **Step 4: Verify real browser UI**
