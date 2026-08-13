@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import sqlite3
+from dataclasses import dataclass
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_domain import ServiceKind
@@ -10,6 +13,86 @@ from reservation_domain.types import ReservationCommand
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_contracts.payments import BusinessUnit
+
+
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True, slots=True)
+class EffectTraceContext:
+    execution_id: str
+    lead_id: str
+    source_turn_receipt_hash: str
+
+    def __post_init__(self) -> None:
+        if type(self.execution_id) is not str or not self.execution_id:
+            raise ValueError("execution_id must be non-empty exact text")
+        if (
+            type(self.lead_id) is not str
+            or not self.lead_id.startswith("manychat:")
+            or not self.lead_id.removeprefix("manychat:").isdecimal()
+        ):
+            raise ValueError("lead_id must be one exact ManyChat lead")
+        if (
+            type(self.source_turn_receipt_hash) is not str
+            or _HASH_RE.fullmatch(self.source_turn_receipt_hash) is None
+        ):
+            raise ValueError("source_turn_receipt_hash must be lowercase SHA-256")
+
+
+class SQLiteEffectTraceContextResolver:
+    """Resolve one effect to the primary source event through exact durable joins."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        if type(connection) is not sqlite3.Connection:
+            raise TypeError("connection must be exact sqlite3.Connection")
+        self._connection = connection
+
+    def _one(self, query: str, parameters: tuple[object, ...]) -> EffectTraceContext:
+        rows = tuple(self._connection.execute(query, parameters))
+        if len(rows) != 1:
+            raise RuntimeError("effect does not have one durable primary source")
+        lead_id, execution_id, effect_receipt, source_receipt = rows[0]
+        if effect_receipt != source_receipt:
+            raise RuntimeError("effect source correlation diverges")
+        return EffectTraceContext(execution_id, lead_id, source_receipt)
+
+    def for_command(self, command_id: str) -> EffectTraceContext:
+        if type(command_id) is not str or not command_id:
+            raise ValueError("command_id must be non-empty exact text")
+        return self._one(
+            "SELECT c.lead_key,s.source_event_id,c.source_turn_receipt_hash,"
+            "s.source_turn_receipt_hash FROM boundary_commands c "
+            "JOIN boundary_event_sources s ON s.lead_key=c.lead_key "
+            "AND s.aggregate_turn_id=c.aggregate_turn_id AND s.source_index=0 "
+            "WHERE c.command_id=?",
+            (command_id,),
+        )
+
+    def for_public_row(self, public_row_id: str) -> EffectTraceContext:
+        if type(public_row_id) is not str or not public_row_id:
+            raise ValueError("public_row_id must be non-empty exact text")
+        return self._one(
+            "SELECT p.lead_key,s.source_event_id,p.source_turn_receipt_hash,"
+            "s.source_turn_receipt_hash FROM boundary_public_outbox p "
+            "JOIN boundary_event_sources s ON s.lead_key=p.lead_key "
+            "AND s.aggregate_turn_id=p.aggregate_turn_id AND s.source_index=0 "
+            "WHERE p.public_row_id=?",
+            (public_row_id,),
+        )
+
+    def for_source_receipt(self, source_turn_receipt_hash: str) -> EffectTraceContext:
+        if (
+            type(source_turn_receipt_hash) is not str
+            or _HASH_RE.fullmatch(source_turn_receipt_hash) is None
+        ):
+            raise ValueError("source_turn_receipt_hash must be lowercase SHA-256")
+        return self._one(
+            "SELECT lead_key,source_event_id,source_turn_receipt_hash,"
+            "source_turn_receipt_hash FROM boundary_event_sources "
+            "WHERE source_index=0 AND source_turn_receipt_hash=?",
+            (source_turn_receipt_hash,),
+        )
 
 
 def _opaque(prefix: str, *parts: str) -> str:
@@ -47,6 +130,27 @@ class DurableLeadResolver:
         self._boundary = boundary
         self._execution = execution
         self._followup = followup
+        self._effect_trace = SQLiteEffectTraceContextResolver(
+            boundary._connection
+        )
+
+    def effect_trace_for_command(self, command_id: str) -> EffectTraceContext:
+        return self._effect_trace.for_command(command_id)
+
+    def effect_trace_for_payment(self, payment_id: str) -> EffectTraceContext:
+        if type(payment_id) is not str or not payment_id:
+            raise ValueError("payment_id must be non-empty exact text")
+        matches = tuple(
+            command
+            for command, _ in self._execution.list_outcome_projection_inputs()
+            if payment_id_for_command(command) == payment_id
+        )
+        if len(matches) != 1:
+            raise RuntimeError("payment does not have one durable command owner")
+        return self.effect_trace_for_command(matches[0].command_id)
+
+    def effect_trace_for_public_row(self, public_row_id: str) -> EffectTraceContext:
+        return self._effect_trace.for_public_row(public_row_id)
 
     @staticmethod
     def _manychat_lead(value: object) -> str:
@@ -106,4 +210,9 @@ class DurableLeadResolver:
         return self.lead_id_for_handoff(handoff_id).removeprefix("manychat:")
 
 
-__all__ = ["DurableLeadResolver", "payment_id_for_command"]
+__all__ = [
+    "DurableLeadResolver",
+    "EffectTraceContext",
+    "SQLiteEffectTraceContextResolver",
+    "payment_id_for_command",
+]

@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from v2_contracts.channel import InboundEvent
 from v2_ops.contracts import (
     ExecutionStatus,
     NodeType,
     OpsExecution,
+    OpsNodeFinish,
     OpsNodeStart,
     TraceCompleteness,
 )
@@ -17,6 +19,7 @@ from v2_ops.recording import (
     NullOpsRecorder,
     SQLiteOpsRecorder,
     record_boundary,
+    record_effect_boundary,
     record_node_boundary,
 )
 from v2_ops.store import SQLiteOpsTraceReader, SQLiteOpsTraceWriter
@@ -48,6 +51,20 @@ def _node(
         input_summary={"request_kind": "lodging"},
         input_full={"request_kind": "lodging"},
         technical_metadata={"attempt_kind": "initial"},
+    )
+
+
+def _effect_value(event_id: str) -> InboundEvent:
+    return InboundEvent(
+        event_id=event_id,
+        lead_id="manychat:1873018537",
+        subscriber_id="1873018537",
+        conversation_id="conversation:ops-recording",
+        text="typed payload",
+        media_url=None,
+        media_type=None,
+        occurred_at=NOW,
+        payload_hash="a" * 64,
     )
 
 
@@ -421,3 +438,149 @@ def test_node_only_boundaries_allow_a_monotonic_multi_node_execution(
             {"ordinal": 1},
             {"ordinal": 2},
         ]
+
+
+def test_effect_boundary_appends_after_terminal_and_calls_business_once(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "effect-boundary.sqlite3").resolve()
+    calls = 0
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        recorder = SQLiteOpsRecorder(writer)
+        turn = _node()
+        recorder.start_execution(_execution())
+        recorder.start_node(turn)
+        recorder.finish_node(
+            OpsNodeFinish.from_start(
+                turn,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=NOW + timedelta(seconds=2),
+            )
+        )
+        recorder.finish_execution(
+            OpsExecution(
+                execution_id=turn.execution_id,
+                lead_id="lead:opaque-recording",
+                received_at=NOW,
+                status=ExecutionStatus.COMPLETED,
+                trace_completeness=TraceCompleteness.COMPLETE_TRACE,
+                current_node_id=turn.node_id,
+                completed_at=NOW + timedelta(seconds=2),
+                terminal_reason="turn_committed",
+            )
+        )
+
+        def business() -> object:
+            nonlocal calls
+            calls += 1
+            return _effect_value("event:result-dto")
+
+        result = record_effect_boundary(
+            recorder,
+            execution_id=turn.execution_id,
+            node_type=NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+            input_value=_effect_value("event:input-dto"),
+            call=business,
+            started_at=lambda: NOW + timedelta(seconds=3),
+            completed_at=lambda: NOW + timedelta(seconds=4),
+            full_content=True,
+        )
+
+    assert calls == 1
+    assert result.event_id == "event:result-dto"
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        nodes = reader.list_nodes(turn.execution_id)
+        detail = reader.get_execution(turn.execution_id)
+    assert nodes[-1].node_type is NodeType.CLOUDBEDS_RESERVATION_REQUEST
+    assert nodes[-1].stored_status is ExecutionStatus.COMPLETED
+    assert detail.stored_status is ExecutionStatus.COMPLETED
+    assert detail.completed_at == NOW + timedelta(seconds=4)
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ("position", "start", "finish", "clock", "serialize"),
+)
+def test_effect_trace_failure_never_retries_or_replaces_result(
+    failure_stage: str,
+) -> None:
+    class EffectFaultRecorder(NullOpsRecorder):
+        __slots__ = ()
+
+        def effect_node_position(self, execution_id: str) -> tuple[int, str]:
+            if failure_stage == "position":
+                raise TraceBaseFailure("position")
+            return 10_000, "a" * 64
+
+        def start_effect_node(self, item: OpsNodeStart) -> None:
+            if failure_stage == "start":
+                raise TraceBaseFailure("start")
+
+        def finish_effect_node(self, item: object) -> None:
+            if failure_stage == "finish":
+                raise TraceBaseFailure("finish")
+
+    calls = 0
+    result = _effect_value("event:same-result")
+
+    def business() -> InboundEvent:
+        nonlocal calls
+        calls += 1
+        return result
+
+    returned = record_effect_boundary(
+        EffectFaultRecorder(),
+        execution_id="event:ops-recording",
+        node_type=NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+        input_value=(object() if failure_stage == "serialize" else result),
+        call=business,
+        started_at=lambda: NOW + timedelta(seconds=2),
+        completed_at=(
+            (lambda: (_ for _ in ()).throw(TraceBaseFailure("clock")))
+            if failure_stage == "clock"
+            else lambda: NOW + timedelta(seconds=3)
+        ),
+        full_content=True,
+    )
+
+    assert returned is result
+    assert calls == 1
+
+
+def test_effect_response_milestone_failure_never_retries_or_replaces_result() -> None:
+    class ResponseFaultRecorder(NullOpsRecorder):
+        __slots__ = ("positions",)
+
+        def __init__(self) -> None:
+            self.positions = 0
+
+        def effect_node_position(self, execution_id: str) -> tuple[int, str]:
+            del execution_id
+            self.positions += 1
+            return 10_000 + self.positions, "a" * 64
+
+        def start_effect_node(self, item: OpsNodeStart) -> None:
+            if item.node_type is NodeType.MANYCHAT_DELIVERY_RESPONSE:
+                raise TraceBaseFailure("response")
+
+    calls = 0
+    result = _effect_value("event:response-milestone-result")
+
+    def business() -> InboundEvent:
+        nonlocal calls
+        calls += 1
+        return result
+
+    returned = record_effect_boundary(
+        ResponseFaultRecorder(),
+        execution_id="event:response-milestone",
+        node_type=NodeType.MANYCHAT_DELIVERY_REQUEST,
+        response_node_type=NodeType.MANYCHAT_DELIVERY_RESPONSE,
+        input_value=_effect_value("event:response-milestone-input"),
+        call=business,
+        started_at=lambda: NOW,
+        completed_at=lambda: NOW + timedelta(seconds=1),
+    )
+
+    assert returned is result
+    assert calls == 1

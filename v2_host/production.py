@@ -608,6 +608,7 @@ def _build_reservation_worker(
     *,
     container: V2Container,
     settings: V2Settings,
+    effect_trace_resolver: DurableLeadResolver | None = None,
 ) -> V2ReservationWorker:
     if container.execution is None:
         raise ValueError("reservation execution owner is unavailable")
@@ -642,6 +643,9 @@ def _build_reservation_worker(
                     {ServiceKind.LODGING: cloudbeds_read_port}
                 ),
                 clock=clock,
+                ops_recorder=container.ops_recorder,
+                effect_trace_resolver=effect_trace_resolver,
+                ops_full_content=settings.ops_trace_full_content,
             )
         )
     if settings.bokun_writes_enabled:
@@ -672,6 +676,9 @@ def _build_reservation_worker(
                     {ServiceKind.ACTIVITY: bokun_read_port}
                 ),
                 clock=clock,
+                ops_recorder=container.ops_recorder,
+                effect_trace_resolver=effect_trace_resolver,
+                ops_full_content=settings.ops_trace_full_content,
             )
         )
     return V2ReservationWorker(
@@ -688,6 +695,7 @@ def _build_payment_worker(
     container: V2Container,
     settings: V2Settings,
     lead_resolver: DurableLeadResolver | None = None,
+    effect_trace_resolver: DurableLeadResolver | None = None,
 ) -> PaymentInitiationWorker:
     if container.payment_initiation is None:
         raise ValueError("payment initiation owner is unavailable")
@@ -780,6 +788,9 @@ def _build_payment_worker(
         effect_guard=effect_guard,
         stripe_reconciler=stripe_reconciler,
         lead_resolver=lead_resolver,
+        ops_recorder=container.ops_recorder,
+        effect_trace_resolver=effect_trace_resolver,
+        ops_full_content=settings.ops_trace_full_content,
     )
 
 
@@ -800,6 +811,15 @@ def build_worker_set(
             followup=container.followup,
         )
         if settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
+        else None
+    )
+    effect_trace_resolver = (
+        DurableLeadResolver(
+            boundary=container.boundary,
+            execution=container.execution,
+            followup=container.followup,
+        )
+        if settings.ops_trace_path is not None
         else None
     )
     inbox_worker: object
@@ -835,6 +855,7 @@ def build_worker_set(
         _build_reservation_worker(
             container=container,
             settings=settings,
+            effect_trace_resolver=effect_trace_resolver,
         )
         if reservation_enabled
         else ClosedCapabilityWorker("reservation_writes")
@@ -848,6 +869,7 @@ def build_worker_set(
             container=container,
             settings=settings,
             lead_resolver=lead_resolver,
+            effect_trace_resolver=effect_trace_resolver,
         )
         if payment_enabled
         else ClosedCapabilityWorker("payment_initiation")
@@ -918,6 +940,9 @@ def build_worker_set(
             effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
             worker_id="worker:manychat-public",
             lease_ttl=timedelta(seconds=30),
+            ops_recorder=container.ops_recorder,
+            effect_trace_resolver=effect_trace_resolver,
+            ops_full_content=settings.ops_trace_full_content,
         )
     else:
         public_delivery = ClosedCapabilityWorker("manychat_delivery")

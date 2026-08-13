@@ -21,6 +21,8 @@ from v2_application.completion import (
     PublicDeliveryWorker,
     PublicOutboxStore,
 )
+from v2_ops.contracts import NodeType
+from v2_ops.recording import NullOpsRecorder, OpsRecorder, record_effect_boundary
 
 
 class BoundaryPublicDisposition(str, Enum):
@@ -72,6 +74,9 @@ class BoundaryPublicDeliveryWorker:
         delivery: PublicDeliveryPort,
         worker_id: str,
         lease_ttl: timedelta,
+        ops_recorder: OpsRecorder | None = None,
+        effect_trace_resolver: object | None = None,
+        ops_full_content: bool = False,
     ) -> None:
         required = (
             "claim_public_delivery",
@@ -90,10 +95,19 @@ class BoundaryPublicDeliveryWorker:
             raise ValueError("worker_id must be non-empty text")
         if type(lease_ttl) is not timedelta or lease_ttl <= timedelta(0):
             raise ValueError("lease_ttl must be positive")
+        if type(ops_full_content) is not bool:
+            raise TypeError("ops_full_content must be an exact bool")
+        if effect_trace_resolver is not None and not callable(
+            getattr(effect_trace_resolver, "effect_trace_for_public_row", None)
+        ):
+            raise TypeError("effect_trace_resolver must resolve public rows")
         self._boundary = boundary
         self._delivery = delivery
         self._worker_id = worker_id
         self._lease_ttl = lease_ttl
+        self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
+        self._effect_trace_resolver = effect_trace_resolver
+        self._ops_full_content = ops_full_content
 
     def run_once(self, *, now: datetime) -> BoundaryPublicDisposition:
         claim = self._boundary.claim_public_delivery(
@@ -111,7 +125,29 @@ class BoundaryPublicDeliveryWorker:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             raise
         try:
-            acceptance = self._delivery.send(claim)
+            context = None
+            try:
+                if self._effect_trace_resolver is not None:
+                    context = self._effect_trace_resolver.effect_trace_for_public_row(
+                        claim.public_row_id
+                    )
+            except BaseException:
+                context = None
+            if context is None:
+                acceptance = self._delivery.send(claim)
+            else:
+                acceptance = record_effect_boundary(
+                    self._ops_recorder,
+                    execution_id=context.execution_id,
+                    node_type=NodeType.MANYCHAT_DELIVERY_REQUEST,
+                    response_node_type=NodeType.MANYCHAT_DELIVERY_RESPONSE,
+                    input_value=claim,
+                    call=lambda: self._delivery.send(claim),
+                    started_at=lambda: now,
+                    completed_at=lambda: max(datetime.now(now.tzinfo), now),
+                    full_content=self._ops_full_content,
+                    technical_metadata={"trace_stage": "manychat_delivery_request"},
+                )
         except PublicDeliveryRejected:
             self._boundary.mark_public_delivery_manual_review(claim, now=now)
             return BoundaryPublicDisposition.MANUAL_REVIEW
@@ -152,6 +188,9 @@ class CombinedPublicDeliveryWorker:
         effect_guard: object,
         worker_id: str,
         lease_ttl: timedelta,
+        ops_recorder: OpsRecorder | None = None,
+        effect_trace_resolver: object | None = None,
+        ops_full_content: bool = False,
     ) -> None:
         if not callable(getattr(effect_guard, "allows_workflow", None)):
             raise TypeError("effect_guard must expose allows_workflow")
@@ -160,6 +199,9 @@ class CombinedPublicDeliveryWorker:
             delivery=delivery,
             worker_id=worker_id + ":boundary",
             lease_ttl=lease_ttl,
+            ops_recorder=ops_recorder,
+            effect_trace_resolver=effect_trace_resolver,
+            ops_full_content=ops_full_content,
         )
         self._completion = PublicDeliveryWorker(
             store=completion,

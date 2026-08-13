@@ -39,6 +39,13 @@ from v2_contracts.payments import (
     StripeStepReceipt,
     StripeStepStatus,
 )
+from v2_ops.contracts import NodeType
+from v2_ops.recording import (
+    NullOpsRecorder,
+    OpsRecorder,
+    record_effect_boundary,
+    record_effect_value,
+)
 
 
 class PaymentService:
@@ -1220,6 +1227,9 @@ class PaymentInitiationWorker:
         effect_guard: object | None = None,
         stripe_reconciler: object | None = None,
         lead_resolver: object | None = None,
+        ops_recorder: OpsRecorder | None = None,
+        effect_trace_resolver: object | None = None,
+        ops_full_content: bool = False,
     ) -> None:
         if type(store) is not SQLitePaymentInitiationStore:
             raise TypeError("store must be exact SQLitePaymentInitiationStore")
@@ -1244,6 +1254,85 @@ class PaymentInitiationWorker:
         ):
             raise TypeError("lead_resolver must resolve payment owners")
         self._lead_resolver = lead_resolver
+        if type(ops_full_content) is not bool:
+            raise TypeError("ops_full_content must be an exact bool")
+        if effect_trace_resolver is not None and not callable(
+            getattr(effect_trace_resolver, "effect_trace_for_payment", None)
+        ):
+            raise TypeError("effect_trace_resolver must resolve payment traces")
+        self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
+        self._effect_trace_resolver = effect_trace_resolver
+        self._ops_full_content = ops_full_content
+
+    def _effect_context(self, payment_id: str):
+        try:
+            if self._effect_trace_resolver is not None:
+                return self._effect_trace_resolver.effect_trace_for_payment(payment_id)
+        except BaseException:
+            pass
+        return None
+
+    def _initiate_once(
+        self,
+        claim: PaymentInitiationClaim,
+        *,
+        subscriber_id: str,
+        now: datetime,
+    ) -> PaymentMethodOffer:
+        selection = claim.selection
+        context = self._effect_context(selection.obligation.payment_id)
+
+        def initiate() -> PaymentMethodOffer:
+            return self._payments.initiate(
+                selection.obligation,
+                selection.method,
+                initiation_id=claim.initiation_id,
+                journal_worker_id=claim.worker_id,
+                journal_fencing_token=claim.fencing_token,
+                subscriber_id=subscriber_id,
+            )
+
+        if context is None:
+            return initiate()
+        node_type = {
+            PaymentMethod.STRIPE: NodeType.STRIPE_PAYMENT_LINK,
+            PaymentMethod.PIX: NodeType.PIX_INSTRUCTION,
+            PaymentMethod.WISE: NodeType.WISE_INSTRUCTION,
+        }[selection.method]
+        offer = record_effect_boundary(
+            self._ops_recorder,
+            execution_id=context.execution_id,
+            node_type=node_type,
+            input_value=selection,
+            call=initiate,
+            started_at=lambda: now,
+            completed_at=lambda: max(datetime.now(now.tzinfo), now),
+            full_content=self._ops_full_content,
+            technical_metadata={"trace_stage": node_type.value},
+        )
+        if selection.method is PaymentMethod.STRIPE:
+            receipt_types = {
+                StripeCreationStep.PRODUCT: NodeType.STRIPE_PRODUCT,
+                StripeCreationStep.PRICE: NodeType.STRIPE_PRICE,
+                StripeCreationStep.PAYMENT_LINK: NodeType.STRIPE_PAYMENT_LINK,
+            }
+            try:
+                receipts = self._store.stripe_step_receipts(selection)
+                for receipt in receipts:
+                    record_effect_value(
+                        self._ops_recorder,
+                        execution_id=context.execution_id,
+                        node_type=receipt_types[receipt.step],
+                        value=receipt,
+                        observed_at=lambda instant=now: max(
+                            datetime.now(instant.tzinfo), instant
+                        ),
+                        full_content=self._ops_full_content,
+                        technical_metadata={"trace_stage": receipt.step.value},
+                    )
+            except BaseException:
+                pass
+        return offer
 
     def run_once(self, *, now: datetime) -> PaymentInitiationResult:
         if self._stripe_reconciler is not None:
@@ -1311,13 +1400,10 @@ class PaymentInitiationWorker:
                 if self._lead_resolver is not None
                 else ""
             )
-            offer = self._payments.initiate(
-                claim.selection.obligation,
-                claim.selection.method,
-                initiation_id=claim.initiation_id,
-                journal_worker_id=claim.worker_id,
-                journal_fencing_token=claim.fencing_token,
+            offer = self._initiate_once(
+                claim,
                 subscriber_id=subscriber_id,
+                now=now,
             )
         except Exception:
             self._store.mark_unknown(claim, now=now)

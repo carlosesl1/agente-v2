@@ -9,9 +9,14 @@ from reservation_boundary.public_dispatch import (
     PublicAcceptanceReceipt,
     PublicDispatchClaim,
 )
-from v2_contracts.channel import InboundBatch, InboundEvent
+from v2_contracts.channel import InboundBatch, InboundEvent, PublicChannelAcceptance
 from v2_contracts.model import ModelProposal, ModelRequest
-from v2_contracts.payments import PaymentInstruction, StripeStepReceipt
+from v2_contracts.payments import (
+    PaymentInstruction,
+    PaymentSelection,
+    StripePaymentLink,
+    StripeStepReceipt,
+)
 from v2_contracts.providers import (
     ProviderDispatchPermit,
     ProviderExecutionResult,
@@ -307,6 +312,26 @@ def _serialize_stripe_receipt(value: StripeStepReceipt) -> SerializedPair:
     )
 
 
+def _serialize_payment_selection(value: PaymentSelection) -> SerializedPair:
+    obligation = value.obligation
+    return _closed_pair(
+        {
+            "payment_fingerprint": _hash(
+                "v2-ops-payment-v1", obligation.payment_id
+            ),
+            "reservation_fingerprint": _hash(
+                "v2-ops-reservation-anchor-v1",
+                obligation.reservation_anchor_id,
+            ),
+            "method": value.method.value,
+            "business_unit": obligation.business_unit.value,
+            "amount_minor": obligation.amount_minor,
+            "currency": obligation.currency,
+            "economic_version": obligation.economic_version,
+        }
+    )
+
+
 def _serialize_payment_instruction(value: PaymentInstruction) -> SerializedPair:
     return _closed_pair(
         {
@@ -323,6 +348,28 @@ def _serialize_payment_instruction(value: PaymentInstruction) -> SerializedPair:
             "instruction_bytes": _bytes(value.public_text),
             "instruction_hash": _hash(
                 "v2-ops-payment-instruction-v1", value.public_text
+            ),
+        }
+    )
+
+
+def _serialize_stripe_payment_link(value: StripePaymentLink) -> SerializedPair:
+    return _closed_pair(
+        {
+            "payment_fingerprint": _hash("v2-ops-payment-v1", value.payment_id),
+            "reservation_fingerprint": _hash(
+                "v2-ops-reservation-anchor-v1", value.reservation_anchor_id
+            ),
+            "account_fingerprint": _hash(
+                "v2-ops-stripe-account-v1", value.account_profile_id
+            ),
+            "economic_version": value.economic_version,
+            "provider_reference_fingerprint": value.provider_reference_fingerprint,
+            "receipt_hash": value.receipt_hash,
+            "settled": value.settled,
+            "public_url_bytes": _bytes(value.public_url),
+            "public_url_hash": _hash(
+                "v2-ops-stripe-public-url-v1", value.public_url
             ),
         }
     )
@@ -404,6 +451,29 @@ def _serialize_public_receipt(value: PublicAcceptanceReceipt) -> SerializedPair:
     )
 
 
+def _serialize_public_acceptance(
+    value: PublicChannelAcceptance,
+) -> SerializedPair:
+    return _closed_pair(
+        {
+            "state": value.state.value,
+            "operations": [item.value for item in value.operations],
+            "operation_count": len(value.operations),
+            "provider_request_fingerprints": [
+                None
+                if item is None
+                else _hash("v2-ops-provider-request-v1", item)
+                for item in value.provider_request_ids
+            ],
+            "dispatch_correlation_fingerprints": [
+                _hash("v2-ops-dispatch-correlation-v1", item)
+                for item in value.dispatch_correlation_ids
+            ],
+            "acceptance_hash": value.canonical_hash(),
+        }
+    )
+
+
 _SERIALIZERS: dict[type[object], Callable[[object], SerializedPair]] = {
     InboundEvent: lambda value: _serialize_inbound_event(value),
     InboundBatch: lambda value: _serialize_inbound_batch(value),
@@ -414,9 +484,12 @@ _SERIALIZERS: dict[type[object], Callable[[object], SerializedPair]] = {
     ProviderDispatchPermit: lambda value: _serialize_provider_permit(value),
     ProviderExecutionResult: lambda value: _serialize_provider_result(value),
     StripeStepReceipt: lambda value: _serialize_stripe_receipt(value),
+    PaymentSelection: lambda value: _serialize_payment_selection(value),
     PaymentInstruction: lambda value: _serialize_payment_instruction(value),
+    StripePaymentLink: lambda value: _serialize_stripe_payment_link(value),
     PublicDispatchClaim: lambda value: _serialize_public_claim(value),
     PublicAcceptanceReceipt: lambda value: _serialize_public_receipt(value),
+    PublicChannelAcceptance: lambda value: _serialize_public_acceptance(value),
 }
 
 

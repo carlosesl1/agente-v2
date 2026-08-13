@@ -73,6 +73,11 @@ def test_contract_enums_are_closed_and_exact() -> None:
         "provider_reconciliation",
         "stripe_reconciliation",
         "manual_review",
+        "ledger_turn",
+        "ledger_command",
+        "ledger_reservation",
+        "ledger_payment",
+        "ledger_public_outbox",
     ]
 
 

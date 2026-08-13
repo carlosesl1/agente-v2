@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Final
 
 from reservation_domain import (
@@ -31,6 +32,13 @@ from v2_contracts.providers import (
     ProviderExecutionResult,
     ProviderWriteAuthorization,
     cloudbeds_outcome_reference,
+)
+from v2_ops.contracts import NodeType
+from v2_ops.recording import (
+    NullOpsRecorder,
+    OpsRecorder,
+    record_effect_boundary,
+    record_effect_value,
 )
 
 
@@ -293,6 +301,9 @@ class V2ReservationExecutionAdapter:
         binding_resolver: PrivateOfferBindingResolver | None = None,
         clock=None,
         require_private_binding: bool = True,
+        ops_recorder: OpsRecorder | None = None,
+        effect_trace_resolver: object | None = None,
+        ops_full_content: bool = False,
     ) -> None:
         if provider not in _PROVIDER_OPERATION:
             raise ValueError("provider is outside the V2 reservation allowlist")
@@ -308,6 +319,12 @@ class V2ReservationExecutionAdapter:
             raise ValueError("binding_resolver and clock must be configured together")
         if type(require_private_binding) is not bool:
             raise TypeError("require_private_binding must be an exact bool")
+        if type(ops_full_content) is not bool:
+            raise TypeError("ops_full_content must be an exact bool")
+        if effect_trace_resolver is not None and not callable(
+            getattr(effect_trace_resolver, "effect_trace_for_command", None)
+        ):
+            raise TypeError("effect_trace_resolver must resolve command traces")
         if binding_resolver is not None and (
             type(binding_resolver) is not PrivateOfferBindingResolver
             or not callable(getattr(clock, "now", None))
@@ -320,6 +337,9 @@ class V2ReservationExecutionAdapter:
         self._binding_resolver = binding_resolver
         self._clock = clock
         self._require_private_binding = require_private_binding
+        self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
+        self._effect_trace_resolver = effect_trace_resolver
+        self._ops_full_content = ops_full_content
         self._prepared_private_bindings: dict[str, dict[str, str]] = {}
 
     @property
@@ -429,7 +449,51 @@ class V2ReservationExecutionAdapter:
             fencing_token=permit.lease.fencing_token,
             authorization_id=self._authorization.authorization_id,
         )
-        result = self._port.execute(provider_permit)
+        context = None
+        try:
+            if self._effect_trace_resolver is not None:
+                context = self._effect_trace_resolver.effect_trace_for_command(
+                    request.command_id
+                )
+        except BaseException:
+            context = None
+        if context is None:
+            result = self._port.execute(provider_permit)
+        else:
+            request_type, response_type = {
+                "cloudbeds": (
+                    NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+                    NodeType.CLOUDBEDS_RESERVATION_RESPONSE,
+                ),
+                "bokun": (
+                    NodeType.BOKUN_BOOKING_REQUEST,
+                    NodeType.BOKUN_BOOKING_RESPONSE,
+                ),
+            }[self.provider]
+            result = record_effect_boundary(
+                self._ops_recorder,
+                execution_id=context.execution_id,
+                node_type=request_type,
+                input_value=provider_permit,
+                call=lambda: self._port.execute(provider_permit),
+                started_at=lambda: permit.fenced_at,
+                completed_at=lambda: max(
+                    datetime.now(timezone.utc), permit.fenced_at
+                ),
+                full_content=self._ops_full_content,
+                technical_metadata={"trace_stage": request_type.value},
+            )
+            record_effect_value(
+                self._ops_recorder,
+                execution_id=context.execution_id,
+                node_type=response_type,
+                value=result,
+                observed_at=lambda: max(
+                    datetime.now(timezone.utc), permit.fenced_at
+                ),
+                full_content=self._ops_full_content,
+                technical_metadata={"trace_stage": response_type.value},
+            )
         if type(result) is not ProviderExecutionResult:
             raise TypeError("provider port returned a non-canonical result")
         if self.provider == "cloudbeds" and result.provider_reference is not None:

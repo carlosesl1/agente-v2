@@ -66,6 +66,7 @@ def node_start(
     ordinal: int = 1,
     node_type: NodeType = NodeType.MAYA_REQUEST,
     started_at: datetime = UTC_NOW + timedelta(seconds=1),
+    parent_node_id: str | None = None,
     input_summary: dict[str, object] | None = None,
     input_full: dict[str, object] | None = None,
 ) -> OpsNodeStart:
@@ -73,6 +74,7 @@ def node_start(
         execution_id=execution_id,
         node_type=node_type,
         ordinal=ordinal,
+        parent_node_id=parent_node_id,
         started_at=started_at,
         input_summary={"kind": "summary"} if input_summary is None else input_summary,
         input_full={"permitted": "input-full"} if input_full is None else input_full,
@@ -261,6 +263,84 @@ def test_execution_transitions_are_monotonic_and_terminal_replay_is_idempotent(
         stored = reader.get_execution("event-001")
     assert stored.status == ExecutionStatus.COMPLETED.value
     assert stored.terminal_reason == "turn_committed"
+
+
+def test_effect_node_can_append_idempotently_after_turn_terminal_without_reopening(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "trace.sqlite3").resolve()
+    turn = node_start(ordinal=1, node_type=NodeType.TURN_COMMIT)
+    effect = node_start(
+        ordinal=10_000,
+        node_type=NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+        started_at=UTC_NOW + timedelta(seconds=4),
+        parent_node_id=turn.node_id,
+    )
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(execution())
+        writer.start_node(turn)
+        writer.finish_node(node_finish(turn))
+        writer.write_execution(
+            execution(
+                status=ExecutionStatus.COMPLETED,
+                current_node_id=turn.node_id,
+                completed_at=UTC_NOW + timedelta(seconds=3),
+                terminal_reason="turn_committed",
+            )
+        )
+
+        writer.start_effect_node(effect)
+        writer.start_effect_node(effect)
+        writer.finish_effect_node(node_finish(effect))
+        writer.finish_effect_node(node_finish(effect))
+
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        stored = reader.get_execution("event-001")
+        nodes = reader.list_nodes("event-001")
+    assert stored.stored_status is ExecutionStatus.COMPLETED
+    assert stored.current_node_id == effect.node_id
+    assert stored.completed_at == effect.started_at + timedelta(seconds=1)
+    assert [item.node_type for item in nodes] == [
+        NodeType.TURN_COMMIT,
+        NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+    ]
+
+
+def test_effect_node_rejects_non_effect_types_and_ordinal_or_identity_conflicts(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "trace.sqlite3").resolve()
+    turn = node_start(ordinal=1, node_type=NodeType.TURN_COMMIT)
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(execution())
+        writer.start_node(turn)
+        writer.finish_node(node_finish(turn))
+        writer.write_execution(
+            execution(
+                status=ExecutionStatus.COMPLETED,
+                current_node_id=turn.node_id,
+                completed_at=UTC_NOW + timedelta(seconds=3),
+                terminal_reason="turn_committed",
+            )
+        )
+        with pytest.raises((TypeError, ValueError, OpsTraceConflictError)):
+            writer.start_effect_node(
+                node_start(
+                    ordinal=10_000,
+                    node_type=NodeType.MAYA_REQUEST,
+                    started_at=UTC_NOW + timedelta(seconds=4),
+                    parent_node_id=turn.node_id,
+                )
+            )
+        with pytest.raises(OpsTraceConflictError, match="ordinal"):
+            writer.start_effect_node(
+                node_start(
+                    ordinal=1,
+                    node_type=NodeType.MANYCHAT_DELIVERY_REQUEST,
+                    started_at=UTC_NOW + timedelta(seconds=4),
+                    parent_node_id=turn.node_id,
+                )
+            )
 
 
 def test_node_start_finish_round_trip_is_deterministic_and_deep_payload_canonical(

@@ -164,6 +164,39 @@ def _expected_live_schema_fingerprint() -> str:
 
 
 _EXPECTED_LIVE_SCHEMA_FINGERPRINT = _expected_live_schema_fingerprint()
+_EFFECT_ORDINAL_MIN = 10_000
+_EFFECT_NODE_TYPES = frozenset(
+    {
+        NodeType.BOUNDARY_RELAY,
+        NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+        NodeType.CLOUDBEDS_RESERVATION_RESPONSE,
+        NodeType.BOKUN_BOOKING_REQUEST,
+        NodeType.BOKUN_BOOKING_RESPONSE,
+        NodeType.STRIPE_PRODUCT,
+        NodeType.STRIPE_PRICE,
+        NodeType.STRIPE_PAYMENT_LINK,
+        NodeType.PIX_INSTRUCTION,
+        NodeType.WISE_INSTRUCTION,
+        NodeType.SETTLEMENT,
+        NodeType.PUBLIC_OUTBOX,
+        NodeType.MANYCHAT_DELIVERY_REQUEST,
+        NodeType.MANYCHAT_DELIVERY_RESPONSE,
+        NodeType.HANDOFF_REQUEST,
+        NodeType.HANDOFF_DELIVERY,
+        NodeType.PROVIDER_RECONCILIATION,
+        NodeType.STRIPE_RECONCILIATION,
+        NodeType.MANUAL_REVIEW,
+    }
+)
+_LEDGER_NODE_TYPES = frozenset(
+    {
+        NodeType.LEDGER_TURN,
+        NodeType.LEDGER_COMMAND,
+        NodeType.LEDGER_RESERVATION,
+        NodeType.LEDGER_PAYMENT,
+        NodeType.LEDGER_PUBLIC_OUTBOX,
+    }
+)
 
 
 class OpsTraceStoreError(RuntimeError):
@@ -581,6 +614,104 @@ class SQLiteOpsTraceWriter:
 
         self._transaction(apply)
 
+    def write_ledger_projection(
+        self,
+        execution: OpsExecution,
+        nodes: tuple[tuple[OpsNodeStart, OpsNodeFinish], ...],
+    ) -> bool:
+        """Atomically insert one ledger-only execution, never overlay live trace."""
+
+        if type(execution) is not OpsExecution:
+            raise TypeError("execution must be an exact OpsExecution")
+        if execution.trace_completeness is not TraceCompleteness.LEDGER_ONLY:
+            raise ValueError("projection execution must be ledger_only")
+        if execution.status not in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.MANUAL_REVIEW,
+            ExecutionStatus.FAILED,
+        }:
+            raise ValueError("projection execution must be terminal")
+        if type(nodes) is not tuple or not nodes:
+            raise ValueError("projection nodes must be a non-empty exact tuple")
+        previous: OpsNodeStart | None = None
+        for pair in nodes:
+            if (
+                type(pair) is not tuple
+                or len(pair) != 2
+                or type(pair[0]) is not OpsNodeStart
+                or type(pair[1]) is not OpsNodeFinish
+            ):
+                raise TypeError("projection node pairs must contain exact DTOs")
+            start, finish = pair
+            if start.node_type not in _LEDGER_NODE_TYPES:
+                raise ValueError("projection node is outside the ledger catalog")
+            if (
+                start.execution_id != execution.execution_id
+                or finish.execution_id != execution.execution_id
+            ):
+                raise ValueError("projection node belongs to another execution")
+            if start.node_id != finish.node_id:
+                raise ValueError("projection node identities diverge")
+            if start.input_full is not None or finish.output_full is not None:
+                raise ValueError("ledger projection cannot contain full payloads")
+            if previous is None:
+                if start.parent_node_id is not None or start.ordinal != 1:
+                    raise ValueError("first projection node must be the root")
+            elif (
+                start.parent_node_id != previous.node_id
+                or start.ordinal != previous.ordinal + 1
+                or start.started_at < previous.started_at
+            ):
+                raise ValueError("projection node chain is not monotonic")
+            previous = start
+        if previous is None or execution.current_node_id != previous.node_id:
+            raise ValueError("projection terminal node identity diverges")
+
+        inserted = False
+
+        def apply(connection: sqlite3.Connection) -> None:
+            nonlocal inserted
+            existing = connection.execute(
+                "SELECT 1 FROM executions WHERE execution_id=?",
+                (execution.execution_id,),
+            ).fetchone()
+            if existing is not None:
+                return
+            connection.execute(
+                "INSERT INTO executions(execution_id,lead_id,received_at,completed_at,"
+                "status,trace_completeness,current_node_id,terminal_reason) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                _execution_tuple(execution),
+            )
+            for start, finish in nodes:
+                connection.execute(
+                    "INSERT INTO nodes(node_id,execution_id,node_type,ordinal,attempt,"
+                    "parent_node_id,status,started_at,completed_at,input_summary_json,"
+                    "output_summary_json,input_full_nonce,input_full_ciphertext,"
+                    "output_full_nonce,output_full_ciphertext,error_json,"
+                    "technical_metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,"
+                    "NULL,NULL,?,?)",
+                    (
+                        start.node_id,
+                        start.execution_id,
+                        start.node_type.value,
+                        start.ordinal,
+                        start.attempt,
+                        start.parent_node_id,
+                        finish.status.value,
+                        format_utc_timestamp(start.started_at),
+                        format_utc_timestamp(finish.completed_at),
+                        _json_text(start.input_summary),
+                        _json_text(finish.output_summary),
+                        None if finish.error is None else _json_text(finish.error),
+                        _json_text(finish.technical_metadata),
+                    ),
+                )
+            inserted = True
+
+        self._transaction(apply)
+        return inserted
+
     def start_node(self, item: OpsNodeStart) -> None:
         if type(item) is not OpsNodeStart:
             raise TypeError("item must be an exact OpsNodeStart")
@@ -772,6 +903,167 @@ class SQLiteOpsTraceWriter:
 
         self._transaction(apply)
 
+    def effect_node_position(self, execution_id: str) -> tuple[int, str]:
+        """Return the next process-local effect ordinal and causal parent."""
+
+        _require_id(execution_id, "execution_id")
+        with self._lock:
+            connection = self._db()
+            execution = connection.execute(
+                "SELECT status,current_node_id FROM executions WHERE execution_id=?",
+                (execution_id,),
+            ).fetchone()
+            if (
+                execution is None
+                or ExecutionStatus(execution[0])
+                not in {
+                    ExecutionStatus.COMPLETED,
+                    ExecutionStatus.FAILED,
+                    ExecutionStatus.MANUAL_REVIEW,
+                }
+                or execution[1] is None
+            ):
+                raise OpsTraceConflictError("effect requires one terminal committed turn")
+            latest = connection.execute(
+                "SELECT max(ordinal) FROM nodes WHERE execution_id=?",
+                (execution_id,),
+            ).fetchone()[0]
+            ordinal = max(_EFFECT_ORDINAL_MIN, int(latest or 0) + 1)
+            return ordinal, execution[1]
+
+    def start_effect_node(self, item: OpsNodeStart) -> None:
+        """Append one reserved post-commit effect node without reopening the turn."""
+
+        if type(item) is not OpsNodeStart:
+            raise TypeError("item must be an exact OpsNodeStart")
+        if item.node_type not in _EFFECT_NODE_TYPES:
+            raise ValueError("node type is outside the post-commit effect catalog")
+        if item.ordinal < _EFFECT_ORDINAL_MIN:
+            raise OpsTraceConflictError("effect node ordinal conflict")
+        if item.parent_node_id is None:
+            raise OpsTraceConflictError("effect node requires a causal parent")
+        input_summary = _json_text(item.input_summary)
+        metadata = _json_text(item.technical_metadata)
+        encrypted = (
+            None
+            if item.input_full is None
+            else self._cipher.encrypt(
+                canonical_json_bytes(item.input_full),
+                execution_id=item.execution_id,
+                node_id=item.node_id,
+                side="input",
+            )
+        )
+
+        def apply(connection: sqlite3.Connection) -> None:
+            execution = connection.execute(
+                "SELECT received_at,status,current_node_id FROM executions "
+                "WHERE execution_id=?",
+                (item.execution_id,),
+            ).fetchone()
+            if execution is None or ExecutionStatus(execution[1]) not in {
+                ExecutionStatus.COMPLETED,
+                ExecutionStatus.FAILED,
+                ExecutionStatus.MANUAL_REVIEW,
+            }:
+                raise OpsTraceConflictError("effect requires one terminal committed turn")
+            if item.started_at < _parse_utc(execution[0], "received_at"):
+                raise OpsTraceConflictError("node time identity conflict")
+            parent = connection.execute(
+                "SELECT execution_id,status FROM nodes WHERE node_id=?",
+                (item.parent_node_id,),
+            ).fetchone()
+            if (
+                parent is None
+                or parent[0] != item.execution_id
+                or parent[1] == ExecutionStatus.RUNNING.value
+            ):
+                raise OpsTraceConflictError("effect parent node identity conflict")
+            row = connection.execute(
+                "SELECT node_type,ordinal,attempt,parent_node_id,started_at,"
+                "input_summary_json,input_full_nonce,input_full_ciphertext,"
+                "technical_metadata_json FROM nodes WHERE node_id=?",
+                (item.node_id,),
+            ).fetchone()
+            if row is not None:
+                same = (
+                    row[0] == item.node_type.value
+                    and row[1] == item.ordinal
+                    and row[2] == item.attempt
+                    and row[3] == item.parent_node_id
+                    and row[4] == format_utc_timestamp(item.started_at)
+                    and row[5] == input_summary
+                    and row[8] == metadata
+                )
+                if row[6] is None:
+                    same = same and item.input_full is None
+                elif item.input_full is None:
+                    same = False
+                else:
+                    try:
+                        existing = self._cipher.decrypt(
+                            row[6],
+                            row[7],
+                            execution_id=item.execution_id,
+                            node_id=item.node_id,
+                            side="input",
+                        )
+                        same = same and existing == canonical_json_bytes(item.input_full)
+                    except TraceCryptoError:
+                        same = False
+                if same:
+                    return
+                raise OpsTraceConflictError("node identity conflict")
+            ordinal_owner = connection.execute(
+                "SELECT node_id FROM nodes WHERE execution_id=? AND ordinal=? AND attempt=?",
+                (item.execution_id, item.ordinal, item.attempt),
+            ).fetchone()
+            if ordinal_owner is not None:
+                raise OpsTraceConflictError("effect node ordinal conflict")
+            connection.execute(
+                "INSERT INTO nodes(node_id,execution_id,node_type,ordinal,attempt,"
+                "parent_node_id,status,started_at,completed_at,input_summary_json,"
+                "output_summary_json,input_full_nonce,input_full_ciphertext,"
+                "output_full_nonce,output_full_ciphertext,error_json,"
+                "technical_metadata_json) VALUES(?,?,?,?,?,?,'running',?,NULL,?,NULL,"
+                "?,?,NULL,NULL,NULL,?)",
+                (
+                    item.node_id,
+                    item.execution_id,
+                    item.node_type.value,
+                    item.ordinal,
+                    item.attempt,
+                    item.parent_node_id,
+                    format_utc_timestamp(item.started_at),
+                    input_summary,
+                    None if encrypted is None else encrypted.nonce,
+                    None if encrypted is None else encrypted.ciphertext,
+                    metadata,
+                ),
+            )
+            current = (
+                None
+                if execution[2] is None
+                else connection.execute(
+                    "SELECT ordinal,attempt FROM nodes WHERE node_id=?",
+                    (execution[2],),
+                ).fetchone()
+            )
+            if current is None or tuple(current) < (item.ordinal, item.attempt):
+                connection.execute(
+                    "UPDATE executions SET current_node_id=? WHERE execution_id=?",
+                    (item.node_id, item.execution_id),
+                )
+
+        self._transaction(apply)
+
+    def finish_effect_node(self, item: OpsNodeFinish) -> None:
+        if type(item) is not OpsNodeFinish:
+            raise TypeError("item must be an exact OpsNodeFinish")
+        if item.node_type not in _EFFECT_NODE_TYPES or item.ordinal < _EFFECT_ORDINAL_MIN:
+            raise ValueError("node is outside the post-commit effect catalog")
+        self.finish_node(item)
+
 
 class SQLiteOpsTraceReader:
     def __init__(
@@ -904,20 +1196,44 @@ class SQLiteOpsTraceReader:
     ) -> OpsExecutionView:
         stored = ExecutionStatus(row[4])
         started = _parse_utc(row[2], "received_at")
-        if stored is ExecutionStatus.RUNNING:
-            node = connection.execute(
-                "SELECT started_at FROM nodes WHERE execution_id=? AND status='running' "
+        visible_status = stored.value
+        completed_at = None if row[3] is None else _parse_utc(row[3], "completed_at")
+        running_node = connection.execute(
+            "SELECT started_at FROM nodes WHERE execution_id=? AND status='running' "
+            "ORDER BY ordinal DESC,attempt DESC LIMIT 1",
+            (row[0],),
+        ).fetchone()
+        if running_node is not None:
+            started = _parse_utc(running_node[0], "node started_at")
+            visible_status = self._stale(
+                ExecutionStatus.RUNNING,
+                started,
+                now=now,
+                stale_after=stale_after,
+            )
+            completed_at = None
+        else:
+            latest = connection.execute(
+                "SELECT status,completed_at FROM nodes WHERE execution_id=? "
                 "ORDER BY ordinal DESC,attempt DESC LIMIT 1",
                 (row[0],),
             ).fetchone()
-            if node is not None:
-                started = _parse_utc(node[0], "node started_at")
+            if latest is not None:
+                if latest[0] in {
+                    ExecutionStatus.FAILED.value,
+                    ExecutionStatus.MANUAL_REVIEW.value,
+                }:
+                    visible_status = latest[0]
+                if latest[1] is not None:
+                    node_completed = _parse_utc(latest[1], "node completed_at")
+                    if completed_at is None or node_completed > completed_at:
+                        completed_at = node_completed
         return OpsExecutionView(
             execution_id=row[0],
             lead_id=row[1],
             received_at=_parse_utc(row[2], "received_at"),
-            completed_at=None if row[3] is None else _parse_utc(row[3], "completed_at"),
-            status=self._stale(stored, started, now=now, stale_after=stale_after),
+            completed_at=completed_at,
+            status=visible_status,
             stored_status=stored,
             trace_completeness=TraceCompleteness(row[5]),
             current_node_id=row[6],

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Protocol, TypeVar
 
 from v2_ops.contracts import (
     ExecutionStatus,
+    NodeType,
     OpsExecution,
     OpsNodeFinish,
     OpsNodeStart,
 )
+from v2_ops.serialization import serialize_ops_value
 
 
 T = TypeVar("T")
@@ -39,6 +41,12 @@ class TraceWriter(Protocol):
 
     def finish_node(self, item: OpsNodeFinish) -> None: ...
 
+    def effect_node_position(self, execution_id: str) -> tuple[int, str]: ...
+
+    def start_effect_node(self, item: OpsNodeStart) -> None: ...
+
+    def finish_effect_node(self, item: OpsNodeFinish) -> None: ...
+
 
 class OpsRecorder(Protocol):
     def start_execution(self, item: OpsExecution) -> None: ...
@@ -48,6 +56,12 @@ class OpsRecorder(Protocol):
     def finish_node(self, item: OpsNodeFinish) -> None: ...
 
     def finish_execution(self, item: OpsExecution) -> None: ...
+
+    def effect_node_position(self, execution_id: str) -> tuple[int, str]: ...
+
+    def start_effect_node(self, item: OpsNodeStart) -> None: ...
+
+    def finish_effect_node(self, item: OpsNodeFinish) -> None: ...
 
     def report_degradation(
         self,
@@ -71,6 +85,16 @@ class NullOpsRecorder:
         del item
 
     def finish_execution(self, item: OpsExecution) -> None:
+        del item
+
+    def effect_node_position(self, execution_id: str) -> tuple[int, str]:
+        del execution_id
+        raise RuntimeError("null recorder has no effect position")
+
+    def start_effect_node(self, item: OpsNodeStart) -> None:
+        del item
+
+    def finish_effect_node(self, item: OpsNodeFinish) -> None:
         del item
 
     def report_degradation(
@@ -106,6 +130,15 @@ class SQLiteOpsRecorder:
 
     def finish_execution(self, item: OpsExecution) -> None:
         self._writer.write_execution(item)
+
+    def effect_node_position(self, execution_id: str) -> tuple[int, str]:
+        return self._writer.effect_node_position(execution_id)
+
+    def start_effect_node(self, item: OpsNodeStart) -> None:
+        self._writer.start_effect_node(item)
+
+    def finish_effect_node(self, item: OpsNodeFinish) -> None:
+        self._writer.finish_effect_node(item)
 
     def report_degradation(
         self,
@@ -261,6 +294,173 @@ def record_node_boundary(
         except BaseException:
             pass
     return result
+
+
+def record_effect_boundary(
+    recorder: OpsRecorder,
+    *,
+    execution_id: str,
+    node_type: NodeType,
+    input_value: object,
+    call: Callable[[], T],
+    started_at: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    completed_at: Callable[[], datetime],
+    response_node_type: NodeType | None = None,
+    full_content: bool = False,
+    technical_metadata: dict[str, object] | None = None,
+) -> T:
+    """Record one post-commit effect without changing its call semantics."""
+
+    if type(full_content) is not bool:
+        raise TypeError("full_content must be an exact bool")
+    try:
+        ordinal, parent_node_id = recorder.effect_node_position(execution_id)
+        input_summary, input_full = serialize_ops_value(input_value)
+        node = OpsNodeStart(
+            execution_id=execution_id,
+            node_type=node_type,
+            ordinal=ordinal,
+            parent_node_id=parent_node_id,
+            started_at=started_at(),
+            input_summary=input_summary,
+            input_full=input_full if full_content else None,
+            technical_metadata=technical_metadata or {},
+        )
+    except BaseException:
+        try:
+            recorder.report_degradation(
+                DegradationReason.RESULT_SERIALIZATION_FAILED,
+                execution_id=execution_id,
+                node_id=None,
+            )
+        except BaseException:
+            pass
+        return call()
+    try:
+        recorder.start_effect_node(node)
+    except BaseException:
+        try:
+            recorder.report_degradation(
+                DegradationReason.NODE_START_FAILED,
+                execution_id=execution_id,
+                node_id=node.node_id,
+            )
+        except BaseException:
+            pass
+    try:
+        result = call()
+    except BaseException:
+        try:
+            recorder.finish_effect_node(
+                OpsNodeFinish.from_start(
+                    node,
+                    status=ExecutionStatus.FAILED,
+                    completed_at=completed_at(),
+                    error={"kind": "wrapped_call_failed"},
+                )
+            )
+        except BaseException:
+            try:
+                recorder.report_degradation(
+                    DegradationReason.NODE_FINISH_FAILED,
+                    execution_id=execution_id,
+                    node_id=node.node_id,
+                )
+            except BaseException:
+                pass
+        raise
+    try:
+        output_summary, output_full = serialize_ops_value(result)
+    except BaseException:
+        output_summary, output_full = {}, None
+        try:
+            recorder.report_degradation(
+                DegradationReason.RESULT_SERIALIZATION_FAILED,
+                execution_id=execution_id,
+                node_id=node.node_id,
+            )
+        except BaseException:
+            pass
+    try:
+        recorder.finish_effect_node(
+            OpsNodeFinish.from_start(
+                node,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=completed_at(),
+                output_summary=output_summary,
+                output_full=output_full if full_content else None,
+            )
+        )
+    except BaseException:
+        try:
+            recorder.report_degradation(
+                DegradationReason.NODE_FINISH_FAILED,
+                execution_id=execution_id,
+                node_id=node.node_id,
+            )
+        except BaseException:
+            pass
+    if response_node_type is not None:
+        record_effect_value(
+            recorder,
+            execution_id=execution_id,
+            node_type=response_node_type,
+            value=result,
+            observed_at=completed_at,
+            full_content=full_content,
+            technical_metadata={
+                **(technical_metadata or {}),
+                "trace_stage": response_node_type.value,
+            },
+        )
+    return result
+
+
+def record_effect_value(
+    recorder: OpsRecorder,
+    *,
+    execution_id: str,
+    node_type: NodeType,
+    value: object,
+    observed_at: Callable[[], datetime],
+    full_content: bool = False,
+    technical_metadata: dict[str, object] | None = None,
+) -> None:
+    """Append a typed effect milestone without any business call."""
+
+    try:
+        ordinal, parent_node_id = recorder.effect_node_position(execution_id)
+        summary, full = serialize_ops_value(value)
+        instant = observed_at()
+        node = OpsNodeStart(
+            execution_id=execution_id,
+            node_type=node_type,
+            ordinal=ordinal,
+            parent_node_id=parent_node_id,
+            started_at=instant,
+            input_summary=summary,
+            input_full=full if full_content else None,
+            technical_metadata=technical_metadata or {},
+        )
+        recorder.start_effect_node(node)
+        recorder.finish_effect_node(
+            OpsNodeFinish.from_start(
+                node,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=instant,
+                output_summary=summary,
+                output_full=full if full_content else None,
+            )
+        )
+    except BaseException:
+        try:
+            recorder.report_degradation(
+                DegradationReason.NODE_FINISH_FAILED,
+                execution_id=execution_id,
+                node_id=None,
+            )
+        except BaseException:
+            pass
 
 
 def record_boundary(

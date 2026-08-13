@@ -82,6 +82,11 @@ class NodeType(str, Enum):
     PROVIDER_RECONCILIATION = "provider_reconciliation"
     STRIPE_RECONCILIATION = "stripe_reconciliation"
     MANUAL_REVIEW = "manual_review"
+    LEDGER_TURN = "ledger_turn"
+    LEDGER_COMMAND = "ledger_command"
+    LEDGER_RESERVATION = "ledger_reservation"
+    LEDGER_PAYMENT = "ledger_payment"
+    LEDGER_PUBLIC_OUTBOX = "ledger_public_outbox"
 
 
 _FORBIDDEN_KEY_PARTS = frozenset(
