@@ -30,7 +30,9 @@
 - Instrumentation rule: capture only at typed runtime boundaries; do not inspect or infer customer intent from prose, do not change Maya output, do not add a runtime gate, and do not let trace failure trigger provider retry or alter commercial decisions.
 - Test rule: tests use fake model/provider transports and temporary SQLite stores; no real reservation, booking, Payment Link, charge, ManyChat delivery, or handoff is permitted during implementation or dashboard smoke tests.
 - Isolation rule: `/home/ubuntu/chapada-leads-v3` is outside scope and must not be edited, cleaned, reset, committed, or used as a source of V2 behavior.
-- Exact NEXT: implement the approved plan test-first, run focused and canonical gates, build an immutable candidate, deploy the dashboard route separately, then instrument the V2 worker only after proving the dashboard has no write/effect surface.
+- Completed Task 1: `8b89a21beb79fd62ca9cb8e5e253c2b0cb9444f9`; tree `8bbcb4276034454246cdc20a4822eec50b664055`; closed trace contracts, recursive sanitized JSON validation, strict UTC, deterministic IDs and payload bounds are GREEN with `24 passed`; Ruff, compileall and diff checks passed. Self-review added and fixed a causal frozen-JSON serialization regression before commit.
+- Baseline gate for this successor: `1778 passed, 7 deselected, 2953 subtests passed` in 199.05s. The seven exact exclusions match `.github/workflows/phase8.yml` and reproduce unchanged on immutable base `9226d1b9`; no broader deselection is allowed.
+- Exact NEXT: execute plan Task 2 test-first: dedicated encrypted monotonic SQLite trace store with a writer-only bootstrap, read-only reader, exact event/lead grouping, idempotency, legal transitions, AES-256-GCM full content, bounded deterministic queries and contention tests. Do not instrument runtime, edit deploy files or advance to Task 3 until Task 2 is committed and reviewed.
 
 ## Preserved release branch — Bókun commercial query binding
 

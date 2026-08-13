@@ -259,9 +259,12 @@ def test_forbidden_keys_are_rejected_recursively(forbidden_key: str) -> None:
 @pytest.mark.parametrize(
     "forbidden_content",
     [
+        "Bearer abc",
+        "Basic xyz",
         "Bearer fixture-provider-credential",
         "Basic fixture-provider-credential",
         "https://provider.invalid/resource?X-Amz-Signature=fixture",
+        "https://provider.invalid/resource?X-Amz-Signature%3Dfixture",
         "https://provider.invalid/resource?access_token=fixture",
         "https://fixture-user:fixture-pass@provider.invalid/resource",
         "sk_live_fixture_provider_credential",
@@ -298,4 +301,20 @@ def test_payload_byte_limits_are_enforced() -> None:
             ordinal=1,
             started_at=UTC_NOW,
             input_full={"safe_text": "x" * MAX_FULL_JSON_BYTES},
+        )
+
+
+@pytest.mark.parametrize("invalid_id", ["event\x00id", "x" * 257])
+def test_execution_and_lead_ids_are_bounded_nul_free_text(invalid_id: str) -> None:
+    with pytest.raises(ValueError, match="NUL|byte limit"):
+        OpsExecution(
+            execution_id=invalid_id,
+            lead_id="manychat:opaque-lead",
+            received_at=UTC_NOW,
+        )
+    with pytest.raises(ValueError, match="NUL|byte limit"):
+        OpsExecution(
+            execution_id="event-001",
+            lead_id=invalid_id,
+            received_at=UTC_NOW,
         )

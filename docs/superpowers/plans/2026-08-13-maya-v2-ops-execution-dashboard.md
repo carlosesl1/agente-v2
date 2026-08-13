@@ -442,7 +442,10 @@ Statically parse the Dockerfile/Compose and require:
 - read-only root filesystem;
 - `cap_drop: [ALL]`, `no-new-privileges`, tmpfs, bounded resources;
 - no Docker socket;
-- `ga-state:/state:ro` and release metadata `:ro`;
+- individual `:ro` mounts for only trace, inbox, boundary, execution,
+  payment-initiation, follow-up, public-outbox, Cloudbeds/Bókun audits,
+  heartbeat and release metadata; no whole-`ga-state` mount and no
+  `v2-private-customer.sqlite3` mount;
 - only independent ops username/password hash/session key/trace key env values;
 - no Cloudbeds/Bókun/Stripe/ManyChat/provider env names;
 - no host-published port;
@@ -452,7 +455,10 @@ Statically parse the Dockerfile/Compose and require:
 
 **Step 2: Implement container/manifest**
 
-The dashboard process is separate from API/worker/router. Its trace/state mounts are read-only. The V2 writer image receives only trace path/key in addition to its existing runtime environment.
+The dashboard process is separate from API/worker/router. Each authorized
+trace/state file is mounted individually and read-only so unrelated databases
+are absent from the container namespace. The V2 writer image receives only
+trace path/key in addition to its existing runtime environment.
 
 **Step 3: Verify render and commit**
 

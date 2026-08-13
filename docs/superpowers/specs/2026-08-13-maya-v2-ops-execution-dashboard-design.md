@@ -366,7 +366,10 @@ O serviço:
 
 - usa usuário não-root;
 - filesystem read-only;
-- monta `ga-state` em modo read-only;
+- monta individualmente, em modo read-only, somente o trace, inbox, boundary,
+  execution, payment-initiation, follow-up, public-outbox, audits e heartbeat
+  autorizados; o diretório `ga-state` inteiro e `v2-private-customer.sqlite3`
+  não entram no namespace do container;
 - monta metadata de release em modo read-only;
 - usa tmpfs mínimo;
 - remove capabilities;
@@ -488,7 +491,8 @@ Polling é preferido ao SSE no MVP por simplicidade operacional. A API usa curso
 
 - compose renderiza;
 - serviço não recebe secrets de provider;
-- mount de `ga-state` é `:ro`;
+- cada arquivo operacional autorizado é montado individualmente como `:ro`,
+  sem mount do diretório `ga-state` e sem o banco privado de cliente;
 - rota `/ops` exige login;
 - `/`, sessões e APIs existentes do WebUI continuam atendidas pelo WebUI;
 - webhook V2 continua saudável;

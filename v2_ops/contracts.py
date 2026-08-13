@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from types import MappingProxyType
 from typing import Iterable, Mapping, TypeAlias
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 
 MAX_SUMMARY_JSON_BYTES = 16 * 1024
@@ -150,7 +150,7 @@ _SIGNED_QUERY_KEYS = frozenset(
     }
 )
 _CREDENTIAL_PATTERNS = (
-    re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s]{12,}"),
+    re.compile(r"(?i)\b(?:bearer|basic)\s+\S+"),
     re.compile(r"(?i)\b(?:api[_-]?key|access[_-]?token|client[_-]?secret)\s*[:=]\s*\S+"),
     re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9_-]+\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
@@ -182,7 +182,8 @@ def _looks_like_signed_url(value: str) -> bool:
         parsed = urlsplit(candidate.rstrip(".,);]"))
         if parsed.username is not None or parsed.password is not None:
             return True
-        for query_key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+        decoded_query = unquote(parsed.query)
+        for query_key, _ in parse_qsl(decoded_query, keep_blank_values=True):
             if _normalized_key(query_key) in _SIGNED_QUERY_KEYS:
                 return True
     return False
@@ -290,7 +291,11 @@ def _validated_frozen_payload(
 def _validate_required_text(value: object, *, field_name: str) -> str:
     if type(value) is not str or not value:
         raise ValueError(f"{field_name} must be a non-empty string")
+    if "\x00" in value:
+        raise ValueError(f"{field_name} may not contain NUL")
     _validate_string_content(value)
+    if len(value.encode("utf-8")) > 256:
+        raise ValueError(f"{field_name} exceeds its 256-byte limit")
     return value
 
 
