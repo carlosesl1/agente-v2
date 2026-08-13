@@ -154,6 +154,15 @@ def _payment_result_store_key(raw: str) -> bytes:
     return value
 
 
+def _ops_trace_key(raw: str) -> bytes:
+    if not raw:
+        return b""
+    try:
+        return bytes.fromhex(raw)
+    except ValueError as exc:
+        raise ValueError("V2_OPS_TRACE_KEY_HEX must be hexadecimal") from exc
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class V2Settings:
     """Fail-closed settings for API and productive worker roles."""
@@ -227,6 +236,9 @@ class V2Settings:
     read_probe_activity_date: str = ""
     read_probe_product_id: str = ""
     read_probe_interval_seconds: int = 60
+    ops_trace_path: Path | None = None
+    ops_trace_key: bytes = b""
+    ops_trace_full_content: bool = False
 
     def __repr__(self) -> str:
         enabled_gates = tuple(
@@ -299,6 +311,36 @@ class V2Settings:
             raise ValueError("api role may not contain worker credentials or model state")
         if not isinstance(self.sqlite_path, Path) or not self.sqlite_path.is_absolute():
             raise ValueError("sqlite_path must be an absolute pathlib.Path")
+        if self.ops_trace_path is not None and (
+            not isinstance(self.ops_trace_path, Path)
+            or not self.ops_trace_path.is_absolute()
+        ):
+            raise ValueError("ops trace path must be absolute")
+        if type(self.ops_trace_key) is not bytes:
+            raise TypeError("ops trace key must be exact bytes")
+        if self.ops_trace_path is None and self.ops_trace_key:
+            raise ValueError("ops trace key is forbidden without path")
+        if self.ops_trace_path is not None and not self.ops_trace_key:
+            raise ValueError("ops trace key is required when path is configured")
+        if self.ops_trace_path is not None and len(self.ops_trace_key) != 32:
+            raise ValueError("ops trace key must be a dedicated 32-byte key")
+        if type(self.ops_trace_full_content) is not bool:
+            raise TypeError("ops trace full content must be an exact bool")
+        if self.ops_trace_full_content and self.ops_trace_path is None:
+            raise ValueError("ops trace full content requires an enabled trace")
+        if self.ops_trace_path is not None:
+            trace = self.ops_trace_path.resolve()
+            if any(trace == path.resolve() for path in self.sqlite_paths.values()):
+                raise ValueError("ops trace path must be distinct from business stores")
+            existing = [path for path in self.sqlite_paths.values() if path.exists()]
+            if trace.exists():
+                try:
+                    if any(trace.samefile(path) for path in existing):
+                        raise ValueError(
+                            "ops trace path must be distinct from business stores"
+                        )
+                except OSError as exc:
+                    raise ValueError("ops trace path cannot be authenticated") from exc
         if type(self.max_body_bytes) is not int or self.max_body_bytes < 1:
             raise ValueError("max_body_bytes must be a positive exact integer")
         if type(self.runtime_mode) is not RuntimeMode:
@@ -733,6 +775,7 @@ class V2Settings:
         authority_path = source.get("V2_PUBLIC_AUTHORITY_MANIFEST_PATH", "")
         knowledge_path = worker_source.get("V2_KNOWLEDGE_BASE_PATH", "")
         payment_instruction_path = worker_source.get("V2_PAYMENT_INSTRUCTION_PATH", "")
+        ops_trace_path = worker_source.get("V2_OPS_TRACE_PATH", "")
         return cls(
             webhook_secret=api_source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
             sqlite_path=Path(raw_path),
@@ -859,6 +902,15 @@ class V2Settings:
             read_probe_activity_date=worker_source.get("V2_READ_PROBE_ACTIVITY_DATE", ""),
             read_probe_product_id=worker_source.get("V2_READ_PROBE_PRODUCT_ID", ""),
             read_probe_interval_seconds=read_probe_interval,
+            ops_trace_path=Path(ops_trace_path) if ops_trace_path else None,
+            ops_trace_key=_ops_trace_key(
+                worker_source.get("V2_OPS_TRACE_KEY_HEX", "")
+            ),
+            ops_trace_full_content=_env_bool(
+                worker_source,
+                "V2_OPS_TRACE_FULL_CONTENT",
+                default=False,
+            ),
         )
 
 

@@ -17,6 +17,7 @@ from v2_ops.recording import (
     NullOpsRecorder,
     SQLiteOpsRecorder,
     record_boundary,
+    record_node_boundary,
 )
 from v2_ops.store import SQLiteOpsTraceReader, SQLiteOpsTraceWriter
 
@@ -387,3 +388,36 @@ def test_business_baseexception_keeps_identity_and_is_called_once() -> None:
 
     assert caught.value is failure
     assert calls == 1
+
+
+def test_node_only_boundaries_allow_a_monotonic_multi_node_execution(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "recording-multi-node.sqlite3").resolve()
+    calls: list[int] = []
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        recorder = SQLiteOpsRecorder(writer)
+        execution = _execution("event:multi-node")
+        recorder.start_execution(execution)
+        for ordinal in (1, 2):
+            result = record_node_boundary(
+                recorder,
+                node=_node("event:multi-node", ordinal=ordinal),
+                call=lambda ordinal=ordinal: calls.append(ordinal) or ordinal,
+                completed_at=lambda ordinal=ordinal: NOW
+                + timedelta(seconds=ordinal + 1),
+                serialize_result=lambda value: ({"ordinal": value}, None),
+            )
+            assert result == ordinal
+
+    assert calls == [1, 2]
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        detail = reader.get_execution("event:multi-node", now=NOW)
+        nodes = reader.list_nodes("event:multi-node", now=NOW)
+        assert detail.stored_status is ExecutionStatus.RUNNING
+        assert detail.current_node_id == nodes[-1].node_id
+        assert [node.ordinal for node in nodes] == [1, 2]
+        assert [node.output_summary for node in nodes] == [
+            {"ordinal": 1},
+            {"ordinal": 2},
+        ]

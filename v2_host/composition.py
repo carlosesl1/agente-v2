@@ -19,6 +19,8 @@ from v2_application.payments import SQLitePaymentInitiationStore
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_host.public_authority import active_authority_reason
 from v2_host.settings import RuntimeMode, V2Settings
+from v2_ops.recording import NullOpsRecorder, SQLiteOpsRecorder
+from v2_ops.store import SQLiteOpsTraceWriter
 
 
 class V2Role(str, Enum):
@@ -199,6 +201,7 @@ class V2Container:
         payment_initiation: SQLitePaymentInitiationStore | None,
         public_outbox: PublicOutboxStore | None,
         private_customer: SQLitePrivateCustomerFactStore | None,
+        ops_trace_writer: SQLiteOpsTraceWriter | None,
     ) -> None:
         self.settings = settings
         self.role = role
@@ -209,6 +212,12 @@ class V2Container:
         self.payment_initiation = payment_initiation
         self.public_outbox = public_outbox
         self.private_customer = private_customer
+        self._ops_trace_writer = ops_trace_writer
+        self.ops_recorder = (
+            NullOpsRecorder()
+            if ops_trace_writer is None
+            else SQLiteOpsRecorder(ops_trace_writer)
+        )
         self._runtime_capabilities: dict[str, str] | None = None
         self._public_authority_resolver: object | None = None
         self._closed = False
@@ -233,8 +242,13 @@ class V2Container:
             ]
             if settings.enabled_payment_methods:
                 mutable_worker_owners.append("payment_initiation")
+            if settings.ops_trace_path is not None:
+                mutable_worker_owners.append("ops_trace")
             owned_names = tuple(mutable_worker_owners)
-        _authenticate_sqlite_owner_files({name: paths[name] for name in owned_names})
+        owner_paths = {name: paths[name] for name in owned_names if name != "ops_trace"}
+        if "ops_trace" in owned_names:
+            owner_paths["ops_trace"] = settings.ops_trace_path
+        _authenticate_sqlite_owner_files(owner_paths)
         opened: list[object] = []
         try:
             inbox = SQLiteInbox(paths["inbox"])
@@ -250,7 +264,15 @@ class V2Container:
                     payment_initiation=None,
                     public_outbox=None,
                     private_customer=None,
+                    ops_trace_writer=None,
                 )
+            ops_trace_writer = None
+            if settings.ops_trace_path is not None:
+                ops_trace_writer = SQLiteOpsTraceWriter(
+                    settings.ops_trace_path,
+                    settings.ops_trace_key,
+                )
+                opened.append(ops_trace_writer)
             boundary = SQLiteBoundaryStore.open_path_v8(paths["boundary"])
             opened.append(boundary)
             private_customer = SQLitePrivateCustomerFactStore(
@@ -280,6 +302,7 @@ class V2Container:
                 payment_initiation=payment_initiation,
                 public_outbox=public_outbox,
                 private_customer=private_customer,
+                ops_trace_writer=ops_trace_writer,
             )
         except BaseException:
             for owner in reversed(opened):
@@ -485,6 +508,7 @@ class V2Container:
         if self._closed:
             return
         for owner in (
+            self._ops_trace_writer,
             self.private_customer,
             self.public_outbox,
             self.payment_initiation,

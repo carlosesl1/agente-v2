@@ -139,3 +139,29 @@ def test_ops_may_use_contracts_and_kernel_but_not_runtime_layers() -> None:
         assert any("v2_ops may not import v2_application" in item for item in errors)
         assert any("v2_ops may not import v2_adapters" in item for item in errors)
         assert any("v2_ops may not import v2_host" in item for item in errors)
+
+
+def test_runtime_layers_may_depend_on_ops_but_adapters_may_not() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for package in FASTTRACK_PACKAGES:
+            (root / package).mkdir()
+            (root / package / "__init__.py").write_text("", encoding="utf-8")
+        (root / "v2_application" / "trace.py").write_text(
+            "from v2_ops.recording import NullOpsRecorder\n",
+            encoding="utf-8",
+        )
+        (root / "v2_host" / "trace.py").write_text(
+            "from v2_ops.store import SQLiteOpsTraceWriter\n",
+            encoding="utf-8",
+        )
+        (root / "v2_adapters" / "bad_trace.py").write_text(
+            "from v2_ops.recording import SQLiteOpsRecorder\n",
+            encoding="utf-8",
+        )
+
+        errors = check_tree(root)
+
+        assert not any("v2_application/trace.py" in item for item in errors)
+        assert not any("v2_host/trace.py" in item for item in errors)
+        assert any("v2_adapters may not import v2_ops" in item for item in errors)

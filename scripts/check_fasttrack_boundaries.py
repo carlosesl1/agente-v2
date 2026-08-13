@@ -26,10 +26,16 @@ KERNEL_PACKAGES: Final = frozenset(
 )
 ALLOWED_INTERNAL: Final = {
     "v2_contracts": frozenset(),
-    "v2_application": frozenset({"v2_contracts", *KERNEL_PACKAGES}),
+    "v2_application": frozenset({"v2_contracts", "v2_ops", *KERNEL_PACKAGES}),
     "v2_adapters": frozenset({"v2_contracts"}),
     "v2_host": frozenset(
-        {"v2_contracts", "v2_application", "v2_adapters", *KERNEL_PACKAGES}
+        {
+            "v2_contracts",
+            "v2_application",
+            "v2_adapters",
+            "v2_ops",
+            *KERNEL_PACKAGES,
+        }
     ),
     "v2_ops": frozenset({"v2_contracts", *KERNEL_PACKAGES}),
 }

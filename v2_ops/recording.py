@@ -172,6 +172,97 @@ def _terminal_execution(
     )
 
 
+def record_node_boundary(
+    recorder: OpsRecorder,
+    *,
+    node: OpsNodeStart,
+    call: Callable[[], T],
+    completed_at: Callable[[], datetime],
+    serialize_result: Callable[
+        [T], tuple[dict[str, object], dict[str, object] | None]
+    ]
+    | None = None,
+) -> T:
+    """Record one node without terminalizing its containing execution."""
+
+    _record_best_effort(
+        recorder,
+        lambda: recorder.start_node(node),
+        DegradationReason.NODE_START_FAILED,
+        execution_id=node.execution_id,
+        node_id=node.node_id,
+    )
+    try:
+        result = call()
+    except BaseException:
+        try:
+            finished_at = completed_at()
+            failed = OpsNodeFinish.from_start(
+                node,
+                status=ExecutionStatus.FAILED,
+                completed_at=finished_at,
+                error={"kind": "wrapped_call_failed"},
+            )
+            _record_best_effort(
+                recorder,
+                lambda: recorder.finish_node(failed),
+                DegradationReason.NODE_FINISH_FAILED,
+                execution_id=node.execution_id,
+                node_id=node.node_id,
+            )
+        except BaseException:
+            try:
+                recorder.report_degradation(
+                    DegradationReason.NODE_FINISH_FAILED,
+                    execution_id=node.execution_id,
+                    node_id=node.node_id,
+                )
+            except BaseException:
+                pass
+        raise
+
+    output_summary: dict[str, object] = {}
+    output_full: dict[str, object] | None = None
+    if serialize_result is not None:
+        try:
+            output_summary, output_full = serialize_result(result)
+        except BaseException:
+            try:
+                recorder.report_degradation(
+                    DegradationReason.RESULT_SERIALIZATION_FAILED,
+                    execution_id=node.execution_id,
+                    node_id=node.node_id,
+                )
+            except BaseException:
+                pass
+    try:
+        finished_at = completed_at()
+        completed = OpsNodeFinish.from_start(
+            node,
+            status=ExecutionStatus.COMPLETED,
+            completed_at=finished_at,
+            output_summary=output_summary,
+            output_full=output_full,
+        )
+        _record_best_effort(
+            recorder,
+            lambda: recorder.finish_node(completed),
+            DegradationReason.NODE_FINISH_FAILED,
+            execution_id=node.execution_id,
+            node_id=node.node_id,
+        )
+    except BaseException:
+        try:
+            recorder.report_degradation(
+                DegradationReason.NODE_FINISH_FAILED,
+                execution_id=node.execution_id,
+                node_id=node.node_id,
+            )
+        except BaseException:
+            pass
+    return result
+
+
 def record_boundary(
     recorder: OpsRecorder,
     *,
