@@ -40,6 +40,7 @@ COPY v2_host /app/v2_host
 COPY v2_ops /app/v2_ops
 COPY deploy /app/deploy
 COPY config/cerebro_faq.yaml /app/config/cerebro_faq.yaml
+COPY config/v2_activity_group_policy.json /app/config/v2_activity_group_policy.json
 COPY config/v2_bokun_product_map.json /app/config/v2_bokun_product_map.json
 COPY config/v2_luna_system_prompt.txt /app/config/v2_luna_system_prompt.txt
 COPY config/v2_payment_instructions.json /app/config/v2_payment_instructions.json
