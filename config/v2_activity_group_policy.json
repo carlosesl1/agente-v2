@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "products": {
+    "product:tour-2ms": {
+      "bokun_product_id": "884481",
+      "aliases": ["roteiro 2ms", "2ms", "2m", "2 m", "2 m s"]
+    },
+    "product:tour-4ps": {
+      "bokun_product_id": "912303",
+      "aliases": ["roteiro 4ps", "4ps", "4p", "4 p", "4 p s"]
+    },
+    "product:aguas-claras": {
+      "bokun_product_id": "913781",
+      "aliases": ["águas claras"]
+    },
+    "product:buracao": {
+      "bokun_product_id": "913372",
+      "aliases": ["buracão", "roteiro do buracão"]
+    },
+    "product:mixila-1d": {
+      "bokun_product_id": "913776",
+      "aliases": ["mixila 1d", "mixila 1 dia", "cachoeira do mixila 1d", "mixila um dia"]
+    },
+    "product:fumaca-por-baixo-3d": {
+      "bokun_product_id": "913343",
+      "aliases": ["fumaça por baixo 3d", "fumaça por baixo"]
+    },
+    "product:fumaca-por-cima": {
+      "bokun_product_id": "913780",
+      "aliases": ["fumaça por cima"]
+    },
+    "product:mandassaia-lapao": {
+      "bokun_product_id": "914620",
+      "aliases": ["mandassaia", "gruta do lapão", "mandassaia e gruta do lapão"]
+    },
+    "product:marimbus": {
+      "bokun_product_id": "913348",
+      "aliases": ["marimbus", "roteiro do marimbus"]
+    },
+    "product:mixila-2d": {
+      "bokun_product_id": "912333",
+      "aliases": ["mixila 2d", "mixila 2 dias", "mixila dois dias"]
+    },
+    "product:pati-3d-english": {
+      "bokun_product_id": "1089292",
+      "aliases": ["pati 3d inglês", "pati 3 dias inglês", "pati 3d english", "pati valley 3d inglês", "pati valley 3d english", "vale do pati 3d inglês", "vale do pati 3 dias inglês", "pati com guia em inglês", "pati com guia inglês"]
+    },
+    "product:sossego": {
+      "bokun_product_id": "913775",
+      "aliases": ["sossego"]
+    },
+    "product:pati-2d": {
+      "bokun_product_id": "996064",
+      "aliases": ["pati 2d", "pati 2 dias", "vale do pati 2d", "vale do pati 2 dias"]
+    },
+    "product:pati-3d": {
+      "bokun_product_id": "884102",
+      "aliases": ["pati 3d", "pati 3 dias", "vale do pati 3d", "vale do pati 3 dias"]
+    },
+    "product:pati-4d": {
+      "bokun_product_id": "1001204",
+      "aliases": ["pati 4d", "pati 4 dias", "vale do pati 4d", "vale do pati 4 dias"]
+    },
+    "product:pati-5d": {
+      "bokun_product_id": "1001205",
+      "aliases": ["pati 5d", "pati 5 dias", "vale do pati 5d", "vale do pati 5 dias"]
+    }
+  },
+  "solo_minimum_two": {
+    "product:aguas-claras": {
+      "bokun_product_id": "913781",
+      "rate_id": "2375647",
+      "adult_category_id": "1160099"
+    },
+    "product:buracao": {
+      "bokun_product_id": "913372",
+      "rate_id": "2375672",
+      "adult_category_id": "1160099"
+    },
+    "product:mixila-1d": {
+      "bokun_product_id": "913776",
+      "rate_id": "2375659",
+      "adult_category_id": "1160099"
+    },
+    "product:marimbus": {
+      "bokun_product_id": "913348",
+      "rate_id": "2375663",
+      "adult_category_id": "1160099"
+    },
+    "product:pati-4d": {
+      "bokun_product_id": "1001204",
+      "rate_id": "2375428",
+      "adult_category_id": "1160099"
+    },
+    "product:pati-5d": {
+      "bokun_product_id": "1001205",
+      "rate_id": "2375667",
+      "adult_category_id": "1160099"
+    }
+  }
+}
