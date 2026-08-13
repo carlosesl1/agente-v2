@@ -395,6 +395,7 @@ def test_transport_exception_is_typed_unavailable_without_exception_text() -> No
     ("response", "expected_calls"),
     [
         (httpx.Response(302, headers={"location": "https://other.test/raw.csv"}), 1),
+        (httpx.Response(307, headers={"location": "https://other.test/raw.csv"}), 1),
         (httpx.Response(200, headers={"content-length": str(2 * 1024 * 1024 + 1)}), 1),
         (httpx.Response(200, headers={"content-length": "not-an-int"}), 1),
     ],
@@ -423,6 +424,85 @@ def test_http_redirect_or_invalid_content_length_is_unavailable(
 
     assert result.status == "unavailable"
     assert calls == expected_calls
+
+
+def test_google_sheet_single_https_content_redirect_is_followed() -> None:
+    module = _module()
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url.host))
+        if request.url.host == "docs.google.com":
+            return httpx.Response(
+                307,
+                headers={
+                    "location": (
+                        "https://doc-14-98-sheets.googleusercontent.com/"
+                        "export/groups.csv?token=opaque"
+                    )
+                },
+            )
+        if request.url.host == "doc-14-98-sheets.googleusercontent.com":
+            return httpx.Response(
+                200,
+                content=b"data,passeio,qtd\n14/08/2026,Aguas Claras,2\n",
+                headers={"content-type": "text/csv"},
+            )
+        raise AssertionError("unexpected redirect target")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        source = module.BokunGroupsSource(
+            sheet_csv_url=(
+                "https://docs.google.com/spreadsheets/d/public/export?format=csv&gid=0"
+            ),
+            policy=_policy(),
+            client=client,
+        )
+        result = source.lookup(
+            canonical_product_id="product:aguas-claras",
+            activity_date=date(2026, 8, 14),
+        )
+
+    assert result.status == "matched"
+    assert result.participant_count == 2
+    assert calls == [
+        "docs.google.com",
+        "doc-14-98-sheets.googleusercontent.com",
+    ]
+
+
+def test_google_sheet_second_redirect_is_unavailable() -> None:
+    module = _module()
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            307,
+            headers={
+                "location": (
+                    "https://doc-14-98-sheets.googleusercontent.com/"
+                    "export/groups.csv?token=opaque"
+                )
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        source = module.BokunGroupsSource(
+            sheet_csv_url=(
+                "https://docs.google.com/spreadsheets/d/public/export?format=csv&gid=0"
+            ),
+            policy=_policy(),
+            client=client,
+        )
+        result = source.lookup(
+            canonical_product_id="product:aguas-claras",
+            activity_date=date(2026, 8, 14),
+        )
+
+    assert result.status == "unavailable"
+    assert calls == 2
 
 
 def test_http_timeout_and_streamed_oversize_are_unavailable() -> None:

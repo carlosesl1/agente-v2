@@ -22,6 +22,9 @@ MAX_CSV_BYTES: Final = 2 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS: Final = 10.0
 _ID_RE: Final = re.compile(r"^[1-9][0-9]*$")
 _PRODUCT_RE: Final = re.compile(r"^product:[a-z0-9]+(?:-[a-z0-9]+)*$")
+_GOOGLE_SHEETS_CONTENT_HOST_RE: Final = re.compile(
+    r"^doc-[a-z0-9-]+-sheets\.googleusercontent\.com$"
+)
 _SOLO_EXPECTED: Final = {
     "product:aguas-claras": ("913781", "2375647", "1160099"),
     "product:buracao": ("913372", "2375672", "1160099"),
@@ -458,6 +461,23 @@ def _read_http_response(response: httpx.Response) -> bytes:
     return b"".join(chunks)
 
 
+def _google_sheets_redirect(source_url: str, response: httpx.Response) -> str:
+    if response.status_code != 307:
+        raise ValueError("group source response status is unavailable")
+    target = response.headers.get("location")
+    if not _valid_https_url(target):
+        raise ValueError("group source redirect is invalid")
+    source = urlsplit(source_url)
+    destination = urlsplit(target)
+    if (
+        source.hostname != "docs.google.com"
+        or destination.hostname is None
+        or _GOOGLE_SHEETS_CONTENT_HOST_RE.fullmatch(destination.hostname) is None
+    ):
+        raise ValueError("group source redirect is not allowed")
+    return target
+
+
 class BokunGroupsSource:
     """GET-only HTTPS group source that exposes only a closed typed result."""
 
@@ -489,6 +509,24 @@ class BokunGroupsSource:
         self._fetcher = fetcher
         self._timeout = float(timeout_seconds)
 
+    def _fetch_http(self, client: httpx.Client) -> bytes:
+        with client.stream(
+            "GET",
+            self._url,
+            timeout=self._timeout,
+            follow_redirects=False,
+        ) as response:
+            if response.status_code == 200:
+                return _read_http_response(response)
+            redirect = _google_sheets_redirect(self._url, response)
+        with client.stream(
+            "GET",
+            redirect,
+            timeout=self._timeout,
+            follow_redirects=False,
+        ) as response:
+            return _read_http_response(response)
+
     def _fetch(self) -> bytes:
         if self._fetcher is not None:
             payload = self._fetcher(self._url, self._timeout, MAX_CSV_BYTES)
@@ -496,24 +534,12 @@ class BokunGroupsSource:
                 raise ValueError("fetcher returned an invalid payload")
             return payload
         if self._client is not None:
-            with self._client.stream(
-                "GET",
-                self._url,
-                timeout=self._timeout,
-                follow_redirects=False,
-            ) as response:
-                return _read_http_response(response)
+            return self._fetch_http(self._client)
         with httpx.Client(
             follow_redirects=False,
             headers={"user-agent": "maya-v2-bokun-groups/1"},
         ) as client:
-            with client.stream(
-                "GET",
-                self._url,
-                timeout=self._timeout,
-                follow_redirects=False,
-            ) as response:
-                return _read_http_response(response)
+            return self._fetch_http(client)
 
     def lookup(
         self, *, canonical_product_id: str, activity_date: date

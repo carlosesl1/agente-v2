@@ -636,6 +636,16 @@ class Phase8LookupProjectionTests(unittest.TestCase):
                 solo_group_booking=None,
                 _wire_version=1,
             )
+        with self.assertRaises((TypeError, ValueError)):
+            replace(
+                offer,
+                group_status=None,
+                existing_group=None,
+                group_participants=None,
+                solo_group_booking=None,
+                _wire_version=1,
+                _decoded_wire_version=1,
+            )
 
     def test_group_context_invariants_and_lodging_exclusion_fail_closed(self) -> None:
         activity = SanitizedOffer(

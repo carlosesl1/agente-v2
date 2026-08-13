@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -1137,24 +1137,18 @@ class SanitizedOffer:
     group_participants: int | None = None
     solo_group_booking: bool | None = None
     _wire_version: int = field(default=2, repr=False, compare=False)
-    _decoded_wire_version: InitVar[int | None] = None
 
     SCHEMA: ClassVar[str] = "phase8-sanitized-offer"
     VERSION: ClassVar[int] = 2
     DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v2"
     LEGACY_DOMAIN: ClassVar[str] = "phase8-sanitized-offer-v1"
 
-    def __post_init__(self, _decoded_wire_version: int | None) -> None:
-        if _decoded_wire_version not in (None, 1, 2):
-            raise ValueError("decoded wire version is invalid")
-        if (
-            _decoded_wire_version is None
-            and self.service is ReadService.ACTIVITY
-            and self._wire_version != 2
-        ):
+    def __post_init__(self) -> None:
+        if self.service is ReadService.ACTIVITY and self._wire_version != 2:
             raise ValueError("legacy activity offer wire is decoder-only")
-        if _decoded_wire_version is not None and self._wire_version != _decoded_wire_version:
-            raise ValueError("decoded offer wire version mismatch")
+        self._validate(allow_legacy_activity=False)
+
+    def _validate(self, *, allow_legacy_activity: bool) -> None:
         if type(self.offer_id) is not str or _OFFER_ID_RE.fullmatch(self.offer_id) is None:
             raise ValueError("SanitizedOffer.offer_id must be canonical")
         if type(self.service) is not ReadService:
@@ -1191,6 +1185,8 @@ class SanitizedOffer:
             raise ValueError("activity offer requires null end_date")
         else:
             if self._wire_version == 1:
+                if not allow_legacy_activity:
+                    raise ValueError("legacy activity offer wire is decoder-only")
                 if any(
                     value is not None
                     for value in (
@@ -1301,7 +1297,7 @@ class SanitizedOffer:
             service = ReadService(data["service"])
         except ValueError as exc:
             raise ValueError("SanitizedOffer service is invalid") from exc
-        offer = cls(
+        values = dict(
             offer_id=data["offer_id"],
             service=service,
             public_label=data["public_label"],
@@ -1324,9 +1320,15 @@ class SanitizedOffer:
             existing_group=data.get("existing_group"),
             group_participants=data.get("group_participants"),
             solo_group_booking=data.get("solo_group_booking"),
-            _wire_version=envelope["version"],
-            _decoded_wire_version=envelope["version"],
         )
+        if envelope["version"] == 1 and service is ReadService.ACTIVITY:
+            offer = object.__new__(cls)
+            for name, value in values.items():
+                object.__setattr__(offer, name, value)
+            object.__setattr__(offer, "_wire_version", 1)
+            offer._validate(allow_legacy_activity=True)
+        else:
+            offer = cls(**values, _wire_version=envelope["version"])
         if offer.to_canonical_bytes() != payload:
             raise ValueError("SanitizedOffer is not byte-canonical")
         return offer
