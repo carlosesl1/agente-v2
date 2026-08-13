@@ -1198,11 +1198,15 @@ class SQLiteOpsTraceReader:
         started = _parse_utc(row[2], "received_at")
         visible_status = stored.value
         completed_at = None if row[3] is None else _parse_utc(row[3], "completed_at")
-        running_node = connection.execute(
-            "SELECT started_at FROM nodes WHERE execution_id=? AND status='running' "
-            "ORDER BY ordinal DESC,attempt DESC LIMIT 1",
-            (row[0],),
-        ).fetchone()
+        running_node = (
+            connection.execute(
+                "SELECT started_at FROM nodes WHERE execution_id=? AND status='running' "
+                "ORDER BY ordinal DESC,attempt DESC LIMIT 1",
+                (row[0],),
+            ).fetchone()
+            if stored is ExecutionStatus.RUNNING
+            else None
+        )
         if running_node is not None:
             started = _parse_utc(running_node[0], "node started_at")
             visible_status = self._stale(
@@ -1212,7 +1216,7 @@ class SQLiteOpsTraceReader:
                 stale_after=stale_after,
             )
             completed_at = None
-        else:
+        elif stored is ExecutionStatus.RUNNING:
             latest = connection.execute(
                 "SELECT status,completed_at FROM nodes WHERE execution_id=? "
                 "ORDER BY ordinal DESC,attempt DESC LIMIT 1",

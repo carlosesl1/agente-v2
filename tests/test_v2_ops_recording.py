@@ -470,6 +470,33 @@ def test_effect_boundary_appends_after_terminal_and_calls_business_once(
             )
         )
 
+        pending = OpsNodeStart(
+            execution_id=turn.execution_id,
+            node_type=NodeType.CLOUDBEDS_RESERVATION_REQUEST,
+            ordinal=10_000,
+            attempt=1,
+            parent_node_id=turn.node_id,
+            started_at=NOW + timedelta(seconds=3),
+            input_summary={"phase": "pending"},
+            technical_metadata={},
+        )
+        recorder.start_effect_node(pending)
+        with SQLiteOpsTraceReader(path, KEY) as reader:
+            pending_detail = reader.get_execution(turn.execution_id)
+            assert reader.list_executions(
+                status="running_stale",
+                now=NOW + timedelta(hours=1),
+            ).executions == ()
+        assert pending_detail.status == ExecutionStatus.COMPLETED.value
+        assert pending_detail.completed_at == NOW + timedelta(seconds=2)
+        recorder.finish_effect_node(
+            OpsNodeFinish.from_start(
+                pending,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=NOW + timedelta(seconds=3),
+            )
+        )
+
         def business() -> object:
             nonlocal calls
             calls += 1
@@ -493,8 +520,9 @@ def test_effect_boundary_appends_after_terminal_and_calls_business_once(
         detail = reader.get_execution(turn.execution_id)
     assert nodes[-1].node_type is NodeType.CLOUDBEDS_RESERVATION_REQUEST
     assert nodes[-1].stored_status is ExecutionStatus.COMPLETED
+    assert detail.status == ExecutionStatus.COMPLETED.value
     assert detail.stored_status is ExecutionStatus.COMPLETED
-    assert detail.completed_at == NOW + timedelta(seconds=4)
+    assert detail.completed_at == NOW + timedelta(seconds=2)
 
 
 @pytest.mark.parametrize(

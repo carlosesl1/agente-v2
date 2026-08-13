@@ -299,7 +299,7 @@ def test_effect_node_can_append_idempotently_after_turn_terminal_without_reopeni
         nodes = reader.list_nodes("event-001")
     assert stored.stored_status is ExecutionStatus.COMPLETED
     assert stored.current_node_id == effect.node_id
-    assert stored.completed_at == effect.started_at + timedelta(seconds=1)
+    assert stored.completed_at == UTC_NOW + timedelta(seconds=3)
     assert [item.node_type for item in nodes] == [
         NodeType.TURN_COMMIT,
         NodeType.CLOUDBEDS_RESERVATION_REQUEST,
