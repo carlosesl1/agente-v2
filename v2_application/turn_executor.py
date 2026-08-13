@@ -120,6 +120,9 @@ from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
+from v2_ops.contracts import ExecutionStatus, NodeType
+from v2_ops.recording import NullOpsRecorder, OpsRecorder
+from v2_ops.tracing import OpsExecutionTrace
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -1358,6 +1361,8 @@ class V2TurnExecutor:
         locale: str,
         turn_timeout: timedelta,
         max_commit_attempts: int,
+        ops_recorder: OpsRecorder | None = None,
+        ops_full_content: bool = False,
     ) -> None:
         required = (
             (store, "acquire_fence", "store"),
@@ -1390,6 +1395,8 @@ class V2TurnExecutor:
             raise ValueError("turn_timeout must be a positive exact timedelta")
         if type(max_commit_attempts) is not int or not 1 <= max_commit_attempts <= 3:
             raise ValueError("max_commit_attempts must be an exact integer from 1 to 3")
+        if type(ops_full_content) is not bool:
+            raise TypeError("ops_full_content must be an exact bool")
         self._store = store
         self._model = model
         self._reads = reads
@@ -1401,6 +1408,8 @@ class V2TurnExecutor:
         self._locale = locale
         self._turn_timeout = turn_timeout
         self._max_commit_attempts = max_commit_attempts
+        self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
+        self._ops_full_content = ops_full_content
 
     def _record_committed_dialogue(
         self,
@@ -1424,6 +1433,11 @@ class V2TurnExecutor:
             raise TypeError("batch must be an exact InboundBatch")
         sources = _source_events(batch)
         event_hash = _event_hash(sources)
+        trace = OpsExecutionTrace(
+            execution_id=batch.events[0].event_id,
+            recorder=self._ops_recorder,
+            full_content=self._ops_full_content,
+        )
         replay = self._store.load_turn_receipt(batch.batch_id)
         if replay is not None:
             if replay.event_hash != event_hash or replay.source_events != sources:
@@ -1434,6 +1448,12 @@ class V2TurnExecutor:
                 event_hash=event_hash,
                 reply_chunks=reply_chunks,
                 committed_at=replay.committed_at,
+            )
+            trace.finish_execution(
+                lead_id=batch.lead_id,
+                received_at=batch.events[0].occurred_at,
+                status=ExecutionStatus.COMPLETED,
+                terminal_reason="turn_replayed",
             )
             return V2TurnExecutionResult(replay, reply_chunks, True)
 
@@ -1446,6 +1466,7 @@ class V2TurnExecutor:
                     sources=sources,
                     event_hash=event_hash,
                     correction_budget=correction_budget,
+                    trace=trace,
                 )
                 if prepared.private_profile_material_hash is not None:
                     profile_now = self._clock.now()
@@ -1487,22 +1508,33 @@ class V2TurnExecutor:
                         prepared.private_profile_material_hash
                     ):
                         raise TurnExecutionError("private profile changed before commit")
-                self._store.commit_turn_v8(
-                    expected_version=expected_version,
-                    fencing_token=fencing_token,
-                    commit=prepared.commit,
-                    receipt=prepared.receipt,
-                    artifacts=prepared.artifacts,
-                    command_relays=prepared.command_relays,
-                    internal_jobs=prepared.internal_jobs,
-                    public_rows=prepared.public_rows,
-                    committed_at=prepared.receipt.committed_at,
+                trace.call(
+                    NodeType.TURN_COMMIT,
+                    lambda: self._store.commit_turn_v8(
+                        expected_version=expected_version,
+                        fencing_token=fencing_token,
+                        commit=prepared.commit,
+                        receipt=prepared.receipt,
+                        artifacts=prepared.artifacts,
+                        command_relays=prepared.command_relays,
+                        internal_jobs=prepared.internal_jobs,
+                        public_rows=prepared.public_rows,
+                        committed_at=prepared.receipt.committed_at,
+                    ),
+                    attempt=1,
+                    technical_metadata={"batch_id": batch.batch_id},
                 )
                 self._record_committed_dialogue(
                     batch,
                     event_hash=event_hash,
                     reply_chunks=prepared.reply_chunks,
                     committed_at=prepared.receipt.committed_at,
+                )
+                trace.finish_execution(
+                    lead_id=batch.lead_id,
+                    received_at=batch.events[0].occurred_at,
+                    status=ExecutionStatus.COMPLETED,
+                    terminal_reason="turn_committed",
                 )
                 return V2TurnExecutionResult(
                     prepared.receipt,
@@ -1527,6 +1559,12 @@ class V2TurnExecutor:
                         reply_chunks=reply_chunks,
                         committed_at=replay.committed_at,
                     )
+                    trace.finish_execution(
+                        lead_id=batch.lead_id,
+                        received_at=batch.events[0].occurred_at,
+                        status=ExecutionStatus.COMPLETED,
+                        terminal_reason="turn_replayed_after_conflict",
+                    )
                     return V2TurnExecutionResult(replay, reply_chunks, True)
         raise ConcurrencyConflict(
             "turn commit attempts were exhausted"
@@ -1539,9 +1577,12 @@ class V2TurnExecutor:
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
         correction_budget: _PublicReplyCorrectionBudget,
+        trace: OpsExecutionTrace,
     ) -> tuple[_PreparedTurn, int, int]:
         if type(correction_budget) is not _PublicReplyCorrectionBudget:
             raise TypeError("public reply correction budget must be exact")
+        if type(trace) is not OpsExecutionTrace:
+            raise TypeError("trace must be an exact OpsExecutionTrace")
         now = self._clock.now()
         try:
             self._store.load_state(batch.lead_id)
@@ -1665,10 +1706,21 @@ class V2TurnExecutor:
             )
             return corrected
 
-        first_audited = self._model.complete_audited(request)
+        first_audited = trace.call(
+            NodeType.MAYA_REQUEST,
+            lambda: self._model.complete_audited(request),
+            input_value=request,
+            output_value=lambda audited: audited.proposal,
+            technical_metadata={"round": 1},
+        )
         if type(first_audited) is not AuditedModelTurn:
             raise TypeError("model must return exact AuditedModelTurn")
         first_proposal = validate_productive_proposal(first_audited.proposal)
+        trace.record_value(
+            NodeType.MAYA_RESPONSE,
+            first_proposal,
+            technical_metadata={"round": 1},
+        )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
         first_proposal = replace(
@@ -1804,10 +1856,21 @@ class V2TurnExecutor:
                     first_proposal,
                 ),
             )
-            review_audited = self._model.complete_audited(review_request)
+            review_audited = trace.call(
+                NodeType.MAYA_REVIEW,
+                lambda: self._model.complete_audited(review_request),
+                input_value=review_request,
+                output_value=lambda audited: audited.proposal,
+                technical_metadata={"review": "semantic"},
+            )
             if type(review_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
             review_proposal = validate_productive_proposal(review_audited.proposal)
+            trace.record_value(
+                NodeType.MAYA_RESPONSE,
+                review_proposal,
+                technical_metadata={"review": "semantic"},
+            )
             if review_proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("semantic review source event diverged")
             (
@@ -2049,7 +2112,22 @@ class V2TurnExecutor:
                         read_requests = ()
                         accepted_observations.clear()
                         break
-                observation = self._reads.read(item)
+                trace.record_value(
+                    NodeType.MAYA_READ_REQUEST,
+                    item,
+                    technical_metadata={"read_kind": item.kind.value},
+                )
+                observation = trace.call(
+                    NodeType.PROVIDER_READ_REQUEST,
+                    lambda item=item: self._reads.read(item),
+                    input_value=item,
+                    technical_metadata={"read_kind": item.kind.value},
+                )
+                trace.record_value(
+                    NodeType.PROVIDER_READ_RESPONSE,
+                    observation,
+                    technical_metadata={"read_kind": item.kind.value},
+                )
                 observed_now = self._clock.now()
                 if (
                     type(observed_now) is not datetime
@@ -2059,7 +2137,16 @@ class V2TurnExecutor:
                 ):
                     raise TurnExecutionError("read clock is not monotonic UTC")
                 accepted_observations.append(
-                    self._reads.accept(observation, now=observed_now)
+                    trace.call(
+                        NodeType.MAYA_OBSERVATION,
+                        lambda observation=observation: self._reads.accept(
+                            observation,
+                            now=observed_now,
+                        ),
+                        input_value=observation,
+                        output_value=lambda value: value,
+                        technical_metadata={"read_kind": item.kind.value},
+                    )
                 )
                 read_floor = observed_now
             v2_observations = tuple(accepted_observations)
@@ -2101,10 +2188,21 @@ class V2TurnExecutor:
                 active_execution_status=active_execution_status(current.state),
                 recap_reuse_required=reused_consultation,
             )
-            second_audited = self._model.complete_audited(followup)
+            second_audited = trace.call(
+                NodeType.MAYA_REQUEST,
+                lambda: self._model.complete_audited(followup),
+                input_value=followup,
+                output_value=lambda audited: audited.proposal,
+                technical_metadata={"round": 2},
+            )
             if type(second_audited) is not AuditedModelTurn:
                 raise TypeError("model must return exact AuditedModelTurn")
             proposal = validate_productive_proposal(second_audited.proposal)
+            trace.record_value(
+                NodeType.MAYA_RESPONSE,
+                proposal,
+                technical_metadata={"round": 2},
+            )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
             if reused_consultation and (
@@ -2206,13 +2304,22 @@ class V2TurnExecutor:
                         proposal,
                     ),
                 )
-                selection_review_audited = self._model.complete_audited(
-                    selection_review_request
+                selection_review_audited = trace.call(
+                    NodeType.MAYA_REVIEW,
+                    lambda: self._model.complete_audited(selection_review_request),
+                    input_value=selection_review_request,
+                    output_value=lambda audited: audited.proposal,
+                    technical_metadata={"review": "selection"},
                 )
                 if type(selection_review_audited) is not AuditedModelTurn:
                     raise TypeError("model must return exact AuditedModelTurn")
                 selection_review_proposal = validate_productive_proposal(
                     selection_review_audited.proposal
+                )
+                trace.record_value(
+                    NodeType.MAYA_RESPONSE,
+                    selection_review_proposal,
+                    technical_metadata={"review": "selection"},
                 )
                 if selection_review_proposal.source_event_id != batch.batch_id:
                     raise TurnExecutionError(
@@ -2413,17 +2520,32 @@ class V2TurnExecutor:
             for read_request, observation in zip(read_requests, v2_observations)
             if read_request.kind in (ReadKind.LODGING, ReadKind.ACTIVITY)
         )
-        try:
-            decision = self._reducer.reduce(
-                state=current.state,
-                projection=projection,
-                proposal=proposal,
-                profile=profile,
-                private_facts=private_facts,
-                reads=v2_observations,
-                fact_commitment_hash=fact_commitment_hash,
-                now=decision_now,
+        def reduce_current(
+            candidate: ModelProposal,
+            *,
+            reason: str,
+        ):
+            return trace.call(
+                NodeType.CONVERSATION_REDUCER,
+                lambda: self._reducer.reduce(
+                    state=current.state,
+                    projection=projection,
+                    proposal=candidate,
+                    profile=profile,
+                    private_facts=private_facts,
+                    reads=v2_observations,
+                    fact_commitment_hash=fact_commitment_hash,
+                    now=decision_now,
+                ),
+                input_value=candidate,
+                technical_metadata={
+                    "reason": reason,
+                    "state_version": current.version,
+                },
             )
+
+        try:
+            decision = reduce_current(proposal, reason="primary")
         except ConversationReductionError:
             if proposal.intent != "select":
                 raise
@@ -2444,15 +2566,9 @@ class V2TurnExecutor:
             frames = _frame_commitments(audited)
             final_frame_hash = frames[-1].canonical_hash()
             fact_commitment_hash = final_frame_hash
-            decision = self._reducer.reduce(
-                state=current.state,
-                projection=projection,
-                proposal=proposal,
-                profile=profile,
-                private_facts=private_facts,
-                reads=v2_observations,
-                fact_commitment_hash=fact_commitment_hash,
-                now=decision_now,
+            decision = reduce_current(
+                proposal,
+                reason="selection_binding_failure",
             )
         if decision.public_reply.kind == "approval_expired":
             proposal, audited = request_public_reply_correction(
@@ -2468,15 +2584,9 @@ class V2TurnExecutor:
             frames = _frame_commitments(audited)
             final_frame_hash = frames[-1].canonical_hash()
             fact_commitment_hash = final_frame_hash
-            decision = self._reducer.reduce(
-                state=current.state,
-                projection=projection,
-                proposal=proposal,
-                profile=profile,
-                private_facts=private_facts,
-                reads=v2_observations,
-                fact_commitment_hash=fact_commitment_hash,
-                now=decision_now,
+            decision = reduce_current(
+                proposal,
+                reason="critical_authority_expired",
             )
             if decision.public_reply.kind != "approval_expired":
                 raise TurnExecutionError(

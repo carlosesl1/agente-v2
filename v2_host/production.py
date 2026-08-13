@@ -591,12 +591,16 @@ def _build_inbox_worker(
         locale="pt-BR",
         turn_timeout=turn_budget,
         max_commit_attempts=2,
+        ops_recorder=container.ops_recorder,
+        ops_full_content=settings.ops_trace_full_content,
     )
     return InboxTurnWorker(
         inbox=container.inbox,
         executor=executor,
         quiet_window=timedelta(milliseconds=750),
         lease_ttl=turn_budget + timedelta(seconds=15),
+        ops_recorder=container.ops_recorder,
+        ops_full_content=settings.ops_trace_full_content,
     )
 
 

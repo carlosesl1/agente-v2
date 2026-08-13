@@ -21,6 +21,8 @@ from v2_application.relay_worker import (
 )
 from v2_contracts.channel import AcceptDisposition, InboundEvent
 from v2_host.worker_main import WorkerCycle, WorkerQueue
+from v2_ops.contracts import ExecutionStatus, NodeType, TraceCompleteness
+from v2_ops.recording import NullOpsRecorder
 
 NOW = datetime(2026, 7, 23, 20, 0, tzinfo=timezone.utc)
 SOURCE_RECEIPT_HASH = "a" * 64
@@ -50,6 +52,109 @@ class ReplayExecutor:
             receipt = FakeReceipt(hashlib.sha256(batch.batch_id.encode()).hexdigest())
             self.receipts[batch.batch_id] = receipt
         return FakeCommittedTurn(receipt, replayed)
+
+
+class CapturingRecorder(NullOpsRecorder):
+    def __init__(self, *, fail: bool = False) -> None:
+        self.executions = []
+        self.started_nodes = []
+        self.finished_nodes = []
+        self.fail = fail
+
+    def start_execution(self, item) -> None:
+        self.executions.append(item)
+        if self.fail:
+            raise KeyboardInterrupt("synthetic trace failure")
+
+    def start_node(self, item) -> None:
+        self.started_nodes.append(item)
+        if self.fail:
+            raise KeyboardInterrupt("synthetic trace failure")
+
+    def finish_node(self, item) -> None:
+        self.finished_nodes.append(item)
+        if self.fail:
+            raise KeyboardInterrupt("synthetic trace failure")
+
+    def finish_execution(self, item) -> None:
+        self.executions.append(item)
+        if self.fail:
+            raise KeyboardInterrupt("synthetic trace failure")
+
+
+def test_inbox_claim_trace_creates_each_execution_but_only_one_primary_node(
+    tmp_path: Path,
+) -> None:
+    inbox = SQLiteInbox(tmp_path / "inbox.sqlite3")
+    first = _event()
+    second = InboundEvent(
+        event_id="manychat-event:task4-002",
+        lead_id=first.lead_id,
+        subscriber_id=first.subscriber_id,
+        conversation_id=first.conversation_id,
+        text="Para duas pessoas.",
+        media_url=None,
+        media_type=None,
+        occurred_at=first.occurred_at + timedelta(seconds=1),
+        payload_hash="c" * 64,
+    )
+    assert inbox.accept(first) is AcceptDisposition.ACCEPTED
+    assert inbox.accept(second) is AcceptDisposition.ACCEPTED
+    executor = ReplayExecutor()
+    recorder = CapturingRecorder()
+    worker = InboxTurnWorker(
+        inbox=inbox,
+        executor=executor,
+        quiet_window=timedelta(0),
+        lease_ttl=timedelta(seconds=10),
+        ops_recorder=recorder,
+        ops_full_content=False,
+    )
+
+    result = worker.run_once(now=NOW)
+
+    assert result.disposition is InboxWorkerDisposition.COMMITTED
+    assert executor.calls == 1
+    assert [item.execution_id for item in recorder.executions] == [
+        first.event_id,
+        second.event_id,
+        second.event_id,
+    ]
+    assert [item.received_at for item in recorder.executions] == [
+        first.occurred_at,
+        second.occurred_at,
+        second.occurred_at,
+    ]
+    assert recorder.executions[-1].status is ExecutionStatus.COMPLETED
+    assert recorder.executions[-1].trace_completeness is TraceCompleteness.LEDGER_ONLY
+    assert recorder.executions[-1].terminal_reason == "coalesced_into_primary_event"
+    assert len(recorder.started_nodes) == len(recorder.finished_nodes) == 1
+    node = recorder.started_nodes[0]
+    assert node.execution_id == first.event_id
+    assert node.node_type is NodeType.INBOX_CLAIM
+    assert node.input_full is None
+    assert recorder.finished_nodes[0].node_id == node.node_id
+
+
+def test_inbox_claim_trace_baseexception_cannot_change_or_repeat_business_call(
+    tmp_path: Path,
+) -> None:
+    inbox = SQLiteInbox(tmp_path / "inbox.sqlite3")
+    assert inbox.accept(_event()) is AcceptDisposition.ACCEPTED
+    executor = ReplayExecutor()
+    worker = InboxTurnWorker(
+        inbox=inbox,
+        executor=executor,
+        quiet_window=timedelta(0),
+        lease_ttl=timedelta(seconds=10),
+        ops_recorder=CapturingRecorder(fail=True),
+    )
+
+    result = worker.run_once(now=NOW)
+
+    assert result.disposition is InboxWorkerDisposition.COMMITTED
+    assert executor.calls == 1
+    assert inbox.processed_count() == 1
 
 
 class FailFirstCompletionInbox(SQLiteInbox):
