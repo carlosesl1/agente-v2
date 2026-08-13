@@ -518,12 +518,13 @@ class BokunGroupsSource:
     def lookup(
         self, *, canonical_product_id: str, activity_date: date
     ) -> GroupLookupResult:
-        unavailable = lambda: GroupLookupResult(
-            status="unavailable",
-            canonical_product_id=canonical_product_id,
-            activity_date=activity_date,
-            participant_count=None,
-        )
+        def unavailable() -> GroupLookupResult:
+            return GroupLookupResult(
+                status="unavailable",
+                canonical_product_id=canonical_product_id,
+                activity_date=activity_date,
+                participant_count=None,
+            )
         if (
             type(canonical_product_id) is not str
             or _PRODUCT_RE.fullmatch(canonical_product_id) is None
