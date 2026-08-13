@@ -110,6 +110,27 @@ def test_execution_dto_is_frozen_and_requires_exact_utc_time() -> None:
             received_at=UTC_NOW,
             completed_at=UTC_NOW - timedelta(microseconds=1),
         )
+    for terminal_status in (
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.FAILED,
+        ExecutionStatus.MANUAL_REVIEW,
+    ):
+        with pytest.raises(ValueError, match="completed_at"):
+            OpsExecution(
+                execution_id="event-terminal",
+                lead_id="manychat:opaque-lead",
+                received_at=UTC_NOW,
+                status=terminal_status,
+            )
+    for nonterminal_status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+        with pytest.raises(ValueError, match="completed_at"):
+            OpsExecution(
+                execution_id="event-nonterminal",
+                lead_id="manychat:opaque-lead",
+                received_at=UTC_NOW,
+                status=nonterminal_status,
+                completed_at=UTC_NOW,
+            )
 
 
 def test_node_dtos_are_deeply_immutable_and_share_deterministic_identity() -> None:
@@ -165,6 +186,12 @@ def test_node_dtos_are_deeply_immutable_and_share_deterministic_identity() -> No
         OpsNodeFinish.from_start(
             start,
             status=ExecutionStatus.RUNNING,
+            completed_at=UTC_NOW,
+        )
+    with pytest.raises(TypeError, match="ExecutionStatus"):
+        OpsNodeFinish.from_start(
+            start,
+            status="completed",  # type: ignore[arg-type]
             completed_at=UTC_NOW,
         )
 

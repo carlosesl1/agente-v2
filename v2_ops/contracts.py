@@ -358,9 +358,9 @@ class OpsExecution:
         _validate_required_text(self.execution_id, field_name="execution_id")
         _validate_required_text(self.lead_id, field_name="lead_id")
         _validate_utc_timestamp(self.received_at, field_name="received_at")
-        if not isinstance(self.status, ExecutionStatus):
+        if type(self.status) is not ExecutionStatus:
             raise TypeError("status must be an ExecutionStatus")
-        if not isinstance(self.trace_completeness, TraceCompleteness):
+        if type(self.trace_completeness) is not TraceCompleteness:
             raise TypeError("trace_completeness must be a TraceCompleteness")
         _validate_node_id(self.current_node_id, field_name="current_node_id")
         _validate_optional_text(self.terminal_reason, field_name="terminal_reason")
@@ -368,6 +368,13 @@ class OpsExecution:
             _validate_utc_timestamp(self.completed_at, field_name="completed_at")
             if self.completed_at < self.received_at:
                 raise ValueError("completed_at cannot be before received_at")
+        terminal = self.status in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.MANUAL_REVIEW,
+        }
+        if terminal != (self.completed_at is not None):
+            raise ValueError("completed_at presence must match terminal status")
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,7 +393,7 @@ class OpsNodeStart:
 
     def __post_init__(self) -> None:
         _validate_required_text(self.execution_id, field_name="execution_id")
-        if not isinstance(self.node_type, NodeType):
+        if type(self.node_type) is not NodeType:
             raise TypeError("node_type must be a NodeType")
         if type(self.ordinal) is not int or self.ordinal < 1:
             raise ValueError("ordinal must be >= 1")
@@ -451,7 +458,7 @@ class OpsNodeFinish:
 
     def __post_init__(self) -> None:
         _validate_required_text(self.execution_id, field_name="execution_id")
-        if not isinstance(self.node_type, NodeType):
+        if type(self.node_type) is not NodeType:
             raise TypeError("node_type must be a NodeType")
         if type(self.ordinal) is not int or self.ordinal < 1:
             raise ValueError("ordinal must be >= 1")
@@ -461,6 +468,8 @@ class OpsNodeFinish:
         _validate_utc_timestamp(self.completed_at, field_name="completed_at")
         if self.completed_at < self.started_at:
             raise ValueError("completed_at cannot be before started_at")
+        if type(self.status) is not ExecutionStatus:
+            raise TypeError("status must be an ExecutionStatus")
         if self.status not in {
             ExecutionStatus.COMPLETED,
             ExecutionStatus.FAILED,
