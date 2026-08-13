@@ -31,4 +31,5 @@ packages = [
   "v2_application",
   "v2_adapters",
   "v2_host",
+  "v2_ops",
 ]
