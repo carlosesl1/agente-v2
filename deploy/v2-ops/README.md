@@ -22,6 +22,9 @@ docker compose --env-file /restricted/path/v2-ops.env \
   -f deploy/v2-ops/compose.ops.yaml config
 ```
 
+Keep `V2_OPS_PASSWORD_HASH` inside single quotes in the env file. Scrypt hashes
+contain `$`; an unquoted value is interpolated by Compose and becomes invalid.
+
 ## Start and verify
 
 ```bash

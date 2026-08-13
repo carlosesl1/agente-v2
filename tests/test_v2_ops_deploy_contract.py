@@ -77,3 +77,15 @@ def test_env_example_contains_only_ops_specific_names() -> None:
         "V2_OPS_IMAGE_DIGEST",
         "V2_OPS_CONFIG_FINGERPRINT",
     }
+
+
+def test_env_example_quotes_scrypt_hash_against_compose_interpolation() -> None:
+    text = (ROOT / "deploy" / "v2-ops" / "env.example").read_text(
+        encoding="utf-8"
+    )
+    password_line = next(
+        line for line in text.splitlines() if line.startswith("V2_OPS_PASSWORD_HASH=")
+    )
+
+    assert password_line.startswith("V2_OPS_PASSWORD_HASH='scrypt$")
+    assert password_line.endswith("'")
