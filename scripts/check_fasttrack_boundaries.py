@@ -12,6 +12,7 @@ NEW_PACKAGES: Final = (
     "v2_application",
     "v2_adapters",
     "v2_host",
+    "v2_ops",
 )
 KERNEL_PACKAGES: Final = frozenset(
     {
@@ -30,6 +31,7 @@ ALLOWED_INTERNAL: Final = {
     "v2_host": frozenset(
         {"v2_contracts", "v2_application", "v2_adapters", *KERNEL_PACKAGES}
     ),
+    "v2_ops": frozenset({"v2_contracts", *KERNEL_PACKAGES}),
 }
 LEGACY_PREFIXES: Final = frozenset(
     {"app", "cli", "chapada_leads", "config", "domain", "services", "tools"}
@@ -238,7 +240,7 @@ def _check_file(owner: str, path: Path, errors: list[str]) -> None:
 
 
 def check_tree(root: Path) -> tuple[str, ...]:
-    """Return deterministic boundary violations for the four V2 packages."""
+    """Return deterministic boundary violations for the registered V2 packages."""
 
     if not isinstance(root, Path):
         raise TypeError("root must be a pathlib.Path")

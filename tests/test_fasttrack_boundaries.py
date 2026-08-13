@@ -18,6 +18,7 @@ FASTTRACK_PACKAGES = (
     "v2_application",
     "v2_adapters",
     "v2_host",
+    "v2_ops",
 )
 
 
@@ -112,3 +113,29 @@ def test_contracts_reject_external_and_escaping_relative_imports() -> None:
 
         assert any("v2_contracts may import only the Python stdlib" in item for item in errors)
         assert any("relative import escapes v2_contracts" in item for item in errors)
+
+
+def test_ops_may_use_contracts_and_kernel_but_not_runtime_layers() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for package in FASTTRACK_PACKAGES:
+            (root / package).mkdir()
+            (root / package / "__init__.py").write_text("", encoding="utf-8")
+        (root / "v2_ops" / "allowed.py").write_text(
+            "from v2_contracts.channel import InboundEvent\n"
+            "from reservation_boundary.public_dispatch import PublicDispatchClaim\n",
+            encoding="utf-8",
+        )
+        (root / "v2_ops" / "forbidden.py").write_text(
+            "from v2_application.turn_executor import V2TurnExecutor\n"
+            "from v2_adapters.provider_http import ManyChatHTTPTransport\n"
+            "from v2_host.production import build_worker_set\n",
+            encoding="utf-8",
+        )
+
+        errors = check_tree(root)
+
+        assert not any("allowed.py" in item for item in errors)
+        assert any("v2_ops may not import v2_application" in item for item in errors)
+        assert any("v2_ops may not import v2_adapters" in item for item in errors)
+        assert any("v2_ops may not import v2_host" in item for item in errors)
