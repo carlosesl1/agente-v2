@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>V2 Ops — Execution Canvas</title>
+  <link rel="stylesheet" href="/ops/static/ops.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="logo">V2</span><strong>Operations</strong><span class="readonly">READ ONLY</span></div>
+    <div id="live-state" class="live-state">Conectando…</div>
+    <form method="post" action="/ops/logout"><input type="hidden" name="csrf" value="{{CSRF}}"><button>Logout</button></form>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <p class="eyebrow">EXECUÇÕES RECENTES</p>
+      <label class="search"><span>Lead ID</span><input id="lead-search" placeholder="manychat:…"></label>
+      <label class="search"><span>Status</span><select id="status-filter"><option value="">Todos</option><option>running</option><option>running_stale</option><option>completed</option><option>failed</option><option>manual_review</option></select></label>
+      <div id="execution-list" class="execution-list"></div>
+    </aside>
+    <section class="canvas-shell">
+      <div class="canvas-toolbar"><strong id="canvas-title">Selecione uma execução</strong><div><button id="zoom-out">−</button><button id="zoom-in">+</button><button id="fit-canvas">Fit</button></div></div>
+      <div id="execution-canvas" class="execution-canvas" tabindex="0"><svg id="edges" aria-hidden="true"></svg><div id="nodes" class="nodes"></div></div>
+    </section>
+    <aside class="inspector">
+      <p class="eyebrow">INSPETOR</p>
+      <h2 id="node-title">Nenhum nó selecionado</h2>
+      <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>
+      <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>
+      <details><summary>Metadados técnicos</summary><pre id="metadata">{}</pre></details>
+      <details><summary>Erro sanitizado</summary><pre id="node-error">null</pre></details>
+    </aside>
+  </main>
+  <script src="/ops/static/ops.js" defer></script>
+</body>
+</html>

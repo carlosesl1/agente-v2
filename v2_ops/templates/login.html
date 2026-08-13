@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>V2 Ops — Login</title>
+  <link rel="stylesheet" href="/ops/static/ops.css">
+</head>
+<body class="login-shell">
+  <main class="login-card">
+    <p class="eyebrow">CHAPADA LEADS · V2 OPS</p>
+    <h1>Operações do Agente V2</h1>
+    <p class="muted">Dashboard operacional somente leitura.</p>
+    <form method="post" action="/ops/login" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{CSRF}}">
+      <label>Usuário<input name="username" required maxlength="64" autocomplete="username"></label>
+      <label>Senha<input name="password" type="password" required maxlength="1024" autocomplete="current-password"></label>
+      <button type="submit">Entrar</button>
+    </form>
+  </main>
+</body>
+</html>
