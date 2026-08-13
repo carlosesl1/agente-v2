@@ -43,9 +43,16 @@ Run:
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" && pwd -P)
 GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
 test "$GIT_DIR" != "$GIT_COMMON"
-/home/ubuntu/chapada-leads-hermes/venv/bin/python -m pytest -q
+/home/ubuntu/chapada-leads-hermes/venv/bin/python -m pytest -q \
+  --deselect=tests/test_phase7_closeout.py::Phase7EntryContractTests::test_wheel_bootstrap_is_closed_and_stdlib_only \
+  --deselect=tests/test_phase7_closeout.py::Phase7CloseoutContractTests::test_evidence_validator_reflects_current_terminal_artifacts \
+  --deselect=tests/test_phase7_closeout.py::Phase7CloseoutContractTests::test_manifest_is_deterministic_current_and_covers_runtime_patch \
+  --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_installed_wheel_imports_without_checkout_on_sys_path \
+  --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_project_metadata_declares_closed_distribution \
+  --deselect=tests/test_phase7_package.py::Phase7PackageTests::test_two_builds_are_byte_identical_closed_and_self_hashing \
+  --deselect=tests/test_phase8_entry.py::Phase8EntryTests::test_phase_index_keeps_slice_zero_and_rollout_closed
 ```
-Expected: linked worktree and existing suite GREEN.
+Expected: linked worktree and `1778 passed, 7 deselected, 2953 subtests passed`. These seven exact historical tests also fail unchanged on immutable base `9226d1b9`: six enforce the closed Phase 7 wheel/evidence contract (`0.7.0`) against the later V2 package (`0.8.0`), and one enforces an obsolete Phase 8 index phrase. They are baseline exclusions, not dashboard regressions; do not broaden the selector.
 
 **Step 2: Write failing contract tests**
 
