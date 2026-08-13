@@ -178,6 +178,33 @@ def test_writer_bootstraps_deterministic_strict_schema_and_reader_never_bootstra
     assert empty.stat().st_size == 0
 
 
+def test_writer_rejects_foreign_database_without_mutating_or_enabling_wal(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "foreign.sqlite3").resolve()
+    with raw_connect(path) as connection:
+        connection.execute("CREATE TABLE business_record(value TEXT)")
+        connection.commit()
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    before = path.read_bytes()
+
+    with pytest.raises(OpsTraceStoreError, match="unavailable"):
+        SQLiteOpsTraceWriter(path, KEY)
+
+    assert path.read_bytes() == before
+    assert not Path(f"{path}-wal").exists()
+    assert not Path(f"{path}-shm").exists()
+    with raw_connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type='table'"
+            )
+        }
+        assert tables == {"business_record"}
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
 def test_one_execution_per_event_exact_lead_grouping_and_idempotent_replay(
     tmp_path: Path,
 ) -> None:
@@ -426,7 +453,21 @@ def test_current_node_must_exist_and_terminal_execution_requires_terminal_node(
                 )
             )
         writer.start_node(start)
-        with pytest.raises(OpsTraceConflictError, match="running node"):
+        with pytest.raises(OpsTraceConflictError, match="current node"):
+            writer.write_execution(execution(status=ExecutionStatus.RUNNING))
+        later = node_start(
+            ordinal=2,
+            started_at=UTC_NOW + timedelta(seconds=2),
+        )
+        writer.start_node(later)
+        with pytest.raises(OpsTraceConflictError, match="current node"):
+            writer.write_execution(
+                execution(
+                    status=ExecutionStatus.RUNNING,
+                    current_node_id=start.node_id,
+                )
+            )
+        with pytest.raises(OpsTraceConflictError, match="current node|running node"):
             writer.write_execution(
                 execution(
                     status=ExecutionStatus.COMPLETED,
@@ -438,18 +479,60 @@ def test_current_node_must_exist_and_terminal_execution_requires_terminal_node(
             writer.write_execution(
                 execution(
                     status=ExecutionStatus.COMPLETED,
-                    current_node_id=start.node_id,
+                    current_node_id=later.node_id,
                     completed_at=UTC_NOW + timedelta(seconds=3),
                 )
             )
         writer.finish_node(node_finish(start))
+        writer.finish_node(node_finish(later))
         writer.write_execution(
             execution(
                 status=ExecutionStatus.COMPLETED,
-                current_node_id=start.node_id,
+                current_node_id=later.node_id,
                 completed_at=UTC_NOW + timedelta(seconds=3),
             )
         )
+
+
+def test_stale_filters_follow_latest_ordinal_not_maximum_started_at(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "trace.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(execution())
+        writer.start_node(
+            node_start(
+                ordinal=1,
+                started_at=UTC_NOW + timedelta(minutes=10),
+            )
+        )
+        writer.start_node(
+            node_start(
+                ordinal=2,
+                started_at=UTC_NOW + timedelta(minutes=1),
+            )
+        )
+
+    observed_at = UTC_NOW + timedelta(minutes=12)
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        detail = reader.get_execution(
+            "event-001",
+            now=observed_at,
+            stale_after=timedelta(minutes=5),
+        )
+        fresh = reader.list_executions(
+            status=ExecutionStatus.RUNNING,
+            now=observed_at,
+            stale_after=timedelta(minutes=5),
+        )
+        stale = reader.list_executions(
+            status="running_stale",
+            now=observed_at,
+            stale_after=timedelta(minutes=5),
+        )
+    assert detail.status == "running_stale"
+    assert fresh.executions == ()
+    assert [item.execution_id for item in stale.executions] == ["event-001"]
 
 
 def test_full_input_output_are_aes_gcm_encrypted_with_distinct_nonce_and_bound_aad(

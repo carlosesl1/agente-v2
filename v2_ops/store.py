@@ -361,6 +361,7 @@ class SQLiteOpsTraceWriter:
             connection.row_factory = sqlite3.Row
             connection.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
             connection.execute("PRAGMA foreign_keys=ON")
+            self._reject_foreign_schema(connection)
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA wal_autocheckpoint=0")
@@ -394,6 +395,18 @@ class SQLiteOpsTraceWriter:
         if self._connection is None:
             raise OpsTraceStoreError("operational trace store unavailable")
         return self._connection
+
+    @staticmethod
+    def _reject_foreign_schema(connection: sqlite3.Connection) -> None:
+        objects = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_schema "
+                "WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if objects and "ops_schema" not in objects:
+            raise OpsTraceStoreError("operational trace store unavailable")
 
     def _bootstrap_or_verify(self) -> None:
         connection = self._db()
@@ -537,6 +550,15 @@ class SQLiteOpsTraceWriter:
                     raise OpsTraceConflictError(
                         "terminal execution cannot reference a running node"
                     )
+                latest = connection.execute(
+                    "SELECT node_id FROM nodes WHERE execution_id=? "
+                    "ORDER BY ordinal DESC,attempt DESC LIMIT 1",
+                    (item.execution_id,),
+                ).fetchone()
+                if latest is None or latest[0] != item.current_node_id:
+                    raise OpsTraceConflictError("execution current node regression")
+            elif current[6] is not None:
+                raise OpsTraceConflictError("execution current node regression")
             if item.completed_at is not None:
                 running_node = connection.execute(
                     "SELECT 1 FROM nodes WHERE execution_id=? AND status='running' LIMIT 1",
@@ -960,16 +982,18 @@ class SQLiteOpsTraceReader:
             clauses.append("status='running'")
             stale_cutoff = format_utc_timestamp(instant - threshold)
             clauses.append(
-                "COALESCE((SELECT MAX(started_at) FROM nodes n "
-                "WHERE n.execution_id=executions.execution_id AND n.status='running'), "
+                "COALESCE((SELECT started_at FROM nodes n "
+                "WHERE n.execution_id=executions.execution_id AND n.status='running' "
+                "ORDER BY ordinal DESC,attempt DESC LIMIT 1), "
                 "received_at) <= ?"
             )
             parameters.append(stale_cutoff)
         if status_value == ExecutionStatus.RUNNING.value:
             fresh_cutoff = format_utc_timestamp(instant - threshold)
             clauses.append(
-                "COALESCE((SELECT MAX(started_at) FROM nodes n "
-                "WHERE n.execution_id=executions.execution_id AND n.status='running'), "
+                "COALESCE((SELECT started_at FROM nodes n "
+                "WHERE n.execution_id=executions.execution_id AND n.status='running' "
+                "ORDER BY ordinal DESC,attempt DESC LIMIT 1), "
                 "received_at) > ?"
             )
             parameters.append(fresh_cutoff)
