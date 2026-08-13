@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from reservation_domain import ExecutionCertainty, ReservationOperation, dumps_command
+from reservation_domain import (
+    ExecutionCertainty,
+    ReservationOperation,
+    ServiceKind,
+    dumps_command,
+)
 from reservation_execution import DispatchRequest
 from v2_application.critical_actions import CriticalActionDisposition
 from v2_application.cloudbeds_audit import SQLiteCloudbedsAuditStore
@@ -40,6 +45,11 @@ REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 
 
 def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
+    product_map = json.loads(
+        (Path(__file__).resolve().parents[1] / "config" / "v2_bokun_product_map.json").read_text(
+            encoding="utf-8"
+        )
+    )
     values: dict[str, object] = {
         "webhook_secret": "m" * 32,
         "sqlite_path": tmp_path / "state" / "inbox.sqlite3",
@@ -56,7 +66,8 @@ def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
         "cloudbeds_source_id": "source-1",
         "bokun_access_key": "bokun-access",
         "bokun_secret_key": "bokun-secret",
-        "bokun_product_map": {"product:buracao": "913372"},
+        "bokun_product_map": product_map,
+        "bokun_groups_sheet_csv_url": "https://groups.example.test/published.csv",
         "read_probe_check_in": "2026-08-05",
         "read_probe_check_out": "2026-08-06",
         "read_probe_activity_date": "2026-08-05",
@@ -231,7 +242,26 @@ def test_read_service_is_constructed_from_direct_provider_transports(tmp_path: P
     assert type(reads).__name__ == "V2ReadService"
     assert "CloudbedsHTTPTransport" in repr(reads)
     assert "BokunHTTPTransport" in repr(reads)
-    assert reads._ports[ReadKind.ACTIVITY]._transport._quote_checkout_enabled is False
+    activity = reads._ports[ReadKind.ACTIVITY]
+    assert type(activity).__name__ == "GroupEnrichedActivityReadAdapter"
+    assert type(activity._bokun).__name__ == "BokunReadAdapter"
+    assert activity._bokun._transport._quote_checkout_enabled is False
+    assert type(activity._groups).__name__ == "BokunGroupsSource"
+    assert reads._ports[ReadKind.ACTIVITY_DESCRIPTION] is activity._bokun
+
+
+def test_read_service_fails_closed_without_group_source_or_policy_map_agreement(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="group"):
+        build_read_service(_settings(tmp_path, bokun_groups_sheet_csv_url=""))
+    with pytest.raises(ValueError, match="policy|product map"):
+        build_read_service(
+            _settings(
+                tmp_path,
+                bokun_product_map={"product:buracao": "913372"},
+            )
+        )
 
 
 def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_closed(
@@ -371,6 +401,13 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert set(reservation._worker._adapter._adapters) == {
             ReservationOperation.BOOK_ACTIVITY
         }
+        activity_execution = reservation._worker._adapter._adapters[
+            ReservationOperation.BOOK_ACTIVITY
+        ]
+        activity_resolver = activity_execution._binding_resolver
+        assert type(activity_resolver._ports[ServiceKind.ACTIVITY]).__name__ == (
+            "GroupEnrichedActivityReadAdapter"
+        )
         assert bokun_container.readiness().capabilities["reservation_writes"] == "ready"
     finally:
         bokun_container.close()

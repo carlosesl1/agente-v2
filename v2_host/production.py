@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import ServiceKind
@@ -17,7 +18,9 @@ from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
 from reservation_followup.workers import HandoffOutboxWorker
 from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
+from v2_adapters.bokun_groups import BokunGroupsSource, load_activity_group_policy
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
+from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
 from v2_adapters.manychat_profile import ManyChatProfileAdapter
@@ -519,10 +522,11 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
         clock=clock,
         ttl=timedelta(minutes=5),
     )
+    activity = _group_enriched_activity_adapter(settings=settings, bokun=bokun)
     ports = {
         ReadKind.LODGING: cloudbeds,
         ReadKind.ROOM_DESCRIPTION: cloudbeds,
-        ReadKind.ACTIVITY: bokun,
+        ReadKind.ACTIVITY: activity,
         ReadKind.ACTIVITY_DESCRIPTION: bokun,
     }
     if settings.knowledge_base_path is not None:
@@ -532,6 +536,33 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
             ttl=timedelta(minutes=5),
         )
     return V2ReadService(ports)
+
+
+def _group_enriched_activity_adapter(
+    *,
+    settings: V2Settings,
+    bokun: BokunReadAdapter,
+) -> GroupEnrichedActivityReadAdapter:
+    if not settings.bokun_groups_sheet_csv_url:
+        raise ValueError("productive activity reads require the group CSV source")
+    config_root = Path(__file__).resolve().parents[1] / "config"
+    policy = load_activity_group_policy(
+        config_root / "v2_activity_group_policy.json",
+        config_root / "v2_bokun_product_map.json",
+    )
+    policy_product_map = {
+        item.canonical_product_id: item.bokun_product_id for item in policy.products
+    }
+    if settings.bokun_product_map != policy_product_map:
+        raise ValueError("activity group policy disagrees with the runtime product map")
+    return GroupEnrichedActivityReadAdapter(
+        bokun=bokun,
+        groups_source=BokunGroupsSource(
+            sheet_csv_url=settings.bokun_groups_sheet_csv_url,
+            policy=policy,
+        ),
+        policy=policy,
+    )
 
 
 def _build_inbox_worker(
@@ -661,6 +692,10 @@ def _build_reservation_worker(
             clock=clock,
             ttl=timedelta(minutes=5),
         )
+        bokun_binding_port = _group_enriched_activity_adapter(
+            settings=settings,
+            bokun=bokun_read_port,
+        )
         adapters.append(
             V2ReservationExecutionAdapter(
                 provider="bokun",
@@ -673,7 +708,7 @@ def _build_reservation_worker(
                     ),
                 ),
                 binding_resolver=PrivateOfferBindingResolver(
-                    {ServiceKind.ACTIVITY: bokun_read_port}
+                    {ServiceKind.ACTIVITY: bokun_binding_port}
                 ),
                 clock=clock,
                 ops_recorder=container.ops_recorder,
