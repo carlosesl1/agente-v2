@@ -34,8 +34,8 @@
 
 **RED tests:**
 
-1. Policy loads exactly the six canonical products, expected provider/rate/category IDs, and aliases.
-2. Policy rejects duplicate normalized aliases, malformed IDs, unknown product-map disagreement, and products outside the closed catalog.
+1. Policy loads aliases for exactly all canonical products in the active Bókun product map, plus a separate six-product solo-minimum-two section with expected provider/rate/category IDs.
+2. Policy rejects missing/extra canonical products, duplicate normalized aliases, malformed IDs, product-map disagreement, and solo policies outside the closed six-product subset.
 3. CSV parser inherits blank dates, handles ISO/Brazilian/month-name dates, aggregates matching participants, and returns `matched` only for exact normalized aliases and exact date.
 4. Similar/substring product names do not match.
 5. Empty or zero-participant rows do not establish a group.
@@ -48,7 +48,8 @@
 - Implement bounded HTTPS CSV fetch with injected client/fetcher for tests.
 - Port only the proven date inheritance/normalization behavior from V1.
 - Use equality against normalized closed aliases, not substring matching.
-- Validate policy against the active canonical→Bókun product map.
+- Validate the complete alias policy against the active canonical→Bókun
+  product map; validate the solo policy as a six-product subset.
 
 **Gate:** `pytest -q tests/test_v2_bokun_groups.py`
 

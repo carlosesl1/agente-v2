@@ -75,6 +75,16 @@ Para esses produtos, quando `adults + children == 1`:
 
 ## Correspondência de grupo
 
+A política de correspondência cobre todos os 16 produtos de
+`config/v2_bokun_product_map.json`. O subconjunto de seis produtos acima limita
+somente a exceção solo de mínimo 2; não limita a consulta da planilha nem o
+enriquecimento comercial normal.
+
+Para todo `ReadKind.ACTIVITY`, inclusive produtos sem grupo encontrado, a fonte
+da planilha é consultada. Um produto do mapa ativo precisa ter aliases fechados
+na política versionada; divergência entre os dois catálogos bloqueia a
+composição produtiva.
+
 A correspondência exige simultaneamente:
 
 - data ISO exatamente igual à data consultada;
@@ -122,7 +132,8 @@ O contexto também entra no `consultation_history`, para sobreviver aos turnos s
 
 - A URL CSV da planilha pertence ao worker e é fornecida por `V2_BOKUN_GROUPS_SHEET_CSV_URL`.
 - O processo API não recebe essa configuração.
-- A política fechada de aliases e tarifas é versionada no repositório.
+- A política fechada de aliases cobre todos os produtos do mapa Bókun ativo; a
+  seção separada de tarifas solo contém somente os seis produtos mínimo-2.
 - A composição produtiva só inicia com URL HTTPS válida e política consistente com `V2_BOKUN_PRODUCT_MAP_JSON`.
 - A fonte lê somente CSV e não retorna nomes, guias, comentários, URL ou linhas brutas ao modelo.
 
