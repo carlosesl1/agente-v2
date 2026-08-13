@@ -8,6 +8,13 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_v2_runtime_image_contains_the_instrumentation_package() -> None:
+    dockerfile = (ROOT / "Dockerfile.v2").read_text(encoding="utf-8")
+
+    assert "COPY v2_ops /app/v2_ops" in dockerfile
+    assert re.search(r"compileall\s+-q[\s\\\n\S]*\bv2_ops\b", dockerfile)
+
+
 def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
     dockerfile = (ROOT / "Dockerfile.v2-ops").read_text(encoding="utf-8")
     compose = yaml.safe_load(
