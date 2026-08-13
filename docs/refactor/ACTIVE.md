@@ -16,11 +16,28 @@
 - No new OCI has been built for this phase.
 - The base candidate remains immutable. All changes belong to the successor branch below.
 
-## Active successor — Maya V2 operational execution dashboard
+## Active successor — Maya V2 group-enriched activity availability
+
+- Authorized by Carlos Eduardo on 2026-08-13: every Maya V2 activity lookup must compose the group sheet and Bókun inside the runtime and return one result to Maya; a one-person option for a minimum-two activity may exist only when the same activity/date has a matching group, otherwise it must not be offered.
+- Branch: `maya-v2-group-enriched-availability`.
+- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-ops-dashboard`.
+- Immutable base: `acfd5d6c1f7ecfef2bebf875a8e5a4dac37da265`.
+- Design: `docs/superpowers/specs/2026-08-13-maya-v2-group-enriched-availability.md`.
+- Plan: `docs/superpowers/plans/2026-08-13-maya-v2-group-enriched-availability.md`.
+- Runtime decision: Maya receives no new tool. `ReadKind.ACTIVITY` remains one model-facing operation and a composite runtime adapter owns group lookup plus Bókun lookup/resolution.
+- Failure decision: for 2+ participants, sheet failure degrades to a Bókun result with group status unavailable; for exactly one participant on the six closed minimum-two products, missing/unavailable group evidence fails closed and hides the option.
+- Safety decision: Bókun remains authoritative for availability, price, exact rate/category and executable private binding. Solo eligibility is revalidated during private binding resolution before any provider write.
+- Scope decision: start only with the six recovered V1 product/rate mappings; no dynamic generalization to all minimum-two products.
+- No-effect rule: implementation/tests use fakes and perform no provider write, ManyChat delivery, payment, handoff, or V3 change. Production promotion follows the plan only after focused/canonical gates, immutable image binding, rollback metadata and read-only smoke.
+- Environment evidence: global `python -m pytest` failed because global Python has no pytest. A first `uv pip install -e '.[runtime,dev]'` attempt failed because this flat monorepo is intentionally not an editable setuptools package. A manually created `.venv` was superseded and removed after confirming the canonical existing `venv` selected by `uv run`. These are runner-selection failures, not product test failures.
+- Focused immutable baseline: `62 passed` across Bókun party reads, authenticated read bridge, reads, settings, and productive composition using `uv run --extra runtime --extra dev python -m pytest ...`.
+- Exact NEXT: execute Task 1 RED tests for the closed group policy and read-only CSV source, prove causal failures, then implement only that task and run its focal gate.
+
+## Preserved release — Maya V2 operational execution dashboard
 
 - Authorized by Carlos Eduardo on 2026-08-13 after approving the dashboard specification: implement, verify, and publish the read-only operational dashboard at `https://hermes.chapadabackpackers.com/ops`.
 - Branch: `maya-v2-ops-dashboard`.
-- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-ops-dashboard`.
+- Required worktree: `/home/ubuntu/agente-v2/.worktrees/maya-v2-ops-dashboard` (the current group-availability successor reuses this published worktree path).
 - Immutable base: `9226d1b91cdf6007c8f5ce72d0a572e35c4f8a5b`; tree `8c64c013671474b521a2bd9228672477fa7211dc`.
 - Design: `docs/superpowers/specs/2026-08-13-maya-v2-ops-execution-dashboard-design.md`.
 - Plan: `docs/superpowers/plans/2026-08-13-maya-v2-ops-execution-dashboard.md`.
