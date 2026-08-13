@@ -84,7 +84,9 @@ def test_only_login_and_health_are_public(tmp_path: Path) -> None:
     client, execution_id, _ = _build_client(tmp_path)
 
     assert client.get("/ops/healthz").status_code == 200
-    assert client.get("/ops/login").status_code == 200
+    login = client.get("/ops/login")
+    assert login.status_code == 200
+    assert client.get("/ops/static/ops.css").status_code == 200
     assert client.get("/ops", follow_redirects=False).headers["location"] == "/ops/"
     assert client.get("/ops/", follow_redirects=False).status_code == 303
     assert client.get("/ops/api/executions").status_code == 401
@@ -160,6 +162,21 @@ def test_login_rejects_bad_csrf_origin_and_credentials_without_cause(tmp_path: P
     )
     assert bad_password.status_code == 401
     assert bad_password.json() == {"status": "invalid_credentials"}
+
+
+def test_login_accepts_valid_csrf_when_browser_omits_origin_and_referer(tmp_path: Path) -> None:
+    client, _, _ = _build_client(tmp_path)
+    page = client.get("/ops/login")
+    csrf = page.cookies["v2_ops_csrf"]
+
+    response = client.post(
+        "/ops/login",
+        data={"username": "ops", "password": "password-123", "csrf": csrf},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ops/"
 
 
 def test_security_headers_and_sse_require_session(tmp_path: Path) -> None:

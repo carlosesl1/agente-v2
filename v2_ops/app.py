@@ -92,7 +92,9 @@ def _same_origin(request: Request) -> bool:
         return hmac.compare_digest(origin.rstrip("/"), expected)
     referer = request.headers.get("referer")
     if referer is None:
-        return False
+        # Browsers may omit both headers under no-referrer. The login POST still
+        # requires the unpredictable double-submit CSRF cookie and form token.
+        return True
     parsed = urlsplit(referer)
     return hmac.compare_digest(f"{parsed.scheme}://{parsed.netloc}", expected)
 
@@ -257,9 +259,7 @@ def create_ops_app(
         return HTMLResponse(html)
 
     @app.get("/ops/static/ops.css")
-    async def css(request: Request) -> Response:
-        if claims(request) is None:
-            return JSONResponse(status_code=401, content={"status": "authentication_required"})
+    async def css() -> Response:
         return FileResponse(_STATIC / "ops.css", media_type="text/css")
 
     @app.get("/ops/static/ops.js")
