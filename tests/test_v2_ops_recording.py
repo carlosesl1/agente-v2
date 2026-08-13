@@ -298,3 +298,92 @@ def test_completion_clock_failure_after_call_cannot_replace_business_result() ->
     assert [item.reason for item in degradations] == [
         DegradationReason.NODE_FINISH_FAILED
     ]
+
+
+class TraceBaseFailure(BaseException):
+    pass
+
+
+class BaseFaultRecorder(NullOpsRecorder):
+    __slots__ = ("operation",)
+
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+
+    def start_execution(self, item: object) -> None:
+        if self.operation == "start_execution":
+            raise TraceBaseFailure("trace start failed")
+
+    def finish_node(self, item: object) -> None:
+        if self.operation == "finish_node":
+            raise TraceBaseFailure("trace finish failed")
+
+
+@pytest.mark.parametrize("operation", ["start_execution", "finish_node"])
+def test_trace_baseexception_never_replaces_success_or_retries_business_call(
+    operation: str,
+) -> None:
+    result = object()
+    calls = 0
+
+    def business_call() -> object:
+        nonlocal calls
+        calls += 1
+        return result
+
+    returned = record_boundary(
+        BaseFaultRecorder(operation),
+        execution=_execution(),
+        node=_node(),
+        call=business_call,
+        completed_at=lambda: NOW + timedelta(seconds=2),
+    )
+
+    assert returned is result
+    assert calls == 1
+
+
+def test_trace_clock_baseexception_never_replaces_success() -> None:
+    result = object()
+    calls = 0
+
+    def business_call() -> object:
+        nonlocal calls
+        calls += 1
+        return result
+
+    def broken_clock() -> datetime:
+        raise TraceBaseFailure("trace clock failed")
+
+    returned = record_boundary(
+        NullOpsRecorder(),
+        execution=_execution(),
+        node=_node(),
+        call=business_call,
+        completed_at=broken_clock,
+    )
+
+    assert returned is result
+    assert calls == 1
+
+
+def test_business_baseexception_keeps_identity_and_is_called_once() -> None:
+    failure = TraceBaseFailure("business base failure")
+    calls = 0
+
+    def business_call() -> object:
+        nonlocal calls
+        calls += 1
+        raise failure
+
+    with pytest.raises(TraceBaseFailure) as caught:
+        record_boundary(
+            NullOpsRecorder(),
+            execution=_execution(),
+            node=_node(),
+            call=business_call,
+            completed_at=lambda: NOW + timedelta(seconds=2),
+        )
+
+    assert caught.value is failure
+    assert calls == 1

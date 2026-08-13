@@ -125,7 +125,7 @@ class SQLiteOpsRecorder:
                     node_id=node_id,
                 )
             )
-        except Exception:
+        except BaseException:
             return
 
 
@@ -140,14 +140,14 @@ def _record_best_effort(
     try:
         operation()
         return True
-    except Exception:
+    except BaseException:
         try:
             recorder.report_degradation(
                 reason,
                 execution_id=execution_id,
                 node_id=node_id,
             )
-        except Exception:
+        except BaseException:
             pass
         return False
 
@@ -231,14 +231,14 @@ def record_boundary(
                 execution_id=execution.execution_id,
                 node_id=node.node_id,
             )
-        except Exception:
+        except BaseException:
             try:
                 recorder.report_degradation(
                     DegradationReason.NODE_FINISH_FAILED,
                     execution_id=execution.execution_id,
                     node_id=node.node_id,
                 )
-            except Exception:
+            except BaseException:
                 pass
         raise
 
@@ -247,14 +247,14 @@ def record_boundary(
     if serialize_result is not None:
         try:
             output_summary, output_full = serialize_result(result)
-        except Exception:
+        except BaseException:
             try:
                 recorder.report_degradation(
                     DegradationReason.RESULT_SERIALIZATION_FAILED,
                     execution_id=execution.execution_id,
                     node_id=node.node_id,
                 )
-            except Exception:
+            except BaseException:
                 pass
             output_summary = {}
             output_full = None
@@ -289,13 +289,13 @@ def record_boundary(
             execution_id=execution.execution_id,
             node_id=node.node_id,
         )
-    except Exception:
+    except BaseException:
         try:
             recorder.report_degradation(
                 DegradationReason.NODE_FINISH_FAILED,
                 execution_id=execution.execution_id,
                 node_id=node.node_id,
             )
-        except Exception:
+        except BaseException:
             pass
     return result

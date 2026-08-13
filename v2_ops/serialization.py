@@ -47,6 +47,7 @@ _PUBLIC_STATUSES = frozenset(
     }
 )
 _PUBLIC_CURRENCIES = frozenset({"BRL", "USD", "EUR", "GBP"})
+_PROVIDER_RESULT_STATUSES = frozenset({"confirmed", "rejected", "unknown"})
 
 
 def _hash(domain: str, value: str) -> str:
@@ -270,7 +271,11 @@ def _serialize_provider_result(value: ProviderExecutionResult) -> SerializedPair
     return _closed_pair(
         {
             "certainty": value.certainty.value,
-            "normalized_status": value.normalized_status,
+            "normalized_status": (
+                value.normalized_status
+                if value.normalized_status in _PROVIDER_RESULT_STATUSES
+                else "other"
+            ),
             "provider_reference_fingerprint": value.provider_reference_fingerprint,
             "evidence": list(value.evidence),
             "evidence_count": len(value.evidence),
@@ -324,6 +329,15 @@ def _serialize_payment_instruction(value: PaymentInstruction) -> SerializedPair:
 
 
 def _serialize_public_claim(value: PublicDispatchClaim) -> SerializedPair:
+    channel_id = (
+        "manychat" if value.channel_id.casefold().startswith("manychat") else "other"
+    )
+    if value.channel_scope in {"subscriber", "whatsapp"}:
+        channel_scope = value.channel_scope
+    elif value.channel_scope.casefold().startswith("manychat:"):
+        channel_scope = "manychat"
+    else:
+        channel_scope = "other"
     return _closed_pair(
         {
             "public_row_fingerprint": _hash(
@@ -341,8 +355,8 @@ def _serialize_public_claim(value: PublicDispatchClaim) -> SerializedPair:
                 "v2-ops-public-idempotency-v1", value.idempotency_key
             ),
             "target_binding_hash": value.target_binding_hash,
-            "channel_id": value.channel_id,
-            "channel_scope": value.channel_scope,
+            "channel_id": channel_id,
+            "channel_scope": channel_scope,
             "authority_fingerprint": _hash(
                 "v2-ops-public-authorization-v1", value.authorization_id
             ),

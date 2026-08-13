@@ -503,6 +503,50 @@ def test_nested_fact_values_and_arbitrary_public_labels_never_escape_allowlists(
     assert event_full["media_type"] == "other"
 
 
+def test_arbitrary_provider_and_public_dispatch_labels_are_normalized() -> None:
+    result = ProviderExecutionResult(
+        certainty=ProviderCertainty.CALLED_NO_EFFECT,
+        normalized_status="status-private-sentinel",
+        provider_reference_fingerprint=None,
+        evidence=(),
+    )
+    chunk = PublicReplyChunk(
+        aggregate_turn_id="turn:label-redaction",
+        ordinal=0,
+        text="safe public text",
+        source_closure_hash="6" * 64,
+    )
+    claim = PublicDispatchClaim(
+        public_row_id="public-row:label-redaction",
+        lead_key="lead-key:label-redaction",
+        aggregate_turn_id=chunk.aggregate_turn_id,
+        chunk=chunk,
+        idempotency_key="public-idempotency:label-redaction",
+        target_binding_hash="5" * 64,
+        channel_id="channel-private-sentinel",
+        channel_scope="scope-private-sentinel",
+        scope_subject_id="scope-subject-private-sentinel",
+        authorization_id="public-authority:label-redaction",
+        allocation_id="public-allocation:label-redaction",
+        immutable_generation=1,
+        source_turn_receipt_hash="4" * 64,
+        deadline_at=NOW + timedelta(minutes=2),
+        worker_id="worker:label-redaction",
+        fencing_token=1,
+        lease_expires_at=NOW + timedelta(minutes=1),
+    )
+
+    result_full = serialize_ops_value(result)[1]
+    claim_full = serialize_ops_value(claim)[1]
+    assert result_full["normalized_status"] == "other"
+    assert claim_full["channel_id"] == "other"
+    assert claim_full["channel_scope"] == "other"
+    encoded = canonical_json_bytes(result_full) + canonical_json_bytes(claim_full)
+    assert b"status-private-sentinel" not in encoded
+    assert b"channel-private-sentinel" not in encoded
+    assert b"scope-private-sentinel" not in encoded
+
+
 @pytest.mark.parametrize("value", _fixtures())
 def test_subclasses_are_rejected_before_field_access(value: object) -> None:
     subclass = type(f"Sub{type(value).__name__}", (type(value),), {})
