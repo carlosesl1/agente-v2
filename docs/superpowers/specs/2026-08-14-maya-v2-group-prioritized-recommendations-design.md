@@ -1,7 +1,7 @@
 # Maya V2 — recomendações com prioridade comercial para grupos formados
 
 **Data:** 2026-08-14
-**Status:** aguardando revisão final de Carlos Eduardo
+**Status:** aprovado por Carlos Eduardo em 2026-08-14
 
 ## Objetivo
 

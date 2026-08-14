@@ -33,6 +33,19 @@
 - Focused immutable baseline: `62 passed` across Bókun party reads, authenticated read bridge, reads, settings, and productive composition using `uv run --extra runtime --extra dev python -m pytest ...`.
 - Exact NEXT: execute Task 1 RED tests for the closed group policy and read-only CSV source, prove causal failures, then implement only that task and run its focal gate.
 
+## Approved successor — Maya V2 group-prioritized recommendations
+
+- Authorized by Carlos Eduardo on 2026-08-14: when a lead asks for recommendations within a stay period, suitability to the lead comes first; among suitable options, Maya gives commercial priority to exact formed groups.
+- Catalog invariant: priority is never a filter. Tours without groups, tours other than 4Ps/Pati-3d, and any valid Bókun catalog product remain consultable, recommendable, selectable, and reservable through the ordinary activity flow.
+- Branch/worktree: continue on `maya-v2-group-enriched-availability` at `/home/ubuntu/agente-v2/.worktrees/maya-v2-ops-dashboard` as the successor to the already deployed group-enriched runtime.
+- Approved design: `docs/superpowers/specs/2026-08-14-maya-v2-group-prioritized-recommendations-design.md`.
+- Implementation plan: `docs/superpowers/plans/2026-08-14-maya-v2-group-prioritized-recommendations.md`.
+- Architecture decision: add one bounded, informational period recommendation read. It composes one group-sheet range read with Bókun availability and returns non-selectable candidates; a fresh ordinary `ReadKind.ACTIVITY` remains mandatory before selection or reservation.
+- Semantic decision: Maya remains sole owner of suitability and response wording. No controller keyword/regex/score decides the best tour.
+- Frequent alternatives: 4Ps and Pati 3 days supplement recommendations when compatible; they do not limit the catalog and never imply a formed group or confirmed departure without current evidence.
+- No-effect rule: implementation and qualification perform no reservation, cart, payment, handoff, ManyChat delivery, provider POST, or V3 change.
+- Exact NEXT: execute Task 1 from the approved plan with causal RED tests for the closed `ACTIVITY_RECOMMENDATION` request contract; do not implement later tasks before Task 1 is independently green and committed.
+
 ## Preserved release — Maya V2 operational execution dashboard
 
 - Authorized by Carlos Eduardo on 2026-08-13 after approving the dashboard specification: implement, verify, and publish the read-only operational dashboard at `https://hermes.chapadabackpackers.com/ops`.
