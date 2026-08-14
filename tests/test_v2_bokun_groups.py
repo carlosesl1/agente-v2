@@ -471,6 +471,50 @@ def test_google_sheet_single_https_content_redirect_is_followed() -> None:
     ]
 
 
+def test_upcoming_groups_fetches_sheet_once_and_returns_only_sanitized_matches() -> None:
+    module = _module()
+    calls = 0
+
+    def fetcher(url: str, timeout: float, limit: int) -> bytes:
+        nonlocal calls
+        calls += 1
+        return (
+            "data,passeio,qtd\n"
+            "14/08/2026,Aguas Claras,2\n"
+            "14/08/2026,Aguas Claras,1\n"
+            "15/08/2026,Roteiro 4Ps,4\n"
+            "20/08/2026,Passeio desconhecido,9\n"
+        ).encode()
+
+    source = module.BokunGroupsSource(
+        sheet_csv_url="https://example.test/groups.csv",
+        policy=_policy(),
+        fetcher=fetcher,
+    )
+
+    groups = source.upcoming_groups(
+        start_date=date(2026, 8, 14),
+        days=7,
+        max_groups=24,
+    )
+
+    assert calls == 1
+    assert groups == (
+        module.GroupLookupResult(
+            status="matched",
+            canonical_product_id="product:aguas-claras",
+            activity_date=date(2026, 8, 14),
+            participant_count=3,
+        ),
+        module.GroupLookupResult(
+            status="matched",
+            canonical_product_id="product:tour-4ps",
+            activity_date=date(2026, 8, 15),
+            participant_count=4,
+        ),
+    )
+
+
 def test_google_sheet_second_redirect_is_unavailable() -> None:
     module = _module()
     calls = 0

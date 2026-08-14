@@ -265,6 +265,19 @@ KNOWN ACTIVITY INFORMATION ROUTING:
 """.strip()
 
 
+_FORMED_GROUPS_SYSTEM_SUFFIX: Final = """
+SIMPLE FORMED-GROUP RECOMMENDATION:
+- For an open request asking what activities fit a period or which activity is more
+  recommended, use the existing knowledge read once. Set its query exactly to
+  formed-groups:YYYY-MM-DD:YYYY-MM-DD with the interpreted inclusive start and end dates.
+- Recommend by suitability first. Among equally suitable options, prefer a formed group.
+  Do not hide other suitable activities merely because they have no formed group.
+- formed_groups comes only from the scheduling sheet. It is not current Bókun availability
+  or a selectable offer. After the customer chooses, request one fresh activity read for
+  the exact product, date and party before selection or booking.
+""".strip()
+
+
 _PUBLIC_REPLY_CORRECTION_SUFFIX: Final = """
 PUBLIC REPLY CORRECTION
 The previous candidate could not be published for the listed closed reasons.
@@ -471,6 +484,8 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _RECAP_REUSE_SYSTEM_SUFFIX
                 + "\n\n"
                 + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
+                + "\n\n"
+                + _FORMED_GROUPS_SYSTEM_SUFFIX
                 + "\n\n"
                 + _TURN_COMPLETION_SYSTEM_SUFFIX
                 + (

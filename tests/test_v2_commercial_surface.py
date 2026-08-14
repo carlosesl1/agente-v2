@@ -58,6 +58,18 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
     assert "75999979532" in prompt
 
 
+def test_model_prompt_uses_existing_knowledge_then_activity_for_group_recommendations() -> None:
+    from v2_adapters.hermes_model import _FORMED_GROUPS_SYSTEM_SUFFIX
+
+    prompt = _FORMED_GROUPS_SYSTEM_SUFFIX
+
+    assert "existing knowledge read" in prompt
+    assert "formed-groups:YYYY-MM-DD:YYYY-MM-DD" in prompt
+    assert "formed_groups" in prompt
+    assert "suitability first" in prompt
+    assert "fresh activity read" in prompt
+
+
 def test_hermes_adapter_parses_closed_knowledge_request_from_live_contract() -> None:
     response = json.dumps(
         {

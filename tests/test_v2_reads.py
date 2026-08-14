@@ -347,6 +347,95 @@ def test_knowledge_read_cannot_return_provider_credentials() -> None:
     }
 
 
+def test_knowledge_read_can_include_sanitized_formed_groups_without_new_read_kind() -> None:
+    class Groups:
+        def upcoming_groups(self, *, start_date: date, days: int, max_groups: int):
+            assert start_date == date(2026, 8, 10)
+            assert days == 8
+            assert max_groups == 24
+            return (
+                type("Group", (), {
+                    "canonical_product_id": "product:buracao",
+                    "activity_date": date(2026, 8, 12),
+                    "participant_count": 3,
+                })(),
+            )
+
+    reads = KnowledgeReadAdapter(
+        transport=lambda operation, payload: {
+            "answer": "Contexto de passeios.",
+            "sources": ["catalogo"],
+        },
+        groups_source=Groups(),
+        clock=FixedClock(),
+        ttl=timedelta(minutes=30),
+    )
+
+    observation = reads.read(
+        replace(
+            KNOWLEDGE_REQUEST,
+            query="formed-groups:2026-08-10:2026-08-17",
+        )
+    )
+
+    assert observation.public_payload == {
+        "answer": "Contexto de passeios.",
+        "sources": ["catalogo"],
+        "formed_groups": [
+            {
+                "product_id": "product:buracao",
+                "activity_date": "2026-08-12",
+                "participants": 3,
+            }
+        ],
+    }
+
+
+def test_knowledge_read_keeps_working_when_group_sheet_is_unavailable() -> None:
+    class BrokenGroups:
+        def upcoming_groups(self, **kwargs):
+            raise RuntimeError("private source detail")
+
+    reads = KnowledgeReadAdapter(
+        transport=lambda operation, payload: {
+            "answer": "O café é servido das 7h às 9h.",
+            "sources": ["faq:cafe"],
+        },
+        groups_source=BrokenGroups(),
+        clock=FixedClock(),
+        ttl=timedelta(minutes=30),
+    )
+
+    observation = reads.read(
+        replace(
+            KNOWLEDGE_REQUEST,
+            query="formed-groups:2026-08-10:2026-08-17",
+        )
+    )
+
+    assert observation.public_payload["formed_groups"] == []
+
+
+def test_regular_knowledge_read_does_not_fetch_group_sheet() -> None:
+    class Groups:
+        def upcoming_groups(self, **kwargs):
+            raise AssertionError("ordinary FAQ must not fetch the group sheet")
+
+    reads = KnowledgeReadAdapter(
+        transport=lambda operation, payload: {
+            "answer": "O café é servido das 7h às 9h.",
+            "sources": ["faq:cafe"],
+        },
+        groups_source=Groups(),
+        clock=FixedClock(),
+        ttl=timedelta(minutes=30),
+    )
+
+    observation = reads.read(KNOWLEDGE_REQUEST)
+
+    assert "formed_groups" not in observation.public_payload
+
+
 def test_stale_observation_cannot_authorize_selection() -> None:
     adapter = CloudbedsReadAdapter(
         transport=lambda operation, payload: {

@@ -18,7 +18,11 @@ from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
 from reservation_followup.workers import HandoffOutboxWorker
 from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
-from v2_adapters.bokun_groups import BokunGroupsSource, load_activity_group_policy
+from v2_adapters.bokun_groups import (
+    ActivityGroupPolicy,
+    BokunGroupsSource,
+    load_activity_group_policy,
+)
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
 from v2_adapters.hermes_model import HermesModelAdapter
@@ -522,7 +526,12 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
         clock=clock,
         ttl=timedelta(minutes=5),
     )
-    activity = _group_enriched_activity_adapter(settings=settings, bokun=bokun)
+    policy, groups_source = _activity_group_source(settings)
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=bokun,
+        groups_source=groups_source,
+        policy=policy,
+    )
     ports = {
         ReadKind.LODGING: cloudbeds,
         ReadKind.ROOM_DESCRIPTION: cloudbeds,
@@ -534,15 +543,14 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
             transport=FileKnowledgeTransport(settings.knowledge_base_path),
             clock=clock,
             ttl=timedelta(minutes=5),
+            groups_source=groups_source,
         )
     return V2ReadService(ports)
 
 
-def _group_enriched_activity_adapter(
-    *,
+def _activity_group_source(
     settings: V2Settings,
-    bokun: BokunReadAdapter,
-) -> GroupEnrichedActivityReadAdapter:
+) -> tuple[ActivityGroupPolicy, BokunGroupsSource]:
     if not settings.bokun_groups_sheet_csv_url:
         raise ValueError("productive activity reads require the group CSV source")
     config_root = Path(__file__).resolve().parents[1] / "config"
@@ -555,12 +563,21 @@ def _group_enriched_activity_adapter(
     }
     if settings.bokun_product_map != policy_product_map:
         raise ValueError("activity group policy disagrees with the runtime product map")
+    return policy, BokunGroupsSource(
+        sheet_csv_url=settings.bokun_groups_sheet_csv_url,
+        policy=policy,
+    )
+
+
+def _group_enriched_activity_adapter(
+    *,
+    settings: V2Settings,
+    bokun: BokunReadAdapter,
+) -> GroupEnrichedActivityReadAdapter:
+    policy, groups_source = _activity_group_source(settings)
     return GroupEnrichedActivityReadAdapter(
         bokun=bokun,
-        groups_source=BokunGroupsSource(
-            sheet_csv_url=settings.bokun_groups_sheet_csv_url,
-            policy=policy,
-        ),
+        groups_source=groups_source,
         policy=policy,
     )
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from io import StringIO
 import json
 import math
@@ -540,6 +540,34 @@ class BokunGroupsSource:
             headers={"user-agent": "maya-v2-bokun-groups/1"},
         ) as client:
             return self._fetch_http(client)
+
+    def upcoming_groups(
+        self, *, start_date: date, days: int = 180, max_groups: int = 24
+    ) -> tuple[GroupLookupResult, ...]:
+        """Return a bounded sanitized snapshot using one sheet fetch."""
+
+        if type(start_date) is not date:
+            raise TypeError("start_date must be an exact date")
+        if type(days) is not int or not 1 <= days <= 366:
+            raise ValueError("days must be between 1 and 366")
+        if type(max_groups) is not int or not 1 <= max_groups <= 64:
+            raise ValueError("max_groups must be between 1 and 64")
+        csv_bytes = self._fetch()
+        matches: list[GroupLookupResult] = []
+        for offset in range(days):
+            activity_date = start_date + timedelta(days=offset)
+            for product in self._policy.products:
+                result = parse_groups_csv(
+                    csv_bytes,
+                    policy=self._policy,
+                    canonical_product_id=product.canonical_product_id,
+                    activity_date=activity_date,
+                )
+                if result.status == "matched":
+                    matches.append(result)
+                    if len(matches) == max_groups:
+                        return tuple(matches)
+        return tuple(matches)
 
     def lookup(
         self, *, canonical_product_id: str, activity_date: date
