@@ -23,7 +23,7 @@ from v2_adapters.bokun_groups import (
     load_activity_group_policy,
 )
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
-from v2_adapters.provider_http import BokunHTTPTransport
+from v2_adapters.provider_http import BokunHTTPTransport, ProviderHTTPError
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
@@ -798,6 +798,100 @@ def test_matched_restricted_solo_normal_unavailability_omits_only_that_candidate
     ]
     assert FORBIDDEN_CANDIDATE_KEYS.isdisjoint(
         observation.public_payload["candidates"][0]
+    )
+
+
+def test_matched_restricted_solo_malformed_available_fails_the_aggregate_get_only() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "GET"
+        provider_id = request.url.path.split("/activity.json/", 1)[1].split("/", 1)[0]
+        is_restricted_solo = provider_id == "913348"
+        adult_category_id = "1160099" if is_restricted_solo else "adult-912303"
+        rate_id = "2375663" if is_restricted_solo else "rate-912303"
+        if request.url.path.endswith("/availabilities"):
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": request.url.params["start"],
+                        "startTimeId": f"start-{provider_id}",
+                        "startTime": "08:00",
+                        "available": "false" if is_restricted_solo else True,
+                        "soldOut": False,
+                        "unavailable": False,
+                        "availabilityCount": 4,
+                        **(
+                            {"minParticipantsToBookNow": 2}
+                            if is_restricted_solo
+                            else {}
+                        ),
+                        "pricesByRate": [
+                            {
+                                "activityRateId": rate_id,
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": adult_category_id,
+                                        "amount": {
+                                            "amount": 125,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": provider_id,
+                "title": "Marimbus" if is_restricted_solo else "Roteiro dos 4Ps",
+                "pricingCategories": [
+                    {
+                        "id": adult_category_id,
+                        "ticketCategory": "ADULT",
+                        "ageQualified": not is_restricted_solo,
+                    }
+                ],
+            },
+        )
+
+    transport = _GETOnlyRecommendationTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=BokunReadAdapter(
+            transport=transport,
+            clock=SimpleNamespace(now=lambda: NOW),
+            ttl=timedelta(minutes=5),
+        ),
+        groups_source=SimpleNamespace(lookup=lambda **_kwargs: None),
+        policy=_policy(),
+    )
+
+    with pytest.raises(ProviderHTTPError, match="availability.*bool"):
+        _adapter(
+            groups=RecordingDiscovery(
+                (
+                    _group("product:tour-4ps", 10),
+                    _group("product:marimbus", 11),
+                )
+            ),
+            activity=activity,
+            max_provider_reads=2,
+        ).read(_recommendation_request(adults=1, days=2))
+
+    assert transport.write_operations == []
+    assert [request.method for request in requests] == ["GET"] * 4
+    assert not any(
+        "shopping-cart" in request.url.path or "checkout" in request.url.path
+        for request in requests
     )
 
 

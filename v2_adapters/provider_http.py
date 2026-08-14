@@ -1377,7 +1377,11 @@ class BokunHTTPTransport:
                 continue
             if exact_selection:
                 if "available" in item:
-                    explicitly_available = item.get("available") is True
+                    if type(item["available"]) is not bool:
+                        raise ProviderHTTPError(
+                            "Bókun exact solo availability must be an exact bool"
+                        )
+                    explicitly_available = item["available"] is True
                 else:
                     explicitly_available = (
                         item.get("soldOut") is False
