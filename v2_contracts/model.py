@@ -17,7 +17,7 @@ from v2_contracts.critical_actions import (
     CriticalActionKind,
     PendingCriticalActionContext,
 )
-from v2_contracts.providers import ReadObservation, ReadRequest
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -580,6 +580,14 @@ class ModelProposal:
             raise InvalidModelProposal(
                 "read_requests must contain exact ReadRequest values"
             )
+        recommendation_read_count = sum(
+            item.kind is ReadKind.ACTIVITY_RECOMMENDATION
+            for item in self.read_requests
+        )
+        if recommendation_read_count > 1:
+            raise InvalidModelProposal(
+                "a proposal may contain at most one recommendation read"
+            )
         if type(self.effect_proposals) is not tuple or any(
             type(item) is not EffectProposal for item in self.effect_proposals
         ):
@@ -593,6 +601,10 @@ class ModelProposal:
         ):
             raise InvalidModelProposal(
                 "selection_requested requires inform intent with a fresh read"
+            )
+        if self.selection_requested and recommendation_read_count:
+            raise InvalidModelProposal(
+                "recommendation read cannot request selection"
             )
         if self.pending_disposition is not None:
             if self.pending_disposition not in ("preserve", "revoke"):

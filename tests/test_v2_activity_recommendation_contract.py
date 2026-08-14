@@ -6,6 +6,7 @@ from datetime import date
 
 import pytest
 
+from v2_contracts.model import InvalidModelProposal, ModelProposal
 from v2_contracts.providers import InvalidReadRequest, ReadKind, ReadRequest
 
 
@@ -76,3 +77,61 @@ def test_recommendation_request_rejects_open_or_invalid_shapes(
 ) -> None:
     with pytest.raises(InvalidReadRequest):
         replace(REQUEST, **changes)
+
+
+def test_model_proposal_rejects_selection_for_recommendation_read() -> None:
+    with pytest.raises(InvalidModelProposal, match="recommendation read cannot request selection"):
+        ModelProposal(
+            source_event_id="event:recommendation-selection",
+            intent="inform",
+            reply_chunks=("Vou recomendar opções para o período.",),
+            facts=(),
+            read_requests=(REQUEST,),
+            effect_proposals=(),
+            selection_requested=True,
+        )
+
+
+def test_model_proposal_preserves_ordinary_activity_selection_request() -> None:
+    activity_read = ReadRequest(
+        request_id="read:activity:ordinary",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:buracao",
+        activity_date=date(2026, 9, 10),
+        adults=2,
+        children=0,
+    )
+
+    proposal = ModelProposal(
+        source_event_id="event:ordinary-activity-selection",
+        intent="inform",
+        reply_chunks=("Vou atualizar a disponibilidade antes da seleção.",),
+        facts=(),
+        read_requests=(activity_read,),
+        effect_proposals=(),
+        selection_requested=True,
+    )
+
+    assert proposal.selection_requested is True
+
+
+def test_model_proposal_rejects_multiple_recommendation_reads() -> None:
+    second_request = replace(
+        REQUEST,
+        request_id="read:recommendation:two",
+        period_start=date(2026, 9, 16),
+        period_end=date(2026, 9, 20),
+    )
+
+    with pytest.raises(
+        InvalidModelProposal,
+        match="at most one recommendation read",
+    ):
+        ModelProposal(
+            source_event_id="event:multiple-recommendations",
+            intent="inform",
+            reply_chunks=("Vou recomendar opções para os períodos.",),
+            facts=(),
+            read_requests=(REQUEST, second_request),
+            effect_proposals=(),
+        )

@@ -204,6 +204,53 @@ def test_v8_activity_recommendation_read_is_closed_and_parent_owned() -> None:
     )
 
 
+def test_v8_rejects_selection_request_with_activity_recommendation_read() -> None:
+    with pytest.raises(
+        InvalidModelProposal,
+        match="recommendation read cannot request selection",
+    ):
+        _proposal(
+            _v8_bytes(
+                read_requests=[
+                    {
+                        "kind": "activity_recommendation",
+                        "period_start": "2026-09-10",
+                        "period_end": "2026-09-15",
+                        "adults": 2,
+                        "children": 0,
+                    }
+                ],
+                selection_requested=True,
+            ),
+            _v8_request(source_event_id="batch:v8-recommendation-selection"),
+        )
+
+
+def test_v8_rejects_multiple_activity_recommendation_reads() -> None:
+    recommendation = {
+        "kind": "activity_recommendation",
+        "period_start": "2026-09-10",
+        "period_end": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+    }
+
+    with pytest.raises(InvalidModelProposal, match="at most one recommendation read"):
+        _proposal(
+            _v8_bytes(
+                read_requests=[
+                    recommendation,
+                    {
+                        **recommendation,
+                        "period_start": "2026-09-16",
+                        "period_end": "2026-09-20",
+                    },
+                ]
+            ),
+            _v8_request(source_event_id="batch:v8-multiple-recommendations"),
+        )
+
+
 @pytest.mark.parametrize(
     "read_request",
     [
