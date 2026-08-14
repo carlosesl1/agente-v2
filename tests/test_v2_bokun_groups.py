@@ -289,6 +289,26 @@ def test_discover_group_candidates_aggregates_exact_aliases_in_inclusive_range()
     )
 
 
+def test_discover_group_candidates_resolves_yearless_month_name_across_year() -> None:
+    module = _module()
+
+    assert module.discover_group_candidates(
+        (
+            "data,passeio,qtd\n"
+            "29/dezembro/2026,Marimbus,1\n"
+            "01/janeiro,Marimbus,2\n"
+            ",Marimbus,3\n"
+            "01/janeiro/2026,Marimbus,50\n"
+        ).encode("utf-8"),
+        policy=_policy(),
+        period_start=date(2026, 12, 29),
+        period_end=date(2027, 1, 5),
+    ) == (
+        module.GroupDateCandidate("product:marimbus", date(2026, 12, 29), 1),
+        module.GroupDateCandidate("product:marimbus", date(2027, 1, 1), 5),
+    )
+
+
 def test_discover_group_candidates_returns_empty_for_valid_sheet_without_groups() -> None:
     module = _module()
 
@@ -306,6 +326,7 @@ def test_discover_group_candidates_returns_empty_for_valid_sheet_without_groups(
         (date(2026, 9, 12), date(2026, 9, 10), 24),
         (date(2026, 9, 1), date(2026, 9, 15), 24),
         (date(2026, 9, 10), date(2026, 9, 12), 0),
+        (date(2026, 9, 10), date(2026, 9, 12), True),
     ],
 )
 def test_discover_group_candidates_rejects_invalid_range_bounds(
@@ -321,6 +342,35 @@ def test_discover_group_candidates_rejects_invalid_range_bounds(
             period_end=period_end,
             max_candidates=max_candidates,
         )
+
+
+def test_discover_group_candidates_accepts_exactly_fourteen_inclusive_dates() -> None:
+    module = _module()
+
+    assert module.discover_group_candidates(
+        b"data,passeio,qtd\n14/09/2026,Marimbus,2\n",
+        policy=_policy(),
+        period_start=date(2026, 9, 1),
+        period_end=date(2026, 9, 14),
+    ) == (
+        module.GroupDateCandidate("product:marimbus", date(2026, 9, 14), 2),
+    )
+
+
+def test_group_date_candidate_is_exact_frozen_slotted_contract() -> None:
+    module = _module()
+    candidate = module.GroupDateCandidate(
+        "product:marimbus", date(2026, 9, 14), 2
+    )
+
+    assert [field.name for field in dataclasses.fields(candidate)] == [
+        "canonical_product_id",
+        "activity_date",
+        "group_participants",
+    ]
+    assert not hasattr(candidate, "__dict__")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        candidate.group_participants = 3
 
 
 def test_discover_group_candidates_rejects_candidate_overflow() -> None:

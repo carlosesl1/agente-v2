@@ -320,7 +320,13 @@ def _header_roles(fieldnames: list[str] | None) -> dict[str, str]:
     return roles
 
 
-def _sheet_date(value: str, *, default_year: int) -> date:
+def _sheet_date(
+    value: str,
+    *,
+    default_year: int,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> date:
     normalized = normalize_alias(value).replace(".", "")
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized):
         try:
@@ -346,11 +352,22 @@ def _sheet_date(value: str, *, default_year: int) -> date:
         month = _MONTHS.get(name)
         if month is not None:
             try:
-                return date(
+                parsed = date(
                     int(year_text) if year_text else default_year,
                     month,
                     int(day_text),
                 )
+                if (
+                    year_text is None
+                    and period_start is not None
+                    and period_end is not None
+                    and period_start.year != period_end.year
+                    and not period_start <= parsed <= period_end
+                ):
+                    end_year_date = date(period_end.year, month, int(day_text))
+                    if period_start <= end_year_date <= period_end:
+                        return end_year_date
+                return parsed
             except ValueError as exc:
                 raise ValueError("sheet date is invalid") from exc
     raise ValueError("sheet date is invalid")
@@ -369,7 +386,11 @@ def _participant_count(value: object) -> int | None:
 
 
 def _iter_group_rows(
-    csv_bytes: bytes, *, default_year: int
+    csv_bytes: bytes,
+    *,
+    default_year: int,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> Iterator[tuple[date, str, int | None]]:
     if type(csv_bytes) is not bytes or len(csv_bytes) > MAX_CSV_BYTES:
         raise ValueError("CSV payload is invalid")
@@ -389,7 +410,12 @@ def _iter_group_rows(
                 raise ValueError("CSV row has unexpected fields")
             raw_date = row.get(roles["date"])
             if raw_date is not None and raw_date.strip():
-                inherited_date = _sheet_date(raw_date, default_year=default_year)
+                inherited_date = _sheet_date(
+                    raw_date,
+                    default_year=default_year,
+                    period_start=period_start,
+                    period_end=period_end,
+                )
             if inherited_date is None:
                 continue
             yield (
@@ -463,7 +489,10 @@ def discover_group_candidates(
     }
     totals: dict[tuple[str, date], int] = {}
     for row_date, tour, participants in _iter_group_rows(
-        csv_bytes, default_year=period_start.year
+        csv_bytes,
+        default_year=period_start.year,
+        period_start=period_start,
+        period_end=period_end,
     ):
         canonical_product_id = alias_to_product.get(tour)
         if (
