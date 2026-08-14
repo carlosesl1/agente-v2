@@ -29,7 +29,7 @@ from v2_host.production import (
     build_read_service,
     build_worker_set,
 )
-from v2_host.settings import RuntimeMode, V2Settings
+from v2_host.settings import RuntimeMode, V2ProcessRole, V2Settings
 from v2_host.worker_main import WorkerFailureReason, WorkerQueue, _load_worker_factory
 from v2_application.payments import PaymentInitiationWorker
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
@@ -248,6 +248,53 @@ def test_read_service_is_constructed_from_direct_provider_transports(tmp_path: P
     assert activity._bokun._transport._quote_checkout_enabled is False
     assert type(activity._groups).__name__ == "BokunGroupsSource"
     assert reads._ports[ReadKind.ACTIVITY_DESCRIPTION] is activity._bokun
+
+
+def test_recommendation_read_reuses_the_worker_activity_dependencies(
+    tmp_path: Path,
+) -> None:
+    sheet_url = "https://recommendation-secret.example.test/published.csv?output=csv"
+    reads = build_read_service(
+        _settings(tmp_path, bokun_groups_sheet_csv_url=sheet_url)
+    )
+
+    recommendations = reads._ports[ReadKind.ACTIVITY_RECOMMENDATION]
+    activity = reads._ports[ReadKind.ACTIVITY]
+    rendered = repr(reads)
+
+    assert type(recommendations).__name__ == "ActivityRecommendationReadAdapter"
+    assert recommendations._activity is activity
+    assert recommendations._groups is activity._groups
+    assert recommendations._policy is activity._policy
+    assert "ActivityRecommendationReadAdapter" in rendered
+    assert sheet_url not in rendered
+    assert "recommendation-secret.example.test" not in rendered
+
+
+def test_recommendation_composition_fails_closed_without_worker_group_source(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="group"):
+        build_read_service(_settings(tmp_path, bokun_groups_sheet_csv_url=""))
+
+
+def test_api_role_does_not_retain_recommendation_group_source(
+    tmp_path: Path,
+) -> None:
+    sheet_url = "https://api-must-ignore.example.test/private.csv?output=csv"
+    settings = V2Settings.from_env(
+        {
+            "V2_MANYCHAT_WEBHOOK_SECRET": "api-webhook-secret",
+            "V2_SQLITE_PATH": str(tmp_path / "api.sqlite3"),
+            "V2_BOKUN_GROUPS_SHEET_CSV_URL": sheet_url,
+        },
+        process_role=V2ProcessRole.API,
+    )
+
+    assert settings.bokun_groups_sheet_csv_url == ""
+    assert settings.group_enriched_activity_configured is False
+    assert sheet_url not in repr(settings)
+    assert "api-must-ignore.example.test" not in repr(settings)
 
 
 def test_read_service_fails_closed_without_group_source_or_policy_map_agreement(

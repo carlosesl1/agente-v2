@@ -8,6 +8,13 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_runtime_image_package_copy_includes_activity_recommendation_adapter() -> None:
+    dockerfile = (ROOT / "Dockerfile.v2").read_text(encoding="utf-8")
+
+    assert "COPY v2_adapters /app/v2_adapters" in dockerfile
+    assert (ROOT / "v2_adapters" / "activity_recommendations.py").is_file()
+
+
 def test_runtime_image_copies_activity_group_policy_to_production_path() -> None:
     dockerfile = (ROOT / "Dockerfile.v2").read_text(encoding="utf-8")
 
