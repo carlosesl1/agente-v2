@@ -171,6 +171,96 @@ def test_v8_read_identity_and_locale_are_parent_owned() -> None:
     )
 
 
+def test_v8_activity_recommendation_read_is_closed_and_parent_owned() -> None:
+    request = _v8_request(source_event_id="batch:v8-recommendation")
+
+    proposal = _proposal(
+        _v8_bytes(
+            read_requests=[
+                {
+                    "kind": "activity_recommendation",
+                    "period_start": "2026-09-10",
+                    "period_end": "2026-09-15",
+                    "adults": 2,
+                    "children": 0,
+                }
+            ]
+        ),
+        request,
+    )
+
+    assert proposal.read_requests == (
+        ReadRequest(
+            request_id=(
+                "batch:v8-recommendation:read:activity-recommendation"
+            ),
+            kind=ReadKind.ACTIVITY_RECOMMENDATION,
+            period_start=date(2026, 9, 10),
+            period_end=date(2026, 9, 15),
+            adults=2,
+            children=0,
+            locale=request.locale,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "read_request",
+    [
+        {
+            "kind": "activity_recommendation",
+            "period_start": "2026-09-10",
+            "period_end": "2026-09-15",
+            "adults": 2,
+            "children": 0,
+            "product_id": "product:tour-4ps",
+        },
+        {
+            "kind": "activity_recommendation",
+            "period_start": "2026-09-10",
+            "period_end": "2026-09-15",
+        },
+        {
+            "kind": "activity_recommendation",
+            "period_start": "2026-09-10",
+            "period_end": "2026-09-24",
+            "adults": 2,
+            "children": 0,
+        },
+        {
+            "kind": "activity_recommendation",
+            "period_start": "not-a-date",
+            "period_end": "2026-09-15",
+            "adults": 2,
+            "children": 0,
+        },
+        {
+            "kind": "activity_recommendation",
+            "period_start": "2026-09-10",
+            "period_end": "not-a-date",
+            "adults": 2,
+            "children": 0,
+        },
+        {
+            "kind": "activity_recommendation",
+            "period_start": "2026-09-10",
+            "period_end": "2026-09-15",
+            "adults": 2,
+            "children": 0,
+            "unexpected": "open",
+        },
+    ],
+)
+def test_v8_activity_recommendation_rejects_invalid_or_open_shapes(
+    read_request: dict[str, object],
+) -> None:
+    with pytest.raises(InvalidModelProposal):
+        _proposal(
+            _v8_bytes(read_requests=[read_request]),
+            _v8_request(source_event_id="batch:v8-invalid-recommendation"),
+        )
+
+
 def test_v8_confirm_binding_is_parent_owned() -> None:
     pending = _pending_action()
     proposal = _proposal(

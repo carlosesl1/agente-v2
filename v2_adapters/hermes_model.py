@@ -721,6 +721,7 @@ def _v8_read_request(value: object, request: ModelRequest) -> ReadRequest:
         ReadKind.KNOWLEDGE: "knowledge",
         ReadKind.LODGING: "lodging",
         ReadKind.ACTIVITY: "activity",
+        ReadKind.ACTIVITY_RECOMMENDATION: "activity-recommendation",
         ReadKind.ROOM_DESCRIPTION: "room-description",
         ReadKind.ACTIVITY_DESCRIPTION: "activity-description",
     }
@@ -750,6 +751,15 @@ def _v8_read_request(value: object, request: ModelRequest) -> ReadRequest:
         fields.update(
             product_id=value.get("product_id"),
             activity_date=_v8_date(value.get("activity_date"), "activity_date"),
+            adults=value.get("adults"),
+            children=value.get("children"),
+            locale=request.locale,
+        )
+    elif kind is ReadKind.ACTIVITY_RECOMMENDATION:
+        expected = {"kind", "period_start", "period_end", "adults", "children"}
+        fields.update(
+            period_start=_v8_date(value.get("period_start"), "period_start"),
+            period_end=_v8_date(value.get("period_end"), "period_end"),
             adults=value.get("adults"),
             children=value.get("children"),
             locale=request.locale,
