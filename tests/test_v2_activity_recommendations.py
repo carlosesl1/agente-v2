@@ -692,6 +692,115 @@ def test_real_recommendation_path_is_get_only_and_returns_non_selectable_candida
     assert all(FORBIDDEN_CANDIDATE_KEYS.isdisjoint(candidate) for candidate in candidates)
 
 
+@pytest.mark.parametrize(
+    ("availability_changes", "availability_remove"),
+    (
+        ({"available": False}, ()),
+        ({}, ("date",)),
+        ({"availabilityCount": 0}, ()),
+    ),
+    ids=("unavailable", "missing-date", "insufficient-capacity"),
+)
+def test_matched_restricted_solo_normal_unavailability_omits_only_that_candidate(
+    availability_changes: dict[str, object],
+    availability_remove: tuple[str, ...],
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "GET"
+        provider_id = request.url.path.split("/activity.json/", 1)[1].split("/", 1)[0]
+        is_restricted_solo = provider_id == "913348"
+        adult_category_id = "1160099" if is_restricted_solo else "adult-912303"
+        rate_id = "2375663" if is_restricted_solo else "rate-912303"
+        if request.url.path.endswith("/availabilities"):
+            row: dict[str, object] = {
+                "date": START.isoformat(),
+                "startTimeId": f"start-{provider_id}",
+                "startTime": "08:00",
+                "available": True,
+                "soldOut": False,
+                "unavailable": False,
+                "availabilityCount": 4,
+                "pricesByRate": [
+                    {
+                        "activityRateId": rate_id,
+                        "pricePerCategoryUnit": [
+                            {
+                                "id": adult_category_id,
+                                "amount": {"amount": 125, "currency": "BRL"},
+                            }
+                        ],
+                    }
+                ],
+            }
+            if is_restricted_solo:
+                row["minParticipantsToBookNow"] = 2
+                row.update(availability_changes)
+                for key in availability_remove:
+                    row.pop(key)
+            return httpx.Response(200, request=request, json=[row])
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": provider_id,
+                "title": "Marimbus" if is_restricted_solo else "Roteiro dos 4Ps",
+                "pricingCategories": [
+                    {
+                        "id": adult_category_id,
+                        "ticketCategory": "ADULT",
+                        "ageQualified": not is_restricted_solo,
+                    }
+                ],
+            },
+        )
+
+    transport = _GETOnlyRecommendationTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=BokunReadAdapter(
+            transport=transport,
+            clock=SimpleNamespace(now=lambda: NOW),
+            ttl=timedelta(minutes=5),
+        ),
+        groups_source=SimpleNamespace(lookup=lambda **_kwargs: None),
+        policy=_policy(),
+    )
+
+    observation = _adapter(
+        groups=RecordingDiscovery((_group("product:marimbus", 10),)),
+        activity=activity,
+        max_provider_reads=2,
+    ).read(_recommendation_request(adults=1, days=1))
+
+    assert transport.write_operations == []
+    assert [request.method for request in requests] == ["GET"] * 4
+    assert not any(
+        "shopping-cart" in request.url.path or "checkout" in request.url.path
+        for request in requests
+    )
+    assert observation.public_payload["candidate_count"] == 1
+    assert observation.public_payload["candidates"] == [
+        {
+            "product_id": "product:tour-4ps",
+            "product_public_name": "Roteiro dos 4Ps",
+            "activity_date": START.isoformat(),
+            "duration_days": 1,
+            "total_amount": "125.00",
+            "currency": "BRL",
+            "group_status": "not_matched",
+            "existing_group": False,
+            "frequent_alternative": True,
+        }
+    ]
+    assert FORBIDDEN_CANDIDATE_KEYS.isdisjoint(
+        observation.public_payload["candidates"][0]
+    )
+
+
 def test_matched_restricted_solo_recommendation_validates_get_gates_without_binding() -> None:
     requests: list[httpx.Request] = []
 

@@ -1447,7 +1447,7 @@ class BokunHTTPTransport:
             ),
             **private,
         }
-        if exact_selection and selected is None:
+        if exact_selection and selected is None and not recommendation_inspection:
             raise ProviderHTTPError("Bókun exact solo selection is unavailable")
         if availability_only:
             return result
