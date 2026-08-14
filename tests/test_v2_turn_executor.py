@@ -1111,6 +1111,45 @@ class FakeActivityReadPort:
         )
 
 
+class FakeActivityRecommendationReadPort:
+    def __init__(self, store: SQLiteBoundaryStore) -> None:
+        self.store = store
+        self.calls: list[ReadRequest] = []
+
+    def read(self, request: ReadRequest) -> ReadObservation:
+        assert self.store._connection.in_transaction is False
+        self.calls.append(request)
+        return ReadObservation(
+            request_hash=request.canonical_hash(),
+            provider="bokun",
+            observed_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            public_payload={
+                "recommendation_period": {
+                    "start": request.period_start.isoformat(),
+                    "end": request.period_end.isoformat(),
+                },
+                "party": {"adults": request.adults, "children": request.children},
+                "group_source_status": "available",
+                "candidates": [
+                    {
+                        "product_id": "product:marimbus",
+                        "product_public_name": "Marimbus",
+                        "activity_date": "2026-08-11",
+                        "duration_days": 1,
+                        "total_amount": "300.00",
+                        "currency": "BRL",
+                        "group_status": "matched",
+                        "existing_group": True,
+                        "frequent_alternative": False,
+                    }
+                ],
+                "candidate_count": 1,
+            },
+            private_binding_hash="4" * 64,
+        )
+
+
 class FakeActivityDescriptionReadPort:
     def __init__(self, store: SQLiteBoundaryStore) -> None:
         self.store = store
@@ -1765,6 +1804,159 @@ def test_read_loop_runs_outside_transaction_and_commits_phase8_read_artifact() -
         assert row[1] is None
         assert type(row[2]) is str and len(row[2]) == 64
     finally:
+        store.close()
+
+
+def test_recommendation_read_is_one_round_non_selectable_and_requires_fresh_activity_read() -> None:
+    recommendation = ReadRequest(
+        request_id="read:recommendation-turn",
+        kind=ReadKind.ACTIVITY_RECOMMENDATION,
+        period_start=date(2026, 8, 10),
+        period_end=date(2026, 8, 13),
+        adults=1,
+        children=0,
+        locale="pt-BR",
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Vou comparar opções para o período.",),
+        facts=(),
+        read_requests=(recommendation,),
+        effect_proposals=(),
+    )
+    recommendation_reply = _proposal(
+        "Marimbus é a opção adequada entre as observadas e tem grupo formado."
+    )
+    choice_event = replace(
+        EVENT,
+        event_id="event:recommendation-fresh-choice",
+        text="Quero o passeio Catacumbas no dia 12; prepare essa opção.",
+        payload_hash="d" * 64,
+    )
+    choice_batch = InboundBatch(
+        batch_id="batch:recommendation-fresh-choice",
+        lead_id=BATCH.lead_id,
+        subscriber_id=BATCH.subscriber_id,
+        events=(choice_event,),
+        combined_text=choice_event.text,
+    )
+    ordinary = ReadRequest(
+        request_id="read:arbitrary-catalog-product",
+        kind=ReadKind.ACTIVITY,
+        product_id="product:catacumbas",
+        activity_date=date(2026, 8, 12),
+        participants=1,
+        locale="pt-BR",
+    )
+    choice_first = ModelProposal(
+        source_event_id=choice_batch.batch_id,
+        intent="inform",
+        reply_chunks=("Vou atualizar a disponibilidade antes de selecionar.",),
+        facts=(
+            ModelFact("birth_date", date(1992, 4, 15)),
+            ModelFact("gender", "f"),
+        ),
+        read_requests=(ordinary,),
+        effect_proposals=(),
+        selection_requested=True,
+    )
+    choice_final = ModelProposal(
+        source_event_id=choice_batch.batch_id,
+        intent="select",
+        reply_chunks=("Vou preparar o resumo do Catacumbas.",),
+        facts=(
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:catacumbas"),
+            ModelFact("activity_date", date(2026, 8, 12)),
+            ModelFact("adults", 1),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+        target_offer_id="offer:" + "6" * 64,
+    )
+    choice_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:recommendation-fresh-choice",
+        allocation_ids=(
+            "allocation:recommendation-fresh-choice-maya",
+            "allocation:recommendation-fresh-choice-system",
+        ),
+        allocation_manifest_hash="d" * 64,
+    )
+
+    class ArbitraryActivityReadPort(FakeActivityReadPort):
+        def read(self, request: ReadRequest) -> ReadObservation:
+            observation = super().read(request)
+            return replace(
+                observation,
+                public_payload={
+                    **observation.public_payload,
+                    "product_id": request.product_id,
+                    "product_public_name": "Catacumbas",
+                    "activity_date": request.activity_date.isoformat(),
+                },
+            )
+
+    store = SQLiteBoundaryStore.open_memory_v8()
+    model = FakeAuditedModel(
+        store,
+        [first, recommendation_reply, choice_first, choice_final],
+    )
+    recommendation_port = FakeActivityRecommendationReadPort(store)
+    ordinary_port = ArbitraryActivityReadPort(store)
+    private_store = SQLitePrivateCustomerFactStore.open_memory()
+    _install_public_authority(store)
+    _install_public_authority(store, choice_authority)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        reads=V2ReadService(
+            {
+                ReadKind.ACTIVITY_RECOMMENDATION: recommendation_port,
+                ReadKind.ACTIVITY: ordinary_port,
+            }
+        ),
+        private_customer_facts=private_store,
+        public_authority=MappingAuthority(
+            {
+                BATCH.batch_id: AUTHORITY,
+                choice_batch.batch_id: choice_authority,
+            }
+        ),
+    )
+    try:
+        recommendation_result = executor.execute(BATCH)
+
+        assert recommendation_port.calls == [recommendation]
+        assert len(model.calls) == 2
+        assert model.calls[1].observations[0].public_payload["candidates"][0][
+            "product_id"
+        ] == "product:marimbus"
+        assert recommendation_result.receipt.read_observations == ()
+        assert recommendation_result.receipt.command_rows == ()
+        assert store.load_state(BATCH.lead_id).state.workflow is None
+
+        choice_result = executor.execute(choice_batch)
+
+        assert ordinary_port.calls == [ordinary]
+        assert len(model.calls) == 4
+        assert model.calls[2].observations == ()
+        assert model.calls[2].consultation_history == ()
+        assert model.calls[3].observations[0].public_payload["product_id"] == (
+            "product:catacumbas"
+        )
+        assert len(choice_result.receipt.read_observations) == 1
+        assert isinstance(
+            store.load_state(BATCH.lead_id).state.workflow,
+            AwaitingConfirmationState,
+        )
+        assert choice_result.receipt.command_rows == ()
+    finally:
+        private_store.close()
         store.close()
 
 
@@ -5291,18 +5483,29 @@ def test_first_model_request_and_committed_language_follow_authenticated_phone()
 def test_parent_overrides_model_read_locale_before_provider_dispatch() -> None:
     from v2_application import turn_executor as module
 
-    request = ReadRequest(
-        request_id="read:locale-authority",
-        kind=ReadKind.ACTIVITY,
-        locale="pt-BR",
-        product_id="product:buracao",
-        activity_date=date(2026, 8, 11),
-        participants=1,
+    requests = (
+        ReadRequest(
+            request_id="read:locale-authority",
+            kind=ReadKind.ACTIVITY,
+            locale="pt-BR",
+            product_id="product:buracao",
+            activity_date=date(2026, 8, 11),
+            participants=1,
+        ),
+        ReadRequest(
+            request_id="read:recommendation-locale-authority",
+            kind=ReadKind.ACTIVITY_RECOMMENDATION,
+            locale="pt-BR",
+            period_start=date(2026, 8, 11),
+            period_end=date(2026, 8, 13),
+            adults=1,
+            children=0,
+        ),
     )
 
-    localized = module._authoritative_read_locales((request,), locale="en")
+    localized = module._authoritative_read_locales(requests, locale="en")
 
-    assert localized == (replace(request, locale="en"),)
+    assert localized == tuple(replace(request, locale="en") for request in requests)
 
 
 

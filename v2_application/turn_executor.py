@@ -770,6 +770,7 @@ def _authoritative_read_locales(
     localized_kinds = {
         ReadKind.KNOWLEDGE,
         ReadKind.ACTIVITY,
+        ReadKind.ACTIVITY_RECOMMENDATION,
         ReadKind.ACTIVITY_DESCRIPTION,
     }
     return tuple(
@@ -2528,6 +2529,8 @@ class V2TurnExecutor:
                 frame_commitment_hash=frames[0].canonical_hash(),
             )
             for read_request, observation in zip(read_requests, v2_observations)
+            # Recommendation evidence is informational only; it must never become
+            # persisted selectable availability authority.
             if read_request.kind in (ReadKind.LODGING, ReadKind.ACTIVITY)
         )
         def reduce_current(

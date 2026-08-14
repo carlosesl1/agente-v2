@@ -383,6 +383,88 @@ def _v8_choice_request() -> ModelRequest:
     )
 
 
+def _v8_recommendation_observation_request() -> ModelRequest:
+    observed_at = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+    return ModelRequest(
+        request_id="request:v8-recommendation-observation",
+        lead_id="manychat:v8-recommendation-observation",
+        source_event_id="batch:v8-recommendation-observation",
+        message="Prefiro uma opção tranquila; quais você recomenda?",
+        locale="pt-BR",
+        state_version=0,
+        observations=(
+            ReadObservation(
+                request_hash="5" * 64,
+                provider="bokun",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "recommendation_period": {
+                        "start": "2026-09-10",
+                        "end": "2026-09-15",
+                    },
+                    "party": {"adults": 2, "children": 0},
+                    "group_source_status": "available",
+                    "candidates": [
+                        {
+                            "product_id": "product:marimbus",
+                            "product_public_name": "Marimbus",
+                            "activity_date": "2026-09-11",
+                            "duration_days": 1,
+                            "total_amount": "300.00",
+                            "currency": "BRL",
+                            "group_status": "matched",
+                            "existing_group": True,
+                            "frequent_alternative": False,
+                        },
+                        {
+                            "product_id": "product:tour-4ps",
+                            "product_public_name": "Roteiro dos 4Ps",
+                            "activity_date": "2026-09-12",
+                            "duration_days": 1,
+                            "total_amount": "350.00",
+                            "currency": "BRL",
+                            "group_status": "not_matched",
+                            "existing_group": False,
+                            "frequent_alternative": True,
+                        },
+                    ],
+                    "candidate_count": 2,
+                },
+                private_binding_hash="6" * 64,
+            ),
+        ),
+    )
+
+
+def test_v8_recommendation_observation_is_public_informational_and_non_selectable() -> None:
+    request = _v8_recommendation_observation_request()
+
+    current = json.loads(
+        json.loads(_request_wire(request, "Closed prompt."))["messages"][-1][1]
+    )
+    serialized = json.dumps(current["observations"], ensure_ascii=False)
+    candidate = current["observations"][0]["public_payload"]["candidates"][0]
+
+    assert candidate["product_id"] == "product:marimbus"
+    assert candidate["group_status"] == "matched"
+    assert "choice_ref" not in serialized
+    assert "offer_id" not in serialized
+    assert "private_binding_hash" not in serialized
+    proposal = _proposal(
+        _v8_bytes(reply_chunks=["Marimbus combina melhor com o seu perfil."]),
+        request,
+    )
+    assert proposal.intent == "inform"
+    assert proposal.target_offer_id is None
+
+    with pytest.raises(InvalidModelProposal, match="selected choice is not current"):
+        _proposal(
+            _v8_bytes(intent="select", selected_choice_refs=["activity:1"]),
+            request,
+        )
+
+
 def test_v8_wire_replaces_offer_ids_with_bounded_choice_refs() -> None:
     current = json.loads(
         json.loads(_request_wire(_v8_choice_request(), "Closed prompt."))["messages"][-1][
@@ -2601,6 +2683,41 @@ def test_current_observation_rejects_recursive_read_and_keeps_maya_repair() -> N
     assert [frame.response_bytes for frame in turn.frames] == [recursive, repaired]
     assert turn.closure.ephemeral_session_id.startswith("uds:")
     assert not turn.closure.ephemeral_session_id.startswith("deterministic:")
+
+
+def test_prompt_defines_suitability_first_activity_recommendation_protocol() -> None:
+    request = ModelRequest(
+        request_id="request:activity-recommendation-protocol",
+        lead_id="manychat:activity-recommendation-protocol",
+        source_event_id="batch:activity-recommendation-protocol",
+        message=(
+            "Estarei na Chapada de 10 a 15 de setembro. "
+            "Quais passeios combinam comigo?"
+        ),
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    prompt = json.loads(_request_wire(request, "Closed prompt."))["system_prompt"]
+
+    required_rules = (
+        "ACTIVITY RECOMMENDATION PROTOCOL:",
+        "emit one activity_recommendation read in the initial frame",
+        "Suitability comes first.",
+        "Among suitable candidates, present matched formed groups before suitable candidates without a formed group.",
+        "Never recommend a clearly unsuitable activity merely because it has a group.",
+        "4Ps and Pati 3 days are frequent alternatives only",
+        "normally present at most three useful options",
+        "Recommendation candidates are informational.",
+        "A customer choice requires a fresh ordinary activity read.",
+        "If the customer asks about another known product, request that ordinary activity read.",
+        "Never emit a second read after observations in the same turn.",
+    )
+    assert all(rule in prompt for rule in required_rules)
+    assert "catalog is limited" not in prompt
+    assert "choose recommendations by list position" not in prompt.lower()
+    assert "choose recommendations by keyword" not in prompt.lower()
+    assert "rank by deterministic score" not in prompt.lower()
 
 
 def test_prompt_routes_known_activity_difficulty_questions_to_activity_description() -> (

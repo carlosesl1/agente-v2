@@ -195,6 +195,20 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 """.strip()
 
 
+_ACTIVITY_RECOMMENDATION_SYSTEM_SUFFIX: Final = """
+ACTIVITY RECOMMENDATION PROTOCOL:
+- When the lead supplies a period and requests suggestions, emit one activity_recommendation read in the initial frame.
+- You alone decide semantic suitability from the complete message, known facts, and observations.
+- Suitability comes first. Among suitable candidates, present matched formed groups before suitable candidates without a formed group.
+- Never recommend a clearly unsuitable activity merely because it has a group.
+- 4Ps and Pati 3 days are frequent alternatives only; never claim a formed group or confirmed departure without current evidence.
+- Recommendation candidates are informational. Never select their list position or treat them as reservation authority. A customer choice requires a fresh ordinary activity read.
+- The recommendation set does not limit the Bókun catalog. If the customer asks about another known product, request that ordinary activity read.
+- normally present at most three useful options, but never imply those options exhaust the open catalog.
+- Never emit a second read after observations in the same turn.
+""".strip()
+
+
 _TURN_COMPLETION_SYSTEM_SUFFIX: Final = """
 FINAL TURN COMPLETION RULES (highest salience):
 - recent committed dialogue, when present, is private context for continuity. Use it to
@@ -471,6 +485,8 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _RECAP_REUSE_SYSTEM_SUFFIX
                 + "\n\n"
                 + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
+                + "\n\n"
+                + _ACTIVITY_RECOMMENDATION_SYSTEM_SUFFIX
                 + "\n\n"
                 + _TURN_COMPLETION_SYSTEM_SUFFIX
                 + (
