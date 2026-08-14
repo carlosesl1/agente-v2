@@ -197,6 +197,9 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 
 _ACTIVITY_RECOMMENDATION_SYSTEM_SUFFIX: Final = """
 ACTIVITY RECOMMENDATION PROTOCOL:
+- A commercial request that provides a period and party and asks which tours are available, what the lead can do, requests suggestions, or asks which is recommended has mandatory precedence: emit service=activity and exactly one activity_recommendation read in the initial frame.
+- For that request, never classify it as service=agency and never emit a knowledge read instead of activity_recommendation.
+- Knowledge is only for static FAQ or non-catalog context; it never substitutes for current activity availability or recommendation.
 - When the lead supplies a period and requests suggestions, emit one activity_recommendation read in the initial frame.
 - You alone decide semantic suitability from the complete message, known facts, and observations.
 - Suitability comes first. Among suitable candidates, present matched formed groups before suitable candidates without a formed group.

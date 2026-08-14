@@ -2720,6 +2720,34 @@ def test_prompt_defines_suitability_first_activity_recommendation_protocol() -> 
     assert "rank by deterministic score" not in prompt.lower()
 
 
+def test_prompt_routes_period_activity_availability_above_knowledge_or_agency() -> None:
+    request = ModelRequest(
+        request_id="request:activity-recommendation-precedence",
+        lead_id="manychat:activity-recommendation-precedence",
+        source_event_id="batch:activity-recommendation-precedence",
+        message=(
+            "Somos dois adultos, sem crianças. O que conseguimos fazer entre "
+            "15/08/2026 e 21/08/2026 e qual passeio é mais recomendado?"
+        ),
+        locale="pt-BR",
+        state_version=0,
+    )
+
+    prompt = json.loads(_request_wire(request, "Closed prompt."))["system_prompt"]
+
+    required_precedence = (
+        "A commercial request that provides a period and party",
+        "which tours are available, what the lead can do, requests suggestions, or asks which is recommended",
+        "service=activity",
+        "exactly one activity_recommendation read in the initial frame",
+        "never classify it as service=agency",
+        "never emit a knowledge read instead of activity_recommendation",
+        "Knowledge is only for static FAQ or non-catalog context",
+        "never substitutes for current activity availability or recommendation",
+    )
+    assert all(rule in prompt for rule in required_precedence)
+
+
 def test_prompt_routes_known_activity_difficulty_questions_to_activity_description() -> (
     None
 ):
