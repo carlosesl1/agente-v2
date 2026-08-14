@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from io import StringIO
@@ -167,6 +167,13 @@ class GroupLookupResult:
                 raise ValueError("matched group requires a positive participant count")
         elif self.participant_count is not None:
             raise ValueError("unmatched group cannot contain a participant count")
+
+
+@dataclass(frozen=True, slots=True)
+class GroupDateCandidate:
+    canonical_product_id: str
+    activity_date: date
+    group_participants: int
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -361,22 +368,11 @@ def _participant_count(value: object) -> int | None:
     return parsed if parsed > 0 else None
 
 
-def parse_groups_csv(
-    csv_bytes: bytes,
-    *,
-    policy: ActivityGroupPolicy,
-    canonical_product_id: str,
-    activity_date: date,
-) -> GroupLookupResult:
-    """Parse bounded CSV bytes and aggregate one exact product/date match."""
-
+def _iter_group_rows(
+    csv_bytes: bytes, *, default_year: int
+) -> Iterator[tuple[date, str, int | None]]:
     if type(csv_bytes) is not bytes or len(csv_bytes) > MAX_CSV_BYTES:
         raise ValueError("CSV payload is invalid")
-    if type(policy) is not ActivityGroupPolicy:
-        raise TypeError("policy must be an exact ActivityGroupPolicy")
-    product = policy.product(canonical_product_id)
-    if product is None or type(activity_date) is not date:
-        raise ValueError("group query is invalid")
     try:
         text = csv_bytes.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -387,32 +383,104 @@ def parse_groups_csv(
     reader = csv.DictReader(StringIO(text, newline=""), strict=True)
     roles = _header_roles(reader.fieldnames)
     inherited_date: date | None = None
-    total = 0
     try:
         for row in reader:
             if None in row:
                 raise ValueError("CSV row has unexpected fields")
             raw_date = row.get(roles["date"])
             if raw_date is not None and raw_date.strip():
-                inherited_date = _sheet_date(raw_date, default_year=activity_date.year)
+                inherited_date = _sheet_date(raw_date, default_year=default_year)
             if inherited_date is None:
                 continue
-            tour = normalize_alias(row.get(roles["tour"]))
-            participants = _participant_count(row.get(roles["participants"]))
-            if (
-                inherited_date == activity_date
-                and tour in product.aliases
-                and participants is not None
-            ):
-                total += participants
+            yield (
+                inherited_date,
+                normalize_alias(row.get(roles["tour"])),
+                _participant_count(row.get(roles["participants"])),
+            )
     except csv.Error as exc:
         raise ValueError("CSV is malformed") from exc
+
+
+def parse_groups_csv(
+    csv_bytes: bytes,
+    *,
+    policy: ActivityGroupPolicy,
+    canonical_product_id: str,
+    activity_date: date,
+) -> GroupLookupResult:
+    """Parse bounded CSV bytes and aggregate one exact product/date match."""
+
+    if type(policy) is not ActivityGroupPolicy:
+        raise TypeError("policy must be an exact ActivityGroupPolicy")
+    product = policy.product(canonical_product_id)
+    if product is None or type(activity_date) is not date:
+        raise ValueError("group query is invalid")
+    total = 0
+    for row_date, tour, participants in _iter_group_rows(
+        csv_bytes, default_year=activity_date.year
+    ):
+        if (
+            row_date == activity_date
+            and tour in product.aliases
+            and participants is not None
+        ):
+            total += participants
 
     return GroupLookupResult(
         status="matched" if total else "not_matched",
         canonical_product_id=canonical_product_id,
         activity_date=activity_date,
         participant_count=total or None,
+    )
+
+
+def discover_group_candidates(
+    csv_bytes: bytes,
+    *,
+    policy: ActivityGroupPolicy,
+    period_start: date,
+    period_end: date,
+    max_candidates: int = 24,
+) -> tuple[GroupDateCandidate, ...]:
+    """Discover exact formed groups across one inclusive bounded period."""
+
+    if type(policy) is not ActivityGroupPolicy:
+        raise TypeError("policy must be an exact ActivityGroupPolicy")
+    if type(period_start) is not date or type(period_end) is not date:
+        raise ValueError("group discovery period is invalid")
+    if (
+        type(max_candidates) is not int
+        or max_candidates < 1
+        or period_end < period_start
+        or (period_end - period_start).days >= 14
+    ):
+        raise ValueError("group discovery bounds are invalid")
+
+    alias_to_product = {
+        alias: product.canonical_product_id
+        for product in policy.products
+        for alias in product.aliases
+    }
+    totals: dict[tuple[str, date], int] = {}
+    for row_date, tour, participants in _iter_group_rows(
+        csv_bytes, default_year=period_start.year
+    ):
+        canonical_product_id = alias_to_product.get(tour)
+        if (
+            period_start <= row_date <= period_end
+            and canonical_product_id is not None
+            and participants is not None
+        ):
+            key = (canonical_product_id, row_date)
+            totals[key] = totals.get(key, 0) + participants
+
+    if len(totals) > max_candidates:
+        raise ValueError("group candidate count exceeds limit")
+    return tuple(
+        GroupDateCandidate(product_id, activity_date, participants)
+        for (product_id, activity_date), participants in sorted(
+            totals.items(), key=lambda item: (item[0][1], item[0][0])
+        )
     )
 
 
@@ -541,6 +609,28 @@ class BokunGroupsSource:
         ) as client:
             return self._fetch_http(client)
 
+    def discover(
+        self,
+        *,
+        period_start: date,
+        period_end: date,
+        max_candidates: int = 24,
+    ) -> tuple[GroupDateCandidate, ...] | None:
+        """Fetch once and expose only sanitized group candidates."""
+
+        if not _valid_https_url(self._url):
+            return None
+        try:
+            return discover_group_candidates(
+                self._fetch(),
+                policy=self._policy,
+                period_start=period_start,
+                period_end=period_end,
+                max_candidates=max_candidates,
+            )
+        except Exception:
+            return None
+
     def lookup(
         self, *, canonical_product_id: str, activity_date: date
     ) -> GroupLookupResult:
@@ -576,9 +666,11 @@ __all__ = [
     "ActivityGroupPolicy",
     "ActivityGroupProductPolicy",
     "BokunGroupsSource",
+    "GroupDateCandidate",
     "GroupLookupResult",
     "MAX_CSV_BYTES",
     "SoloMinimumTwoPolicy",
+    "discover_group_candidates",
     "load_activity_group_policy",
     "normalize_alias",
     "parse_groups_csv",

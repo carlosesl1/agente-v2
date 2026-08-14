@@ -261,6 +261,190 @@ def test_rows_for_another_exact_date_do_not_match() -> None:
     assert result.participant_count is None
 
 
+def test_discover_group_candidates_aggregates_exact_aliases_in_inclusive_range() -> None:
+    module = _module()
+    csv_bytes = (
+        "Data,Passeio,Qtd Clt\n"
+        ",Marimbus,99\n"
+        "09/09/2026,Marimbus,50\n"
+        "10/09/2026,Roteiro do Marimbus,1\n"
+        ",  MARIMBUS  ,2\n"
+        ",Marimbus - Grupo,40\n"
+        ",Passeio desconhecido,9\n"
+        ",Marimbus,0\n"
+        "11/09/2026,Águas Claras,4\n"
+        "12/09/2026,2 M S,2\n"
+        "13/09/2026,Marimbus,60\n"
+    ).encode("utf-8")
+
+    assert module.discover_group_candidates(
+        csv_bytes,
+        policy=_policy(),
+        period_start=date(2026, 9, 10),
+        period_end=date(2026, 9, 12),
+    ) == (
+        module.GroupDateCandidate("product:marimbus", date(2026, 9, 10), 3),
+        module.GroupDateCandidate("product:aguas-claras", date(2026, 9, 11), 4),
+        module.GroupDateCandidate("product:tour-2ms", date(2026, 9, 12), 2),
+    )
+
+
+def test_discover_group_candidates_returns_empty_for_valid_sheet_without_groups() -> None:
+    module = _module()
+
+    assert module.discover_group_candidates(
+        b"data,passeio,qtd\n10/09/2026,Unknown,3\n,Marimbus,\n",
+        policy=_policy(),
+        period_start=date(2026, 9, 10),
+        period_end=date(2026, 9, 12),
+    ) == ()
+
+
+@pytest.mark.parametrize(
+    ("period_start", "period_end", "max_candidates"),
+    [
+        (date(2026, 9, 12), date(2026, 9, 10), 24),
+        (date(2026, 9, 1), date(2026, 9, 15), 24),
+        (date(2026, 9, 10), date(2026, 9, 12), 0),
+    ],
+)
+def test_discover_group_candidates_rejects_invalid_range_bounds(
+    period_start: date, period_end: date, max_candidates: int
+) -> None:
+    module = _module()
+
+    with pytest.raises(ValueError):
+        module.discover_group_candidates(
+            b"data,passeio,qtd\n",
+            policy=_policy(),
+            period_start=period_start,
+            period_end=period_end,
+            max_candidates=max_candidates,
+        )
+
+
+def test_discover_group_candidates_rejects_candidate_overflow() -> None:
+    module = _module()
+
+    with pytest.raises(ValueError, match="candidate"):
+        module.discover_group_candidates(
+            (
+                b"data,passeio,qtd\n"
+                b"10/09/2026,Marimbus,1\n"
+                b"11/09/2026,Marimbus,1\n"
+            ),
+            policy=_policy(),
+            period_start=date(2026, 9, 10),
+            period_end=date(2026, 9, 11),
+            max_candidates=1,
+        )
+
+
+def test_source_discover_fetches_once_and_returns_sanitized_candidates() -> None:
+    module = _module()
+    calls: list[tuple[str, float, int]] = []
+
+    def fetcher(url: str, timeout_seconds: float, max_bytes: int) -> bytes:
+        calls.append((url, timeout_seconds, max_bytes))
+        return (
+            b"data,passeio,qtd\n"
+            b"10/09/2026,Marimbus,1\n"
+            b",Marimbus,2\n"
+            b"12/09/2026,2ms,2\n"
+        )
+
+    source = module.BokunGroupsSource(
+        sheet_csv_url="https://example.test/private-sheet.csv",
+        policy=_policy(),
+        fetcher=fetcher,
+        timeout_seconds=4.5,
+    )
+
+    result = source.discover(
+        period_start=date(2026, 9, 10), period_end=date(2026, 9, 12)
+    )
+
+    assert calls == [
+        ("https://example.test/private-sheet.csv", 4.5, 2 * 1024 * 1024)
+    ]
+    assert result == (
+        module.GroupDateCandidate("product:marimbus", date(2026, 9, 10), 3),
+        module.GroupDateCandidate("product:tour-2ms", date(2026, 9, 12), 2),
+    )
+    assert "private-sheet" not in repr(result)
+
+
+def test_source_discover_distinguishes_valid_sheet_without_groups() -> None:
+    module = _module()
+    source = module.BokunGroupsSource(
+        sheet_csv_url="https://example.test/groups.csv",
+        policy=_policy(),
+        fetcher=lambda _url, _timeout, _limit: b"data,passeio,qtd\n",
+    )
+
+    assert source.discover(
+        period_start=date(2026, 9, 10), period_end=date(2026, 9, 12)
+    ) == ()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "invalid_csv", "oversize", "overflow"])
+def test_source_discover_failures_return_none_without_raw_leakage(failure: str) -> None:
+    module = _module()
+
+    def fetcher(_url: str, _timeout: float, limit: int) -> bytes:
+        if failure == "timeout":
+            raise httpx.ReadTimeout("raw customer secret")
+        if failure == "invalid_csv":
+            return b"wrong,headers\nsecret-name,secret-comment\n"
+        if failure == "oversize":
+            return b"x" * (limit + 1)
+        return (
+            b"data,passeio,qtd\n"
+            b"10/09/2026,Marimbus,1\n"
+            b"11/09/2026,Marimbus,1\n"
+        )
+
+    source = module.BokunGroupsSource(
+        sheet_csv_url="https://example.test/raw-secret.csv",
+        policy=_policy(),
+        fetcher=fetcher,
+    )
+    result = source.discover(
+        period_start=date(2026, 9, 10),
+        period_end=date(2026, 9, 12),
+        max_candidates=1 if failure == "overflow" else 24,
+    )
+
+    assert result is None
+    assert "secret" not in repr(result)
+
+
+def test_source_discover_redirect_failure_returns_none() -> None:
+    module = _module()
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            302,
+            headers={"location": "https://secret.example.test/private.csv"},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        source = module.BokunGroupsSource(
+            sheet_csv_url="https://example.test/groups.csv",
+            policy=_policy(),
+            client=client,
+        )
+        result = source.discover(
+            period_start=date(2026, 9, 10), period_end=date(2026, 9, 12)
+        )
+
+    assert result is None
+    assert calls == 1
+
+
 def test_fetcher_is_https_bounded_and_receives_timeout() -> None:
     module = _module()
     calls: list[tuple[str, float, int]] = []
