@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import date, datetime, timedelta, timezone
+from enum import StrEnum
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,11 +15,13 @@ from v2_adapters.activity_recommendations import (
     CandidateQuery,
     plan_recommendation_candidates,
 )
+from v2_adapters.bokun import BokunReadAdapter
 from v2_adapters.bokun_groups import (
     GroupDateCandidate,
     GroupLookupResult,
     load_activity_group_policy,
 )
+from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
@@ -154,6 +157,18 @@ def test_planning_candidate_query_is_frozen_closed_and_exact(kwargs: dict[str, o
     assert not hasattr(candidate, "__dict__")
 
 
+def test_planning_candidate_query_rejects_string_enum_source() -> None:
+    class CandidateSourceLookalike(StrEnum):
+        FREQUENT = "frequent"
+
+    with pytest.raises(TypeError, match="exact string"):
+        CandidateQuery(
+            "product:marimbus",
+            START,
+            source=CandidateSourceLookalike.FREQUENT,  # type: ignore[arg-type]
+        )
+
+
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
 FORBIDDEN_CANDIDATE_KEYS = {
@@ -182,10 +197,14 @@ def _policy():
 
 
 def _recommendation_request(
-    *, adults: int = 2, children: int = 0, days: int = 3
+    *,
+    adults: int = 2,
+    children: int = 0,
+    days: int = 3,
+    request_id: str = "read:recommendation:1",
 ) -> ReadRequest:
     return ReadRequest(
-        request_id="read:recommendation:1",
+        request_id=request_id,
         kind=ReadKind.ACTIVITY_RECOMMENDATION,
         period_start=START,
         period_end=START + timedelta(days=days - 1),
@@ -420,6 +439,41 @@ def test_composed_recommendation_discovers_once_then_uses_only_source_free_reads
     assert observation.private_binding_hash not in candidate_hashes
 
 
+def test_child_id_preflight_accepts_parent_at_worst_index_boundary() -> None:
+    max_provider_reads = 64
+    suffix = f":candidate:{max_provider_reads - 1}"
+    parent_id = "r" * (256 - len(suffix))
+    groups = RecordingDiscovery(())
+    activity = RecordingActivity()
+
+    _adapter(
+        groups=groups,
+        activity=activity,
+        max_provider_reads=max_provider_reads,
+    ).read(_recommendation_request(days=1, request_id=parent_id))
+
+    assert groups.calls == [(START, START, 24)]
+    assert activity.calls[0][0].request_id == f"{parent_id}:candidate:0"
+
+
+def test_child_id_preflight_rejects_oversized_parent_before_discovery() -> None:
+    max_provider_reads = 64
+    suffix = f":candidate:{max_provider_reads - 1}"
+    parent_id = "r" * (257 - len(suffix))
+    groups = RecordingDiscovery(())
+    activity = RecordingActivity()
+
+    with pytest.raises(ValueError, match="child request IDs"):
+        _adapter(
+            groups=groups,
+            activity=activity,
+            max_provider_reads=max_provider_reads,
+        ).read(_recommendation_request(days=1, request_id=parent_id))
+
+    assert groups.calls == []
+    assert activity.calls == []
+
+
 def test_unavailable_group_source_still_projects_available_frequent_candidates() -> None:
     groups = RecordingDiscovery(None)
     activity = RecordingActivity()
@@ -437,26 +491,51 @@ def test_unavailable_group_source_still_projects_available_frequent_candidates()
     )
 
 
-def test_candidate_unavailability_is_omitted_and_definitive_error_is_isolated() -> None:
+def test_candidate_unavailability_observation_is_omitted() -> None:
     pati = ("product:pati-3d", START)
-    second_day_4ps = ("product:tour-4ps", START + timedelta(days=1))
-    activity = RecordingActivity(
-        unavailable={pati},
-        errors={second_day_4ps: ProviderReadError("definitive read unavailable")},
-    )
+    activity = RecordingActivity(unavailable={pati})
 
     observation = _adapter(
         groups=RecordingDiscovery(()), activity=activity
     ).read(_recommendation_request(days=3))
 
-    assert observation.public_payload["candidate_count"] == 2
+    assert observation.public_payload["candidate_count"] == 3
     assert {
         (candidate["product_id"], candidate["activity_date"])
         for candidate in observation.public_payload["candidates"]
     } == {
         ("product:tour-4ps", START.isoformat()),
+        ("product:tour-4ps", (START + timedelta(days=1)).isoformat()),
         ("product:tour-4ps", (START + timedelta(days=2)).isoformat()),
     }
+
+
+def test_structural_provider_read_error_fails_the_aggregate() -> None:
+    def divergent_product_transport(
+        operation: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        assert operation == "activity"
+        assert payload["product_id"] == "product:tour-4ps"
+        return {"product_id": "product:marimbus"}
+
+    bokun = BokunReadAdapter(
+        transport=divergent_product_transport,
+        clock=SimpleNamespace(now=lambda: NOW),
+        ttl=timedelta(minutes=5),
+    )
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=bokun,
+        groups_source=SimpleNamespace(lookup=lambda **_kwargs: None),
+        policy=_policy(),
+    )
+    groups = RecordingDiscovery(())
+
+    with pytest.raises(ProviderReadError, match="canonical product binding"):
+        _adapter(groups=groups, activity=activity).read(
+            _recommendation_request(days=1)
+        )
+
+    assert groups.calls == [(START, START, 24)]
 
 
 @pytest.mark.parametrize("error", (TypeError("structural"), ValueError("binding")))

@@ -8,7 +8,7 @@ import hashlib
 import re
 from typing import Final, Literal
 
-from v2_adapters._provider_common import ProviderReadError, observed_window
+from v2_adapters._provider_common import observed_window
 from v2_adapters.bokun_groups import (
     ActivityGroupPolicy,
     BokunGroupsSource,
@@ -58,6 +58,8 @@ class CandidateQuery:
             raise ValueError("candidate product ID is invalid")
         if type(self.activity_date) is not date:
             raise TypeError("candidate activity_date must be an exact date")
+        if type(self.source) is not str:
+            raise TypeError("candidate source must be an exact string")
         if self.source not in ("formed_group", "frequent"):
             raise ValueError("candidate source is invalid")
 
@@ -220,6 +222,11 @@ class ActivityRecommendationReadAdapter:
             raise TypeError("recommendation adapter supports only ACTIVITY_RECOMMENDATION")
         assert request.period_start is not None and request.period_end is not None
         assert request.adults is not None and request.children is not None
+        worst_child_id = (
+            f"{request.request_id}:candidate:{self._max_provider_reads - 1}"
+        )
+        if len(worst_child_id) > 256:
+            raise ValueError("child request IDs exceed the canonical identifier limit")
         try:
             discovered = self._groups.discover(
                 period_start=request.period_start,
@@ -270,12 +277,9 @@ class ActivityRecommendationReadAdapter:
                     activity_date=query.activity_date,
                     participant_count=None,
                 )
-            try:
-                observation = self._activity.read_with_group_context(
-                    child_request, group=group
-                )
-            except ProviderReadError:
-                continue
+            observation = self._activity.read_with_group_context(
+                child_request, group=group
+            )
             if type(observation) is not ReadObservation:
                 raise TypeError("candidate activity reader returned an invalid observation")
             evidence_hashes.append(observation.private_binding_hash)
