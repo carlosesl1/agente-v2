@@ -58,6 +58,19 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
     assert "75999979532" in prompt
 
 
+def test_live_prompt_preserves_whatsapp_identity_installment_and_channel_rules() -> None:
+    prompt = (ROOT / "config/v2_luna_system_prompt.txt").read_text()
+
+    assert "assistente de IA da Chapada Backpackers" in prompt
+    assert "adiantamento" in prompt
+    assert "parcelar presencialmente" in prompt
+    assert "agência ou no hostel" in prompt
+    assert "não realiza parcelamento" in prompt
+    assert "conversa natural de WhatsApp" in prompt
+    assert "Nunca use e-mail como canal de continuidade" in prompt
+    assert "Todas as interações com o lead acontecem somente pelo WhatsApp" in prompt
+
+
 def test_model_prompt_uses_existing_knowledge_then_activity_for_group_recommendations() -> None:
     from v2_adapters.hermes_model import _FORMED_GROUPS_SYSTEM_SUFFIX
 

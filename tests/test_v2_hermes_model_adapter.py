@@ -79,6 +79,41 @@ def _v8_bytes(**changes: object) -> bytes:
     ).encode()
 
 
+def test_request_wire_refreshes_bahia_business_clock_on_every_turn() -> None:
+    instants = iter(
+        (
+            datetime(2026, 8, 14, 23, 59, 58, tzinfo=timezone.utc),
+            datetime(2026, 8, 15, 3, 0, 2, tzinfo=timezone.utc),
+        )
+    )
+
+    first = json.loads(
+        _request_wire(_v8_request(), "system", now=lambda: next(instants))
+    )
+    second = json.loads(
+        _request_wire(_v8_request(), "system", now=lambda: next(instants))
+    )
+
+    first_payload = json.loads(first["messages"][-1][1])
+    second_payload = json.loads(second["messages"][-1][1])
+    assert first_payload["business_clock"] == {
+        "current_date": "2026-08-14",
+        "current_time": "20:59:58",
+        "timezone": "America/Bahia",
+        "utc_offset": "-03:00",
+        "timestamp": "2026-08-14T20:59:58-03:00",
+    }
+    assert second_payload["business_clock"] == {
+        "current_date": "2026-08-15",
+        "current_time": "00:00:02",
+        "timezone": "America/Bahia",
+        "utc_offset": "-03:00",
+        "timestamp": "2026-08-15T00:00:02-03:00",
+    }
+    assert "Use business_clock" in first["system_prompt"]
+    assert first_payload["business_clock"] != second_payload["business_clock"]
+
+
 def test_v8_question_is_authored_once_and_parent_binds_source_event() -> None:
     request = _v8_request(source_event_id="batch:v8-question")
     question = "Qual será a data de saída?"

@@ -9,8 +9,9 @@ import subprocess
 
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import (
@@ -385,7 +386,17 @@ def _choice_projection(
     return projected, ref_offers
 
 
-def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
+def _request_wire(
+    request: ModelRequest,
+    system_prompt: str,
+    *,
+    now: Callable[[], datetime] | None = None,
+) -> bytes:
+    current = (now or (lambda: datetime.now(timezone.utc)))()
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("business clock must be timezone-aware")
+    business_now = current.astimezone(ZoneInfo("America/Bahia"))
+    offset = business_now.strftime("%z")
     projected_payloads, _ = _choice_projection(request.observations)
     observations = [
         {
@@ -429,6 +440,13 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
         ],
         "observations": observations,
         "consultation_history": consultation_history,
+        "business_clock": {
+            "timestamp": business_now.isoformat(timespec="seconds"),
+            "current_date": business_now.date().isoformat(),
+            "current_time": business_now.time().isoformat(timespec="seconds"),
+            "timezone": "America/Bahia",
+            "utc_offset": f"{offset[:3]}:{offset[3:]}",
+        },
     }
     if request.state_facts:
         user_payload["state_facts"] = [
@@ -488,6 +506,7 @@ def _request_wire(request: ModelRequest, system_prompt: str) -> bytes:
                 + _FORMED_GROUPS_SYSTEM_SUFFIX
                 + "\n\n"
                 + _TURN_COMPLETION_SYSTEM_SUFFIX
+                + "\n\nUse business_clock as the authoritative Bahia date and time for hoje, amanhã, agora, horários and all relative dates. Never expose the internal clock object."
                 + (
                     "\n\n" + _PUBLIC_REPLY_CORRECTION_SUFFIX
                     if request.public_reply_correction_reasons
