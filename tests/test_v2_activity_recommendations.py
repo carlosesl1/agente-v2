@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from v2_adapters._provider_common import ProviderReadError
@@ -22,6 +23,7 @@ from v2_adapters.bokun_groups import (
     load_activity_group_policy,
 )
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
+from v2_adapters.provider_http import BokunHTTPTransport
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 
@@ -252,7 +254,7 @@ class RecordingActivity:
         self.ordinary_calls.append(request)
         raise AssertionError("recommendation fan-out must not use ordinary read")
 
-    def read_with_group_context(
+    def read_for_recommendation_with_group_context(
         self, request: ReadRequest, *, group: GroupLookupResult
     ) -> ReadObservation:
         self.calls.append((request, group))
@@ -514,7 +516,7 @@ def test_structural_provider_read_error_fails_the_aggregate() -> None:
     def divergent_product_transport(
         operation: str, payload: dict[str, object]
     ) -> dict[str, object]:
-        assert operation == "activity"
+        assert operation == "activity_inspection"
         assert payload["product_id"] == "product:tour-4ps"
         return {"product_id": "product:marimbus"}
 
@@ -565,6 +567,218 @@ def test_recommendation_preserves_two_plus_without_groups_but_omits_restricted_s
         candidate["product_id"]
         for candidate in restricted.public_payload["candidates"]
     } == {"product:tour-4ps"}
+
+
+class _GETOnlyRecommendationTransport(BokunHTTPTransport):
+    def __init__(self, *, client: httpx.Client) -> None:
+        super().__init__(
+            access_key="access",
+            secret_key="secret",
+            product_map={
+                "product:tour-4ps": "912303",
+                "product:pati-3d": "884102",
+                "product:marimbus": "913348",
+            },
+            base_url="https://api.bokun.invalid",
+            client=client,
+            timestamp=lambda: "2026-09-01 12:00:00",
+            quote_checkout_enabled=True,
+        )
+        self.write_operations: list[tuple[str, str]] = []
+
+    def _write_request(self, *, method: str, path: str, **kwargs):
+        self.write_operations.append((method, path))
+        raise AssertionError("recommendation must not enter cart/checkout transport")
+
+
+@pytest.mark.parametrize("matched", (False, True))
+def test_real_recommendation_path_is_get_only_and_returns_non_selectable_candidates(
+    matched: bool,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "GET"
+        provider_id = request.url.path.split("/activity.json/", 1)[1].split("/", 1)[0]
+        adult_category_id = (
+            "1160099" if provider_id == "913348" else f"adult-{provider_id}"
+        )
+        rate_id = "2375663" if provider_id == "913348" else f"rate-{provider_id}"
+        if request.url.path.endswith("/availabilities"):
+            activity_date = request.url.params["start"]
+            minimum = {"minParticipantsToBookNow": 2} if provider_id == "913348" else {}
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": activity_date,
+                        "startTimeId": f"start-{provider_id}",
+                        "startTime": "08:00",
+                        "available": True,
+                        "soldOut": False,
+                        "unavailable": False,
+                        "availabilityCount": 6,
+                        **minimum,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": rate_id,
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": adult_category_id,
+                                        "amount": {
+                                            "amount": 125,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": provider_id,
+                "title": f"Passeio {provider_id}",
+                "pricingCategories": [
+                    {
+                        "id": adult_category_id,
+                        "ticketCategory": "ADULT",
+                        "ageQualified": provider_id != "913348",
+                    }
+                ],
+            },
+        )
+
+    transport = _GETOnlyRecommendationTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    bokun = BokunReadAdapter(
+        transport=transport,
+        clock=SimpleNamespace(now=lambda: NOW),
+        ttl=timedelta(minutes=5),
+    )
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=bokun,
+        groups_source=SimpleNamespace(lookup=lambda **_kwargs: None),
+        policy=_policy(),
+    )
+    formed = (_group("product:tour-4ps", 10),) if matched else ()
+
+    observation = _adapter(
+        groups=RecordingDiscovery(formed),
+        activity=activity,
+        max_provider_reads=2,
+    ).read(_recommendation_request(adults=2, days=3))
+
+    assert transport.write_operations == []
+    assert requests
+    assert {request.method for request in requests} == {"GET"}
+    assert not any(
+        "shopping-cart" in request.url.path or "checkout" in request.url.path
+        for request in requests
+    )
+    candidates = observation.public_payload["candidates"]
+    assert {candidate["product_id"] for candidate in candidates} == {
+        "product:tour-4ps",
+        "product:pati-3d",
+    }
+    assert {candidate["total_amount"] for candidate in candidates} == {"250.00"}
+    assert {candidate["currency"] for candidate in candidates} == {"BRL"}
+    assert all(FORBIDDEN_CANDIDATE_KEYS.isdisjoint(candidate) for candidate in candidates)
+
+
+def test_matched_restricted_solo_recommendation_validates_get_gates_without_binding() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "GET"
+        if request.url.path.endswith("/availabilities"):
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": START.isoformat(),
+                        "startTimeId": "start-marimbus",
+                        "startTime": "08:00",
+                        "available": True,
+                        "soldOut": False,
+                        "unavailable": False,
+                        "availabilityCount": 4,
+                        "minParticipantsToBookNow": 2,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": "2375663",
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": "1160099",
+                                        "amount": {
+                                            "amount": 125,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "913348",
+                "title": "Marimbus",
+                "pricingCategories": [
+                    {
+                        "id": "1160099",
+                        "ticketCategory": "ADULT",
+                        "ageQualified": False,
+                    }
+                ],
+            },
+        )
+
+    transport = _GETOnlyRecommendationTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    activity = GroupEnrichedActivityReadAdapter(
+        bokun=BokunReadAdapter(
+            transport=transport,
+            clock=SimpleNamespace(now=lambda: NOW),
+            ttl=timedelta(minutes=5),
+        ),
+        groups_source=SimpleNamespace(lookup=lambda **_kwargs: None),
+        policy=_policy(),
+    )
+
+    observation = _adapter(
+        groups=RecordingDiscovery((_group("product:marimbus", 10),)),
+        activity=activity,
+        max_provider_reads=1,
+    ).read(_recommendation_request(adults=1, days=1))
+
+    assert transport.write_operations == []
+    assert [request.method for request in requests] == ["GET", "GET"]
+    assert observation.public_payload["candidates"] == [
+        {
+            "product_id": "product:marimbus",
+            "product_public_name": "Marimbus",
+            "activity_date": START.isoformat(),
+            "duration_days": 1,
+            "total_amount": "125.00",
+            "currency": "BRL",
+            "group_status": "matched",
+            "existing_group": True,
+            "frequent_alternative": False,
+        }
+    ]
 
 
 def test_formed_group_overflow_fails_before_any_provider_read() -> None:

@@ -204,6 +204,30 @@ class BokunReadAdapter:
     def read_availability_only(self, request: ReadRequest) -> ReadObservation:
         return self._activity_with_options(request, availability_only=True)
 
+    def read_for_recommendation(self, request: ReadRequest) -> ReadObservation:
+        """Inspect current GET-backed availability and price without creating an offer."""
+
+        return self._activity_with_options(request, recommendation_only=True)
+
+    def read_for_recommendation_with_selection(
+        self,
+        request: ReadRequest,
+        *,
+        expected_bokun_product_id: str,
+        expected_rate_id: str,
+        expected_adult_category_id: str,
+    ) -> ReadObservation:
+        """Validate the closed solo exception from GETs without creating an offer."""
+
+        return self._activity_with_options(
+            request,
+            recommendation_only=True,
+            expected_bokun_product_id=expected_bokun_product_id,
+            expected_rate_id=expected_rate_id,
+            expected_adult_category_id=expected_adult_category_id,
+            ignore_minimum_participants=True,
+        )
+
     def read_with_selection(
         self,
         request: ReadRequest,
@@ -259,6 +283,7 @@ class BokunReadAdapter:
         request: ReadRequest,
         *,
         availability_only: bool = False,
+        recommendation_only: bool = False,
         expected_bokun_product_id: str | None = None,
         expected_rate_id: str | None = None,
         expected_adult_category_id: str | None = None,
@@ -285,9 +310,12 @@ class BokunReadAdapter:
             if selection:
                 raise TypeError("availability-only inspection forbids Bókun selection")
             query["availability_only"] = True
+        if availability_only and recommendation_only:
+            raise TypeError("Bókun inspection modes are mutually exclusive")
         if request.locale is not None:
             query["locale"] = request.locale
-        response = exact_dict(self._transport("activity", query), "Bókun response")
+        operation = "activity_inspection" if recommendation_only else "activity"
+        response = exact_dict(self._transport(operation, query), "Bókun response")
         if response.get("product_id") not in (None, request.product_id):
             raise ProviderReadError("Bókun response failed canonical product binding")
         amount = text(response.get("total_amount"), "total_amount")
@@ -329,6 +357,42 @@ class BokunReadAdapter:
                     "available": False,
                 },
                 private_binding_hash=private_hash,
+            )
+        if recommendation_only:
+            start_time = _public_start_time(response)
+            public = {
+                "product_id": request.product_id,
+                "activity_date": request.activity_date.isoformat(),
+                "adults": adults,
+                "children": children,
+                "participants": adults + children,
+                "product_public_name": text(
+                    response.get("product_public_name"), "product_public_name"
+                ),
+                "total_amount": amount,
+                "currency": currency,
+                "available": available,
+            }
+            if start_time is not None:
+                public["start_time"] = start_time
+            evidence_hash = binding_hash(
+                {
+                    "request_hash": request.query_hash(),
+                    "recommendation_inspection": "true",
+                    "total_amount": amount,
+                    "currency": currency,
+                    "available": available,
+                    "start_time": start_time,
+                }
+            )
+            observed_at, expires_at = observed_window(self._clock, self._ttl)
+            return ReadObservation(
+                request_hash=request.canonical_hash(),
+                provider="bokun",
+                observed_at=observed_at,
+                expires_at=expires_at,
+                public_payload=public,
+                private_binding_hash=evidence_hash,
             )
         private = _private_booking_fields(response, children=children)
         fee_fields = _fee_inclusive_public_fields(

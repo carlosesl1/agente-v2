@@ -517,6 +517,42 @@ def test_read_with_group_context_rejects_mismatched_or_unsanitized_context() -> 
     assert transport.calls == []
 
 
+@pytest.mark.parametrize(
+    ("status", "available"),
+    (("matched", True), ("not_matched", False), ("unavailable", False)),
+)
+def test_recommendation_solo_path_preserves_exact_policy_without_selector(
+    status: str,
+    available: bool,
+) -> None:
+    transport = RecordingBokunTransport()
+    request = _request(participants=1)
+    context = GroupLookupResult(
+        status=status,  # type: ignore[arg-type]
+        canonical_product_id=request.product_id,
+        activity_date=request.activity_date,
+        participant_count=4 if status == "matched" else None,
+    )
+
+    observation = _composite(
+        bokun=_bokun(transport),
+        groups_source=RecordingGroups(fail=True),
+        policy=_policy(),
+    ).read_for_recommendation_with_group_context(request, group=context)
+
+    assert observation.public_payload["available"] is available
+    assert "offer_id" not in observation.public_payload
+    assert observation.public_payload["group_status"] == status
+    if status == "matched":
+        payload = transport.calls[0][1]
+        assert payload["expected_bokun_product_id"] == "913372"
+        assert payload["expected_rate_id"] == "2375672"
+        assert payload["expected_adult_category_id"] == "1160099"
+        assert payload["ignore_minimum_participants"] is True
+    else:
+        assert transport.calls[0][1]["availability_only"] is True
+
+
 def test_composite_rejects_non_activity_read_and_non_activity_resolve() -> None:
     adapter = _composite(
         bokun=_bokun(RecordingBokunTransport()),

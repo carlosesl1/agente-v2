@@ -196,7 +196,9 @@ class ActivityRecommendationReadAdapter:
             raise TypeError("recommendation adapter requires a group discovery source")
         if type(policy) is not ActivityGroupPolicy:
             raise TypeError("recommendation adapter requires an exact group policy")
-        if not callable(getattr(activity, "read_with_group_context", None)):
+        if not callable(
+            getattr(activity, "read_for_recommendation_with_group_context", None)
+        ):
             raise TypeError("recommendation adapter requires a source-free activity reader")
         if not hasattr(clock, "now"):
             raise TypeError("recommendation clock must implement now")
@@ -277,7 +279,7 @@ class ActivityRecommendationReadAdapter:
                     activity_date=query.activity_date,
                     participant_count=None,
                 )
-            observation = self._activity.read_with_group_context(
+            observation = self._activity.read_for_recommendation_with_group_context(
                 child_request, group=group
             )
             if type(observation) is not ReadObservation:

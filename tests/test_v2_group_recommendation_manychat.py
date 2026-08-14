@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 START = date(2026, 9, 10)
 TRANSCRIPT_KEY = b"m" * 32
-READ_OPERATIONS = frozenset({"activity"})
+READ_OPERATIONS = frozenset({"activity", "activity_inspection"})
 PRODUCT_NAMES = {
     "product:buracao": "Buracão",
     "product:catacumbas": "Catacumbas",
