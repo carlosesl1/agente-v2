@@ -1297,7 +1297,6 @@ class BokunHTTPTransport:
         if provider_id is None:
             raise ProviderHTTPError("Bókun canonical product ID is not configured")
         provider_locale, _ = _bokun_languages(payload.get("locale"))
-        recommendation_inspection = operation == "activity_inspection"
         meta_path = (
             f"/activity.json/{provider_id}?lang={provider_locale}&currency=BRL"
         )
@@ -1309,7 +1308,7 @@ class BokunHTTPTransport:
                 "product_public_name": self._title(meta) or canonical_id,
                 "description": _first(meta, "description", "descriptionText", "excerpt", "summary") or "Descrição indisponível",
             }
-        if operation not in {"activity", "activity_inspection"}:
+        if operation != "activity":
             raise ProviderHTTPError("unsupported Bókun read operation")
         activity_date = str(payload.get("activity_date") or "")
         query = urlencode({"start": activity_date, "end": activity_date, "currency": "BRL"})
@@ -1377,11 +1376,7 @@ class BokunHTTPTransport:
                 continue
             if exact_selection:
                 if "available" in item:
-                    if type(item["available"]) is not bool:
-                        raise ProviderHTTPError(
-                            "Bókun exact solo availability must be an exact bool"
-                        )
-                    explicitly_available = item["available"] is True
+                    explicitly_available = item.get("available") is True
                 else:
                     explicitly_available = (
                         item.get("soldOut") is False
@@ -1446,31 +1441,14 @@ class BokunHTTPTransport:
             "available": (
                 False
                 if availability_only
-                else selected is not None
-                and (recommendation_inspection or self._quote_checkout_enabled)
+                else selected is not None and self._quote_checkout_enabled
             ),
             **private,
         }
-        if exact_selection and selected is None and not recommendation_inspection:
+        if exact_selection and selected is None:
             raise ProviderHTTPError("Bókun exact solo selection is unavailable")
         if availability_only:
             return result
-        if recommendation_inspection:
-            if selected is not None and selected_fields is None:
-                raise ProviderHTTPError(
-                    "Bókun recommendation price is not canonically available from GETs"
-                )
-            inspection = {
-                "product_id": result["product_id"],
-                "product_public_name": result["product_public_name"],
-                "total_amount": result["total_amount"],
-                "currency": result["currency"],
-                "available": result["available"],
-            }
-            start_time = private.get("start_time")
-            if start_time is not None:
-                inspection["start_time"] = start_time
-            return inspection
         if selected is None or not self._quote_checkout_enabled:
             return result
         quote_scope = _text(payload.get("quote_scope"))

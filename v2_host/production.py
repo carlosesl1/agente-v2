@@ -17,7 +17,6 @@ from reservation_domain import ServiceKind
 from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
 from reservation_followup.workers import HandoffOutboxWorker
-from v2_adapters.activity_recommendations import ActivityRecommendationReadAdapter
 from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
 from v2_adapters.bokun_groups import BokunGroupsSource, load_activity_group_policy
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
@@ -524,18 +523,10 @@ def build_read_service(settings: V2Settings) -> V2ReadService:
         ttl=timedelta(minutes=5),
     )
     activity = _group_enriched_activity_adapter(settings=settings, bokun=bokun)
-    recommendations = ActivityRecommendationReadAdapter(
-        groups=activity._groups,
-        policy=activity._policy,
-        activity=activity,
-        clock=clock,
-        ttl=timedelta(minutes=5),
-    )
     ports = {
         ReadKind.LODGING: cloudbeds,
         ReadKind.ROOM_DESCRIPTION: cloudbeds,
         ReadKind.ACTIVITY: activity,
-        ReadKind.ACTIVITY_RECOMMENDATION: recommendations,
         ReadKind.ACTIVITY_DESCRIPTION: bokun,
     }
     if settings.knowledge_base_path is not None:

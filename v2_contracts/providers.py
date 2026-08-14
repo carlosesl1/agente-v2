@@ -28,7 +28,6 @@ class ReadKind(str, Enum):
     KNOWLEDGE = "knowledge"
     LODGING = "lodging"
     ACTIVITY = "activity"
-    ACTIVITY_RECOMMENDATION = "activity_recommendation"
     ROOM_DESCRIPTION = "room_description"
     ACTIVITY_DESCRIPTION = "activity_description"
 
@@ -91,8 +90,6 @@ class ReadRequest:
     locale: str | None = None
     check_in: date | None = None
     check_out: date | None = None
-    period_start: date | None = None
-    period_end: date | None = None
     adults: int | None = None
     children: int | None = None
     product_id: str | None = None
@@ -112,8 +109,6 @@ class ReadRequest:
             self._require_none(
                 "check_in",
                 "check_out",
-                "period_start",
-                "period_end",
                 "adults",
                 "children",
                 "product_id",
@@ -135,8 +130,6 @@ class ReadRequest:
             self._require_none(
                 "query",
                 "locale",
-                "period_start",
-                "period_end",
                 "product_id",
                 "activity_date",
                 "participants",
@@ -171,31 +164,6 @@ class ReadRequest:
                 "query",
                 "check_in",
                 "check_out",
-                "period_start",
-                "period_end",
-                "offer_id",
-            )
-        elif self.kind is ReadKind.ACTIVITY_RECOMMENDATION:
-            if type(self.period_start) is not date or type(self.period_end) is not date:
-                raise InvalidReadRequest("recommendation period must use exact dates")
-            if self.period_end < self.period_start:
-                raise InvalidReadRequest("period_end must not precede period_start")
-            if self.period_end > self.period_start + timedelta(days=13):
-                raise InvalidReadRequest("recommendation period exceeds 14 calendar days")
-            if type(self.adults) is not int or self.adults < 1:
-                raise InvalidReadRequest("adults must be a positive exact integer")
-            if type(self.children) is not int or self.children < 0:
-                raise InvalidReadRequest(
-                    "children must be a non-negative exact integer"
-                )
-            self._validate_optional_locale()
-            self._require_none(
-                "query",
-                "check_in",
-                "check_out",
-                "product_id",
-                "activity_date",
-                "participants",
                 "offer_id",
             )
         elif self.kind is ReadKind.ROOM_DESCRIPTION:
@@ -205,8 +173,6 @@ class ReadRequest:
                 "locale",
                 "check_in",
                 "check_out",
-                "period_start",
-                "period_end",
                 "adults",
                 "children",
                 "product_id",
@@ -220,8 +186,6 @@ class ReadRequest:
                 "query",
                 "check_in",
                 "check_out",
-                "period_start",
-                "period_end",
                 "adults",
                 "children",
                 "activity_date",
@@ -268,8 +232,6 @@ class ReadRequest:
             "locale",
             "check_in",
             "check_out",
-            "period_start",
-            "period_end",
             "adults",
             "children",
             "product_id",

@@ -84,41 +84,20 @@ class GroupEnrichedActivityReadAdapter:
             private_binding_hash=observation.private_binding_hash,
         )
 
-    @staticmethod
-    def _validate_activity_request(request: ReadRequest) -> None:
+    def read(self, request: ReadRequest) -> ReadObservation:
         if type(request) is not ReadRequest or request.kind is not ReadKind.ACTIVITY:
             raise TypeError("group-enriched adapter supports only ACTIVITY reads")
-
-    def read(self, request: ReadRequest) -> ReadObservation:
-        self._validate_activity_request(request)
         assert request.product_id is not None and request.activity_date is not None
-        group = self._group_lookup(
+        groups = self._group_lookup(
             canonical_product_id=request.product_id,
             activity_date=request.activity_date,
         )
-        return self.read_with_group_context(request, group=group)
-
-    def read_with_group_context(
-        self,
-        request: ReadRequest,
-        *,
-        group: GroupLookupResult,
-    ) -> ReadObservation:
-        """Apply activity policy using an already sanitized, source-free group result."""
-
-        self._validate_activity_request(request)
-        assert request.product_id is not None and request.activity_date is not None
-        if type(group) is not GroupLookupResult or (
-            group.canonical_product_id != request.product_id
-            or group.activity_date != request.activity_date
-        ):
-            raise ValueError("group context does not bind the activity request")
         adults, children = request.activity_party()
         solo_policy = self._policy.solo_policy(request.product_id)
         restricted_solo = adults + children == 1 and solo_policy is not None
-        if restricted_solo and group.status != "matched":
+        if restricted_solo and groups.status != "matched":
             observation = self._bokun.read_availability_only(request)
-            return self._enrich(observation, group, solo_group_booking=False)
+            return self._enrich(observation, groups, solo_group_booking=False)
         if restricted_solo:
             assert solo_policy is not None
             observation = self._bokun.read_with_selection(
@@ -127,42 +106,9 @@ class GroupEnrichedActivityReadAdapter:
                 expected_rate_id=solo_policy.rate_id,
                 expected_adult_category_id=solo_policy.adult_category_id,
             )
-            return self._enrich(observation, group, solo_group_booking=True)
+            return self._enrich(observation, groups, solo_group_booking=True)
         observation = self._bokun.read(request)
-        return self._enrich(observation, group, solo_group_booking=False)
-
-    def read_for_recommendation_with_group_context(
-        self,
-        request: ReadRequest,
-        *,
-        group: GroupLookupResult,
-    ) -> ReadObservation:
-        """Inspect one recommendation candidate without producing selection authority."""
-
-        self._validate_activity_request(request)
-        assert request.product_id is not None and request.activity_date is not None
-        if type(group) is not GroupLookupResult or (
-            group.canonical_product_id != request.product_id
-            or group.activity_date != request.activity_date
-        ):
-            raise ValueError("group context does not bind the activity request")
-        adults, children = request.activity_party()
-        solo_policy = self._policy.solo_policy(request.product_id)
-        restricted_solo = adults + children == 1 and solo_policy is not None
-        if restricted_solo and group.status != "matched":
-            observation = self._bokun.read_availability_only(request)
-            return self._enrich(observation, group, solo_group_booking=False)
-        if restricted_solo:
-            assert solo_policy is not None
-            observation = self._bokun.read_for_recommendation_with_selection(
-                request,
-                expected_bokun_product_id=solo_policy.bokun_product_id,
-                expected_rate_id=solo_policy.rate_id,
-                expected_adult_category_id=solo_policy.adult_category_id,
-            )
-            return self._enrich(observation, group, solo_group_booking=True)
-        observation = self._bokun.read_for_recommendation(request)
-        return self._enrich(observation, group, solo_group_booking=False)
+        return self._enrich(observation, groups, solo_group_booking=False)
 
     def resolve(self, query: PrivateOfferQuery) -> PrivateOfferBinding:
         if type(query) is not PrivateOfferQuery or query.service != "activity":
