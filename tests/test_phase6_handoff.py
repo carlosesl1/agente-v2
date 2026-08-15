@@ -696,6 +696,51 @@ class Phase6HandoffReducerTests(unittest.TestCase):
 
 
 class Phase6HandoffProjectionTests(unittest.TestCase):
+    def test_operational_handoff_copy_uses_canonical_reservation_certainty(self) -> None:
+        operational = active_handoff(
+            request=handoff_requested(
+                reason_code=HandoffReasonCode.PROVIDER_UNCERTAIN,
+            )
+        )
+
+        no_effect = project_handoff_public_reply(
+            operational,
+            outcome(certainty=ExecutionCertainty.CALLED_NO_EFFECT),
+        )
+        self.assertEqual(
+            no_effect.public_text,
+            "A reserva não foi criada. Já temos seus dados e os detalhes da reserva. "
+            "Uma pessoa da nossa equipe vai assumir a conversa e concluir essa etapa por aqui.",
+        )
+
+        uncertain = project_handoff_public_reply(
+            operational,
+            outcome(certainty=ExecutionCertainty.CALLED_UNKNOWN),
+        )
+        self.assertTrue(
+            uncertain.public_text.startswith(
+                "Ainda não sabemos se a reserva foi criada. Já temos seus dados"
+            )
+        )
+
+        confirmed = project_handoff_public_reply(operational, outcome())
+        self.assertEqual(
+            confirmed.public_text,
+            "A reserva foi criada. Uma pessoa da nossa equipe vai assumir a conversa "
+            "e ajudar você a finalizar o atendimento por aqui.",
+        )
+
+    def test_customer_requested_handoff_keeps_immediate_copy(self) -> None:
+        projection = project_handoff_public_reply(active_handoff(), None)
+
+        self.assertTrue(
+            projection.public_text.endswith(
+                "Uma pessoa da nossa equipe vai assumir a conversa e continuar seu "
+                "atendimento por aqui."
+            )
+        )
+        self.assertNotIn("Já temos seus dados", projection.public_text)
+
     def test_terminal_handoff_suppresses_stale_confirmation_and_missing_slots(self) -> None:
         projection = project_handoff_public_reply(
             active_handoff(),

@@ -640,8 +640,8 @@ class PublicHandoffProjection:
             )
         expected_prefix = _reservation_sentence(self.reservation_outcome)
         expected_handoff_texts = {
-            PublicNextAction.WAIT_FOR_HUMAN: (
-                "O atendimento humano foi acionado. Aguarde o contato da equipe.",
+            PublicNextAction.WAIT_FOR_HUMAN: _active_handoff_texts(
+                self.reservation_outcome
             ),
             PublicNextAction.NO_ACTION: (
                 "O atendimento humano foi cancelado.",
@@ -1010,6 +1010,44 @@ def _reservation_sentence(outcome: ExecutionOutcome | None) -> str:
     raise ValueError("unsupported reservation outcome certainty")
 
 
+def _active_handoff_texts(
+    outcome: ExecutionOutcome | None,
+) -> tuple[str, ...]:
+    immediate = (
+        "Uma pessoa da nossa equipe vai assumir a conversa e continuar seu "
+        "atendimento por aqui."
+    )
+    if outcome is None:
+        operational = (
+            "Já reunimos os detalhes do seu atendimento. Uma pessoa da nossa equipe "
+            "vai assumir a conversa e concluir essa etapa por aqui."
+        )
+    elif outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED:
+        operational = (
+            "Uma pessoa da nossa equipe vai assumir a conversa e ajudar você a "
+            "finalizar o atendimento por aqui."
+        )
+    else:
+        operational = (
+            "Já temos seus dados e os detalhes da reserva. Uma pessoa da nossa equipe "
+            "vai assumir a conversa e concluir essa etapa por aqui."
+        )
+    return immediate, operational
+
+
+def _active_handoff_text(
+    outcome: ExecutionOutcome | None,
+    reason: HandoffReasonCode,
+) -> str:
+    immediate, operational = _active_handoff_texts(outcome)
+    if reason in (
+        HandoffReasonCode.PROVIDER_UNCERTAIN,
+        HandoffReasonCode.OPERATIONAL_REVIEW,
+    ):
+        return operational
+    return immediate
+
+
 def _canonical_optional_text(value: str | None, field_name: str) -> str | None:
     if value is None:
         return None
@@ -1060,7 +1098,10 @@ def project_handoff_public_reply(
         handoff_text = "O atendimento humano foi concluído."
         next_action = PublicNextAction.NO_ACTION
     else:
-        handoff_text = "O atendimento humano foi acionado. Aguarde o contato da equipe."
+        handoff_text = _active_handoff_text(
+            reservation_outcome,
+            state.request.reason_code,
+        )
         next_action = PublicNextAction.WAIT_FOR_HUMAN
 
     return PublicHandoffProjection(
