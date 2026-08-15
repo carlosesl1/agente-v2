@@ -1158,6 +1158,31 @@ def test_bokun_http_transport_exact_solo_selection_bypasses_only_minimum() -> No
     assert [request.method for request in seen] == ["GET", "GET"]
 
 
+def test_bokun_http_transport_exact_agent_rate_accepts_provider_minimum_one() -> None:
+    transport, seen = _solo_transport(
+        availability_changes={"minParticipantsToBookNow": 1}
+    )
+
+    result = transport(
+        "activity",
+        {
+            "product_id": "product:buracao",
+            "activity_date": "2026-11-18",
+            "adults": 1,
+            "children": 0,
+            "expected_bokun_product_id": "913372",
+            "expected_rate_id": "2375672",
+            "expected_adult_category_id": "1160099",
+            "ignore_minimum_participants": True,
+        },
+    )
+
+    assert result["rate_id"] == "2375672"
+    assert result["adult_pricing_category_id"] == "1160099"
+    assert result["total_amount"] == "300.00"
+    assert [request.method for request in seen] == ["GET", "GET"]
+
+
 @pytest.mark.parametrize(
     "payload_changes",
     (
@@ -1196,7 +1221,6 @@ def test_bokun_http_transport_exact_solo_selection_rejects_id_drift(
         {"availabilityCount": None},
         {"date": "2026-11-19"},
         {"date": None},
-        {"minParticipantsToBookNow": 1},
         {"minParticipantsToBookNow": 3},
         {
             "pricesByRate": [

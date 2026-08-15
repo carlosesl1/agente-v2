@@ -1388,9 +1388,9 @@ class BokunHTTPTransport:
                 if type(capacity) is not int or capacity < participants:
                     continue
                 minimum = item.get("minParticipantsToBookNow")
-                if type(minimum) is not int or minimum != 2:
+                if type(minimum) is not int or minimum not in (1, 2):
                     raise ProviderHTTPError(
-                        "Bókun exact solo minimum-two selection is unavailable"
+                        "Bókun exact solo selection minimum is unavailable"
                     )
                 fields = self._activity_booking_fields_exact(
                     item,
