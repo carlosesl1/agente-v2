@@ -66,6 +66,7 @@ def test_api_role_ignores_worker_only_environment_and_boots_without_financial_ca
         "V2_HERMES_TRANSCRIPT_KEY_HEX": "33" * 32,
         "V2_STRIPE_HOSTEL_SECRET_KEY": "FORBIDDEN_STRIPE_HOSTEL",
         "V2_STRIPE_AGENCY_SECRET_KEY": "FORBIDDEN_STRIPE_AGENCY",
+        "V2_WISE_API_TOKEN": "FORBIDDEN_WISE_TOKEN",
 
     }
 
@@ -84,6 +85,7 @@ def test_api_role_ignores_worker_only_environment_and_boots_without_financial_ca
     assert settings.hermes_transcript_key == b""
     assert settings.stripe_hostel_secret_key == ""
     assert settings.stripe_agency_secret_key == ""
+    assert settings.wise_api_token == ""
     assert settings.all_real_effect_gates_closed is True
 
     with TestClient(build_api_app(settings)) as client:
@@ -145,6 +147,7 @@ def test_compose_api_environment_has_no_worker_or_financial_secrets() -> None:
         "V2_MANYCHAT_API_KEY",
         "V2_STRIPE_HOSTEL_SECRET_KEY",
         "V2_STRIPE_AGENCY_SECRET_KEY",
+        "V2_WISE_API_TOKEN",
         "V2_HERMES_TRANSCRIPT_KEY_HEX",
         "V2_STRIPE_WEBHOOK_SECRET",
         "V2_WISE_WEBHOOK_SECRET",
@@ -165,6 +168,7 @@ def test_compose_api_environment_has_no_worker_or_financial_secrets() -> None:
     assert "V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX" in api_env
     assert "V2_CLOUDBEDS_API_KEY" in worker_env
     assert "V2_HERMES_TRANSCRIPT_KEY_HEX" in worker_env
+    assert "V2_WISE_API_TOKEN" in worker_env
 
 
 def test_process_role_environment_must_match_entrypoint_authority(tmp_path: Path) -> None:

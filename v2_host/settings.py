@@ -222,6 +222,8 @@ class V2Settings:
     agency_payment_percentage: int = 20
     critical_approval_ttl_seconds: int = 1_800
     stripe_base_url: str = "https://api.stripe.com"
+    wise_api_token: str = ""
+    wise_base_url: str = "https://api.wise.com"
     hermes_command: tuple[str, ...] = ()
     hermes_system_prompt: str = ""
     hermes_transcript_key: bytes = b""
@@ -304,6 +306,7 @@ class V2Settings:
             self.stripe_secret_key,
             self.stripe_hostel_secret_key,
             self.stripe_agency_secret_key,
+            self.wise_api_token,
             self.hermes_command,
             self.hermes_system_prompt,
             self.hermes_transcript_key,
@@ -446,6 +449,8 @@ class V2Settings:
                 raise ValueError(
                     "Stripe link creation requires two test Stripe keys"
                 )
+            if not self.wise_api_token or "\x00" in self.wise_api_token:
+                raise ValueError("Stripe link creation requires a Wise exchange-rate token")
         if owns_worker and (
             self.wise_instructions_enabled or self.pix_instructions_enabled
         ) and self.payment_instruction_path is None:
@@ -528,6 +533,7 @@ class V2Settings:
             "bokun_base_url",
             "manychat_base_url",
             "stripe_base_url",
+            "wise_base_url",
         ):
             value = getattr(self, name)
             if type(value) is not str or not value.startswith("https://") or "\x00" in value:
@@ -907,6 +913,8 @@ class V2Settings:
             agency_payment_percentage=agency_payment_percentage,
             critical_approval_ttl_seconds=critical_approval_ttl_seconds,
             stripe_base_url=worker_source.get("V2_STRIPE_BASE_URL", "https://api.stripe.com"),
+            wise_api_token=worker_source.get("V2_WISE_API_TOKEN", ""),
+            wise_base_url=worker_source.get("V2_WISE_BASE_URL", "https://api.wise.com"),
             hermes_command=_json_command(worker_source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=_system_prompt(worker_source),
             hermes_transcript_key=_hex_key(worker_source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),

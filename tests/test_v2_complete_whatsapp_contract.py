@@ -72,6 +72,7 @@ def test_each_real_effect_gate_is_independent(tmp_path: Path) -> None:
                     "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
                     "V2_STRIPE_HOSTEL_SECRET_KEY": "rk_" + "test_scoped_hostel",
                     "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
+                    "V2_WISE_API_TOKEN": "wise-token",
                     "V2_PAYMENT_RESULT_STORE_KEY_HEX": "33" * 32,
                 }
             )

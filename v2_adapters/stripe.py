@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Callable, Mapping
 from urllib.parse import quote, urlparse
 
@@ -79,6 +80,110 @@ def _is_canonical_stripe_api_origin(value: object) -> bool:
         and not parsed.query
         and not parsed.fragment
     )
+
+
+def _is_canonical_wise_api_origin(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    try:
+        parsed = urlparse(value)
+    except (UnicodeError, ValueError):
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "api.wise.com"
+        and parsed.port is None
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and parsed.query == ""
+        and parsed.fragment == ""
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class WiseBRLRates:
+    usd_brl: Decimal
+    eur_brl: Decimal
+
+    def __post_init__(self) -> None:
+        for value in (self.usd_brl, self.eur_brl):
+            if type(value) is not Decimal or not value.is_finite() or value <= 0:
+                raise ValueError("Wise BRL rates must be positive finite Decimals")
+
+
+class WiseExchangeRateReader:
+    """Read current BRL-per-foreign-unit rates using the V1 adjustment."""
+
+    _MARGIN_BRL = Decimal("0.20")
+    _RATE_QUANTUM = Decimal("0.0001")
+
+    def __init__(
+        self,
+        *,
+        api_token: str,
+        base_url: str = "https://api.wise.com",
+        timeout_seconds: float = 10.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        if type(api_token) is not str or not api_token or "\x00" in api_token:
+            raise ValueError("Wise API token is required")
+        if not _is_canonical_wise_api_origin(base_url):
+            raise ValueError("Wise base URL must be the canonical API origin")
+        if type(timeout_seconds) not in {int, float} or timeout_seconds <= 0:
+            raise ValueError("Wise timeout must be positive")
+        self._token = api_token
+        self._base_url = base_url.rstrip("/")
+        self._timeout = float(timeout_seconds)
+        self._client = client or httpx.Client()
+
+    def __call__(self) -> WiseBRLRates:
+        return WiseBRLRates(
+            usd_brl=self._read_adjusted_rate("USD"),
+            eur_brl=self._read_adjusted_rate("EUR"),
+        )
+
+    def _read_adjusted_rate(self, target: str) -> Decimal:
+        try:
+            response = self._client.get(
+                f"{self._base_url}/v1/rates",
+                params={"source": "BRL", "target": target},
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Accept": "application/json",
+                },
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if (
+                type(payload) is not list
+                or len(payload) != 1
+                or type(payload[0]) is not dict
+            ):
+                raise ValueError("unexpected Wise rate payload")
+            item = payload[0]
+            if item.get("source") != "BRL" or item.get("target") != target:
+                raise ValueError("unexpected Wise currency route")
+            raw_rate = Decimal(str(item["rate"]))
+            if not raw_rate.is_finite() or raw_rate <= 0:
+                raise ValueError("invalid Wise rate")
+            adjusted = ((Decimal("1") / raw_rate) - self._MARGIN_BRL).quantize(
+                self._RATE_QUANTUM,
+                rounding=ROUND_HALF_UP,
+            )
+            if adjusted <= 0:
+                raise ValueError("invalid adjusted Wise rate")
+            return adjusted
+        except (
+            httpx.HTTPError,
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            json.JSONDecodeError,
+        ) as exc:
+            raise RuntimeError("Wise exchange-rate read failed") from exc
 
 
 _STRIPE_OBJECT_ID_RE = re.compile(r"^[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+$")
@@ -187,6 +292,7 @@ class StripeTestHTTPTransport:
         base_url: str = "https://api.stripe.com",
         timeout_seconds: float = 10.0,
         client: httpx.Client | None = None,
+        wise_rates: Callable[[], WiseBRLRates] | None = None,
         journal: object | None = None,
         clock: Callable[[], datetime] | None = None,
         effect_guard: object | None = None,
@@ -209,6 +315,9 @@ class StripeTestHTTPTransport:
         self._base_url = base_url.rstrip("/")
         self._timeout = float(timeout_seconds)
         self._client = client or httpx.Client()
+        if wise_rates is not None and not callable(wise_rates):
+            raise TypeError("wise_rates must be callable")
+        self._wise_rates = wise_rates
         if journal is not None and (
             not callable(getattr(journal, "record_stripe_step_intent", None))
             or not callable(getattr(journal, "record_stripe_step_accepted", None))
@@ -335,6 +444,23 @@ class StripeTestHTTPTransport:
             raise TypeError("Stripe transport requires exact StripeLinkRequest")
         if not request.subscriber_fingerprint:
             raise ValueError("Stripe request requires allowlisted subscriber fingerprint")
+        if request.currency != "BRL":
+            raise ValueError("Stripe multi-currency Price requires a BRL obligation")
+        if self._wise_rates is None:
+            raise RuntimeError("Wise exchange-rate reader is required")
+        rates = self._wise_rates()
+        if type(rates) is not WiseBRLRates:
+            raise TypeError("Wise exchange-rate reader returned an invalid value")
+        usd_minor = int(
+            (Decimal(request.amount_minor) / rates.usd_brl).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        eur_minor = int(
+            (Decimal(request.amount_minor) / rates.eur_brl).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
         presentation = stripe_product_presentation(request)
         expected_product_metadata = {
             "payment_id_sha256": hashlib.sha256(
@@ -395,6 +521,11 @@ class StripeTestHTTPTransport:
             "currency": request.currency.lower(),
             "unit_amount": str(request.amount_minor),
         }
+        price_form = {
+            **price_expected,
+            "currency_options[usd][unit_amount]": str(usd_minor),
+            "currency_options[eur][unit_amount]": str(eur_minor),
+        }
         price_key = request.idempotency_key + ":price"
         self._record_step(
             request,
@@ -406,11 +537,7 @@ class StripeTestHTTPTransport:
         price = self._post(
             profile=request.account_profile_id,
             path="/v1/prices",
-            form={
-                "product": product_id,
-                "currency": request.currency.lower(),
-                "unit_amount": str(request.amount_minor),
-            },
+            form=price_form,
             idempotency_key=price_key,
         )
         self._require_test_mode(price, "price")
@@ -1068,4 +1195,6 @@ __all__ = [
     "StripeLinkReconciliationAdapter",
     "StripeTestHTTPTransport",
     "StripeTestReconciliationTransport",
+    "WiseBRLRates",
+    "WiseExchangeRateReader",
 ]

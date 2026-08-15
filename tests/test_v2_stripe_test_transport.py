@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -13,6 +14,8 @@ from v2_adapters.stripe import (
     StripeLinkAdapter,
     StripeTestHTTPTransport,
     StripeTestReconciliationTransport,
+    WiseBRLRates,
+    WiseExchangeRateReader,
 )
 from v2_adapters.stripe_checkout import stripe_product_presentation
 from v2_adapters.wise import WiseInstructionAdapter
@@ -79,7 +82,64 @@ def _transport(handler, *, key: str = TEST_KEY) -> StripeTestHTTPTransport:
         secret_keys={"stripe-account:hostel:test": key},
         base_url="https://api.stripe.invalid",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
+        wise_rates=lambda: WiseBRLRates(
+            usd_brl=Decimal("5.0000"),
+            eur_brl=Decimal("6.0000"),
+        ),
     )
+
+
+def test_wise_reader_fetches_exact_routes_and_applies_v1_adjustment() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        target = request.url.params["target"]
+        rate = {"USD": "0.200000", "EUR": "0.160000"}[target]
+        return httpx.Response(
+            200,
+            request=request,
+            json=[{"source": "BRL", "target": target, "rate": rate}],
+        )
+
+    reader = WiseExchangeRateReader(
+        api_token="wise-secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert reader() == WiseBRLRates(
+        usd_brl=Decimal("4.8000"),
+        eur_brl=Decimal("6.0500"),
+    )
+    assert [request.url.path for request in seen] == ["/v1/rates", "/v1/rates"]
+    assert [request.url.params["source"] for request in seen] == ["BRL", "BRL"]
+    assert [request.url.params["target"] for request in seen] == ["USD", "EUR"]
+    assert all(
+        request.headers["Authorization"] == "Bearer wise-secret"
+        for request in seen
+    )
+
+
+def test_wise_failure_happens_before_any_stripe_create() -> None:
+    seen: list[httpx.Request] = []
+
+    def failed_rates() -> WiseBRLRates:
+        raise RuntimeError("Wise exchange-rate read failed")
+
+    transport = StripeTestHTTPTransport(
+        secret_keys={"stripe-account:hostel:test": TEST_KEY},
+        base_url="https://api.stripe.invalid",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: seen.append(request) or httpx.Response(500)
+            )
+        ),
+        wise_rates=failed_rates,
+    )
+
+    with pytest.raises(RuntimeError, match="Wise exchange-rate"):
+        transport(_request())
+    assert seen == []
 
 
 def _product_payload(*, product_id: str = "prod_test_001") -> dict[str, object]:
@@ -141,6 +201,8 @@ def test_product_price_and_link_use_closed_forms_and_deterministic_keys() -> Non
                 "product": ["prod_test_001"],
                 "currency": ["brl"],
                 "unit_amount": ["15300"],
+                "currency_options[usd][unit_amount]": ["3060"],
+                "currency_options[eur][unit_amount]": ["2550"],
             }
             return httpx.Response(
                 200,

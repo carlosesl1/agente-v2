@@ -151,6 +151,8 @@ services:
       V2_HOSTEL_PAYMENT_PERCENTAGE: "${V2_HOSTEL_PAYMENT_PERCENTAGE:-100}"
       V2_AGENCY_PAYMENT_PERCENTAGE: "${V2_AGENCY_PAYMENT_PERCENTAGE:-20}"
       V2_STRIPE_BASE_URL: "${V2_STRIPE_BASE_URL:-https://api.stripe.com}"
+      V2_WISE_API_TOKEN: "${V2_WISE_API_TOKEN:?set V2_WISE_API_TOKEN}"
+      V2_WISE_BASE_URL: "${V2_WISE_BASE_URL:-https://api.wise.com}"
       V2_HERMES_MODEL: openai-codex/gpt-5.6-luna
       V2_HERMES_COMMAND_JSON: '["python","-m","v2_host.hermes_child","hermes","--profile","leads","-m","gpt-5.6-luna","--provider","openai-codex","--safe-mode"]'
       V2_HERMES_SYSTEM_PROMPT_PATH: /app/config/v2_luna_system_prompt.txt

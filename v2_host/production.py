@@ -44,6 +44,7 @@ from v2_adapters.stripe import (
     StripeLinkReconciliationAdapter,
     StripeTestHTTPTransport,
     StripeTestReconciliationTransport,
+    WiseExchangeRateReader,
 )
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
@@ -779,6 +780,10 @@ def _build_payment_worker(
             transport=StripeTestHTTPTransport(
                 secret_keys=settings.stripe_test_secret_keys,
                 base_url=settings.stripe_base_url,
+                wise_rates=WiseExchangeRateReader(
+                    api_token=settings.wise_api_token,
+                    base_url=settings.wise_base_url,
+                ),
                 journal=container.payment_initiation,
                 clock=clock.now,
                 effect_guard=effect_guard,

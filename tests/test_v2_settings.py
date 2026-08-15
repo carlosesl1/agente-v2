@@ -177,6 +177,7 @@ def test_general_availability_requires_empty_allowlist_and_accepts_open_gates(
             "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
             "V2_STRIPE_HOSTEL_SECRET_KEY": "rk_test_hostel",
             "V2_STRIPE_AGENCY_SECRET_KEY": "rk_test_agency",
+            "V2_WISE_API_TOKEN": "wise-token",
             "V2_PAYMENT_RESULT_STORE_KEY_HEX": "cd" * 32,
             "V2_MANYCHAT_REPLY_FIELD_ID": "101",
             "V2_MANYCHAT_REPLY_FLOW_NS": "reply-flow",
@@ -293,6 +294,7 @@ def test_effect_gates_may_remain_open_without_an_auto_close_deadline(
             "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_test_hostel",
             "V2_STRIPE_AGENCY_SECRET_KEY": "rk_test_agency",
             "V2_PAYMENT_RESULT_STORE_KEY_HEX": "cd" * 32,
+            "V2_WISE_API_TOKEN": "wise-token",
             "V2_PAYMENT_INSTRUCTION_PATH": str(tmp_path / "payments.json"),
             "V2_MANYCHAT_REPLY_FIELD_ID": "101",
             "V2_MANYCHAT_REPLY_FLOW_NS": "reply-flow",
@@ -323,6 +325,7 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
             "V2_STRIPE_AGENCY_ACCOUNT_PROFILE_ID": "stripe-account:agency:test",
             "V2_STRIPE_HOSTEL_SECRET_KEY": "sk_" + "live_forbidden_hostel",
             "V2_STRIPE_AGENCY_SECRET_KEY": "rk_" + "test_scoped_agency",
+            "V2_WISE_API_TOKEN": "wise-token",
             "V2_PAYMENT_RESULT_STORE_KEY_HEX": "ab" * 32,
             "V2_STRIPE_ENVIRONMENT": "test",
         }
@@ -336,6 +339,10 @@ def test_stripe_gate_accepts_only_test_environment_and_test_key(tmp_path: Path) 
         V2Settings.from_env(env)
 
     env["V2_STRIPE_ENVIRONMENT"] = "test"
+    wise_token = env.pop("V2_WISE_API_TOKEN")
+    with pytest.raises(ValueError, match="Wise exchange-rate token"):
+        V2Settings.from_env(env)
+    env["V2_WISE_API_TOKEN"] = wise_token
     payment_key = env.pop("V2_PAYMENT_RESULT_STORE_KEY_HEX")
     with pytest.raises(ValueError, match="dedicated 32-byte result store key"):
         V2Settings.from_env(env)

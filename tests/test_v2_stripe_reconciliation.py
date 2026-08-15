@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import hashlib
 import inspect
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 
 import v2_adapters.stripe as stripe_module
 from v2_adapters.pix import PixInstructionAdapter
+from v2_adapters.stripe import WiseBRLRates
 from v2_adapters.stripe_checkout import stripe_product_presentation
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.payments import (
@@ -138,6 +140,10 @@ def _build_worker(
         secret_keys={PROFILE: TEST_KEY},
         base_url="https://api.stripe.invalid",
         client=httpx.Client(transport=httpx.MockTransport(capture_write)),
+        wise_rates=lambda: WiseBRLRates(
+            usd_brl=Decimal("5.0000"),
+            eur_brl=Decimal("6.0000"),
+        ),
         journal=store,
         clock=clock or (lambda: NOW + timedelta(seconds=1)),
         effect_guard=effect_guard,

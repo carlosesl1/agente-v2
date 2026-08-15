@@ -68,6 +68,7 @@ def _settings(tmp_path: Path, **overrides: object) -> V2Settings:
         "bokun_secret_key": "bokun-secret",
         "bokun_product_map": product_map,
         "bokun_groups_sheet_csv_url": "https://groups.example.test/published.csv",
+        "wise_api_token": "wise-token",
         "read_probe_check_in": "2026-08-05",
         "read_probe_check_out": "2026-08-06",
         "read_probe_activity_date": "2026-08-05",
