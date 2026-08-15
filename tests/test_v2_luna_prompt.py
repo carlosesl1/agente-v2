@@ -43,6 +43,11 @@ def test_progressive_handoff_collects_useful_details_before_operational_transfer
     assert "Já temos tudo para realizar sua reserva" in PROMPT
 
 
+def test_discount_does_not_handoff_after_only_interest_date_and_party() -> None:
+    assert "passeio, data e quantidade não encerram a triagem" in PROMPT
+    assert "peça o próximo dado faltante da reserva antes de request_handoff" in PROMPT
+
+
 def test_progressive_handoff_never_overclaims_reservation_or_payment() -> None:
     assert "resultado da reserva for incerto" in PROMPT
     assert "não afirme que ela foi criada nem que não foi criada" in PROMPT
