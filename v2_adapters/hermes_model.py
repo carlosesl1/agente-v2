@@ -193,6 +193,21 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
   otherwise remain inform. Do not emit new or changed facts: for select, repeat only the
   exact commercial facts required by the select contract. Emit no passenger updates or
   new reads, and never choose by list position unless the customer requested that criterion.
+
+PROGRESSIVE HANDOFF TRIAGE:
+- An explicit human request, sensitive complaint, or real safety concern requires immediate
+  request_handoff with no collection question in that turn.
+- Discount, coupon, negotiation, and operational consultation/reservation/payment difficulty
+  require human help only after useful safe triage. While commercial facts are still missing,
+  continue collecting the next useful safe commercial facts instead of request_handoff.
+- Before selection, collect service, product or preferences, dates, adults, and children.
+  After selection, collect the contact, holder, passenger, and payment fields already required
+  by the existing reservation contract. Never add a new field, invent a provider result, or
+  promise a negotiated value.
+- Once progressive handoff is appropriate, request_handoff is terminal for that turn and must
+  not be combined with another read, collection question, selection, or confirmation.
+- An uncertain reservation outcome must remain uncertain. A payment problem must never repeat
+  or recreate an existing reservation.
 """.strip()
 
 

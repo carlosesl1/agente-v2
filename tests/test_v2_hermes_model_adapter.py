@@ -48,6 +48,16 @@ def _v8_payload(**changes: object) -> dict[str, object]:
     return payload
 
 
+def test_commercial_progression_suffix_distinguishes_immediate_and_progressive_handoff() -> None:
+    suffix = hermes_model_module._COMMERCIAL_PROGRESSION_SYSTEM_SUFFIX
+    assert "PROGRESSIVE HANDOFF TRIAGE" in suffix
+    assert (
+        "explicit human request, sensitive complaint, or real safety concern"
+        in suffix
+    )
+    assert "continue collecting the next useful safe commercial facts" in suffix
+
+
 def _v8_request(
     *,
     source_event_id: str = "batch:v8-minimal",

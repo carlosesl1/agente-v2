@@ -32,6 +32,23 @@ def test_standard_twenty_percent_deposit_never_routes_to_handoff() -> None:
     assert "confirmar esse sinal deve ser respondido normalmente e nunca abre handoff" in PROMPT
 
 
+def test_progressive_handoff_collects_useful_details_before_operational_transfer() -> None:
+    assert "HANDOFF IMEDIATO" in PROMPT
+    assert "TRIAGEM ANTES DO HANDOFF" in PROMPT
+    assert "pedido explícito para falar com uma pessoa" in PROMPT
+    assert "reclamação sensível" in PROMPT
+    assert "risco ou dúvida real de segurança" in PROMPT
+    assert "desconto, cupom ou negociação" in PROMPT
+    assert "continue coletando" in PROMPT
+    assert "Já temos tudo para realizar sua reserva" in PROMPT
+
+
+def test_progressive_handoff_never_overclaims_reservation_or_payment() -> None:
+    assert "resultado da reserva for incerto" in PROMPT
+    assert "não afirme que ela foi criada nem que não foi criada" in PROMPT
+    assert "não repita nem recrie a reserva" in PROMPT
+
+
 def test_pending_tour_schedule_question_never_uses_unrelated_hostel_hours() -> None:
     assert "horário durante uma proposta pendente de passeio" in PROMPT
     assert "nunca substitua pelo horário de check-in/check-out do hostel" in PROMPT
