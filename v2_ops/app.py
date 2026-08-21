@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import AsyncIterator, Literal
@@ -82,13 +82,61 @@ def _dashboard(value: DashboardSnapshot) -> dict[str, object]:
     return {
         "generated_at": _json_value(value.generated_at),
         "range": value.range_key.value,
-        "metrics": _json_value(value.metrics),
-        "execution_series": _json_value(value.execution_series),
-        "status_distribution": _json_value(value.status_distribution),
-        "trace_distribution": _json_value(value.trace_distribution),
-        "milestones": _json_value(value.milestones),
-        "top_node_types": _json_value(value.top_node_types),
-        "executions": _json_value(value.executions),
+        "metrics": {
+            "executions": _json_value(value.metrics["executions"]),
+            "distinct_leads": _json_value(value.metrics["distinct_leads"]),
+            "in_progress": _json_value(value.metrics["in_progress"]),
+            "completed": _json_value(value.metrics["completed"]),
+            "failed": _json_value(value.metrics["failed"]),
+            "manual_review": _json_value(value.metrics["manual_review"]),
+            "technical_completion_rate": _json_value(
+                value.metrics["technical_completion_rate"]
+            ),
+            "average_terminal_duration_ms": _json_value(
+                value.metrics["average_terminal_duration_ms"]
+            ),
+        },
+        "execution_series": [
+            {"start_at": _json_value(item["start_at"]), "count": item["count"]}
+            for item in value.execution_series
+        ],
+        "status_distribution": [
+            {"status": _json_value(item["status"]), "count": item["count"]}
+            for item in value.status_distribution
+        ],
+        "trace_distribution": [
+            {
+                "trace_completeness": _json_value(item["trace_completeness"]),
+                "count": item["count"],
+            }
+            for item in value.trace_distribution
+        ],
+        "milestones": [
+            {"milestone": _json_value(item["milestone"]), "count": item["count"]}
+            for item in value.milestones
+        ],
+        "top_node_types": [
+            {"node_type": _json_value(item["node_type"]), "count": item["count"]}
+            for item in value.top_node_types
+        ],
+        "executions": [
+            {
+                "lead_id": _json_value(item["lead_id"]),
+                "execution_id": _json_value(item["execution_id"]),
+                "received_at": _json_value(item["received_at"]),
+                "duration_ms": _json_value(item["duration_ms"]),
+                "status": _json_value(item["status"]),
+                "trace_completeness": _json_value(item["trace_completeness"]),
+                "current_node_type": _json_value(item["current_node_type"]),
+                "node_count": _json_value(item["node_count"]),
+                "has_reservation": _json_value(item["has_reservation"]),
+                "has_payment": _json_value(item["has_payment"]),
+                "has_public_delivery": _json_value(item["has_public_delivery"]),
+                "has_handoff": _json_value(item["has_handoff"]),
+                "terminal_reason": _json_value(item["terminal_reason"]),
+            }
+            for item in value.executions
+        ],
     }
 
 
@@ -152,6 +200,8 @@ def create_ops_app(
         raise TypeError("reader must be exact SQLiteOpsTraceReader")
     sessions = SessionCodec(settings.session_key, ttl=settings.session_ttl)
     limiter = LoginLimiter()
+    dashboard_cache: dict[DashboardRange, tuple[datetime, dict[str, object]]] = {}
+    dashboard_cache_lock = asyncio.Lock()
     app = FastAPI(
         title="V2 Ops Read Only",
         docs_url=None,
@@ -329,27 +379,38 @@ def create_ops_app(
 
     @app.get("/ops/api/dashboard")
     async def dashboard(request: Request, range: str = "7d") -> Response:
-        if type(require_api(request)) is not SessionClaims:
-            return require_api(request)
+        authenticated = require_api(request)
+        if type(authenticated) is not SessionClaims:
+            return authenticated
         try:
             range_key = DashboardRange.parse(range)
-            generated_at = _now()
-            records = trace_reader.list_dashboard_records(
-                start_at=generated_at - range_key.duration,
-                end_at=generated_at,
-                now=generated_at,
-                stale_after=settings.stale_after,
-            )
-            snapshot = build_dashboard_snapshot(
-                records,
-                range_key=range_key,
-                generated_at=generated_at,
-            )
         except ValueError:
             return JSONResponse(status_code=422, content={"status": "invalid_query"})
-        except OpsTraceStoreError:
-            return JSONResponse(status_code=503, content={"status": "source_unavailable"})
-        return _etag_response(_dashboard(snapshot), request)
+        async with dashboard_cache_lock:
+            generated_at = _now()
+            cached = dashboard_cache.get(range_key)
+            if cached is not None and generated_at - cached[0] < timedelta(seconds=2):
+                payload = cached[1]
+            else:
+                try:
+                    records = trace_reader.list_dashboard_records(
+                        start_at=generated_at - range_key.duration,
+                        end_at=generated_at,
+                        now=generated_at,
+                        stale_after=settings.stale_after,
+                    )
+                    snapshot = build_dashboard_snapshot(
+                        records,
+                        range_key=range_key,
+                        generated_at=generated_at,
+                    )
+                    payload = _dashboard(snapshot)
+                except (OpsTraceStoreError, ValueError, TypeError):
+                    return JSONResponse(
+                        status_code=503, content={"status": "source_unavailable"}
+                    )
+                dashboard_cache[range_key] = (generated_at, payload)
+        return _etag_response(payload, request)
 
     @app.get("/ops/api/harness")
     async def harness(request: Request) -> Response:
