@@ -331,6 +331,33 @@ def test_html_has_no_commercial_claims() -> None:
         assert forbidden not in lowered
 
 
+def test_approved_visual_palette_and_responsive_structure() -> None:
+    _, _, css = assets()
+    for color in (
+        "#245634",
+        "#173a27",
+        "#f4e8d7",
+        "#fffcf7",
+        "#e4d5c0",
+        "#66766b",
+        "#e85f67",
+    ):
+        assert color in css.casefold()
+    assert css.count("@media") >= 2
+    for token in (
+        ".kpi-grid",
+        ".analytics-grid",
+        ".operations-panel",
+        ".execution-detail",
+        ".execution-mobile-list",
+    ):
+        assert token in css
+    assert "max-width:1100px" in css.replace(" ", "")
+    assert "max-width:720px" in css.replace(" ", "")
+    assert ":focus-visible" in css
+    assert "prefers-reduced-motion" in css
+
+
 def test_existing_javascript_and_css_read_only_markers_are_preserved() -> None:
     html, js, css = assets()
     assert "EventSource" in js
@@ -716,6 +743,9 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     )
     if docker_probe.returncode != 0:
         pytest.skip("Playwright Chromium container is unavailable")
+    browser_cache = ROOT.parents[1] / "artifacts" / "ops-dashboard" / "playwright"
+    package = browser_cache / "node_modules" / "@playwright" / "test" / "package.json"
+    assert package.is_file(), f"cached @playwright/test package is unavailable: {browser_cache}"
     with tempfile.TemporaryDirectory(prefix="ops-browser-") as directory:
         os.chmod(directory, 0o755)
         spec = Path(directory) / "ops.spec.js"
@@ -725,6 +755,7 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
         started = subprocess.run(
             [
                 "docker", "run", "--rm", "-d", "--name", container,
+                "-v", f"{browser_cache / 'node_modules'}:/work/node_modules:ro",
                 "mcr.microsoft.com/playwright:v1.55.0-noble", "sleep", "300",
             ],
             capture_output=True,
@@ -752,17 +783,6 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
                     check=False,
                 )
                 assert copied.returncode == 0, copied.stdout + copied.stderr
-            installed = subprocess.run(
-                [
-                    "docker", "exec", "-w", "/work", container,
-                    "npm", "install", "--no-save", "@playwright/test@1.55.0",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=180,
-                check=False,
-            )
-            assert installed.returncode == 0, installed.stdout + installed.stderr
             completed = subprocess.run(
                 [
                     "docker", "exec", "-w", "/work", container,
