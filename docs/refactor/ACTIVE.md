@@ -9,6 +9,18 @@
 - No deploy, restart, canary promotion, broad rollout, production provider POST, or real external effect is authorized by this phase.
 - Authorized by Carlos Eduardo on 2026-08-11 after the natural-conversation audit: continue with the prompt/skill/process and provider-information approach before adding controller complexity. The approved implementation reuses the existing prompt and read tools; it adds no new skill inventory or controller gate.
 
+## Approved parallel design-only lane — Ops dashboard from existing data
+
+- Authorized by Carlos Eduardo on 2026-08-21: design a visual operational panel using only data already persisted in the dedicated Ops trace; do not change the agent, its instrumentation, its prompts, its tools, its providers or its effects.
+- Branch: `feature/maya-ops-existing-data-dashboard`.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/maya-ops-existing-data-dashboard`.
+- Base: `acfd5d6c1f7ecfef2bebf875a8e5a4dac37da265`.
+- Design: `docs/superpowers/specs/2026-08-21-maya-ops-existing-data-dashboard-design.md`.
+- Scope boundary: this lane is documentation-only until Carlos reviews the committed specification and separately approves an implementation plan.
+- Data boundary: only `v2-ops-trace.sqlite3` execution/node contracts and deterministic calculations over those records; no legacy dashboard, inferred commercial data or synthetic fallback.
+- No-effect boundary: no deploy, restart, runtime change, new instrumentation, provider access, reservation, payment, ManyChat delivery, handoff or V3 work is authorized.
+- This parallel lane does not replace or advance the `maya-v2-group-enriched-availability` NEXT below.
+
 ## Immutable base
 
 - Base commit: `496799ed0d8c30f9d966fdea9e9c86b546ac992e`
