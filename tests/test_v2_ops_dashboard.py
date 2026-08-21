@@ -89,12 +89,11 @@ def persisted_node(
     )
 
 
-def database_bytes(path: Path) -> bytes:
-    content = bytearray()
-    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
-        if candidate.exists():
-            content.extend(candidate.read_bytes())
-    return bytes(content)
+def database_snapshot(path: Path) -> tuple[tuple[str, bool, bytes], ...]:
+    return tuple(
+        (candidate.name, candidate.exists(), candidate.read_bytes() if candidate.exists() else b"")
+        for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm"))
+    )
 
 
 def test_reader_returns_inclusive_recent_first_window_with_persisted_node_association(
@@ -154,6 +153,15 @@ def test_reader_returns_inclusive_recent_first_window_with_persisted_node_associ
         writer.start_node(stale)
         writer.write_execution(persisted_execution("upper", NOW))
 
+    # The writer correctly advances current_node_id monotonically. This direct fixture
+    # update creates a valid persisted historical witness whose current node is not the
+    # final node in display order, so positional inference cannot satisfy the assertion.
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE executions SET current_node_id=? WHERE execution_id='lower'",
+            (first.node_id,),
+        )
+
     # A deliberately wrong key proves this aggregate path never decrypts full payloads.
     with SQLiteOpsTraceReader(path, OTHER_KEY) as reader:
         records = reader.list_dashboard_records(
@@ -173,7 +181,7 @@ def test_reader_returns_inclusive_recent_first_window_with_persisted_node_associ
         NodeType.MAYA_REQUEST,
         NodeType.MAYA_RESPONSE,
     )
-    assert by_execution["lower"].current_node_type is NodeType.MAYA_RESPONSE
+    assert by_execution["lower"].current_node_type is NodeType.MAYA_REQUEST
     assert by_execution["lower"].node_count == 2
     assert by_execution["upper"].node_types == ()
     assert by_execution["upper"].current_node_type is None
@@ -193,7 +201,7 @@ def test_reader_repeated_window_calls_do_not_mutate_database_bytes_or_rows(
         )
 
     with SQLiteOpsTraceReader(path, KEY) as reader:
-        before_bytes = database_bytes(path)
+        before_snapshot = database_snapshot(path)
         for _ in range(3):
             assert len(
                 reader.list_dashboard_records(
@@ -202,15 +210,44 @@ def test_reader_repeated_window_calls_do_not_mutate_database_bytes_or_rows(
                     now=NOW,
                 )
             ) == 1
-        after_bytes = database_bytes(path)
+        after_snapshot = database_snapshot(path)
 
-    assert after_bytes == before_bytes
+    assert after_snapshot == before_snapshot
     with sqlite3.connect(path) as connection:
         after_counts = (
             connection.execute("SELECT count(*) FROM executions").fetchone()[0],
             connection.execute("SELECT count(*) FROM nodes").fetchone()[0],
         )
     assert after_counts == before_counts == (1, 0)
+
+
+def test_database_snapshot_preserves_each_file_identity_existence_and_bytes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "snapshot.sqlite3"
+    wal_path = Path(f"{path}-wal")
+    shm_path = Path(f"{path}-shm")
+    path.write_bytes(b"db")
+    wal_path.write_bytes(b"wal")
+
+    before = database_snapshot(path)
+    path.write_bytes(b"dbw")
+    wal_path.write_bytes(b"al")
+    shm_path.write_bytes(b"")
+    after = database_snapshot(path)
+
+    assert b"".join(item[2] for item in before) == b"".join(item[2] for item in after)
+    assert before == (
+        ("snapshot.sqlite3", True, b"db"),
+        ("snapshot.sqlite3-wal", True, b"wal"),
+        ("snapshot.sqlite3-shm", False, b""),
+    )
+    assert after == (
+        ("snapshot.sqlite3", True, b"dbw"),
+        ("snapshot.sqlite3-wal", True, b"al"),
+        ("snapshot.sqlite3-shm", True, b""),
+    )
+    assert after != before
 
 
 def test_reader_rejects_unbounded_or_misaligned_dashboard_windows(tmp_path: Path) -> None:
@@ -230,6 +267,58 @@ def test_reader_rejects_unbounded_or_misaligned_dashboard_windows(tmp_path: Path
                     end_at=end_at,
                     now=NOW,
                 )
+
+
+def test_reader_accepts_exactly_thirty_days(tmp_path: Path) -> None:
+    path = (tmp_path / "exactly-thirty-days.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY):
+        pass
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        assert reader.list_dashboard_records(
+            start_at=NOW - timedelta(days=30),
+            end_at=NOW,
+            now=NOW,
+        ) == ()
+
+
+@pytest.mark.parametrize("field", ("start_at", "end_at", "now"))
+@pytest.mark.parametrize(
+    "invalid_time",
+    (NOW.replace(tzinfo=None), NOW.astimezone(timezone(timedelta(hours=-3)))),
+    ids=("naive", "non-utc-timezone"),
+)
+def test_reader_rejects_each_non_exact_utc_time(
+    tmp_path: Path, field: str, invalid_time: datetime
+) -> None:
+    path = (tmp_path / f"invalid-{field}.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY):
+        pass
+    arguments = {
+        "start_at": NOW - timedelta(days=7),
+        "end_at": NOW,
+        "now": NOW,
+    }
+    arguments[field] = invalid_time
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        with pytest.raises(ValueError, match=rf"{field} must be an exact UTC datetime"):
+            reader.list_dashboard_records(**arguments)
+
+
+@pytest.mark.parametrize("stale_after", (timedelta(0), -timedelta(microseconds=1)))
+def test_reader_rejects_non_positive_stale_after(
+    tmp_path: Path, stale_after: timedelta
+) -> None:
+    path = (tmp_path / "invalid-stale-after.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY):
+        pass
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        with pytest.raises(ValueError, match="stale_after must be a positive timedelta"):
+            reader.list_dashboard_records(
+                start_at=NOW - timedelta(days=7),
+                end_at=NOW,
+                now=NOW,
+                stale_after=stale_after,
+            )
 
 
 def test_empty_snapshot_uses_zero_counts_and_null_rates() -> None:
