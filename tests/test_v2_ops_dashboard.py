@@ -63,6 +63,25 @@ def test_empty_snapshot_uses_zero_counts_and_null_rates() -> None:
     }
     assert len(snapshot.execution_series) == 7
     assert {point["count"] for point in snapshot.execution_series} == {0}
+    assert snapshot.status_distribution == (
+        {"status": "pending", "count": 0},
+        {"status": "running", "count": 0},
+        {"status": "running_stale", "count": 0},
+        {"status": "completed", "count": 0},
+        {"status": "failed", "count": 0},
+        {"status": "manual_review", "count": 0},
+    )
+    assert snapshot.trace_distribution == (
+        {"trace_completeness": "complete_trace", "count": 0},
+        {"trace_completeness": "partial_trace", "count": 0},
+        {"trace_completeness": "ledger_only", "count": 0},
+    )
+    assert snapshot.milestones == (
+        {"milestone": "reservation", "count": 0},
+        {"milestone": "payment", "count": 0},
+        {"milestone": "public_delivery", "count": 0},
+        {"milestone": "handoff", "count": 0},
+    )
     assert snapshot.executions == ()
 
 
@@ -105,6 +124,46 @@ def test_metrics_use_received_at_window_and_exact_technical_mean() -> None:
     assert snapshot.metrics["average_terminal_duration_ms"] == 3000
 
 
+def test_all_six_statuses_witness_all_eight_metric_formulas_exactly() -> None:
+    cases = (
+        ("pending", None),
+        ("running", None),
+        ("running_stale", None),
+        ("completed", timedelta(seconds=2)),
+        ("failed", timedelta(seconds=5)),
+        ("manual_review", timedelta(seconds=11)),
+    )
+    records = tuple(
+        record(
+            execution(
+                f"metric-{index}",
+                lead_id=("shared-lead" if index < 3 else f"terminal-lead-{index}"),
+                received_at=NOW - timedelta(minutes=index + 1),
+                status=status,
+                completed_at=(
+                    None
+                    if duration is None
+                    else NOW - timedelta(minutes=index + 1) + duration
+                ),
+            )
+        )
+        for index, (status, duration) in enumerate(cases)
+    )
+
+    snapshot = build_dashboard_snapshot(records, range_key=DashboardRange.D7, generated_at=NOW)
+
+    assert snapshot.metrics == {
+        "executions": 6,
+        "distinct_leads": 4,
+        "in_progress": 3,
+        "completed": 1,
+        "failed": 1,
+        "manual_review": 1,
+        "technical_completion_rate": pytest.approx(100 / 6),
+        "average_terminal_duration_ms": 6000,
+    }
+
+
 def test_ranges_are_closed_and_boundaries_are_inclusive() -> None:
     assert [item.value for item in DashboardRange] == ["24h", "7d", "30d"]
     assert DashboardRange.parse("24h") is DashboardRange.H24
@@ -143,20 +202,52 @@ def test_ranges_are_closed_and_boundaries_are_inclusive() -> None:
 
 
 @pytest.mark.parametrize(
-    ("range_key", "expected_buckets"),
-    ((DashboardRange.H24, 24), (DashboardRange.D7, 7), (DashboardRange.D30, 30)),
+    ("range_key", "expected_duration", "expected_buckets", "expected_bucket_duration"),
+    (
+        (DashboardRange.H24, timedelta(hours=24), 24, timedelta(hours=1)),
+        (DashboardRange.D7, timedelta(days=7), 7, timedelta(days=1)),
+        (DashboardRange.D30, timedelta(days=30), 30, timedelta(days=1)),
+    ),
 )
-def test_each_range_emits_ordered_zero_filled_buckets(
-    range_key: DashboardRange, expected_buckets: int
+def test_each_range_has_independent_inclusive_limits_and_exact_zero_filled_buckets(
+    range_key: DashboardRange,
+    expected_duration: timedelta,
+    expected_buckets: int,
+    expected_bucket_duration: timedelta,
 ) -> None:
-    snapshot = build_dashboard_snapshot((), range_key=range_key, generated_at=NOW)
-    assert len(snapshot.execution_series) == expected_buckets
-    assert snapshot.execution_series[0]["start_at"] == NOW - range_key.duration
-    assert snapshot.execution_series[-1]["start_at"] == NOW - range_key.bucket_duration
-    assert tuple(point["start_at"] for point in snapshot.execution_series) == tuple(
-        sorted(point["start_at"] for point in snapshot.execution_series)
+    lower = NOW - expected_duration
+    records = (
+        record(execution("lower", lead_id="lower", received_at=lower, status="pending")),
+        record(
+            execution(
+                "before-lower",
+                lead_id="before-lower",
+                received_at=lower - timedelta(microseconds=1),
+                status="pending",
+            )
+        ),
+        record(execution("upper", lead_id="upper", received_at=NOW, status="pending")),
+        record(
+            execution(
+                "after-upper",
+                lead_id="after-upper",
+                received_at=NOW + timedelta(microseconds=1),
+                status="pending",
+            )
+        ),
     )
-    assert all(point["count"] == 0 for point in snapshot.execution_series)
+    snapshot = build_dashboard_snapshot(records, range_key=range_key, generated_at=NOW)
+    assert snapshot.metrics["executions"] == 2
+    assert len(snapshot.execution_series) == expected_buckets
+    assert snapshot.execution_series[0] == {"start_at": lower, "count": 1}
+    assert snapshot.execution_series[-1] == {
+        "start_at": NOW - expected_bucket_duration,
+        "count": 1,
+    }
+    assert tuple(point["start_at"] for point in snapshot.execution_series) == tuple(
+        lower + index * expected_bucket_duration for index in range(expected_buckets)
+    )
+    assert all(point["count"] == 0 for point in snapshot.execution_series[1:-1])
 
 
 def test_status_and_trace_distributions_emit_closed_catalogs_in_stable_order() -> None:
