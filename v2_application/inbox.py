@@ -394,5 +394,30 @@ class SQLiteInbox:
         finally:
             connection.close()
 
+    def release_claim(self, claim: InboxClaim) -> None:
+        """Return one exact failed claim to pending for worker-level backoff retry."""
+        if type(claim) is not InboxClaim:
+            raise TypeError("claim must be an exact InboxClaim")
+        event_ids = tuple(event.event_id for event in claim.events)
+        placeholders = ",".join("?" for _ in event_ids)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                f"UPDATE inbound_events SET status='pending',claim_token=NULL,"
+                f"claim_expires_at=NULL WHERE status='claimed' AND claim_token=? "
+                f"AND event_id IN ({placeholders})",
+                (claim.claim_token, *event_ids),
+            )
+            if cursor.rowcount != len(event_ids):
+                raise RuntimeError("inbox claim release is stale or divergent")
+            connection.commit()
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
 
 __all__ = ["InboxClaim", "SQLiteInbox"]

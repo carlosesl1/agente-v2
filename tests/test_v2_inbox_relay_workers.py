@@ -54,6 +54,11 @@ class ReplayExecutor:
         return FakeCommittedTurn(receipt, replayed)
 
 
+class FailingExecutor:
+    def execute(self, batch):
+        raise RuntimeError("synthetic transient model failure")
+
+
 class CapturingRecorder(NullOpsRecorder):
     def __init__(self, *, fail: bool = False) -> None:
         self.executions = []
@@ -155,6 +160,25 @@ def test_inbox_claim_trace_baseexception_cannot_change_or_repeat_business_call(
     assert result.disposition is InboxWorkerDisposition.COMMITTED
     assert executor.calls == 1
     assert inbox.processed_count() == 1
+
+
+def test_inbox_executor_failure_releases_claim_for_worker_backoff_retry(
+    tmp_path: Path,
+) -> None:
+    inbox = SQLiteInbox(tmp_path / "inbox.sqlite3")
+    assert inbox.accept(_event()) is AcceptDisposition.ACCEPTED
+    worker = InboxTurnWorker(
+        inbox=inbox,
+        executor=FailingExecutor(),
+        quiet_window=timedelta(0),
+        lease_ttl=timedelta(minutes=15),
+    )
+
+    with pytest.raises(RuntimeError, match="transient model failure"):
+        worker.run_once(now=NOW)
+
+    assert inbox.pending_count() == 1
+    assert inbox.claimed_count() == 0
 
 
 class FailFirstCompletionInbox(SQLiteInbox):

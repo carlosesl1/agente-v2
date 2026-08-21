@@ -190,21 +190,25 @@ class InboxTurnWorker:
             return InboxWorkerResult(InboxWorkerDisposition.IDLE)
         if type(claim) is not InboxClaim:
             raise TypeError("inbox returned a non-canonical claim")
-        self._record_claim(claim, now=instant)
-        committed = self._executor.execute(claim.batch)
-        receipt_hash = committed.receipt.artifact_hash
-        if (
-            type(receipt_hash) is not str
-            or len(receipt_hash) != 64
-            or any(char not in "0123456789abcdef" for char in receipt_hash)
-        ):
-            raise ValueError("executor returned an invalid turn receipt hash")
-        self._finish_coalesced_events(claim, now=instant)
-        self._inbox.complete_claim(
-            claim,
-            turn_receipt_hash=receipt_hash,
-            now=instant,
-        )
+        try:
+            self._record_claim(claim, now=instant)
+            committed = self._executor.execute(claim.batch)
+            receipt_hash = committed.receipt.artifact_hash
+            if (
+                type(receipt_hash) is not str
+                or len(receipt_hash) != 64
+                or any(char not in "0123456789abcdef" for char in receipt_hash)
+            ):
+                raise ValueError("executor returned an invalid turn receipt hash")
+            self._finish_coalesced_events(claim, now=instant)
+            self._inbox.complete_claim(
+                claim,
+                turn_receipt_hash=receipt_hash,
+                now=instant,
+            )
+        except BaseException:
+            self._inbox.release_claim(claim)
+            raise
         disposition = (
             InboxWorkerDisposition.REPLAYED
             if committed.replayed
