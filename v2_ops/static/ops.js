@@ -1,37 +1,349 @@
 "use strict";
 
-const state = { executions: [], selectedExecution: null, nodes: [], selectedNode: null, zoom: 1 };
+const state = {
+  range: "7d",
+  snapshot: null,
+  selectedExecution: null,
+  nodes: [],
+  selectedNode: null,
+  statusFilter: "",
+  completenessFilter: "",
+  leadFilter: "",
+  zoom: 1,
+  connected: false,
+};
+
+const KPI_DEFINITIONS = [
+  ["executions", "Execuções"],
+  ["distinct_leads", "Leads distintos"],
+  ["in_progress", "Em andamento"],
+  ["completed", "Concluídas"],
+  ["failed", "Falhas"],
+  ["manual_review", "Revisão manual"],
+  ["technical_completion_rate", "Conclusão técnica"],
+  ["average_terminal_duration_ms", "Duração média terminal"],
+];
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
-const showJSON = (element, value) => { element.textContent = JSON.stringify(value, null, 2); };
+
+function showJSON(element, value) {
+  element.textContent = JSON.stringify(value, null, 2);
+}
+
+function showAlert(message) {
+  const alert = $("dashboard-alert");
+  alert.textContent = message;
+  alert.hidden = false;
+}
+
+function clearAlert() {
+  const alert = $("dashboard-alert");
+  alert.textContent = "";
+  alert.hidden = true;
+}
 
 async function getJSON(path) {
-  const response = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 401) {
+    window.location.assign("/ops/login");
+    throw new Error("authentication_required");
+  }
+  if (response.status === 503) {
+    const error = new Error("source_unavailable");
+    error.code = "source_unavailable";
+    throw error;
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
   return response.json();
+}
+
+function formatDuration(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "Não registrado";
+  }
+  const milliseconds = Math.max(0, Number(value));
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
+function formatMetric(key, value) {
+  if (value === null || value === undefined) return "—";
+  if (key === "technical_completion_rate") return `${Number(value).toFixed(1)}%`;
+  if (key === "average_terminal_duration_ms") return formatDuration(value);
+  return String(value);
+}
+
+function formatTimestamp(value) {
+  if (!value) return "Não registrado";
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "Não registrado";
+  return timestamp.toLocaleString("pt-BR", { timeZone: "UTC" });
+}
+
+function displayValue(value) {
+  return value === null || value === undefined || value === "" ? "Não registrado" : String(value);
+}
+
+function shortExecutionId(value) {
+  const identifier = String(value);
+  return identifier.length > 18 ? `${identifier.slice(0, 8)}…${identifier.slice(-7)}` : identifier;
 }
 
 function statusBadge(value) {
   const badge = document.createElement("span");
   badge.className = "badge";
-  badge.textContent = value;
+  badge.textContent = displayValue(value);
   return badge;
 }
 
-function renderExecutions() {
-  const root = $("execution-list");
-  root.replaceChildren();
-  for (const execution of state.executions) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "execution-card" + (execution.execution_id === state.selectedExecution ? " active" : "");
-    const title = document.createElement("strong");
-    title.textContent = execution.lead_id;
-    const subtitle = document.createElement("small");
-    subtitle.textContent = execution.execution_id;
-    card.append(title, subtitle, statusBadge(execution.status));
-    card.addEventListener("click", () => selectExecution(execution.execution_id));
-    root.append(card);
+function emptyMessage(root, message) {
+  const paragraph = document.createElement("p");
+  paragraph.className = "empty-chart";
+  paragraph.textContent = message;
+  root.replaceChildren(paragraph);
+}
+
+function renderKpis() {
+  const root = $("kpi-grid");
+  const metrics = state.snapshot ? state.snapshot.metrics : {};
+  const cards = KPI_DEFINITIONS.map(([key, label]) => {
+    const card = document.createElement("article");
+    card.className = "kpi-card";
+    const heading = document.createElement("span");
+    heading.textContent = label;
+    const value = document.createElement("strong");
+    value.textContent = formatMetric(key, metrics[key]);
+    card.append(heading, value);
+    return card;
+  });
+  root.replaceChildren(...cards);
+}
+
+function renderExecutionSeries() {
+  const root = $("execution-series");
+  const points = state.snapshot ? state.snapshot.execution_series : [];
+  if (!points.length || points.every((point) => Number(point.count) === 0)) {
+    emptyMessage(root, "Nenhuma execução registrada.");
+    return;
   }
+  const width = 640;
+  const height = 220;
+  const padding = 28;
+  const maximum = Math.max(1, ...points.map((point) => Math.max(0, Number(point.count) || 0)));
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Série de execuções no período");
+  const polyline = document.createElementNS(SVG_NAMESPACE, "polyline");
+  const coordinates = points.map((point, index) => {
+    const denominator = Math.max(1, points.length - 1);
+    const x = padding + (index / denominator) * (width - padding * 2);
+    const count = Math.max(0, Number(point.count) || 0);
+    const y = height - padding - (count / maximum) * (height - padding * 2);
+    const marker = document.createElementNS(SVG_NAMESPACE, "circle");
+    marker.setAttribute("cx", x.toFixed(2));
+    marker.setAttribute("cy", y.toFixed(2));
+    marker.setAttribute("r", "4");
+    const title = document.createElementNS(SVG_NAMESPACE, "title");
+    title.textContent = `${formatTimestamp(point.start_at)}: ${count}`;
+    marker.append(title);
+    svg.append(marker);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  polyline.setAttribute("points", coordinates.join(" "));
+  polyline.setAttribute("fill", "none");
+  svg.prepend(polyline);
+  root.replaceChildren(svg);
+}
+
+function labeledBar(label, count, maximum, suffix) {
+  const row = document.createElement("div");
+  row.className = "bar-row";
+  const heading = document.createElement("span");
+  heading.textContent = label;
+  const track = document.createElement("div");
+  track.className = "bar-track";
+  const bar = document.createElement("span");
+  bar.className = "bar-value";
+  const safeCount = Math.max(0, Number(count) || 0);
+  const percent = maximum > 0 ? Math.min(100, (safeCount / maximum) * 100) : 0;
+  bar.style.width = `${percent.toFixed(2)}%`;
+  track.append(bar);
+  const value = document.createElement("strong");
+  value.textContent = suffix ? `${safeCount} ${suffix}` : String(safeCount);
+  row.append(heading, track, value);
+  return row;
+}
+
+function renderDistribution(rootId, items, key) {
+  const root = $(rootId);
+  if (!items.length || items.every((item) => Number(item.count) === 0)) {
+    emptyMessage(root, "Nenhum registro no período.");
+    return;
+  }
+  const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
+  root.replaceChildren(...items.map((item) => labeledBar(displayValue(item[key]), item.count, maximum, "")));
+}
+
+function renderMilestones() {
+  const root = $("milestones-chart");
+  const items = state.snapshot ? state.snapshot.milestones : [];
+  if (!items.length || items.every((item) => Number(item.count) === 0)) {
+    emptyMessage(root, "Nenhum marco registrado.");
+    return;
+  }
+  const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
+  root.replaceChildren(
+    ...items.map((item) => labeledBar(displayValue(item.milestone), item.count, maximum, "execuções com marco")),
+  );
+}
+
+function renderTopNodeTypes() {
+  const root = $("top-node-types");
+  const items = state.snapshot ? state.snapshot.top_node_types : [];
+  if (!items.length) {
+    emptyMessage(root, "Nenhum nó registrado.");
+    return;
+  }
+  const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
+  root.replaceChildren(
+    ...items.map((item, index) => labeledBar(`${index + 1}. ${displayValue(item.node_type)}`, item.count, maximum, "")),
+  );
+}
+
+function filteredExecutions() {
+  const executions = state.snapshot ? state.snapshot.executions : [];
+  return executions.filter((execution) => (
+    (!state.leadFilter || execution.lead_id === state.leadFilter)
+    && (!state.statusFilter || execution.status === state.statusFilter)
+    && (!state.completenessFilter || execution.trace_completeness === state.completenessFilter)
+  ));
+}
+
+function milestoneText(execution) {
+  const facts = [
+    ["reserva", execution.has_reservation],
+    ["pagamento", execution.has_payment],
+    ["entrega pública", execution.has_public_delivery],
+    ["handoff", execution.has_handoff],
+  ];
+  return facts.map(([label, present]) => `${label}: ${present ? "Sim" : "Não"}`).join(" · ");
+}
+
+function executionFacts(execution) {
+  return [
+    ["Lead ID", displayValue(execution.lead_id)],
+    ["Execução", shortExecutionId(execution.execution_id)],
+    ["Recebida", formatTimestamp(execution.received_at)],
+    ["Duração", formatDuration(execution.duration_ms)],
+    ["Estado", displayValue(execution.status)],
+    ["Completude", displayValue(execution.trace_completeness)],
+    ["Nó atual", displayValue(execution.current_node_type)],
+    ["Nós", String(Number(execution.node_count) || 0)],
+    ["Marcos", milestoneText(execution)],
+    ["Motivo terminal", displayValue(execution.terminal_reason)],
+  ];
+}
+
+function executionLink(execution) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "execution-link";
+  button.textContent = shortExecutionId(execution.execution_id);
+  button.setAttribute("title", String(execution.execution_id));
+  button.addEventListener("click", () => openExecution(execution.execution_id).catch(handleDashboardError));
+  return button;
+}
+
+function renderExecutionTable() {
+  const tableRoot = $("execution-table-body");
+  const mobileRoot = $("execution-mobile-list");
+  const executions = filteredExecutions();
+  const rows = [];
+  const cards = [];
+  for (const execution of executions) {
+    const facts = executionFacts(execution);
+    const row = document.createElement("tr");
+    facts.forEach(([, value], index) => {
+      const cell = document.createElement("td");
+      if (index === 1) cell.append(executionLink(execution));
+      else if (index === 4) cell.append(statusBadge(value));
+      else cell.textContent = value;
+      row.append(cell);
+    });
+    rows.push(row);
+
+    const card = document.createElement("article");
+    card.className = "execution-mobile-card";
+    for (const [label, value] of facts) {
+      const fact = document.createElement("div");
+      const heading = document.createElement("strong");
+      heading.textContent = label;
+      if (label === "Execução") fact.append(heading, executionLink(execution));
+      else {
+        const content = document.createElement("span");
+        content.textContent = value;
+        fact.append(heading, content);
+      }
+      card.append(fact);
+    }
+    cards.push(card);
+  }
+  tableRoot.replaceChildren(...rows);
+  mobileRoot.replaceChildren(...cards);
+  const empty = $("empty-state");
+  empty.hidden = executions.length !== 0;
+  empty.textContent = state.snapshot && state.snapshot.executions.length
+    ? "Nenhuma execução corresponde aos filtros exatos."
+    : "Nenhuma execução registrada neste período.";
+}
+
+function populateFilter(select, items, key, allLabel, selectedValue) {
+  const options = [];
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = allLabel;
+  options.push(all);
+  for (const item of items) {
+    const option = document.createElement("option");
+    option.value = String(item[key]);
+    option.textContent = String(item[key]);
+    options.push(option);
+  }
+  select.replaceChildren(...options);
+  select.value = selectedValue;
+}
+
+function renderDashboard() {
+  if (!state.snapshot) return;
+  $("generated-at").textContent = `Atualizado em ${formatTimestamp(state.snapshot.generated_at)} UTC`;
+  renderKpis();
+  renderExecutionSeries();
+  renderDistribution("status-distribution", state.snapshot.status_distribution, "status");
+  renderDistribution("trace-distribution", state.snapshot.trace_distribution, "trace_completeness");
+  renderMilestones();
+  renderTopNodeTypes();
+  populateFilter($("status-filter"), state.snapshot.status_distribution, "status", "Todos", state.statusFilter);
+  populateFilter(
+    $("completeness-filter"),
+    state.snapshot.trace_distribution,
+    "trace_completeness",
+    "Todas",
+    state.completenessFilter,
+  );
+  renderExecutionTable();
+}
+
+async function loadDashboard() {
+  const payload = await getJSON(`/ops/api/dashboard?range=${encodeURIComponent(state.range)}`);
+  state.snapshot = payload;
+  clearAlert();
+  renderDashboard();
 }
 
 function nodePosition(index) {
@@ -51,17 +363,17 @@ function renderCanvas() {
     positions.set(node.node_id, position);
     const element = document.createElement("button");
     element.type = "button";
-    element.className = "node" + (node.node_id === state.selectedNode ? " selected" : "");
+    element.className = `node${node.node_id === state.selectedNode ? " selected" : ""}`;
     element.style.left = `${position.x}px`;
     element.style.top = `${position.y}px`;
     const kind = document.createElement("div");
     kind.className = "kind";
-    kind.textContent = node.node_type.replaceAll("_", " ");
+    kind.textContent = displayValue(node.node_type).replaceAll("_", " ");
     const ordinal = document.createElement("strong");
-    ordinal.textContent = `#${node.ordinal} · tentativa ${node.attempt}`;
+    ordinal.textContent = `#${Number(node.ordinal) || 0} · tentativa ${Number(node.attempt) || 0}`;
     const status = document.createElement("div");
     status.className = "status";
-    status.textContent = node.status;
+    status.textContent = displayValue(node.status);
     element.append(kind, ordinal, status);
     element.addEventListener("click", () => selectNode(node.node_id));
     nodesRoot.append(element);
@@ -70,19 +382,19 @@ function renderCanvas() {
     if (index === 0) return;
     const from = positions.get(state.nodes[index - 1].node_id);
     const to = positions.get(node.node_id);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const path = document.createElementNS(SVG_NAMESPACE, "path");
     path.setAttribute("class", "edge");
     path.setAttribute("d", `M ${from.x + 178} ${from.y + 38} C ${from.x + 220} ${from.y + 38}, ${to.x - 42} ${to.y + 38}, ${to.x} ${to.y + 38}`);
     edgesRoot.append(path);
   });
-  nodesRoot.style.transform = `scale(${state.zoom})`;
+  nodesRoot.style.transform = `scale(${Math.max(0.5, Math.min(1.6, Number(state.zoom) || 1))})`;
 }
 
 function selectNode(nodeId) {
   state.selectedNode = nodeId;
   const node = state.nodes.find((item) => item.node_id === nodeId);
   if (!node) return;
-  $("node-title").textContent = node.node_type.replaceAll("_", " ");
+  $("node-title").textContent = displayValue(node.node_type).replaceAll("_", " ");
   showJSON($("input-summary"), node.input_summary);
   showJSON($("output-summary"), node.output_summary);
   showJSON($("metadata"), node.technical_metadata);
@@ -94,54 +406,117 @@ function selectNode(nodeId) {
   renderCanvas();
 }
 
-async function selectExecution(executionId) {
-  state.selectedExecution = executionId;
+async function refreshOpenExecution() {
+  if (!state.selectedExecution) return;
+  const executionId = state.selectedExecution;
   const payload = await getJSON(`/ops/api/executions/${encodeURIComponent(executionId)}/nodes`);
   state.nodes = payload.nodes;
-  state.selectedNode = state.nodes.length ? state.nodes[0].node_id : null;
+  const selectedStillExists = state.nodes.some((node) => node.node_id === state.selectedNode);
+  if (!selectedStillExists) state.selectedNode = state.nodes.length ? state.nodes[0].node_id : null;
   $("canvas-title").textContent = executionId;
-  renderExecutions();
   renderCanvas();
   if (state.selectedNode) selectNode(state.selectedNode);
 }
 
-async function loadExecutions() {
-  const params = new URLSearchParams();
-  const lead = $("lead-search").value.trim();
-  const status = $("status-filter").value;
-  if (lead) params.set("lead_id", lead);
-  if (status) params.set("status", status);
-  const payload = await getJSON(`/ops/api/executions?${params.toString()}`);
-  state.executions = payload.executions;
-  renderExecutions();
-  if (!state.selectedExecution && state.executions.length) await selectExecution(state.executions[0].execution_id);
+async function openExecution(executionId) {
+  state.selectedExecution = executionId;
+  $("overview-view").hidden = true;
+  $("execution-view").hidden = false;
+  $("nav-overview").removeAttribute("aria-current");
+  $("nav-execution").disabled = false;
+  $("nav-execution").setAttribute("aria-current", "page");
+  await refreshOpenExecution();
+}
+
+function showOverview() {
+  $("overview-view").hidden = false;
+  $("execution-view").hidden = true;
+  $("nav-execution").removeAttribute("aria-current");
+  $("nav-overview").setAttribute("aria-current", "page");
+  $("range-select").value = state.range;
+  $("lead-search").value = state.leadFilter;
+  $("status-filter").value = state.statusFilter;
+  $("completeness-filter").value = state.completenessFilter;
+  renderExecutionTable();
 }
 
 async function loadFull(side) {
   if (!state.selectedExecution || !state.selectedNode) return;
-  const payload = await getJSON(`/ops/api/executions/${encodeURIComponent(state.selectedExecution)}/nodes/${state.selectedNode}/full?side=${side}`);
+  const executionId = encodeURIComponent(state.selectedExecution);
+  const nodeId = encodeURIComponent(state.selectedNode);
+  const payload = await getJSON(`/ops/api/executions/${executionId}/nodes/${nodeId}/full?side=${side}`);
   const target = side === "input" ? $("input-full") : $("output-full");
   showJSON(target, payload.value ?? { status: "not_recorded" });
   target.hidden = false;
 }
 
-function connectLive() {
-  const source = new EventSource("/ops/api/events");
-  source.addEventListener("ready", () => { $("live-state").textContent = "LIVE"; });
-  source.addEventListener("change", () => { loadExecutions().catch(disconnected); });
-  source.onerror = disconnected;
+function markDisconnected() {
+  state.connected = false;
+  $("live-state").textContent = "Desconectado";
+  showAlert("Atualização ao vivo indisponível. Os últimos dados recebidos permanecem visíveis.");
 }
 
-function disconnected() { $("live-state").textContent = "DESCONECTADO"; }
+function handleDashboardError(error) {
+  if (error && error.message === "authentication_required") return;
+  if (error && error.code === "source_unavailable") {
+    showAlert("Fonte operacional indisponível. Os últimos dados recebidos permanecem visíveis.");
+    return;
+  }
+  showAlert("Não foi possível atualizar os dados operacionais.");
+}
 
-$("lead-search").addEventListener("change", () => loadExecutions().catch(disconnected));
-$("status-filter").addEventListener("change", () => loadExecutions().catch(disconnected));
-$("load-full-input").addEventListener("click", () => loadFull("input").catch(disconnected));
-$("load-full-output").addEventListener("click", () => loadFull("output").catch(disconnected));
-$("zoom-in").addEventListener("click", () => { state.zoom = Math.min(1.6, state.zoom + 0.1); renderCanvas(); });
-$("zoom-out").addEventListener("click", () => { state.zoom = Math.max(0.5, state.zoom - 0.1); renderCanvas(); });
-$("fit-canvas").addEventListener("click", () => { state.zoom = 1; $("execution-canvas").scrollTo(0, 0); renderCanvas(); });
+function connectLive() {
+  const source = new EventSource("/ops/api/events");
+  source.addEventListener("ready", () => {
+    state.connected = true;
+    $("live-state").textContent = "Ao vivo";
+    clearAlert();
+  });
+  source.addEventListener("change", () => {
+    loadDashboard()
+      .then(() => refreshOpenExecution())
+      .catch(handleDashboardError);
+  });
+  source.addEventListener("degraded", markDisconnected);
+  source.onerror = markDisconnected;
+}
 
-loadExecutions().catch(disconnected);
+$("range-select").addEventListener("change", (event) => {
+  state.range = event.target.value;
+  loadDashboard().catch(handleDashboardError);
+});
+$("lead-search").addEventListener("input", (event) => {
+  state.leadFilter = event.target.value.trim();
+  renderExecutionTable();
+});
+$("status-filter").addEventListener("change", (event) => {
+  state.statusFilter = event.target.value;
+  renderExecutionTable();
+});
+$("completeness-filter").addEventListener("change", (event) => {
+  state.completenessFilter = event.target.value;
+  renderExecutionTable();
+});
+$("back-to-overview").addEventListener("click", showOverview);
+$("nav-overview").addEventListener("click", showOverview);
+$("nav-execution").addEventListener("click", () => {
+  if (state.selectedExecution) openExecution(state.selectedExecution).catch(handleDashboardError);
+});
+$("load-full-input").addEventListener("click", () => loadFull("input").catch(handleDashboardError));
+$("load-full-output").addEventListener("click", () => loadFull("output").catch(handleDashboardError));
+$("zoom-in").addEventListener("click", () => {
+  state.zoom = Math.min(1.6, state.zoom + 0.1);
+  renderCanvas();
+});
+$("zoom-out").addEventListener("click", () => {
+  state.zoom = Math.max(0.5, state.zoom - 0.1);
+  renderCanvas();
+});
+$("fit-canvas").addEventListener("click", () => {
+  state.zoom = 1;
+  $("execution-canvas").scrollTo(0, 0);
+  renderCanvas();
+});
+
+loadDashboard().catch(handleDashboardError);
 connectLive();
-setInterval(() => loadExecutions().catch(disconnected), 2000);

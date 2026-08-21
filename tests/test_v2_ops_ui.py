@@ -346,3 +346,106 @@ def test_existing_javascript_and_css_read_only_markers_are_preserved() -> None:
         assert forbidden not in (html + js).casefold()
     assert "@media" in css
     assert "input-panel" in css and "output-panel" in css
+
+
+def test_javascript_dashboard_contract_is_safe_and_explicit() -> None:
+    _, js, _ = assets()
+    for name in (
+        "loadDashboard",
+        "renderKpis",
+        "renderExecutionSeries",
+        "renderDistribution",
+        "renderMilestones",
+        "renderTopNodeTypes",
+        "renderExecutionTable",
+        "filteredExecutions",
+        "openExecution",
+        "showOverview",
+        "renderCanvas",
+        "selectNode",
+        "connectLive",
+    ):
+        assert f"function {name}(" in js or f"async function {name}(" in js
+
+    assert "textContent" in js
+    assert "document.createElement(" in js
+    assert "document.createElementNS(" in js
+    assert "replaceChildren" in js
+    assert "setAttribute" in js
+    assert "innerHTML" not in js
+    assert "method:" not in js
+    for forbidden in (
+        "SERVICES",
+        "RANGE_MODELS",
+        "demo-",
+        "payment_link",
+        "request_handoff",
+        "create_reservation",
+    ):
+        assert forbidden not in js
+
+
+def test_javascript_uses_the_closed_state_cards_and_exact_filters() -> None:
+    _, js, _ = assets()
+    for field, initial in (
+        ("range", '"7d"'),
+        ("snapshot", "null"),
+        ("selectedExecution", "null"),
+        ("nodes", "[]"),
+        ("selectedNode", "null"),
+        ("statusFilter", '""'),
+        ("completenessFilter", '""'),
+        ("leadFilter", '""'),
+        ("zoom", "1"),
+        ("connected", "false"),
+    ):
+        assert f"{field}: {initial}" in js
+
+    for key, label in (
+        ("executions", "Execuções"),
+        ("distinct_leads", "Leads distintos"),
+        ("in_progress", "Em andamento"),
+        ("completed", "Concluídas"),
+        ("failed", "Falhas"),
+        ("manual_review", "Revisão manual"),
+        ("technical_completion_rate", "Conclusão técnica"),
+        ("average_terminal_duration_ms", "Duração média terminal"),
+    ):
+        assert f'["{key}", "{label}"]' in js
+
+    assert "execution.lead_id === state.leadFilter" in js
+    assert "execution.status === state.statusFilter" in js
+    assert "execution.trace_completeness === state.completenessFilter" in js
+
+
+def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
+    _, js, _ = assets()
+    assert 'getJSON(`/ops/api/dashboard?range=${encodeURIComponent(state.range)}`)' in js
+    assert 'window.location.assign("/ops/login")' in js
+    assert 'error.code = "source_unavailable"' in js
+    assert 'new EventSource("/ops/api/events")' in js
+    for event in ("ready", "change", "degraded"):
+        assert f'addEventListener("{event}"' in js
+    assert "setInterval" not in js
+    assert "state.snapshot =" in js
+    assert '$("overview-view").hidden = true' in js
+    assert '$("execution-view").hidden = false' in js
+    assert '$("overview-view").hidden = false' in js
+    assert '$("execution-view").hidden = true' in js
+    assert 'payload.value ?? { status: "not_recorded" }' in js
+    for token in (
+        "lead_id",
+        "execution_id",
+        "received_at",
+        "duration_ms",
+        "status",
+        "trace_completeness",
+        "current_node_type",
+        "node_count",
+        "has_reservation",
+        "has_payment",
+        "has_public_delivery",
+        "has_handoff",
+        "terminal_reason",
+    ):
+        assert token in js
