@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
@@ -51,20 +52,22 @@ EXPECTED_IDS = {
     "zoom-in",
     "zoom-out",
 }
-EXPECTED_CONTROL_IDS = {
-    "back-to-overview",
-    "completeness-filter",
-    "fit-canvas",
-    "lead-search",
-    "load-full-input",
-    "load-full-output",
-    "nav-execution",
-    "nav-overview",
-    "range-select",
-    "status-filter",
-    "zoom-in",
-    "zoom-out",
-}
+EXPECTED_CONTROLS = (
+    ("button", None, "submit"),
+    ("button", "back-to-overview", "button"),
+    ("button", "fit-canvas", "button"),
+    ("button", "load-full-input", "button"),
+    ("button", "load-full-output", "button"),
+    ("button", "nav-execution", "button"),
+    ("button", "nav-overview", "button"),
+    ("button", "zoom-in", "button"),
+    ("button", "zoom-out", "button"),
+    ("input", None, "hidden"),
+    ("input", "lead-search", "text"),
+    ("select", "completeness-filter", None),
+    ("select", "range-select", None),
+    ("select", "status-filter", None),
+)
 
 
 @dataclass
@@ -146,6 +149,15 @@ def is_descendant(element: Element, ancestor: Element) -> bool:
     return False
 
 
+def control_type(element: Element) -> str | None:
+    declared_type = element.attrs.get("type")
+    if element.tag == "button":
+        return (declared_type or "submit").casefold()
+    if element.tag == "input":
+        return (declared_type or "text").casefold()
+    return declared_type.casefold() if declared_type is not None else None
+
+
 def assert_dashboard_dom_contract(html: str) -> None:
     root = parse_html(html)
     by_id = elements_by_id(root)
@@ -166,20 +178,23 @@ def assert_dashboard_dom_contract(html: str) -> None:
 
     canvas = by_id["execution-canvas"]
     inspector = next(element for element in root.descendants("aside") if "inspector" in (element.attrs.get("class") or "").split())
-    assert is_descendant(canvas, execution)
-    assert is_descendant(inspector, execution)
+    assert is_descendant(canvas, execution), "canvas must descend from execution-view"
+    assert is_descendant(inspector, execution), "inspector must descend from execution-view"
 
     input_panel = by_id["input-panel"]
     output_panel = by_id["output-panel"]
     assert input_panel.parent is output_panel.parent
-    assert "hidden" not in input_panel.attrs
-    assert "hidden" not in output_panel.attrs
+    assert "hidden" not in input_panel.attrs, "hidden Input"
+    assert "hidden" not in output_panel.attrs, "hidden Output"
     assert is_descendant(input_panel, inspector)
     assert is_descendant(output_panel, inspector)
 
     controls = [element for element in root.descendants() if element.tag in {"button", "input", "select"}]
-    control_ids = {element.attrs["id"] for element in controls if element.attrs.get("id")}
-    assert control_ids == EXPECTED_CONTROL_IDS
+    control_contract = Counter(
+        (element.tag, element.attrs.get("id"), control_type(element))
+        for element in controls
+    )
+    assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected control tag/id/type"
     anonymous_controls = [element for element in controls if not element.attrs.get("id")]
     assert len(anonymous_controls) == 2
 
@@ -201,7 +216,7 @@ def assert_dashboard_dom_contract(html: str) -> None:
     submit_controls = [
         element
         for element in controls
-        if element.tag == "button" and (element.attrs.get("type") or "submit").casefold() == "submit"
+        if element.tag in {"button", "input"} and control_type(element) == "submit"
     ]
     assert len(submit_controls) == 1
     assert submit_controls[0].parent is logout_form
@@ -237,25 +252,33 @@ def test_dashboard_shell_dom_contract() -> None:
         (
             lambda html: html.replace(
                 '          <aside class="inspector">',
-                '          </div>\n          <aside class="inspector">',
+                '        </div>\n      </section>\n      <aside class="inspector">',
                 1,
             ).replace(
-                '          </aside>\n        </div>',
-                '          </aside>\n        <div>',
+                '          </aside>\n        </div>\n      </section>',
+                '      </aside>',
                 1,
             ),
-            "wrong inspector parent",
+            "inspector must descend from execution-view",
         ),
         (
             lambda html: html.replace('id="generated-at"', 'id="range-select"'),
-            "duplicate ID",
+            "duplicate id",
         ),
         (
             lambda html: html.replace(
                 '      <section id="overview-view">',
                 '      <button type="submit">Excluir</button>\n      <section id="overview-view">',
             ),
-            "extra submit",
+            "unexpected control tag/id/type",
+        ),
+        (
+            lambda html: html.replace(
+                '<input id="lead-search" autocomplete="off">',
+                '<input id="lead-search" type="submit" autocomplete="off">',
+                1,
+            ),
+            "unexpected control tag/id/type",
         ),
     ),
 )
@@ -265,7 +288,7 @@ def test_dom_contract_rejects_causal_mutants(
     html, _, _ = assets()
     mutated = mutant(html)
     assert mutated != html, f"mutant fixture did not apply: {message}"
-    with pytest.raises((AssertionError, KeyError)):
+    with pytest.raises(AssertionError, match=message):
         assert_dashboard_dom_contract(mutated)
 
 
