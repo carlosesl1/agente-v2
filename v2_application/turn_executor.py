@@ -738,6 +738,24 @@ def _authoritative_language_facts(
     )
 
 
+def _proposal_locale(facts: tuple[ModelFact, ...], fallback: str) -> str:
+    """Use a closed model-interpreted message language, else the phone fallback."""
+    if fallback not in {"pt-BR", "en"}:
+        raise ValueError("proposal locale fallback must be closed")
+    languages = tuple(item.value for item in facts if item.name == "language")
+    if len(languages) != 1 or type(languages[0]) is not str:
+        return fallback
+    normalized = {
+        "pt": "pt-BR",
+        "pt-br": "pt-BR",
+        "pt_br": "pt-BR",
+        "en": "en",
+        "en-us": "en",
+        "en_us": "en",
+    }.get(languages[0].casefold())
+    return normalized or fallback
+
+
 def _authoritative_phone_locale_projection(
     projection: ConversationProjection,
     locale: str,
@@ -1733,11 +1751,13 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        turn_locale = _proposal_locale(first_proposal.facts, projection.locale)
+        projection = replace(projection, locale=turn_locale)
         first_proposal = replace(
             first_proposal,
             read_requests=_authoritative_read_locales(
                 first_proposal.read_requests,
-                locale=projection.locale,
+                locale=turn_locale,
             ),
         )
         (
@@ -1748,7 +1768,7 @@ class V2TurnExecutor:
         ) = _partition_private_customer_facts(first_proposal)
         first_public_facts = _authoritative_language_facts(
             first_public_facts,
-            projection.locale,
+            turn_locale,
         )
         if first_private_facts:
             private_facts = _persist_private_collection(

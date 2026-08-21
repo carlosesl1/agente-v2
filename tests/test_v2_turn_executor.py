@@ -46,6 +46,7 @@ from v2_application.turn_executor import (
     _confirmation_read_requests,
     _intent,
     _private_update_no_command_proposal,
+    _proposal_locale,
     _request_public_reply_correction,
     _repair_requested_activity_selection,
     _selection_binding_failure_proposal,
@@ -327,6 +328,12 @@ def test_phone_locale_authority_removes_a_stale_model_language_fact() -> None:
 
     assert authoritative.locale == "en"
     assert tuple(fact.name for fact in authoritative.facts) == ("service",)
+
+
+def test_proposal_locale_normalizes_closed_model_language_aliases() -> None:
+    assert _proposal_locale((ModelFact("language", "pt"),), "en") == "pt-BR"
+    assert _proposal_locale((ModelFact("language", "pt_BR"),), "en") == "pt-BR"
+    assert _proposal_locale((ModelFact("language", "en-US"),), "pt-BR") == "en"
 
 
 def test_parent_does_not_promote_birth_or_gender_from_raw_customer_text(
@@ -5254,13 +5261,13 @@ def test_executor_rejects_model_source_identity_before_any_turn_commit() -> None
         store.close()
 
 
-def test_first_model_request_and_committed_language_follow_authenticated_phone() -> (
+def test_unambiguous_model_language_can_override_authenticated_phone_fallback() -> (
     None
 ):
     proposal = ModelProposal(
         source_event_id=BATCH.batch_id,
         intent="inform",
-        reply_chunks=("Hello. How can I help?",),
+        reply_chunks=("Olá! Como posso ajudar?",),
         facts=(ModelFact("language", "pt-BR"),),
         read_requests=(),
         effect_proposals=(),
@@ -5280,10 +5287,10 @@ def test_first_model_request_and_committed_language_follow_authenticated_phone()
         assert model.calls[0].locale == "en"
         assert result.reply_chunks == proposal.reply_chunks
         assert projection is not None
-        assert projection.locale == "en"
+        assert projection.locale == "pt-BR"
         assert {fact.name: fact.value.value for fact in projection.facts}[
             "language"
-        ] == "en"
+        ] == "pt-BR"
     finally:
         store.close()
 

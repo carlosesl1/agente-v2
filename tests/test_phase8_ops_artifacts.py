@@ -181,11 +181,8 @@ def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> No
     ):
         assert legacy_output_field not in prompt
     assert "source_event_id" in prompt
-    assert "A mensagem atual e o fato `language` em state_facts vencem" not in prompt
-    assert (
-        "O locale do request, derivado do telefone ManyChat autenticado, é autoritativo"
-        in prompt
-    )
+    assert "idioma inequívoco da mensagem atual prevalece" in prompt
+    assert "locale do request funciona apenas como fallback" in prompt
     assert "v2-model-proposal-v4" not in prompt
     assert "v2-model-proposal-v3" not in prompt
     assert "v2-model-proposal-v2" not in prompt

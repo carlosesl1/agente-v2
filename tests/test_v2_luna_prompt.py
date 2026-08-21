@@ -21,6 +21,11 @@ def test_prompt_requires_direct_grounded_atendimento_process() -> None:
     assert "acomodação restrita por gênero" in PROMPT
 
 
+def test_unambiguous_current_message_language_overrides_phone_locale_fallback() -> None:
+    assert "idioma inequívoco da mensagem atual prevalece" in PROMPT
+    assert "locale do request funciona apenas como fallback" in PROMPT
+
+
 def test_agency_card_link_is_bound_to_twenty_percent_fee_inclusive_deposit() -> None:
     assert "sinal obrigatório de 20% sobre o total final observado já com a taxa" in PROMPT
     assert "link de reserva no cartão cobra somente esse sinal de 20%" in PROMPT
