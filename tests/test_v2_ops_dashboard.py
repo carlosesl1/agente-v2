@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from v2_ops.contracts import ExecutionStatus, NodeType, TraceCompleteness
+from v2_ops.contracts import (
+    ExecutionStatus,
+    NodeType,
+    OpsExecution,
+    OpsNodeFinish,
+    OpsNodeStart,
+    TraceCompleteness,
+)
 from v2_ops.dashboard import (
     DashboardRange,
     DashboardRecord,
     build_dashboard_snapshot,
 )
-from v2_ops.store import OpsExecutionView
+from v2_ops.store import OpsExecutionView, SQLiteOpsTraceReader, SQLiteOpsTraceWriter
 
 NOW = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+KEY = bytes(range(32))
+OTHER_KEY = bytes(reversed(range(32)))
 
 
 def execution(
@@ -47,6 +57,179 @@ def record(view: OpsExecutionView, *node_types: NodeType) -> DashboardRecord:
         current_node_type=node_types[-1] if node_types else None,
         node_count=len(node_types),
     )
+
+
+def persisted_execution(execution_id: str, received_at: datetime) -> OpsExecution:
+    return OpsExecution(
+        execution_id=execution_id,
+        lead_id=f"lead:{execution_id}",
+        received_at=received_at,
+        status=ExecutionStatus.PENDING,
+        trace_completeness=TraceCompleteness.COMPLETE_TRACE,
+    )
+
+
+def persisted_node(
+    execution_id: str,
+    node_type: NodeType,
+    ordinal: int,
+    started_at: datetime,
+    *,
+    parent_node_id: str | None = None,
+) -> OpsNodeStart:
+    return OpsNodeStart(
+        execution_id=execution_id,
+        node_type=node_type,
+        ordinal=ordinal,
+        parent_node_id=parent_node_id,
+        started_at=started_at,
+        input_summary={"kind": "bounded-summary"},
+        input_full={"encrypted": "reader-must-not-decrypt-this"},
+        technical_metadata={},
+    )
+
+
+def database_bytes(path: Path) -> bytes:
+    content = bytearray()
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        if candidate.exists():
+            content.extend(candidate.read_bytes())
+    return bytes(content)
+
+
+def test_reader_returns_inclusive_recent_first_window_with_persisted_node_association(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "dashboard.sqlite3").resolve()
+    lower = NOW - timedelta(days=7)
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(persisted_execution("outside", lower - timedelta(microseconds=1)))
+        writer.write_execution(persisted_execution("lower", lower))
+        first = persisted_node("lower", NodeType.MAYA_REQUEST, 1, lower + timedelta(seconds=1))
+        writer.start_node(first)
+        writer.finish_node(
+            OpsNodeFinish.from_start(
+                first,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=first.started_at + timedelta(seconds=1),
+                output_summary={},
+                output_full={"encrypted": "output"},
+                technical_metadata={},
+            )
+        )
+        second = persisted_node(
+            "lower",
+            NodeType.MAYA_RESPONSE,
+            2,
+            lower + timedelta(seconds=3),
+            parent_node_id=first.node_id,
+        )
+        writer.start_node(second)
+        writer.finish_node(
+            OpsNodeFinish.from_start(
+                second,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=second.started_at + timedelta(seconds=1),
+                output_summary={},
+                output_full={"encrypted": "output"},
+                technical_metadata={},
+            )
+        )
+        writer.write_execution(
+            OpsExecution(
+                execution_id="lower",
+                lead_id="lead:lower",
+                received_at=lower,
+                completed_at=second.started_at + timedelta(seconds=1),
+                status=ExecutionStatus.COMPLETED,
+                trace_completeness=TraceCompleteness.COMPLETE_TRACE,
+                current_node_id=second.node_id,
+                terminal_reason="completed",
+            )
+        )
+        writer.write_execution(persisted_execution("stale", NOW - timedelta(minutes=20)))
+        stale = persisted_node(
+            "stale", NodeType.CONVERSATION_REDUCER, 1, NOW - timedelta(minutes=10)
+        )
+        writer.start_node(stale)
+        writer.write_execution(persisted_execution("upper", NOW))
+
+    # A deliberately wrong key proves this aggregate path never decrypts full payloads.
+    with SQLiteOpsTraceReader(path, OTHER_KEY) as reader:
+        records = reader.list_dashboard_records(
+            start_at=lower,
+            end_at=NOW,
+            now=NOW,
+            stale_after=timedelta(minutes=5),
+        )
+
+    assert [item.execution.execution_id for item in records] == ["upper", "stale", "lower"]
+    by_execution = {item.execution.execution_id: item for item in records}
+    assert by_execution["stale"].execution.status == "running_stale"
+    assert by_execution["stale"].node_types == (NodeType.CONVERSATION_REDUCER,)
+    assert by_execution["stale"].current_node_type is NodeType.CONVERSATION_REDUCER
+    assert by_execution["stale"].node_count == 1
+    assert by_execution["lower"].node_types == (
+        NodeType.MAYA_REQUEST,
+        NodeType.MAYA_RESPONSE,
+    )
+    assert by_execution["lower"].current_node_type is NodeType.MAYA_RESPONSE
+    assert by_execution["lower"].node_count == 2
+    assert by_execution["upper"].node_types == ()
+    assert by_execution["upper"].current_node_type is None
+
+
+def test_reader_repeated_window_calls_do_not_mutate_database_bytes_or_rows(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "read-only.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY) as writer:
+        writer.write_execution(persisted_execution("execution", NOW))
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        before_counts = (
+            connection.execute("SELECT count(*) FROM executions").fetchone()[0],
+            connection.execute("SELECT count(*) FROM nodes").fetchone()[0],
+        )
+
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        before_bytes = database_bytes(path)
+        for _ in range(3):
+            assert len(
+                reader.list_dashboard_records(
+                    start_at=NOW - DashboardRange.D7.duration,
+                    end_at=NOW,
+                    now=NOW,
+                )
+            ) == 1
+        after_bytes = database_bytes(path)
+
+    assert after_bytes == before_bytes
+    with sqlite3.connect(path) as connection:
+        after_counts = (
+            connection.execute("SELECT count(*) FROM executions").fetchone()[0],
+            connection.execute("SELECT count(*) FROM nodes").fetchone()[0],
+        )
+    assert after_counts == before_counts == (1, 0)
+
+
+def test_reader_rejects_unbounded_or_misaligned_dashboard_windows(tmp_path: Path) -> None:
+    path = (tmp_path / "bounded.sqlite3").resolve()
+    with SQLiteOpsTraceWriter(path, KEY):
+        pass
+    with SQLiteOpsTraceReader(path, KEY) as reader:
+        invalid_windows = (
+            (NOW + timedelta(microseconds=1), NOW),
+            (NOW - timedelta(days=30, microseconds=1), NOW),
+            (NOW - timedelta(days=7), NOW - timedelta(microseconds=1)),
+        )
+        for start_at, end_at in invalid_windows:
+            with pytest.raises(ValueError, match="bounded range"):
+                reader.list_dashboard_records(
+                    start_at=start_at,
+                    end_at=end_at,
+                    now=NOW,
+                )
 
 
 def test_empty_snapshot_uses_zero_counts_and_null_rates() -> None:
