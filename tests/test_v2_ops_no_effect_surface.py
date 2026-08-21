@@ -59,6 +59,7 @@ def test_ops_route_matrix_and_smoke_never_expose_business_mutation(tmp_path) -> 
     approved_posts = {"/ops/login", "/ops/logout"}
     assert {path for path, methods in paths if "POST" in methods} == approved_posts
     assert not any(method in methods for _path, methods in paths for method in ("PUT", "PATCH", "DELETE"))
+    assert ("/ops/api/dashboard", ("GET",)) in paths
     reader.close()
 
 

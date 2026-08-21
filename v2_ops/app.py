@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from v2_ops.auth import LoginLimiter, SessionClaims, SessionCodec, verify_password
 from v2_ops.contracts import ExecutionStatus
+from v2_ops.dashboard import DashboardRange, DashboardSnapshot, build_dashboard_snapshot
 from v2_ops.settings import OpsWebSettings
 from v2_ops.store import OpsTraceStoreError, SQLiteOpsTraceReader
 
@@ -74,6 +75,20 @@ def _node(value: object) -> dict[str, object]:
         "has_full_output": value.has_full_output,
         "error": _json_value(value.error),
         "technical_metadata": _json_value(value.technical_metadata),
+    }
+
+
+def _dashboard(value: DashboardSnapshot) -> dict[str, object]:
+    return {
+        "generated_at": _json_value(value.generated_at),
+        "range": value.range_key.value,
+        "metrics": _json_value(value.metrics),
+        "execution_series": _json_value(value.execution_series),
+        "status_distribution": _json_value(value.status_distribution),
+        "trace_distribution": _json_value(value.trace_distribution),
+        "milestones": _json_value(value.milestones),
+        "top_node_types": _json_value(value.top_node_types),
+        "executions": _json_value(value.executions),
     }
 
 
@@ -311,6 +326,30 @@ def create_ops_app(
             {"executions": [_execution(item) for item in page.executions], "next_cursor": page.next_cursor},
             request,
         )
+
+    @app.get("/ops/api/dashboard")
+    async def dashboard(request: Request, range: str = "7d") -> Response:
+        if type(require_api(request)) is not SessionClaims:
+            return require_api(request)
+        try:
+            range_key = DashboardRange.parse(range)
+            generated_at = _now()
+            records = trace_reader.list_dashboard_records(
+                start_at=generated_at - range_key.duration,
+                end_at=generated_at,
+                now=generated_at,
+                stale_after=settings.stale_after,
+            )
+            snapshot = build_dashboard_snapshot(
+                records,
+                range_key=range_key,
+                generated_at=generated_at,
+            )
+        except ValueError:
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        except OpsTraceStoreError:
+            return JSONResponse(status_code=503, content={"status": "source_unavailable"})
+        return _etag_response(_dashboard(snapshot), request)
 
     @app.get("/ops/api/harness")
     async def harness(request: Request) -> Response:
