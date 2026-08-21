@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Callable
 
 import pytest
@@ -420,7 +423,9 @@ def test_javascript_uses_the_closed_state_cards_and_exact_filters() -> None:
 
 def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
     _, js, _ = assets()
-    assert 'getJSON(`/ops/api/dashboard?range=${encodeURIComponent(state.range)}`)' in js
+    assert "const requestedRange = state.range" in js
+    assert 'getJSON(`/ops/api/dashboard?range=${encodeURIComponent(requestedRange)}`)' in js
+    assert "epoch !== state.dashboardEpoch || requestedRange !== state.range" in js
     assert 'window.location.assign("/ops/login")' in js
     assert 'error.code = "source_unavailable"' in js
     assert 'new EventSource("/ops/api/events")' in js
@@ -449,3 +454,254 @@ def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
         "terminal_reason",
     ):
         assert token in js
+
+
+BROWSER_SPEC = r"""
+const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const html = fs.readFileSync('/static/index.html', 'utf8')
+  .replace('  <script src="/ops/static/ops.js" defer></script>\n', '');
+const js = fs.readFileSync('/static/ops.js', 'utf8');
+
+function snapshot(label, executions) {
+  return {
+    generated_at: '2026-08-21T12:00:00Z', range: label,
+    metrics: {executions, distinct_leads: executions, in_progress: 0,
+      completed: executions, failed: 0, manual_review: 0,
+      technical_completion_rate: 100, average_terminal_duration_ms: 1000},
+    execution_series: [],
+    status_distribution: [{status: 'completed', count: executions}],
+    trace_distribution: [{trace_completeness: 'complete_trace', count: executions}],
+    milestones: [], top_node_types: [], executions: [],
+  };
+}
+
+function nodes(executionId) {
+  return {nodes: [{
+    node_id: `node-${executionId}`, node_type: `type_${executionId}`,
+    ordinal: 1, attempt: 1, status: 'completed',
+    input_summary: {execution: executionId}, output_summary: {execution: executionId},
+    technical_metadata: {execution: executionId}, error: null,
+    has_full_input: true, has_full_output: true,
+  }]};
+}
+
+async function setup(page) {
+  await page.setContent(html);
+  await page.evaluate(() => {
+    window.__requests = [];
+    window.fetch = (path, options) => new Promise((resolve, reject) => {
+      window.__requests.push({path: String(path), options, resolve, reject});
+    });
+    window.__resolveRequest = (index, status, payload) => {
+      window.__requests[index].resolve({
+        status, ok: status >= 200 && status < 300,
+        json: async () => payload,
+      });
+    };
+    class DeterministicEventSource {
+      constructor(path) {
+        this.path = path;
+        this.listeners = {};
+        window.__eventSource = this;
+      }
+      addEventListener(name, callback) { this.listeners[name] = callback; }
+      emit(name) { this.listeners[name](); }
+      fail() { this.onerror(new Error('disconnected')); }
+    }
+    window.EventSource = DeterministicEventSource;
+  });
+  await page.addScriptTag({content: js});
+}
+
+async function resolveRequest(page, index, status, payload) {
+  await page.evaluate(
+    ([index, status, payload]) => window.__resolveRequest(index, status, payload),
+    [index, status, payload],
+  );
+  await page.waitForTimeout(0);
+}
+
+async function paths(page) {
+  return page.evaluate(() => window.__requests.map(request => request.path));
+}
+
+test('dashboard ignores inverted A/B ranges', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.selectOption('#range-select', '24h');
+  await page.selectOption('#range-select', '30d');
+  expect((await paths(page)).slice(1)).toEqual([
+    '/ops/api/dashboard?range=24h', '/ops/api/dashboard?range=30d',
+  ]);
+  await resolveRequest(page, 2, 200, snapshot('manual-30d', 30));
+  await resolveRequest(page, 1, 200, snapshot('stale-24h', 24));
+  await expect(page.locator('#range-select')).toHaveValue('30d');
+  await expect(page.locator('#kpi-grid strong').first()).toHaveText('30');
+});
+
+test('dashboard ignores an SSE load superseded by a manual range', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => window.__eventSource.emit('change'));
+  await page.selectOption('#range-select', '24h');
+  await resolveRequest(page, 2, 200, snapshot('manual-24h', 240));
+  await resolveRequest(page, 1, 200, snapshot('stale-sse-7d', 7));
+  await expect(page.locator('#range-select')).toHaveValue('24h');
+  await expect(page.locator('#kpi-grid strong').first()).toHaveText('240');
+});
+
+test('detail commits inverted A/B responses atomically', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('A').catch(handleDashboardError); });
+  await page.evaluate(() => { openExecution('B').catch(handleDashboardError); });
+  await resolveRequest(page, 2, 200, nodes('B'));
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await expect(page.locator('#canvas-title')).toHaveText('B');
+  await expect(page.locator('#node-title')).toHaveText('type B');
+  await expect(page.locator('#input-summary')).toContainText('"B"');
+});
+
+test('empty detail clears inspector and ignores obsolete full', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('B').catch(handleDashboardError); });
+  await resolveRequest(page, 1, 200, nodes('B'));
+  await page.click('#load-full-input');
+  expect((await paths(page))[2]).toContain('/executions/B/nodes/node-B/full?side=input');
+  await page.evaluate(() => { openExecution('EMPTY').catch(handleDashboardError); });
+  await resolveRequest(page, 3, 200, {nodes: []});
+  await resolveRequest(page, 2, 200, {value: {execution: 'B', secret: 'obsolete'}});
+  await expect(page.locator('#canvas-title')).toHaveText('EMPTY');
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#input-summary')).toHaveText('{}');
+  await expect(page.locator('#input-full')).toBeHidden();
+  await expect(page.locator('#input-full')).not.toContainText('obsolete');
+});
+
+test('detail loading and 503 clear every prior detail field', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('A').catch(handleDashboardError); });
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await page.evaluate(() => { openExecution('FAIL').catch(handleDashboardError); });
+  await expect(page.locator('#canvas-title')).toHaveText('FAIL');
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#input-summary')).toHaveText('{}');
+  await resolveRequest(page, 2, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#canvas-title')).toHaveText('FAIL');
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#metadata')).toHaveText('{}');
+  await expect(page.locator('#node-error')).toHaveText('null');
+  await expect(page.locator('#dashboard-alert')).toContainText('Fonte operacional indisponível');
+});
+
+test('SSE ready does not clear a dashboard 503', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 503, {status: 'source_unavailable'});
+  await page.evaluate(() => window.__eventSource.emit('ready'));
+  await expect(page.locator('#dashboard-alert')).toContainText('Fonte operacional indisponível');
+});
+
+test('dashboard success does not clear degraded live state', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => window.__eventSource.emit('degraded'));
+  await page.evaluate(() => { loadDashboard().catch(handleDashboardError); });
+  await resolveRequest(page, 1, 200, snapshot('recovered-dashboard', 2));
+  await expect(page.locator('#dashboard-alert')).toContainText('Atualização ao vivo indisponível');
+  await expect(page.locator('#live-state')).toHaveText('Desconectado');
+  await page.evaluate(() => window.__eventSource.emit('ready'));
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+  await expect(page.locator('#live-state')).toHaveText('Ao vivo');
+});
+
+test('reconnect clears only the live error after dashboard success', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => window.__eventSource.fail());
+  await expect(page.locator('#dashboard-alert')).toContainText('Atualização ao vivo indisponível');
+  await page.evaluate(() => window.__eventSource.emit('ready'));
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
+"""
+
+
+def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
+    docker_probe = subprocess.run(
+        ["docker", "image", "inspect", "mcr.microsoft.com/playwright:v1.55.0-noble"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if docker_probe.returncode != 0:
+        pytest.skip("Playwright Chromium container is unavailable")
+    with tempfile.TemporaryDirectory(prefix="ops-browser-") as directory:
+        os.chmod(directory, 0o755)
+        spec = Path(directory) / "ops.spec.js"
+        spec.write_text(BROWSER_SPEC, encoding="utf-8")
+        spec.chmod(0o644)
+        container = f"ops-browser-{os.getpid()}"
+        started = subprocess.run(
+            [
+                "docker", "run", "--rm", "-d", "--name", container,
+                "mcr.microsoft.com/playwright:v1.55.0-noble", "sleep", "300",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert started.returncode == 0, started.stdout + started.stderr
+        prepared = subprocess.run(
+            ["docker", "exec", container, "mkdir", "-p", "/work", "/static"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+        try:
+            for source, target in (
+                (spec, "/work/ops.spec.js"),
+                (ROOT / "index.html", "/static/index.html"),
+                (ROOT / "ops.js", "/static/ops.js"),
+            ):
+                copied = subprocess.run(
+                    ["docker", "cp", str(source), f"{container}:{target}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert copied.returncode == 0, copied.stdout + copied.stderr
+            installed = subprocess.run(
+                [
+                    "docker", "exec", "-w", "/work", container,
+                    "npm", "install", "--no-save", "@playwright/test@1.55.0",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+            assert installed.returncode == 0, installed.stdout + installed.stderr
+            completed = subprocess.run(
+                [
+                    "docker", "exec", "-w", "/work", container,
+                    "./node_modules/.bin/playwright", "test", "ops.spec.js",
+                    "--reporter=line", "--workers=1",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        finally:
+            subprocess.run(
+                ["docker", "rm", "-f", container],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    assert "8 passed" in output, output

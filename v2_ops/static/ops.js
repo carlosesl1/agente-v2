@@ -11,6 +11,11 @@ const state = {
   leadFilter: "",
   zoom: 1,
   connected: false,
+  dashboardEpoch: 0,
+  detailEpoch: 0,
+  fullEpoch: 0,
+  dashboardError: null,
+  liveError: null,
 };
 
 const KPI_DEFINITIONS = [
@@ -30,16 +35,11 @@ function showJSON(element, value) {
   element.textContent = JSON.stringify(value, null, 2);
 }
 
-function showAlert(message) {
+function renderAlert() {
   const alert = $("dashboard-alert");
-  alert.textContent = message;
-  alert.hidden = false;
-}
-
-function clearAlert() {
-  const alert = $("dashboard-alert");
-  alert.textContent = "";
-  alert.hidden = true;
+  const messages = [state.dashboardError, state.liveError].filter(Boolean);
+  alert.textContent = messages.join(" ");
+  alert.hidden = messages.length === 0;
 }
 
 async function getJSON(path) {
@@ -340,10 +340,31 @@ function renderDashboard() {
 }
 
 async function loadDashboard() {
-  const payload = await getJSON(`/ops/api/dashboard?range=${encodeURIComponent(state.range)}`);
+  const requestedRange = state.range;
+  const epoch = ++state.dashboardEpoch;
+  let payload;
+  try {
+    payload = await getJSON(`/ops/api/dashboard?range=${encodeURIComponent(requestedRange)}`);
+  } catch (error) {
+    if (epoch !== state.dashboardEpoch || requestedRange !== state.range) {
+      error.superseded = true;
+      throw error;
+    }
+    if (error && error.message !== "authentication_required") {
+      state.dashboardError = error && error.code === "source_unavailable"
+        ? "Fonte operacional indisponível. Os últimos dados recebidos permanecem visíveis."
+        : "Não foi possível atualizar os dados operacionais.";
+      renderAlert();
+      error.dashboardHandled = true;
+    }
+    throw error;
+  }
+  if (epoch !== state.dashboardEpoch || requestedRange !== state.range) return false;
   state.snapshot = payload;
-  clearAlert();
+  state.dashboardError = null;
+  renderAlert();
   renderDashboard();
+  return true;
 }
 
 function nodePosition(index) {
@@ -390,15 +411,37 @@ function renderCanvas() {
   nodesRoot.style.transform = `scale(${Math.max(0.5, Math.min(1.6, Number(state.zoom) || 1))})`;
 }
 
+function clearInspector() {
+  state.selectedNode = null;
+  state.fullEpoch += 1;
+  $("node-title").textContent = "Nenhum nó selecionado";
+  showJSON($("input-summary"), {});
+  showJSON($("output-summary"), {});
+  showJSON($("metadata"), {});
+  showJSON($("node-error"), null);
+  $("input-full").textContent = "";
+  $("output-full").textContent = "";
+  $("input-full").hidden = true;
+  $("output-full").hidden = true;
+  $("load-full-input").hidden = true;
+  $("load-full-output").hidden = true;
+}
+
 function selectNode(nodeId) {
   state.selectedNode = nodeId;
+  state.fullEpoch += 1;
   const node = state.nodes.find((item) => item.node_id === nodeId);
-  if (!node) return;
+  if (!node) {
+    clearInspector();
+    return;
+  }
   $("node-title").textContent = displayValue(node.node_type).replaceAll("_", " ");
   showJSON($("input-summary"), node.input_summary);
   showJSON($("output-summary"), node.output_summary);
   showJSON($("metadata"), node.technical_metadata);
   showJSON($("node-error"), node.error);
+  $("input-full").textContent = "";
+  $("output-full").textContent = "";
   $("input-full").hidden = true;
   $("output-full").hidden = true;
   $("load-full-input").hidden = !node.has_full_input;
@@ -406,26 +449,39 @@ function selectNode(nodeId) {
   renderCanvas();
 }
 
-async function refreshOpenExecution() {
-  if (!state.selectedExecution) return;
-  const executionId = state.selectedExecution;
-  const payload = await getJSON(`/ops/api/executions/${encodeURIComponent(executionId)}/nodes`);
+async function refreshOpenExecution(executionId, epoch) {
+  if (!executionId) return false;
+  let payload;
+  try {
+    payload = await getJSON(`/ops/api/executions/${encodeURIComponent(executionId)}/nodes`);
+  } catch (error) {
+    if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) {
+      error.superseded = true;
+    }
+    throw error;
+  }
+  if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) return false;
   state.nodes = payload.nodes;
-  const selectedStillExists = state.nodes.some((node) => node.node_id === state.selectedNode);
-  if (!selectedStillExists) state.selectedNode = state.nodes.length ? state.nodes[0].node_id : null;
   $("canvas-title").textContent = executionId;
+  clearInspector();
   renderCanvas();
-  if (state.selectedNode) selectNode(state.selectedNode);
+  if (state.nodes.length) selectNode(state.nodes[0].node_id);
+  return true;
 }
 
 async function openExecution(executionId) {
+  const epoch = ++state.detailEpoch;
   state.selectedExecution = executionId;
+  state.nodes = [];
+  $("canvas-title").textContent = executionId;
+  clearInspector();
+  renderCanvas();
   $("overview-view").hidden = true;
   $("execution-view").hidden = false;
   $("nav-overview").removeAttribute("aria-current");
   $("nav-execution").disabled = false;
   $("nav-execution").setAttribute("aria-current", "page");
-  await refreshOpenExecution();
+  return refreshOpenExecution(executionId, epoch);
 }
 
 function showOverview() {
@@ -442,39 +498,70 @@ function showOverview() {
 
 async function loadFull(side) {
   if (!state.selectedExecution || !state.selectedNode) return;
-  const executionId = encodeURIComponent(state.selectedExecution);
-  const nodeId = encodeURIComponent(state.selectedNode);
-  const payload = await getJSON(`/ops/api/executions/${executionId}/nodes/${nodeId}/full?side=${side}`);
+  const executionId = state.selectedExecution;
+  const nodeId = state.selectedNode;
+  const detailEpoch = state.detailEpoch;
+  const fullEpoch = ++state.fullEpoch;
+  let payload;
+  try {
+    payload = await getJSON(
+      `/ops/api/executions/${encodeURIComponent(executionId)}/nodes/${encodeURIComponent(nodeId)}/full?side=${side}`,
+    );
+  } catch (error) {
+    if (
+      detailEpoch !== state.detailEpoch
+      || fullEpoch !== state.fullEpoch
+      || executionId !== state.selectedExecution
+      || nodeId !== state.selectedNode
+    ) error.superseded = true;
+    throw error;
+  }
+  if (
+    detailEpoch !== state.detailEpoch
+    || fullEpoch !== state.fullEpoch
+    || executionId !== state.selectedExecution
+    || nodeId !== state.selectedNode
+  ) return false;
   const target = side === "input" ? $("input-full") : $("output-full");
   showJSON(target, payload.value ?? { status: "not_recorded" });
   target.hidden = false;
+  return true;
 }
 
 function markDisconnected() {
   state.connected = false;
+  state.liveError = "Atualização ao vivo indisponível. Os últimos dados recebidos permanecem visíveis.";
   $("live-state").textContent = "Desconectado";
-  showAlert("Atualização ao vivo indisponível. Os últimos dados recebidos permanecem visíveis.");
+  renderAlert();
 }
 
 function handleDashboardError(error) {
-  if (error && error.message === "authentication_required") return;
+  if (error && (error.message === "authentication_required" || error.superseded || error.dashboardHandled)) return;
   if (error && error.code === "source_unavailable") {
-    showAlert("Fonte operacional indisponível. Os últimos dados recebidos permanecem visíveis.");
+    state.dashboardError = "Fonte operacional indisponível. Os últimos dados recebidos permanecem visíveis.";
+    renderAlert();
     return;
   }
-  showAlert("Não foi possível atualizar os dados operacionais.");
+  state.dashboardError = "Não foi possível atualizar os dados operacionais.";
+  renderAlert();
 }
 
 function connectLive() {
   const source = new EventSource("/ops/api/events");
   source.addEventListener("ready", () => {
     state.connected = true;
+    state.liveError = null;
     $("live-state").textContent = "Ao vivo";
-    clearAlert();
+    renderAlert();
   });
   source.addEventListener("change", () => {
     loadDashboard()
-      .then(() => refreshOpenExecution())
+      .then((applied) => {
+        if (!applied || !state.selectedExecution) return false;
+        const executionId = state.selectedExecution;
+        const epoch = ++state.detailEpoch;
+        return refreshOpenExecution(executionId, epoch);
+      })
       .catch(handleDashboardError);
   });
   source.addEventListener("degraded", markDisconnected);
