@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Mockup visual demonstrativo do dashboard operacional da Maya">
+  <title>Maya · Dashboard operacional</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside id="app-sidebar" class="sidebar" aria-label="Navegação principal">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true"><span>M</span></div>
+        <div><strong>Maya</strong><small>Chapada Backpackers</small></div>
+      </div>
+      <div class="demo-chip"><span></span> Dados demonstrativos</div>
+      <nav class="main-nav">
+        <p class="nav-label">GESTÃO</p>
+        <button class="nav-item active" data-section="overview"><span class="nav-icon">⌂</span><span>Visão geral</span></button>
+        <button class="nav-item" data-section="services"><span class="nav-icon">◌</span><span>Atendimentos</span><span class="nav-count">18</span></button>
+        <button class="nav-item" data-section="reservations"><span class="nav-icon">▣</span><span>Reservas</span></button>
+        <button class="nav-item" data-section="payments"><span class="nav-icon">◇</span><span>Pagamentos</span><span class="nav-count warning">4</span></button>
+        <button class="nav-item" data-section="handoffs"><span class="nav-icon">↗</span><span>Handoffs</span><span class="nav-count coral">3</span></button>
+        <p class="nav-label">OPERAÇÃO</p>
+        <button class="nav-item" data-section="executions"><span class="nav-icon">⌁</span><span>Execuções</span></button>
+        <button class="nav-item" data-section="integrations"><span class="nav-icon">⚡</span><span>Integrações</span></button>
+        <button class="nav-item" data-section="settings"><span class="nav-icon">⚙</span><span>Configurações</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="maya-health"><span class="online-dot"></span><div><strong>Maya online</strong><small>Todos os sistemas operacionais</small></div></div>
+        <div class="readonly-note">Mockup visual · somente leitura</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header id="dashboard-header" class="dashboard-header">
+        <div class="header-copy">
+          <button id="mobile-menu" class="icon-button mobile-menu" aria-label="Abrir menu">☰</button>
+          <div><p class="eyebrow">CENTRAL DE OPERAÇÕES</p><h1>Visão geral</h1><p>Painel visual sem conexão com dados reais</p></div>
+        </div>
+        <div class="header-actions">
+          <label class="range-control"><span>Período</span><select id="range-select" aria-label="Selecionar período"><option value="today">Hoje</option><option value="7days" selected>7 dias</option><option value="30days">30 dias</option></select></label>
+          <button id="refresh-button" class="icon-button refresh-button" aria-label="Atualizar dados demonstrativos"><span aria-hidden="true">↻</span><span id="refresh-label">Atualizado agora</span></button>
+          <button class="operator-button" aria-label="Menu do operador"><span>CE</span><div><strong>Carlos</strong><small>Operador</small></div><b>⌄</b></button>
+        </div>
+      </header>
+
+      <div class="mobile-demo-pill"><span></span> Dados demonstrativos · sem dados reais</div>
+
+      <div id="section-preview" class="section-preview" hidden></div>
+
+      <section class="welcome-row">
+        <div><h2>Bom dia, Carlos</h2><p>A Maya está operando normalmente. Veja o que merece sua atenção hoje.</p></div>
+        <div class="health-pill"><span class="online-dot"></span><strong>Operação saudável</strong><small>última verificação agora</small></div>
+      </section>
+
+      <section id="kpi-grid" class="kpi-grid" aria-label="Resumo executivo" aria-live="polite"></section>
+
+      <section class="analytics-grid" aria-label="Indicadores analíticos">
+        <article class="panel funnel-panel">
+          <div class="panel-heading"><div><p class="eyebrow">CONVERSÃO</p><h3>Funil comercial</h3></div><span id="analytics-range-label" class="panel-meta">Últimos 7 dias</span></div>
+          <div id="commercial-funnel" class="funnel-chart" aria-label="Funil comercial demonstrativo"></div>
+        </article>
+        <article class="panel volume-panel">
+          <div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h3>Atendimentos por dia</h3></div><span class="legend-dot"><i></i> Atendimentos</span></div>
+          <div id="service-volume-chart" class="volume-chart" aria-label="Atendimentos demonstrativos por dia"></div>
+        </article>
+        <article class="panel small-panel">
+          <div class="panel-heading"><div><p class="eyebrow">INTERESSES</p><h3>O que os leads procuram</h3></div></div>
+          <div id="interest-mix-chart" class="interest-chart" aria-label="Distribuição de interesses demonstrativa"></div>
+        </article>
+        <article class="panel small-panel">
+          <div class="panel-heading"><div><p class="eyebrow">HANDOFFS</p><h3>Motivos de transferência</h3></div><span class="panel-meta coral-text">3 nesta semana</span></div>
+          <div id="handoff-reasons-chart" class="bar-chart" aria-label="Motivos de handoff demonstrativos"></div>
+        </article>
+      </section>
+
+      <section class="operations-panel" aria-labelledby="operations-title">
+        <div class="operations-head">
+          <div><p class="eyebrow">OPERAÇÃO EM TEMPO REAL</p><h3 id="operations-title">Atendimentos recentes</h3><p>Acompanhe a etapa atual e identifique situações que precisam de atenção.</p></div>
+          <div class="live-badge"><span class="pulse-dot"></span> Atualização simulada</div>
+        </div>
+        <div class="table-toolbar">
+          <label class="search-box"><span aria-hidden="true">⌕</span><input id="service-search" type="search" placeholder="Buscar lead ou interesse…" aria-label="Buscar atendimento demonstrativo"></label>
+          <label><span class="sr-only">Filtrar por status</span><select id="status-filter"><option value="">Todos os status</option><option>Ativo</option><option>Aguardando</option><option>Concluído</option><option>Falha</option></select></label>
+          <label><span class="sr-only">Filtrar por interesse</span><select id="interest-filter"><option value="">Todos os interesses</option><option>Passeio</option><option>Hospedagem</option><option>Pacote</option></select></label>
+          <span id="result-count" class="result-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Lead</th><th>Interesse</th><th>Etapa atual</th><th>Maya</th><th>Reserva</th><th>Pagamento</th><th>Última atividade</th><th><span class="sr-only">Abrir</span></th></tr></thead>
+            <tbody id="services-table-body"></tbody>
+          </table>
+          <div id="services-mobile-list" class="services-mobile-list"></div>
+        </div>
+      </section>
+      <footer class="page-footer"><span>Dados 100% fictícios para aprovação visual</span><span>Maya Dashboard Mockup · v1</span></footer>
+    </main>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside id="service-drawer" class="service-drawer" aria-hidden="true" aria-labelledby="drawer-title">
+      <header class="drawer-header"><div><p class="eyebrow">DETALHES DO ATENDIMENTO</p><h2 id="drawer-title">Atendimento demonstrativo</h2></div><button id="close-drawer" class="drawer-close" aria-label="Fechar detalhes do atendimento">×</button></header>
+      <div id="drawer-content" class="drawer-content">
+        <div id="drawer-status" class="drawer-status"></div>
+        <section class="drawer-section"><h3>Resumo</h3><p id="drawer-summary"></p><div id="drawer-facts" class="fact-grid"></div></section>
+        <section class="drawer-section next-step-card"><p class="eyebrow">PRÓXIMA ETAPA</p><strong id="drawer-next-step"></strong><p id="drawer-reason"></p></section>
+        <section class="drawer-section"><div class="section-title-row"><h3>Jornada operacional</h3><span>tempo real simulado</span></div><ol id="journey-list" class="journey-list"></ol></section>
+        <section class="drawer-section"><h3>Últimas mensagens</h3><div id="drawer-conversation" class="conversation-preview"></div></section>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>
