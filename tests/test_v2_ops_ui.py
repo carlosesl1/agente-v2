@@ -499,6 +499,9 @@ async function setup(page) {
         json: async () => payload,
       });
     };
+    window.__rejectRequest = (index, message) => {
+      window.__requests[index].reject(new Error(message));
+    };
     class DeterministicEventSource {
       constructor(path) {
         this.path = path;
@@ -551,6 +554,24 @@ test('dashboard ignores an SSE load superseded by a manual range', async ({page}
   await expect(page.locator('#kpi-grid strong').first()).toHaveText('240');
 });
 
+test('superseded dashboard errors cannot overwrite current range or alert', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.selectOption('#range-select', '24h');
+  await page.selectOption('#range-select', '30d');
+  await resolveRequest(page, 2, 200, snapshot('manual-30d', 30));
+  await resolveRequest(page, 1, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#kpi-grid strong').first()).toHaveText('30');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+
+  await page.evaluate(() => window.__eventSource.emit('change'));
+  await page.selectOption('#range-select', '7d');
+  await resolveRequest(page, 4, 200, snapshot('manual-7d', 70));
+  await page.evaluate(() => window.__rejectRequest(3, 'obsolete network failure'));
+  await expect(page.locator('#kpi-grid strong').first()).toHaveText('70');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
+
 test('detail commits inverted A/B responses atomically', async ({page}) => {
   await setup(page);
   await resolveRequest(page, 0, 200, snapshot('initial', 1));
@@ -595,6 +616,64 @@ test('detail loading and 503 clear every prior detail field', async ({page}) => 
   await expect(page.locator('#metadata')).toHaveText('{}');
   await expect(page.locator('#node-error')).toHaveText('null');
   await expect(page.locator('#dashboard-alert')).toContainText('Fonte operacional indisponível');
+});
+
+test('SSE detail refresh clears loading state and remains clear after 503', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('A').catch(handleDashboardError); });
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await page.evaluate(() => window.__eventSource.emit('change'));
+  await resolveRequest(page, 2, 200, snapshot('refreshed', 2));
+  await expect.poll(async () => (await paths(page)).length).toBe(4);
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#input-summary')).toHaveText('{}');
+  await expect(page.locator('#nodes')).toBeEmpty();
+  await resolveRequest(page, 3, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#metadata')).toHaveText('{}');
+  await expect(page.locator('#nodes')).toBeEmpty();
+});
+
+test('input and output full loads remain independent in both response orders', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('A').catch(handleDashboardError); });
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await page.click('#load-full-input');
+  await page.click('#load-full-output');
+  await resolveRequest(page, 3, 200, {value: {side: 'output-first'}});
+  await resolveRequest(page, 2, 200, {value: {side: 'input-second'}});
+  await expect(page.locator('#input-full')).toContainText('input-second');
+  await expect(page.locator('#output-full')).toContainText('output-first');
+  await expect(page.locator('#input-full')).toBeVisible();
+  await expect(page.locator('#output-full')).toBeVisible();
+
+  await page.click('#load-full-input');
+  await page.click('#load-full-output');
+  await resolveRequest(page, 4, 200, {value: {side: 'input-first'}});
+  await resolveRequest(page, 5, 200, {value: {side: 'output-second'}});
+  await expect(page.locator('#input-full')).toContainText('input-first');
+  await expect(page.locator('#output-full')).toContainText('output-second');
+});
+
+test('superseded detail and full errors cannot alter current detail or alert', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openExecution('A').catch(handleDashboardError); });
+  await page.evaluate(() => { openExecution('B').catch(handleDashboardError); });
+  await resolveRequest(page, 2, 200, nodes('B'));
+  await resolveRequest(page, 1, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#node-title')).toHaveText('type B');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+
+  await page.click('#load-full-input');
+  await page.evaluate(() => { openExecution('C').catch(handleDashboardError); });
+  await resolveRequest(page, 4, 200, nodes('C'));
+  await resolveRequest(page, 3, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#node-title')).toHaveText('type C');
+  await expect(page.locator('#input-full')).toBeHidden();
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
 });
 
 test('SSE ready does not clear a dashboard 503', async ({page}) => {
@@ -704,4 +783,4 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
             )
     output = completed.stdout + completed.stderr
     assert completed.returncode == 0, output
-    assert "8 passed" in output, output
+    assert "12 passed" in output, output

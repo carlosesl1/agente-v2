@@ -13,7 +13,7 @@ const state = {
   connected: false,
   dashboardEpoch: 0,
   detailEpoch: 0,
-  fullEpoch: 0,
+  fullEpoch: { input: 0, output: 0 },
   dashboardError: null,
   liveError: null,
 };
@@ -413,7 +413,8 @@ function renderCanvas() {
 
 function clearInspector() {
   state.selectedNode = null;
-  state.fullEpoch += 1;
+  state.fullEpoch.input += 1;
+  state.fullEpoch.output += 1;
   $("node-title").textContent = "Nenhum nó selecionado";
   showJSON($("input-summary"), {});
   showJSON($("output-summary"), {});
@@ -429,7 +430,8 @@ function clearInspector() {
 
 function selectNode(nodeId) {
   state.selectedNode = nodeId;
-  state.fullEpoch += 1;
+  state.fullEpoch.input += 1;
+  state.fullEpoch.output += 1;
   const node = state.nodes.find((item) => item.node_id === nodeId);
   if (!node) {
     clearInspector();
@@ -451,6 +453,11 @@ function selectNode(nodeId) {
 
 async function refreshOpenExecution(executionId, epoch) {
   if (!executionId) return false;
+  if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) return false;
+  state.nodes = [];
+  $("canvas-title").textContent = executionId;
+  clearInspector();
+  renderCanvas();
   let payload;
   try {
     payload = await getJSON(`/ops/api/executions/${encodeURIComponent(executionId)}/nodes`);
@@ -501,7 +508,7 @@ async function loadFull(side) {
   const executionId = state.selectedExecution;
   const nodeId = state.selectedNode;
   const detailEpoch = state.detailEpoch;
-  const fullEpoch = ++state.fullEpoch;
+  const fullEpoch = ++state.fullEpoch[side];
   let payload;
   try {
     payload = await getJSON(
@@ -510,7 +517,7 @@ async function loadFull(side) {
   } catch (error) {
     if (
       detailEpoch !== state.detailEpoch
-      || fullEpoch !== state.fullEpoch
+      || fullEpoch !== state.fullEpoch[side]
       || executionId !== state.selectedExecution
       || nodeId !== state.selectedNode
     ) error.superseded = true;
@@ -518,7 +525,7 @@ async function loadFull(side) {
   }
   if (
     detailEpoch !== state.detailEpoch
-    || fullEpoch !== state.fullEpoch
+    || fullEpoch !== state.fullEpoch[side]
     || executionId !== state.selectedExecution
     || nodeId !== state.selectedNode
   ) return false;
