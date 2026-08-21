@@ -15,8 +15,9 @@
 - Branch: `feature/maya-ops-existing-data-dashboard`.
 - Worktree: `/home/ubuntu/agente-v2/.worktrees/maya-ops-existing-data-dashboard`.
 - Base: `acfd5d6c1f7ecfef2bebf875a8e5a4dac37da265`.
-- Design: `docs/superpowers/specs/2026-08-21-maya-ops-existing-data-dashboard-design.md`.
-- Scope boundary: this lane is documentation-only until Carlos reviews the committed specification and separately approves an implementation plan.
+- Design: `docs/superpowers/specs/2026-08-21-maya-ops-existing-data-dashboard-design.md` (approved by Carlos Eduardo on 2026-08-21).
+- Implementation plan: `docs/superpowers/plans/2026-08-21-maya-ops-existing-data-dashboard.md`.
+- Scope boundary: implementation may start only after Carlos chooses the execution mode; deploy and production effects remain separately gated.
 - Data boundary: only `v2-ops-trace.sqlite3` execution/node contracts and deterministic calculations over those records; no legacy dashboard, inferred commercial data or synthetic fallback.
 - No-effect boundary: no deploy, restart, runtime change, new instrumentation, provider access, reservation, payment, ManyChat delivery, handoff or V3 work is authorized.
 - This parallel lane does not replace or advance the `maya-v2-group-enriched-availability` NEXT below.
