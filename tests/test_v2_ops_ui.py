@@ -1,8 +1,120 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import Callable
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "v2_ops" / "static"
+VOID_ELEMENTS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+EXPECTED_IDS = {
+    "app-sidebar",
+    "back-to-overview",
+    "canvas-title",
+    "completeness-filter",
+    "dashboard-alert",
+    "edges",
+    "empty-state",
+    "execution-canvas",
+    "execution-mobile-list",
+    "execution-series",
+    "execution-table-body",
+    "execution-view",
+    "fit-canvas",
+    "generated-at",
+    "input-full",
+    "input-panel",
+    "input-summary",
+    "kpi-grid",
+    "lead-search",
+    "live-state",
+    "load-full-input",
+    "load-full-output",
+    "metadata",
+    "milestones-chart",
+    "nav-execution",
+    "nav-overview",
+    "node-error",
+    "node-title",
+    "nodes",
+    "output-full",
+    "output-panel",
+    "output-summary",
+    "overview-view",
+    "range-select",
+    "status-distribution",
+    "status-filter",
+    "top-node-types",
+    "trace-distribution",
+    "zoom-in",
+    "zoom-out",
+}
+EXPECTED_CONTROL_IDS = {
+    "back-to-overview",
+    "completeness-filter",
+    "fit-canvas",
+    "lead-search",
+    "load-full-input",
+    "load-full-output",
+    "nav-execution",
+    "nav-overview",
+    "range-select",
+    "status-filter",
+    "zoom-in",
+    "zoom-out",
+}
+
+
+@dataclass
+class Element:
+    tag: str
+    attrs: dict[str, str | None]
+    parent: Element | None = None
+    children: list[Element] = field(default_factory=list)
+    text_parts: list[str] = field(default_factory=list)
+
+    def descendants(self, tag: str | None = None) -> list[Element]:
+        found: list[Element] = []
+        for child in self.children:
+            if tag is None or child.tag == tag:
+                found.append(child)
+            found.extend(child.descendants(tag))
+        return found
+
+    def text(self) -> str:
+        return "".join(self.text_parts) + "".join(child.text() for child in self.children)
+
+
+class LocalDOMParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = Element("#document", {})
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        element = Element(tag, dict(attrs), self.stack[-1])
+        self.stack[-1].children.append(element)
+        if tag not in VOID_ELEMENTS:
+            self.stack.append(element)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag not in VOID_ELEMENTS:
+            self.stack.pop()
+
+    def handle_endtag(self, tag: str) -> None:
+        assert len(self.stack) > 1 and self.stack[-1].tag == tag, f"unexpected </{tag}>"
+        self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        self.stack[-1].text_parts.append(data)
+
+    def finish(self) -> Element:
+        self.close()
+        assert self.stack == [self.root], "unclosed HTML elements"
+        return self.root
 
 
 def assets() -> tuple[str, str, str]:
@@ -12,32 +124,171 @@ def assets() -> tuple[str, str, str]:
     )
 
 
-def test_dashboard_shell_and_canvas_detail_exist() -> None:
+def parse_html(html: str) -> Element:
+    parser = LocalDOMParser()
+    parser.feed(html)
+    return parser.finish()
+
+
+def elements_by_id(root: Element) -> dict[str, Element]:
+    elements = root.descendants()
+    ids = [element.attrs["id"] for element in elements if element.attrs.get("id")]
+    assert len(ids) == len(set(ids)), "duplicate id"
+    return {element.attrs["id"]: element for element in elements if element.attrs.get("id")}
+
+
+def is_descendant(element: Element, ancestor: Element) -> bool:
+    parent = element.parent
+    while parent is not None:
+        if parent is ancestor:
+            return True
+        parent = parent.parent
+    return False
+
+
+def assert_dashboard_dom_contract(html: str) -> None:
+    root = parse_html(html)
+    by_id = elements_by_id(root)
+    assert set(by_id) == EXPECTED_IDS
+    for element in by_id.values():
+        parent = element.parent
+        while parent is not None:
+            assert parent.tag != "template", f"id={element.attrs['id']} is inert"
+            parent = parent.parent
+
+    overview = by_id["overview-view"]
+    execution = by_id["execution-view"]
+    assert overview.parent is execution.parent
+    assert overview.parent is not None and overview.parent.tag == "main"
+    assert overview.parent.children.index(overview) < overview.parent.children.index(execution)
+    assert "hidden" not in overview.attrs
+    assert "hidden" in execution.attrs
+
+    canvas = by_id["execution-canvas"]
+    inspector = next(element for element in root.descendants("aside") if "inspector" in (element.attrs.get("class") or "").split())
+    assert is_descendant(canvas, execution)
+    assert is_descendant(inspector, execution)
+
+    input_panel = by_id["input-panel"]
+    output_panel = by_id["output-panel"]
+    assert input_panel.parent is output_panel.parent
+    assert "hidden" not in input_panel.attrs
+    assert "hidden" not in output_panel.attrs
+    assert is_descendant(input_panel, inspector)
+    assert is_descendant(output_panel, inspector)
+
+    controls = [element for element in root.descendants() if element.tag in {"button", "input", "select"}]
+    control_ids = {element.attrs["id"] for element in controls if element.attrs.get("id")}
+    assert control_ids == EXPECTED_CONTROL_IDS
+    anonymous_controls = [element for element in controls if not element.attrs.get("id")]
+    assert len(anonymous_controls) == 2
+
+    forms = root.descendants("form")
+    assert len(forms) == 1
+    logout_form = forms[0]
+    assert (logout_form.attrs.get("method") or "get").casefold() == "post"
+    assert logout_form.attrs.get("action") == "/ops/logout"
+    assert "formaction" not in logout_form.attrs
+    csrf = [
+        element
+        for element in logout_form.descendants("input")
+        if element.attrs.get("name") == "csrf"
+    ]
+    assert len(csrf) == 1
+    assert csrf[0].attrs.get("type") == "hidden"
+    assert csrf[0].attrs.get("value") == "{{CSRF}}"
+
+    submit_controls = [
+        element
+        for element in controls
+        if element.tag == "button" and (element.attrs.get("type") or "submit").casefold() == "submit"
+    ]
+    assert len(submit_controls) == 1
+    assert submit_controls[0].parent is logout_form
+    assert submit_controls[0].text().strip() == "Logout"
+    assert set(map(id, anonymous_controls)) == {id(csrf[0]), id(submit_controls[0])}
+    assert not [element for element in controls if "formaction" in element.attrs]
+
+    links = root.descendants("link")
+    scripts = [element.attrs.get("src") for element in root.descendants("script")]
+    assert len(links) == 1
+    assert (links[0].attrs.get("rel") or "").casefold() == "stylesheet"
+    assert links[0].attrs.get("href") == "/ops/static/ops.css"
+    assert scripts == ["/ops/static/ops.js"]
+
+
+def test_dashboard_shell_dom_contract() -> None:
     html, _, _ = assets()
-    for token in (
-        'id="overview-view"',
-        'id="execution-view"',
-        'id="range-select"',
-        'id="kpi-grid"',
-        'id="execution-series"',
-        'id="status-distribution"',
-        'id="trace-distribution"',
-        'id="milestones-chart"',
-        'id="top-node-types"',
-        'id="execution-table-body"',
-        'id="execution-mobile-list"',
-        'id="empty-state"',
-        'id="execution-canvas"',
-        'id="input-panel"',
-        'id="output-panel"',
-        'id="back-to-overview"',
-    ):
-        assert token in html
+    assert_dashboard_dom_contract(html)
     assert "SOMENTE LEITURA" in html
     assert "Dados demonstrativos" not in html
 
 
-def test_html_has_no_commercial_claims_or_write_controls() -> None:
+@pytest.mark.parametrize(
+    ("mutant", "message"),
+    (
+        (
+            lambda html: html.replace(
+                '<section id="input-panel" class="io-panel">',
+                '<section class="io-panel" hidden id="input-panel">',
+            ),
+            "hidden Input",
+        ),
+        (
+            lambda html: html.replace(
+                '          <aside class="inspector">',
+                '          </div>\n          <aside class="inspector">',
+                1,
+            ).replace(
+                '          </aside>\n        </div>',
+                '          </aside>\n        <div>',
+                1,
+            ),
+            "wrong inspector parent",
+        ),
+        (
+            lambda html: html.replace('id="generated-at"', 'id="range-select"'),
+            "duplicate ID",
+        ),
+        (
+            lambda html: html.replace(
+                '      <section id="overview-view">',
+                '      <button type="submit">Excluir</button>\n      <section id="overview-view">',
+            ),
+            "extra submit",
+        ),
+    ),
+)
+def test_dom_contract_rejects_causal_mutants(
+    mutant: Callable[[str], str], message: str
+) -> None:
+    html, _, _ = assets()
+    mutated = mutant(html)
+    assert mutated != html, f"mutant fixture did not apply: {message}"
+    with pytest.raises((AssertionError, KeyError)):
+        assert_dashboard_dom_contract(mutated)
+
+
+def test_accessibility_metadata_is_explicit() -> None:
+    html, _, _ = assets()
+    root = parse_html(html)
+    by_id = elements_by_id(root)
+
+    table = root.descendants("table")
+    assert len(table) == 1
+    captions = table[0].descendants("caption")
+    assert len(captions) == 1 and captions[0].text().strip()
+    headers = table[0].descendants("th")
+    assert headers and all(header.attrs.get("scope") == "col" for header in headers)
+
+    canvas = by_id["execution-canvas"]
+    assert canvas.attrs.get("role") == "region"
+    assert canvas.attrs.get("aria-label") == "Canvas da execução"
+    assert by_id["zoom-out"].attrs.get("aria-label") == "Reduzir zoom"
+    assert by_id["zoom-in"].attrs.get("aria-label") == "Aumentar zoom"
+
+
+def test_html_has_no_commercial_claims() -> None:
     html, _, _ = assets()
     lowered = html.casefold()
     for forbidden in (
@@ -54,31 +305,8 @@ def test_html_has_no_commercial_claims_or_write_controls() -> None:
         assert forbidden not in lowered
 
 
-def test_execution_canvas_assets_have_joint_inspector_and_no_write_controls() -> None:
+def test_existing_javascript_and_css_read_only_markers_are_preserved() -> None:
     html, js, css = assets()
-
-    for token in (
-        'id="execution-canvas"',
-        'id="edges"',
-        'id="nodes"',
-        'id="node-title"',
-        'id="input-panel"',
-        'id="load-full-input"',
-        'id="input-summary"',
-        'id="input-full"',
-        'id="output-panel"',
-        'id="load-full-output"',
-        'id="output-summary"',
-        'id="output-full"',
-        'id="metadata"',
-        'id="node-error"',
-        'id="fit-canvas"',
-        'id="zoom-in"',
-        'id="zoom-out"',
-    ):
-        assert token in html
-    assert 'id="input-panel" hidden' not in html
-    assert 'id="output-panel" hidden' not in html
     assert "EventSource" in js
     assert "textContent" in js
     assert "innerHTML" not in js

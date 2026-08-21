@@ -75,18 +75,19 @@
           </div>
           <div id="empty-state" hidden>Nenhuma execução registrada neste período.</div>
           <table>
+            <caption>Execuções operacionais no período selecionado</caption>
             <thead>
               <tr>
-                <th>Lead</th>
-                <th>Execução</th>
-                <th>Recebida</th>
-                <th>Duração</th>
-                <th>Estado</th>
-                <th>Trace</th>
-                <th>Nó atual</th>
-                <th>Nós</th>
-                <th>Marcos</th>
-                <th>Motivo terminal</th>
+                <th scope="col">Lead</th>
+                <th scope="col">Execução</th>
+                <th scope="col">Recebida</th>
+                <th scope="col">Duração</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Trace</th>
+                <th scope="col">Nó atual</th>
+                <th scope="col">Nós</th>
+                <th scope="col">Marcos</th>
+                <th scope="col">Motivo terminal</th>
               </tr>
             </thead>
             <tbody id="execution-table-body"></tbody>
@@ -102,12 +103,12 @@
             <div class="canvas-toolbar">
               <strong id="canvas-title">Execução</strong>
               <div>
-                <button id="zoom-out" type="button">−</button>
-                <button id="zoom-in" type="button">+</button>
+                <button id="zoom-out" type="button" aria-label="Reduzir zoom">−</button>
+                <button id="zoom-in" type="button" aria-label="Aumentar zoom">+</button>
                 <button id="fit-canvas" type="button">Fit</button>
               </div>
             </div>
-            <div id="execution-canvas" class="execution-canvas" tabindex="0">
+            <div id="execution-canvas" class="execution-canvas" tabindex="0" role="region" aria-label="Canvas da execução">
               <svg id="edges" aria-hidden="true"></svg>
               <div id="nodes" class="nodes"></div>
             </div>
