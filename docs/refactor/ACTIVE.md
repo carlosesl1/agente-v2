@@ -20,6 +20,7 @@
 - Scope boundary: implementation may start only after Carlos chooses the execution mode; deploy and production effects remain separately gated.
 - Data boundary: only `v2-ops-trace.sqlite3` execution/node contracts and deterministic calculations over those records; no legacy dashboard, inferred commercial data or synthetic fallback.
 - No-effect boundary: no deploy, restart, runtime change, new instrumentation, provider access, reservation, payment, ManyChat delivery, handoff or V3 work is authorized.
+- Task 1 TDD evidence: focused RED `venv/bin/python -m pytest tests/test_v2_ops_dashboard.py -q` exited `2` with the expected missing `v2_ops.dashboard`; GREEN `venv/bin/python -m pytest tests/test_v2_ops_dashboard.py tests/test_v2_ops_no_effect_surface.py -q` exited `0` with `15 passed`. Commit intent: `feat(v2-ops): calculate existing-data dashboard`.
 - This parallel lane does not replace or advance the `maya-v2-group-enriched-availability` NEXT below.
 
 ## Immutable base
