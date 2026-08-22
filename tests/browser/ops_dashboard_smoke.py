@@ -25,6 +25,10 @@ USERNAME = "ops-smoke"
 PASSWORD = "ops-smoke-password"
 
 
+def _smoke_bytecode_paths() -> tuple[Path, ...]:
+    return tuple(sorted((ARTIFACTS / "__pycache__").glob("smoke_server*.pyc")))
+
+
 def _write_fixture(path: Path, key: bytes, now: datetime) -> str:
     writer = SQLiteOpsTraceWriter(path, key)
     try:
@@ -289,6 +293,9 @@ def main() -> None:
             screenshot.unlink(missing_ok=True)
         for path in generated:
             path.unlink(missing_ok=True)
+        stale_bytecode = _smoke_bytecode_paths()
+        if stale_bytecode:
+            raise RuntimeError(f"stale smoke server bytecode exists: {stale_bytecode}")
         _require_browser_capability()
         browser_capability_ready = True
 
@@ -317,7 +324,7 @@ def main() -> None:
             "set -eu; server=''; "
             "cleanup() { if [ -n \"$server\" ]; then kill \"$server\" 2>/dev/null || true; "
             "wait \"$server\" 2>/dev/null || true; fi; }; trap cleanup EXIT INT TERM; "
-            "PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
+            "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
             "python3 -m uvicorn smoke_server:app --host 127.0.0.1 --port 18765 "
             "--log-level warning --no-access-log & server=$!; node smoke.js"
         )
@@ -338,6 +345,9 @@ def main() -> None:
         output = completed.stdout + completed.stderr
         if completed.returncode != 0 or "browser_contract=PASS" not in output:
             raise RuntimeError(f"real browser smoke failed (exit={completed.returncode}):\n{output}")
+        residual_bytecode = _smoke_bytecode_paths()
+        if residual_bytecode:
+            raise RuntimeError(f"smoke server left bytecode: {residual_bytecode}")
         for screenshot in screenshots:
             if not screenshot.is_file() or screenshot.stat().st_size == 0:
                 raise RuntimeError(f"browser smoke did not produce screenshot: {screenshot}")
@@ -348,7 +358,7 @@ def main() -> None:
         print(f"drawer_mobile_screenshot={screenshots[3]}")
     finally:
         primary_failure = sys.exc_info()[0] is not None
-        cleanup_error: OSError | None = None
+        cleanup_error: OSError | RuntimeError | None = None
         if browser_capability_ready:
             try:
                 subprocess.run(
@@ -366,6 +376,9 @@ def main() -> None:
             except OSError as exc:
                 if not primary_failure and cleanup_error is None:
                     cleanup_error = exc
+        residual_bytecode = _smoke_bytecode_paths()
+        if residual_bytecode and not primary_failure and cleanup_error is None:
+            cleanup_error = RuntimeError(f"smoke server left bytecode: {residual_bytecode}")
         if primary_failure or cleanup_error is not None:
             for screenshot in screenshots:
                 try:

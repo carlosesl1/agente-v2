@@ -1,7 +1,7 @@
 # Maya Ops — verificação final do redesenho de fidelidade ao mockup
 
 **Data:** 2026-08-22
-**Decisão:** **IMPLEMENTATION VERIFIED — NOT DEPLOYED**
+**Decisão do sucessor:** **PENDING FOCUSED RE-REVIEW — NOT DEPLOYED**
 
 ## 1. Autoridade, identidade e escopo
 
@@ -172,6 +172,452 @@ Ações deliberadamente não executadas:
 - sem reserva, pagamento, ManyChat, handoff ou outro efeito externo;
 - sem V3.
 
-O rerun pós-commit deve executar exatamente a suíte qualified clean-env e o smoke real do brief. Como o commit altera somente documentação, a validade do resultado será transportada apenas após provar byte-identidade dos cinco paths de produto/teste com `2ed7c15`; hashes de PNG pós-commit, por serem temporais, pertencem ao scratch report ignorado final e podem diferir desta tabela.
+Na execução histórica de Task 7, o rerun pós-commit exigia a suíte qualified clean-env e o smoke real do brief porque aquele commit era documental. Para este sucessor focal, a seção 8 substitui essa orientação: a suíte qualified e Chromium 24 são herdados; somente os gates proporcionais explicitamente registrados são fresh.
 
-**Decisão final deste artefato:** **IMPLEMENTATION VERIFIED — NOT DEPLOYED**.
+**Decisão histórica antes da revisão final:** `IMPLEMENTATION VERIFIED — NOT DEPLOYED`; essa decisão foi rejeitada pela revisão independente e é substituída pela seção sucessora abaixo.
+
+## 8. Sucessor focal dos dois achados finais
+
+### 8.1 Identidade prospectiva, autoridade e decisão
+
+- Base imutável deste sucessor: `b6e325a141c4e0d685ce3815f058dc0445517872`; tree `956282c4768325e3ae0a4e5c0f65b20bc55f85ea`.
+- Subject autorizado: `fix(v2-ops): close final audit evidence`.
+- Pathset autorizado e pretendido do commit: somente `tests/browser/ops_dashboard_smoke.py` e este relatório.
+- O SHA do commit sucessor é necessariamente prospectivo: um commit não pode conter seu próprio SHA. Após o commit, sua identidade deve ser obtida com `git show -s --format='%H %T %s' HEAD` e registrada no scratch ignorado.
+- `docs/refactor/ACTIVE.md` não foi alterado. Nenhum CSS/HTML/JS, teste de UI, backend/API/agente/runtime/provider/deploy/V3 foi alterado.
+- A decisão terminal permanece **PENDING FOCUSED RE-REVIEW — NOT DEPLOYED**. O token `IMPLEMENTATION VERIFIED — NOT DEPLOYED` só pode ser restabelecido pela re-revisão independente dos dois achados.
+
+A suíte qualified completa (`2023 passed, 7 deselected`) e o inventário Chromium de 24 cenários acima são evidência **herdada**, não fresh neste sucessor. Eles não foram repetidos porque produto/UI não mudou. Fresh neste sucessor: auditoria bounded, smoke real, focused no-effect/deploy, compileall focal, igualdade de bytes e higiene.
+
+### 8.2 RED/GREEN do bytecode do smoke
+
+RED causal autenticado nos bytes de `HEAD=b6e325a`:
+
+```text
+residual_before path=artifacts/ops-dashboard/__pycache__/smoke_server.cpython-312.pyc owner=root:root size=1036 mtime=2026-08-22 07:04:37.982433404 +0000
+head_server_line="python3 -m uvicorn smoke_server:app --host 127.0.0.1 --port 18765 "
+AssertionError: RED expected: uvicorn environment lacks PYTHONDONTWRITEBYTECODE=1
+exit=1
+```
+
+O resíduo atribuído foi removido sem varrer outros artefatos, usando somente o cache exato dentro do container pinado:
+
+```bash
+/usr/local/bin/docker run --rm \
+  -v "$PWD/artifacts/ops-dashboard:/artifacts" \
+  mcr.microsoft.com/playwright:v1.55.0-noble \
+  sh -lc 'rm -rf /artifacts/__pycache__'
+```
+
+Correção mínima: o processo uvicorn agora recebe `PYTHONDONTWRITEBYTECODE=1`. O próprio smoke enumera `artifacts/ops-dashboard/__pycache__/smoke_server*.pyc`, falha diante de resíduo stale antes da tentativa e volta a falhar se qualquer bytecode atribuível existir após o subprocesso ou no `finally`. A checagem de cleanup não substitui uma exceção primária.
+
+GREEN fresh pré-commit:
+
+```text
+green_server_line="PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
+bytecode_contract_probe=PASS
+ops_dashboard_smoke=PASS
+smoke_bytecode_hygiene=PASS
+exit=0
+```
+
+Após essa execução: nenhum `smoke_server*.pyc`, nenhum `__pycache__` atribuível, DB/WAL/SHM/spec/server temporário, container ou processo do smoke.
+
+### 8.3 Auditoria bounded reproduzível DB/WAL/SHM
+
+Comando exato, executado da raiz da worktree:
+
+```bash
+set -o pipefail
+venv/bin/python .superpowers/sdd/task-7-bounded-audit-successor.py 2>&1 \
+  | tee .superpowers/sdd/task-7-bounded-audit-successor.log
+```
+
+O arquivo `.superpowers/sdd/task-7-bounded-audit-successor.py` é scratch ignorado; seus bytes reproduzíveis são versionados abaixo como bloco literal. SHA-256 do script exato: `76f1b8c0a99d9706f2d11916f924b440795a212267164b70ea218568562bb588`. SHA-256 do log exato ignorado: `d6685ba2f6e20ea867c5895805959880c1e9738d210acf233629cc95c75d94f1`.
+
+Ordem causal obrigatória: o writer foi fechado; depois reader, app, login e todos os formatos de request foram aquecidos; somente então foi capturado `before`. Entre `before` e `after` ocorreram exclusivamente os requests medidos. Isso evita repetir as tentativas anteriores contraditórias, que capturaram metadata antes de completar o warm-up do reader e viram criação/mtime legítima dos sidecars pela abertura local. A primeira invocação deste sucessor sem a inserção da raiz no `sys.path` também foi uma falha de harness (`ModuleNotFoundError`), corrigida antes da execução vencedora e não contada como auditoria.
+
+Fixture: diretório temporário, dados técnicos sintéticos, zero rede e zero produção. Script literal exato:
+
+```python
+from __future__ import annotations
+
+import asyncio
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+from pathlib import Path
+import sys
+import tempfile
+
+ROOT = Path.cwd()
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+import v2_ops.app as ops_app
+from v2_ops.auth import hash_password
+from v2_ops.app import create_ops_app
+from v2_ops.contracts import ExecutionStatus, NodeType, OpsExecution, OpsNodeFinish, OpsNodeStart
+from v2_ops.settings import OpsWebSettings
+from v2_ops.store import SQLiteOpsTraceReader, SQLiteOpsTraceWriter
+
+NOW = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+KEY = b"t" * 32
+
+
+def snapshot(path: Path) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    for label, candidate in (
+        ("DB", path),
+        ("WAL", Path(f"{path}-wal")),
+        ("SHM", Path(f"{path}-shm")),
+    ):
+        exists = candidate.is_file()
+        stat = candidate.stat() if exists else None
+        result[label] = {
+            "exists": exists,
+            "size": stat.st_size if stat else None,
+            "mtime_ns": stat.st_mtime_ns if stat else None,
+            "sha256": hashlib.sha256(candidate.read_bytes()).hexdigest() if exists else None,
+        }
+    return result
+
+
+def route_matrix(app: object) -> list[str]:
+    rows = []
+    for route in app.routes:
+        for method in sorted(route.methods or ()):
+            if method != "HEAD":
+                rows.append(f"{method:<6} {route.path}")
+    return sorted(rows, key=lambda row: (row.split(maxsplit=1)[1], row.split(maxsplit=1)[0]))
+
+
+async def bounded_events_startup(app: object, cookie: str) -> tuple[int, str]:
+    route = next(route for route in app.routes if route.path == "/ops/api/events")
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/ops/api/events",
+        "raw_path": b"/ops/api/events",
+        "query_string": b"",
+        "headers": [(b"host", b"testserver"), (b"cookie", cookie.encode("ascii"))],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 443),
+    }
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.disconnect"}
+
+    response = await route.endpoint(Request(scope, receive))
+    first = await anext(response.body_iterator)
+    await response.body_iterator.aclose()
+    return response.status_code, first.decode("utf-8") if isinstance(first, bytes) else first
+
+
+def assert_status(label: str, response: object, expected: int, requests: list[dict[str, object]]) -> None:
+    actual = response.status_code
+    requests.append({"request": label, "status": actual})
+    assert actual == expected, (label, actual, expected)
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory(prefix="maya-ops-bounded-audit-") as directory:
+        database = Path(directory) / "synthetic.sqlite3"
+        writer = SQLiteOpsTraceWriter(database, KEY)
+        execution = OpsExecution("event-tech-audit", "lead-tech-audit", NOW - timedelta(hours=12))
+        writer.write_execution(execution)
+        node = OpsNodeStart(
+            execution_id=execution.execution_id,
+            node_type=NodeType.MAYA_REQUEST,
+            ordinal=1,
+            started_at=execution.received_at,
+            input_summary={"request_id": "request-tech-audit"},
+            input_full={"fixture_code": "input-tech-audit"},
+        )
+        writer.start_node(node)
+        writer.finish_node(
+            OpsNodeFinish.from_start(
+                node,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=execution.received_at + timedelta(seconds=1),
+                output_summary={"status": "ok"},
+                output_full={"fixture_code": "output-tech-audit"},
+            )
+        )
+        writer.write_execution(
+            replace(
+                execution,
+                status=ExecutionStatus.COMPLETED,
+                current_node_id=node.node_id,
+                completed_at=execution.received_at + timedelta(seconds=1),
+                terminal_reason="technical_fixture_complete",
+            )
+        )
+        writer.write_execution(OpsExecution("event-tech-week", "lead-tech-week", NOW - timedelta(days=3)))
+        writer.write_execution(OpsExecution("event-tech-month", "lead-tech-month", NOW - timedelta(days=15)))
+        writer.close()
+
+        reader = SQLiteOpsTraceReader(database, KEY)
+        settings = OpsWebSettings(
+            username="ops-audit",
+            password_hash=hash_password("audit-password", salt=b"s" * 16),
+            session_key=b"k" * 32,
+            trace_path=database,
+            trace_key=KEY,
+            secure_cookie=True,
+            release_sha="a" * 40,
+            image_digest="sha256:" + "b" * 64,
+            config_fingerprint="c" * 64,
+        )
+        ops_app._now = lambda: NOW
+        app = create_ops_app(settings, reader=reader)
+        client = TestClient(app, base_url="https://testserver")
+        login_page = client.get("/ops/login")
+        csrf = login_page.cookies["v2_ops_csrf"]
+        login = client.post(
+            "/ops/login",
+            data={"username": "ops-audit", "password": "audit-password", "csrf": csrf},
+            headers={"Origin": "https://testserver", "Referer": "https://testserver/ops/login"},
+            follow_redirects=False,
+        )
+        assert login.status_code == 303
+        cookie = "; ".join(f"{key}={value}" for key, value in client.cookies.items())
+
+        # Complete reader/app/request-shape warm-up before the before snapshot.
+        warm = [client.get(f"/ops/api/dashboard?range={range_key}") for range_key in ("24h", "7d", "30d")]
+        warm += [
+            client.get(f"/ops/api/executions/{execution.execution_id}"),
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes"),
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes/{node.node_id}/full?side=input"),
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes/{node.node_id}/full?side=output"),
+        ]
+        assert all(response.status_code == 200 for response in warm)
+        warm_event_status, _ = asyncio.run(bounded_events_startup(app, cookie))
+        assert warm_event_status == 200
+
+        before = snapshot(database)
+        requests: list[dict[str, object]] = []
+        dashboards = {}
+        for range_key in ("24h", "7d", "30d"):
+            response = client.get(f"/ops/api/dashboard?range={range_key}")
+            assert_status(f"GET dashboard {range_key}", response, 200, requests)
+            dashboards[range_key] = response
+            revalidation = client.get(
+                f"/ops/api/dashboard?range={range_key}",
+                headers={"If-None-Match": response.headers["etag"]},
+            )
+            assert_status(f"GET dashboard {range_key} If-None-Match", revalidation, 304, requests)
+
+        assert_status(
+            "GET execution detail",
+            client.get(f"/ops/api/executions/{execution.execution_id}"),
+            200,
+            requests,
+        )
+        assert_status(
+            "GET execution nodes",
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes"),
+            200,
+            requests,
+        )
+        assert_status(
+            "GET full input",
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes/{node.node_id}/full?side=input"),
+            200,
+            requests,
+        )
+        assert_status(
+            "GET full output",
+            client.get(f"/ops/api/executions/{execution.execution_id}/nodes/{node.node_id}/full?side=output"),
+            200,
+            requests,
+        )
+        event_status, event_chunk = asyncio.run(bounded_events_startup(app, cookie))
+        requests.append(
+            {
+                "request": "GET events bounded startup",
+                "status": event_status,
+                "event": "ready",
+                "data_status": "connected",
+            }
+        )
+        assert event_status == 200
+        assert "event: ready" in event_chunk and '"status":"connected"' in event_chunk
+
+        after = snapshot(database)
+        equality = {label: before[label] == after[label] for label in ("DB", "WAL", "SHM")}
+        assert all(equality.values())
+        result = {
+            "fixture": "temporary synthetic technical data; zero network/production",
+            "phase_order": [
+                "writer_closed",
+                "reader_app_login_and_all_request_shapes_warmed",
+                "snapshot_before",
+                "measured_requests_only",
+                "snapshot_after",
+            ],
+            "route_matrix": route_matrix(app),
+            "requests": requests,
+            "before": before,
+            "after": after,
+            "structured_equality": equality,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        print("db_wal_shm_invariance=PASS")
+        reader.close()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Output exato preservado pelo log vencedor:
+
+```text
+/home/ubuntu/agente-v2/.worktrees/maya-ops-existing-data-dashboard/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+{
+  "after": {
+    "DB": {
+      "exists": true,
+      "mtime_ns": 1787383049319407214,
+      "sha256": "1b9d4a4359e85ee3f3cc7620631da407a9b4ddd6299aa42c7fdd073e599e6de6",
+      "size": 45056
+    },
+    "SHM": {
+      "exists": true,
+      "mtime_ns": 1787383049491408324,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "size": 32768
+    },
+    "WAL": {
+      "exists": true,
+      "mtime_ns": 1787383049319407214,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    }
+  },
+  "before": {
+    "DB": {
+      "exists": true,
+      "mtime_ns": 1787383049319407214,
+      "sha256": "1b9d4a4359e85ee3f3cc7620631da407a9b4ddd6299aa42c7fdd073e599e6de6",
+      "size": 45056
+    },
+    "SHM": {
+      "exists": true,
+      "mtime_ns": 1787383049491408324,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "size": 32768
+    },
+    "WAL": {
+      "exists": true,
+      "mtime_ns": 1787383049319407214,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    }
+  },
+  "fixture": "temporary synthetic technical data; zero network/production",
+  "phase_order": [
+    "writer_closed",
+    "reader_app_login_and_all_request_shapes_warmed",
+    "snapshot_before",
+    "measured_requests_only",
+    "snapshot_after"
+  ],
+  "requests": [
+    {
+      "request": "GET dashboard 24h",
+      "status": 200
+    },
+    {
+      "request": "GET dashboard 24h If-None-Match",
+      "status": 304
+    },
+    {
+      "request": "GET dashboard 7d",
+      "status": 200
+    },
+    {
+      "request": "GET dashboard 7d If-None-Match",
+      "status": 304
+    },
+    {
+      "request": "GET dashboard 30d",
+      "status": 200
+    },
+    {
+      "request": "GET dashboard 30d If-None-Match",
+      "status": 304
+    },
+    {
+      "request": "GET execution detail",
+      "status": 200
+    },
+    {
+      "request": "GET execution nodes",
+      "status": 200
+    },
+    {
+      "request": "GET full input",
+      "status": 200
+    },
+    {
+      "request": "GET full output",
+      "status": 200
+    },
+    {
+      "data_status": "connected",
+      "event": "ready",
+      "request": "GET events bounded startup",
+      "status": 200
+    }
+  ],
+  "route_matrix": [
+    "GET    /ops",
+    "GET    /ops/",
+    "GET    /ops/api/dashboard",
+    "GET    /ops/api/events",
+    "GET    /ops/api/executions",
+    "GET    /ops/api/executions/{execution_id}",
+    "GET    /ops/api/executions/{execution_id}/nodes",
+    "GET    /ops/api/executions/{execution_id}/nodes/{node_id}/full",
+    "GET    /ops/api/harness",
+    "GET    /ops/api/release",
+    "GET    /ops/healthz",
+    "GET    /ops/login",
+    "POST   /ops/login",
+    "POST   /ops/logout",
+    "GET    /ops/static/ops.css",
+    "GET    /ops/static/ops.js"
+  ],
+  "structured_equality": {
+    "DB": true,
+    "SHM": true,
+    "WAL": true
+  }
+}
+db_wal_shm_invariance=PASS
+```
+
+A route matrix confirma POST somente em login/logout e nenhum PUT/PATCH/DELETE. Os requests medidos confirmam dashboard `24h`/`7d`/`30d` = 200, cada revalidação ETag = 304, detail = 200, nodes = 200, full Input/Output = 200 e events bounded startup = 200 com `ready/connected`. Os snapshots individuais mostram `exists`, `size`, `mtime_ns` e SHA-256 para DB/WAL/SHM; campos ausentes seriam serializados como `null`. O assert estruturado foi verdadeiro para os três membros e o resultado literal foi `db_wal_shm_invariance=PASS`.
+
+### 8.4 Gates proporcionais fresh pré-commit
+
+```text
+bounded audit: db_wal_shm_invariance=PASS; exit=0
+venv/bin/python tests/browser/ops_dashboard_smoke.py: ops_dashboard_smoke=PASS; exit=0
+venv/bin/python -m pytest tests/test_v2_ops_no_effect_surface.py tests/test_v2_ops_deploy_contract.py -q:
+7 passed in 0.59s; exit=0
+PYTHONPYCACHEPREFIX=<temporary> venv/bin/python -m compileall -q tests/browser/ops_dashboard_smoke.py:
+compileall_smoke=PASS; exit=0
+```
+
+Igualdade com `b6e325a` foi comprovada para `tests/test_v2_ops_ui.py`, `v2_ops/static/index.html`, `v2_ops/static/ops.css` e `v2_ops/static/ops.js`; safe DOM/conteúdo proibido permaneceu PASS. Screenshots continuam ignorados e não são parte do commit. Nenhum push, build, deploy, restart, acesso à produção, provider effect ou PII ocorreu.
