@@ -63,6 +63,8 @@ def test_grounding_reviewer_treats_activity_availability_as_literal() -> None:
     assert "available=false directly supports an unavailable claim" in prompt
     assert "available=true directly supports an available claim" in prompt
     assert "never infer availability from total_amount" in prompt
+    assert "the standard agency card link charges a 20% deposit" in prompt
+    assert "Natural questions requesting booking details are not unsupported claims" in prompt
 
 
 def _v8_request(

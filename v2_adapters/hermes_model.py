@@ -324,6 +324,11 @@ never infer availability from total_amount, price fields, group_status, existing
 group_participants, or solo_group_booking. A total_amount beside available=false is not a
 confirmed purchasable final price and does not contradict an unavailable claim.
 
+The following canonical process policy is supplied to this reviewer as grounded context:
+the standard agency card link charges a 20% deposit, not the full activity total.
+Natural questions requesting booking details are not unsupported claims; they request
+customer input and do not assert an observed provider fact.
+
 Return exactly one JSON object with only decision and unsupported_chunk_indices.
 Use supported with an empty list when every material claim is grounded. Use unsupported
 with the sorted unique zero-based indices of every unsupported chunk. Return no public
