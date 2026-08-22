@@ -10,10 +10,7 @@ import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import _request_wire
 from v2_contracts.model import ModelRequest
 from v2_host.hermes_child import run, run_structured
-from v2_host.structured_output import (
-    grounding_review_request_overrides,
-    maya_v8_request_overrides,
-)
+from v2_host.structured_output import maya_v8_request_overrides
 
 
 @dataclass
@@ -152,45 +149,31 @@ def test_structured_child_supports_installed_sync_agent_api() -> None:
     assert captured["closed"] is True
 
 
-def test_structured_child_selects_closed_grounding_contract() -> None:
-    captured: dict[str, object] = {}
-    result = {"decision": "unsupported", "unsupported_chunk_indices": [0]}
-
-    class GroundingAgent:
+def test_structured_child_rejects_grounding_contract() -> None:
+    class FailIfCalled:
         def __init__(self, **kwargs: object) -> None:
-            captured["kwargs"] = kwargs
+            raise AssertionError(f"second semantic agent was created: {kwargs!r}")
 
-        def run_conversation(
-            self, prompt: str, *, system_message: str
-        ) -> dict[str, object]:
-            captured["prompt"] = prompt
-            captured["system_message"] = system_message
-            return {"final_response": json.dumps(result)}
-
-    output = asyncio.run(
-        run_structured(
-            (
-                "hermes",
-                "--profile",
-                "leads",
-                "-m",
-                "gpt-5.6-luna",
-                "--provider",
-                "openai-codex",
-                "--contract",
-                "grounding-v1",
-            ),
-            _wire(),
-            agent_factory=GroundingAgent,
-            profile_resolver=lambda _profile: "/tmp/hermes-profile-leads",
-            session_db_factory=lambda path: {"path": str(path)},
+    with pytest.raises(ValueError, match="response contract"):
+        asyncio.run(
+            run_structured(
+                (
+                    "hermes",
+                    "--profile",
+                    "leads",
+                    "-m",
+                    "gpt-5.6-luna",
+                    "--provider",
+                    "openai-codex",
+                    "--contract",
+                    "grounding-v1",
+                ),
+                _wire(),
+                agent_factory=FailIfCalled,
+                profile_resolver=lambda _profile: "/tmp/hermes-profile-leads",
+                session_db_factory=lambda path: {"path": str(path)},
+            )
         )
-    )
-
-    assert json.loads(output.split(b"\x00", 1)[1]) == result
-    assert captured["kwargs"]["request_overrides"] == (
-        grounding_review_request_overrides()
-    )
 
 
 def test_child_forces_tool_free_one_turn_and_emits_only_canonical_result() -> None:

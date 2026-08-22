@@ -22,7 +22,6 @@ from v2_contracts.model import (
     ModelFact,
     ModelProposal,
     ModelRequest,
-    PublicReplyCorrectionReason,
     proposal_requires_progress_review,
 )
 from v2_contracts.model_wire import V8_RESPONSE_FIELDS
@@ -304,38 +303,6 @@ Return one valid V8 frame with the eight conversational fields. Write each publi
 once; the parent will bind mechanical authority and will not rewrite the text.
 """.strip()
 
-_GROUNDING_REVIEW_SYSTEM_PROMPT: Final = """
-You are a closed material-grounding reviewer, not the customer-facing agent. You have no
-tools and must not author or rewrite public text. Evaluate each indexed reply chunk only
-against the supplied current customer message and authenticated public observations.
-
-Review factual claims about age rules, physical suitability, safety, eligibility,
-requirements, restrictions, or provider policy. A claim is supported only when it is
-entailed by the observations. Never add world knowledge, assumptions, reassurance, or
-medical judgment. In particular, null age_guidance or suitability_guidance does not
-support a claim that an age does not prevent an activity, that no confirmation is needed,
-or that a person is suitable. Honest statements that guidance is absent, natural
-questions, and clearly marked uncertainty are not unsupported claims.
-
-For current activity observations, interpret the exact boolean literally:
-available=false directly supports an unavailable claim for that date and party, while
-available=true directly supports an available claim. Never invert the boolean and
-never infer availability from total_amount, price fields, group_status, existing_group,
-group_participants, or solo_group_booking. A total_amount beside available=false is not a
-confirmed purchasable final price and does not contradict an unavailable claim.
-
-The following canonical process policy is supplied to this reviewer as grounded context:
-the standard agency card link charges a 20% deposit, not the full activity total.
-Natural questions requesting booking details are not unsupported claims; they request
-customer input and do not assert an observed provider fact.
-
-Return exactly one JSON object with only decision and unsupported_chunk_indices.
-Use supported with an empty list when every material claim is grounded. Use unsupported
-with the sorted unique zero-based indices of every unsupported chunk. Return no public
-reply, explanation, markdown, or extra field.
-""".strip()
-
-
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -569,71 +536,6 @@ def _confirmation_review_wire(request: ModelRequest, system_prompt: str) -> byte
             "messages": [["user", _canonical(user_payload).decode("utf-8")]],
         }
     )
-
-
-def _grounding_review_required(request: ModelRequest) -> bool:
-    return any(
-        observation.public_payload.get("grounding_review_required") is True
-        for observation in request.observations
-    )
-
-
-def _grounding_review_wire(
-    request: ModelRequest,
-    proposal: ModelProposal,
-) -> bytes:
-    projected, _ = _choice_projection(request.observations)
-    observations = [
-        {
-            "provider": observation.provider,
-            "observed_at": observation.observed_at.isoformat(),
-            "expires_at": observation.expires_at.isoformat(),
-            "public_payload": public_payload,
-        }
-        for observation, public_payload in zip(
-            request.observations, projected, strict=True
-        )
-    ]
-    current = {
-        "message": request.message,
-        "observations": observations,
-        "reply_chunks": [
-            {"index": index, "text": text}
-            for index, text in enumerate(proposal.reply_chunks)
-        ],
-    }
-    return _canonical(
-        {
-            "system_prompt": _GROUNDING_REVIEW_SYSTEM_PROMPT,
-            "messages": [["user", _canonical(current).decode("utf-8")]],
-        }
-    )
-
-
-def _grounding_decision(payload: bytes, chunk_count: int) -> bool:
-    try:
-        value = json.loads(payload, object_pairs_hook=_unique_object)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        raise InvalidModelProposal("grounding review is not closed JSON") from exc
-    if type(value) is not dict or set(value) != {
-        "decision",
-        "unsupported_chunk_indices",
-    }:
-        raise InvalidModelProposal("grounding review fields mismatch")
-    decision = value["decision"]
-    indices = value["unsupported_chunk_indices"]
-    if decision not in {"supported", "unsupported"} or type(indices) is not list:
-        raise InvalidModelProposal("grounding review decision is invalid")
-    if (
-        any(type(index) is not int or not 0 <= index < chunk_count for index in indices)
-        or indices != sorted(set(indices))
-    ):
-        raise InvalidModelProposal("grounding review chunk indices are invalid")
-    if (decision == "supported" and indices) or (
-        decision == "unsupported" and not indices
-    ):
-        raise InvalidModelProposal("grounding review decision and indices disagree")
-    return decision == "supported"
 
 
 def _fact(value: object) -> ModelFact:
@@ -1264,107 +1166,6 @@ class HermesModelAdapter:
         )
         return turn, turn.frames[0]
 
-    def _grounding_review(
-        self,
-        request: ModelRequest,
-        proposal: ModelProposal,
-    ) -> tuple[bool, AuditedTranscriptFrame]:
-        stdin_bytes = _grounding_review_wire(request, proposal)
-        try:
-            result = self._run(
-                (*self._command, "--contract", "grounding-v1"),
-                input=stdin_bytes,
-                capture_output=True,
-                timeout=self._timeout,
-                check=False,
-                env=self._child_env,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise InvalidModelProposal("grounding review child failed closed") from exc
-        returncode = getattr(result, "returncode", None)
-        stdout = getattr(result, "stdout", None)
-        stderr = getattr(result, "stderr", None)
-        if (
-            type(returncode) is not int
-            or type(stdout) is not bytes
-            or type(stderr) is not bytes
-            or returncode != 0
-        ):
-            raise InvalidModelProposal("grounding review child failed closed")
-        marker_at = stdout.rfind(_RESULT_MARKER)
-        if marker_at < 0:
-            raise InvalidModelProposal("grounding review result marker is missing")
-        response = stdout[marker_at + len(_RESULT_MARKER) :]
-        if not response or len(response) > 16 * 1024:
-            raise InvalidModelProposal("grounding review response size is invalid")
-        frame = AuditedTranscriptFrame.create(
-            stdin_bytes=stdin_bytes,
-            stdout_bytes=stdout,
-            response_bytes=response,
-            transcript_key=self._transcript_key,
-        )
-        return _grounding_decision(response, len(proposal.reply_chunks)), frame
-
-    def _apply_grounding_review(
-        self,
-        request: ModelRequest,
-        turn: AuditedModelTurn,
-    ) -> AuditedModelTurn:
-        if not _grounding_review_required(request):
-            return turn
-        supported, review_frame = self._grounding_review(request, turn.proposal)
-        if supported:
-            return AuditedModelTurn.from_frames(
-                proposal=turn.proposal,
-                frames=(*turn.frames, review_frame),
-                ephemeral_session_id=turn.closure.ephemeral_session_id,
-            )
-
-        reason = PublicReplyCorrectionReason.UNSUPPORTED_OBSERVATION_CLAIM
-        if reason in request.public_reply_correction_reasons:
-            raise InvalidModelProposal(
-                "material grounding remained unsupported after Maya rewrite"
-            )
-        correction_reasons = tuple(
-            sorted(
-                (*request.public_reply_correction_reasons, reason),
-                key=lambda item: item.value,
-            )
-        )
-        correction_request = replace(
-            request,
-            request_id=(
-                "grounding-correction:"
-                + hashlib.sha256(request.request_id.encode("utf-8")).hexdigest()
-            ),
-            progress_review_required=False,
-            confirmation_review_required=False,
-            selection_review_required=False,
-            recap_reuse_required=False,
-            public_reply_correction_reasons=correction_reasons,
-        )
-        corrected = self._complete_audited(
-            correction_request,
-            allow_protocol_repair=True,
-        )
-        corrected_supported, corrected_review_frame = self._grounding_review(
-            correction_request,
-            corrected.proposal,
-        )
-        if not corrected_supported:
-            raise InvalidModelProposal(
-                "material grounding remained unsupported after Maya rewrite"
-            )
-        return AuditedModelTurn.from_frames(
-            proposal=corrected.proposal,
-            frames=(
-                *turn.frames,
-                review_frame,
-                *corrected.frames,
-                corrected_review_frame,
-            ),
-            ephemeral_session_id=corrected.closure.ephemeral_session_id,
-        )
 
     def _maybe_progress_review(
         self,
@@ -1403,8 +1204,7 @@ class HermesModelAdapter:
         )
 
     def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
-        turn = self._complete_audited(request, allow_protocol_repair=True)
-        return self._apply_grounding_review(request, turn)
+        return self._complete_audited(request, allow_protocol_repair=True)
 
     def _complete_audited(
         self,

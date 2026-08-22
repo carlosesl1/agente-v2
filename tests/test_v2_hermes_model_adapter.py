@@ -58,15 +58,6 @@ def test_commercial_progression_suffix_distinguishes_immediate_and_progressive_h
     assert "continue collecting the next useful safe commercial facts" in suffix
 
 
-def test_grounding_reviewer_treats_activity_availability_as_literal() -> None:
-    prompt = hermes_model_module._GROUNDING_REVIEW_SYSTEM_PROMPT
-    assert "available=false directly supports an unavailable claim" in prompt
-    assert "available=true directly supports an available claim" in prompt
-    assert "never infer availability from total_amount" in prompt
-    assert "the standard agency card link charges a 20% deposit" in prompt
-    assert "Natural questions requesting booking details are not unsupported claims" in prompt
-
-
 def _v8_request(
     *,
     source_event_id: str = "batch:v8-minimal",
@@ -394,7 +385,6 @@ def _grounding_request() -> ModelRequest:
                     "description": "Passeio por trilhas e cânions.",
                     "age_guidance": None,
                     "suitability_guidance": None,
-                    "grounding_review_required": True,
                 },
                 private_binding_hash="b" * 64,
             ),
@@ -402,51 +392,16 @@ def _grounding_request() -> ModelRequest:
     )
 
 
-def _grounding_response(
-    decision: str, unsupported_chunk_indices: list[int]
-) -> bytes:
-    return json.dumps(
-        {
-            "decision": decision,
-            "unsupported_chunk_indices": unsupported_chunk_indices,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-
-
-def test_material_grounding_review_reasks_maya_once_without_parent_authorship() -> None:
-    initial = _v8_bytes(
-        reply_chunks=[
-            "Ter 67 anos, por si só, não impede o passeio e não exige confirmação."
-        ]
-    )
-    corrected_text = (
-        "As informações disponíveis não trazem uma regra específica por idade. "
-        "Ela tem alguma limitação de mobilidade ou condição relevante?"
-    )
-    corrected = _v8_bytes(
-        reply_chunks=[{"text": corrected_text, "expects_reply": True}]
-    )
-    exchanges = [
-        ("maya-v8", initial),
-        ("grounding-v1", _grounding_response("unsupported", [0])),
-        ("maya-v8", corrected),
-        ("grounding-v1", _grounding_response("supported", [])),
-    ]
-    seen: list[tuple[tuple[str, ...], dict[str, object]]] = []
+def test_complete_audited_never_launches_a_second_semantic_model() -> None:
+    text = "Resposta da Maya baseada na observação atual."
+    seen: list[tuple[str, ...]] = []
 
     def run(command, **kwargs):
-        contract, response = exchanges.pop(0)
-        if contract == "grounding-v1":
-            assert command[-2:] == ("--contract", "grounding-v1")
-        else:
-            assert "--contract" not in command
-        envelope = json.loads(kwargs["input"])
-        seen.append((command, json.loads(envelope["messages"][-1][1])))
+        assert "--contract" not in command, "second semantic model was launched"
+        seen.append(command)
         return SimpleNamespace(
             returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + response,
+            stdout=b"PHASE8_RESULT\x00" + _v8_bytes(reply_chunks=[text]),
             stderr=b"",
         )
 
@@ -454,87 +409,13 @@ def test_material_grounding_review_reasks_maya_once_without_parent_authorship() 
         command=("synthetic-tool-free-child",),
         system_prompt="closed prompt",
         timeout=10,
-        transcript_key=b"material-grounding-review-key-00001",
+        transcript_key=b"single-maya-agent-key-00000000001",
         run=run,
         environ={},
     ).complete_audited(_grounding_request())
 
-    assert exchanges == []
-    assert turn.proposal.reply_chunks == (corrected_text,)
-    assert turn.proposal.clarification_question == corrected_text
-    assert len(turn.frames) == 4
-    assert seen[2][1]["public_reply_correction_reasons"] == [
-        "unsupported_observation_claim"
-    ]
-    assert set(seen[1][1]) == {"message", "observations", "reply_chunks"}
-    assert seen[1][1]["reply_chunks"] == [
-        {
-            "index": 0,
-            "text": "Ter 67 anos, por si só, não impede o passeio e não exige confirmação.",
-        }
-    ]
-
-
-def test_material_grounding_review_keeps_supported_maya_text_byte_exact() -> None:
-    text = "A descrição informa trilhas e cânions; não traz regra específica por idade."
-    exchanges = [
-        ("maya-v8", _v8_bytes(reply_chunks=[text])),
-        ("grounding-v1", _grounding_response("supported", [])),
-    ]
-
-    def run(command, **kwargs):
-        contract, response = exchanges.pop(0)
-        if contract == "grounding-v1":
-            assert command[-2:] == ("--contract", "grounding-v1")
-        return SimpleNamespace(
-            returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + response,
-            stderr=b"",
-        )
-
-    turn = HermesModelAdapter(
-        command=("synthetic-tool-free-child",),
-        system_prompt="closed prompt",
-        timeout=10,
-        transcript_key=b"supported-grounding-review-key-0001",
-        run=run,
-        environ={},
-    ).complete_audited(_grounding_request())
-
-    assert exchanges == []
     assert turn.proposal.reply_chunks == (text,)
-    assert len(turn.frames) == 2
-
-
-def test_material_grounding_review_fails_closed_after_one_unsupported_rewrite() -> None:
-    response = _v8_bytes(reply_chunks=["A idade não impede o passeio."])
-    exchanges = [
-        response,
-        _grounding_response("unsupported", [0]),
-        response,
-        _grounding_response("unsupported", [0]),
-    ]
-
-    def run(command, **kwargs):
-        del command, kwargs
-        return SimpleNamespace(
-            returncode=0,
-            stdout=b"PHASE8_RESULT\x00" + exchanges.pop(0),
-            stderr=b"",
-        )
-
-    adapter = HermesModelAdapter(
-        command=("synthetic-tool-free-child",),
-        system_prompt="closed prompt",
-        timeout=10,
-        transcript_key=b"failed-grounding-review-key-000001",
-        run=run,
-        environ={},
-    )
-
-    with pytest.raises(InvalidModelProposal, match="grounding"):
-        adapter.complete_audited(_grounding_request())
-    assert exchanges == []
+    assert len(seen) == 1
 
 
 def test_model_public_reply_chunks_preserve_valid_unicode_byte_exact() -> None:
@@ -790,7 +671,7 @@ def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
         sorted(
             (
                 reason_type.TYPED_CLARIFICATION_MISMATCH,
-                reason_type.UNSUPPORTED_OBSERVATION_CLAIM,
+                reason_type.OPERATIONAL_STATUS_CONFLICT,
             ),
             key=lambda item: item.value,
         )

@@ -78,7 +78,6 @@ class InvalidModelProposal(ValueError):
 
 class PublicReplyCorrectionReason(str, Enum):
     TYPED_CLARIFICATION_MISMATCH = "typed_clarification_mismatch"
-    UNSUPPORTED_OBSERVATION_CLAIM = "unsupported_observation_claim"
     OPERATIONAL_STATUS_CONFLICT = "operational_status_conflict"
     READ_REMOVED_BY_AUTHORITY = "read_removed_by_authority"
     SELECTION_BINDING_FAILURE = "selection_binding_failure"

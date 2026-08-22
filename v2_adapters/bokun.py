@@ -395,7 +395,6 @@ class BokunReadAdapter:
                 if suitability_guidance is None
                 else text(suitability_guidance, "suitability_guidance")
             ),
-            "grounding_review_required": True,
         }
         observed_at, expires_at = observed_window(self._clock, self._ttl)
         return ReadObservation(

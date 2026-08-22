@@ -45,7 +45,6 @@ def test_bokun_activity_description_marks_missing_material_guidance_explicitly()
         "description": "Passeio por trilhas e cânions.",
         "age_guidance": None,
         "suitability_guidance": None,
-        "grounding_review_required": True,
     }
 
 

@@ -78,7 +78,6 @@ def test_public_reply_correction_reason_catalog_is_exact_and_default_is_empty() 
 
     assert tuple((item.name, item.value) for item in reason_type) == (
         ("TYPED_CLARIFICATION_MISMATCH", "typed_clarification_mismatch"),
-        ("UNSUPPORTED_OBSERVATION_CLAIM", "unsupported_observation_claim"),
         ("OPERATIONAL_STATUS_CONFLICT", "operational_status_conflict"),
         ("READ_REMOVED_BY_AUTHORITY", "read_removed_by_authority"),
         ("SELECTION_BINDING_FAILURE", "selection_binding_failure"),
