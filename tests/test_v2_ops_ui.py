@@ -1435,8 +1435,20 @@ test('Task 3 causally renders five exact analytics sources and adversarial struc
 test('Task 4 renders factual desktop rows and mobile cards from the same exact-filtered executions', async ({page}) => {
   await page.setViewportSize({width: 1280, height: 800});
   await setup(page);
-  const payload = snapshot('operations', 3);
-  payload.executions = [
+
+  for (const executions of [undefined, {not: 'an array'}]) {
+    const malformedPayload = snapshot('malformed-operations', 0);
+    if (executions === undefined) delete malformedPayload.executions;
+    else malformedPayload.executions = executions;
+    await page.evaluate(payload => { state.snapshot = payload; renderExecutionTable(); }, malformedPayload);
+    await expect(page.locator('#result-count')).toHaveText('0 execuções');
+    await expect(page.locator('#execution-table-body > tr')).toHaveCount(0);
+    await expect(page.locator('.execution-mobile-card')).toHaveCount(0);
+  }
+
+  const specialLeadId = 'lead [special] "#/?:&';
+  const specialExecutionId = 'execution [special] "#/?:&';
+  const validExecutions = [
     {
       lead_id: 'lead-one', execution_id: 'execution-one', received_at: '2026-08-21T10:00:00Z',
       duration_ms: 1250, status: 'completed', trace_completeness: 'complete_trace',
@@ -1445,7 +1457,7 @@ test('Task 4 renders factual desktop rows and mobile cards from the same exact-f
       terminal_reason: 'completed',
     },
     {
-      lead_id: 'lead-two', execution_id: 'execution-two', received_at: 'invalid',
+      lead_id: specialLeadId, execution_id: specialExecutionId, received_at: 'invalid',
       duration_ms: null, status: 'future_status', trace_completeness: 'future_trace',
       current_node_type: null, node_count: 0, has_reservation: false,
       has_payment: false, has_public_delivery: false, has_handoff: false,
@@ -1458,24 +1470,42 @@ test('Task 4 renders factual desktop rows and mobile cards from the same exact-f
       has_payment: true, has_public_delivery: false, has_handoff: true,
       terminal_reason: null,
     },
-    null,
-    42,
   ];
+  const invalidExecutions = [
+    null, 42, [],
+    {...validExecutions[0], lead_id: undefined},
+    {...validExecutions[0], lead_id: 7},
+    {...validExecutions[0], lead_id: ''},
+    {...validExecutions[0], lead_id: '   '},
+    {...validExecutions[0], execution_id: undefined},
+    {...validExecutions[0], execution_id: 7},
+    {...validExecutions[0], execution_id: ''},
+    {...validExecutions[0], execution_id: '\t '},
+    {...validExecutions[0], status: 42},
+    {...validExecutions[0], trace_completeness: {bad: true}},
+    {...validExecutions[0], has_reservation: 'false'},
+    {...validExecutions[0], has_payment: 1},
+    {...validExecutions[0], has_public_delivery: null},
+    {...validExecutions[0], has_handoff: undefined},
+  ];
+  const payload = snapshot('operations', 3);
+  payload.executions = [validExecutions[0], ...invalidExecutions, ...validExecutions.slice(1)];
   await resolveRequest(page, 0, 200, payload);
 
+  const expectedIds = ['execution-one', specialExecutionId, 'execution-three'];
   await expect(page.locator('#result-count')).toHaveText('3 execuções');
   await expect(page.locator('#execution-table-body > tr')).toHaveCount(3);
   await expect(page.locator('.execution-mobile-card')).toHaveCount(3);
   expect(await page.locator('#execution-table-body > tr').evaluateAll(rows =>
-    rows.map(row => row.dataset.executionId))).toEqual(['execution-one', 'execution-two', 'execution-three']);
+    rows.map(row => row.dataset.executionId))).toEqual(expectedIds);
   expect(await page.locator('.execution-mobile-card').evaluateAll(cards =>
-    cards.map(card => card.dataset.executionId))).toEqual(['execution-one', 'execution-two', 'execution-three']);
+    cards.map(card => card.dataset.executionId))).toEqual(expectedIds);
   await expect(page.locator('#execution-table-body .status-chip').first()).toContainText('Concluída');
   await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('future_status');
   await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('future_trace');
   await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('Nenhum registrado');
 
-  await page.fill('#lead-search', ' lead-one ');
+  await page.fill('#lead-search', ` ${specialLeadId} `);
   await expect(page.locator('#result-count')).toHaveText('1 execução');
   await expect(page.locator('#execution-table-body > tr')).toHaveCount(1);
   await expect(page.locator('.execution-mobile-card')).toHaveCount(1);
@@ -1485,14 +1515,36 @@ test('Task 4 renders factual desktop rows and mobile cards from the same exact-f
   await expect(page.locator('#result-count')).toHaveText('0 execuções');
   await expect(page.locator('#execution-table-body > tr')).toHaveCount(0);
   await expect(page.locator('.execution-mobile-card')).toHaveCount(0);
-  await page.fill('#lead-search', 'lead-one');
+  await page.fill('#lead-search', specialLeadId);
+
+  const desktopButton = page.locator('#execution-table-body > tr .row-open');
+  await desktopButton.click();
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  expect((await paths(page))[1]).toBe(`/ops/api/executions/${encodeURIComponent(specialExecutionId)}/nodes`);
+  await page.click('#drawer-close');
+  await expect(page.locator('#execution-drawer')).not.toHaveClass(/open/);
+  await expect(page.locator('#execution-table-body > tr .row-open')).toBeFocused();
+
+  await page.locator('#execution-table-body > tr .row-open').click();
+  await expect.poll(async () => (await paths(page)).length).toBe(3);
+  await page.click('#drawer-backdrop');
+  await expect(page.locator('#execution-drawer')).not.toHaveClass(/open/);
+  await expect(page.locator('#execution-table-body > tr .row-open')).toBeFocused();
 
   await page.setViewportSize({width: 390, height: 844});
   await expect(page.locator('.execution-mobile-card')).toHaveCount(1);
   await expect(page.locator('.operations-panel table')).toBeHidden();
   await page.click('.execution-mobile-card .row-open');
-  await expect.poll(async () => (await paths(page)).length).toBe(2);
-  expect((await paths(page))[1]).toBe('/ops/api/executions/execution-one/nodes');
+  await expect.poll(async () => (await paths(page)).length).toBe(4);
+  expect((await paths(page))[3]).toBe(`/ops/api/executions/${encodeURIComponent(specialExecutionId)}/nodes`);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#execution-drawer')).not.toHaveClass(/open/);
+  await expect(page.locator('.execution-mobile-card .row-open')).toBeFocused();
+
+  await page.locator('#refresh-dashboard').focus();
+  await page.evaluate(() => { openExecution('programmatic').catch(handleDashboardError); });
+  await page.evaluate(() => showOverview());
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
 });
 
 test('dashboard ignores inverted A/B ranges', async ({page}) => {

@@ -456,7 +456,15 @@ function filteredExecutions() {
     && typeof execution === "object"
     && !Array.isArray(execution)
     && typeof execution.lead_id === "string"
+    && execution.lead_id.trim() !== ""
     && typeof execution.execution_id === "string"
+    && execution.execution_id.trim() !== ""
+    && typeof execution.status === "string"
+    && typeof execution.trace_completeness === "string"
+    && typeof execution.has_reservation === "boolean"
+    && typeof execution.has_payment === "boolean"
+    && typeof execution.has_public_delivery === "boolean"
+    && typeof execution.has_handoff === "boolean"
   ));
   return executions.filter((execution) => (
     (!state.leadFilter || execution.lead_id === state.leadFilter)
@@ -823,12 +831,25 @@ async function refreshOpenExecution(executionId, epoch) {
   return true;
 }
 
-async function openExecution(executionId) {
+async function openExecution(executionId, trigger) {
   const epoch = ++state.detailEpoch;
   state.selectedExecution = executionId;
   state.nodes = [];
   state.drawerOpen = true;
-  state.detailTrigger = document.activeElement;
+  const mobileContainer = trigger && typeof trigger.closest === "function"
+    ? trigger.closest(".execution-mobile-card")
+    : null;
+  const desktopContainer = trigger && typeof trigger.closest === "function"
+    ? trigger.closest("#execution-table-body > tr")
+    : null;
+  const triggerContainer = mobileContainer || desktopContainer;
+  state.detailTrigger = triggerContainer && triggerContainer.dataset.executionId === executionId
+    ? {
+      node: trigger,
+      executionId,
+      surface: mobileContainer ? "mobile" : "desktop",
+    }
+    : null;
   $("canvas-title").textContent = executionId;
   $("drawer-title").textContent = executionId;
   clearInspector();
@@ -843,6 +864,7 @@ async function openExecution(executionId) {
 }
 
 function showOverview() {
+  const detailTrigger = state.detailTrigger;
   state.drawerOpen = false;
   $("execution-drawer").classList.remove("open");
   $("execution-drawer").setAttribute("aria-hidden", "true");
@@ -854,9 +876,19 @@ function showOverview() {
   $("status-filter").value = state.statusFilter;
   $("completeness-filter").value = state.completenessFilter;
   renderExecutionTable();
-  if (state.detailTrigger && typeof state.detailTrigger.focus === "function") {
-    state.detailTrigger.focus();
+  let focusTarget = detailTrigger && detailTrigger.node.isConnected ? detailTrigger.node : null;
+  if (!focusTarget && detailTrigger) {
+    for (const button of document.querySelectorAll(".row-open")) {
+      const container = detailTrigger.surface === "mobile"
+        ? button.closest(".execution-mobile-card")
+        : button.closest("#execution-table-body > tr");
+      if (container && container.dataset.executionId === detailTrigger.executionId) {
+        focusTarget = button;
+        break;
+      }
+    }
   }
+  if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
   state.detailTrigger = null;
 }
 
