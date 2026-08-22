@@ -133,3 +133,4 @@
 - Real-model evaluation is allowed only in a controlled sandbox with tool-free Hermes and fake/no business providers.
 - A new immutable commit/tree/OCI may be frozen only after repeated conversational qualification.
 - Promotion remains blocked until Carlos explicitly authorizes it after reviewing evidence.
+- Mockup fidelity Task 1: semantic shell and closed drawer DOM contract.

@@ -8,142 +8,120 @@
 </head>
 <body>
   <div class="app-shell">
-    <aside id="app-sidebar" class="app-sidebar">
-      <strong>Maya Ops</strong>
-      <span class="readonly">SOMENTE LEITURA</span>
-      <nav aria-label="Navegação operacional">
-        <button id="nav-overview" type="button" aria-current="page">Visão geral</button>
-        <button id="nav-execution" type="button" disabled>Execução</button>
+    <aside id="app-sidebar" class="sidebar" aria-label="Navegação principal">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"><span>M</span></span>
+        <div><strong>Maya Ops</strong><small>Operação Maya V2</small></div>
+      </div>
+      <span class="readonly-chip"><i aria-hidden="true"></i>SOMENTE LEITURA</span>
+      <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Fechar navegação">×</button>
+      <p class="nav-label">OPERAÇÃO</p>
+      <nav class="main-nav" aria-label="Navegação operacional">
+        <button id="nav-overview" class="nav-item active" type="button" aria-current="page"><span aria-hidden="true">⌂</span><span>Visão geral</span></button>
+        <button id="nav-execution" class="nav-item" type="button" disabled><span aria-hidden="true">⌘</span><span>Execuções</span></button>
       </nav>
+      <div class="sidebar-foot">
+        <div class="source-health"><i class="online-dot" aria-hidden="true"></i><div><strong id="source-health-state">Conectando</strong><small>Fonte operacional</small></div></div>
+        <p>Dados existentes · acesso read-only</p>
+      </div>
     </aside>
+    <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" hidden aria-label="Fechar navegação"></button>
+
     <main class="main-content">
       <header class="dashboard-header">
-        <div>
-          <p class="eyebrow">OPERAÇÃO MAYA V2</p>
-          <h1>Painel operacional</h1>
+        <div class="header-copy">
+          <button id="mobile-menu" class="mobile-menu" type="button" aria-label="Abrir navegação">☰</button>
+          <div><p class="eyebrow">OPERAÇÃO MAYA V2</p><h1>Painel operacional</h1><p>Execuções e traces já registrados.</p></div>
         </div>
-        <div>
-          <span id="live-state" aria-live="polite">Conectando…</span>
-          <form method="post" action="/ops/logout">
-            <input type="hidden" name="csrf" value="{{CSRF}}">
-            <button type="submit">Logout</button>
-          </form>
+        <div class="header-actions">
+          <label class="range-control"><span>Período</span><select id="range-select"><option value="24h">24 horas</option><option value="7d" selected>7 dias</option><option value="30d">30 dias</option></select></label>
+          <button id="refresh-dashboard" class="icon-button" type="button" aria-label="Atualizar painel"><span aria-hidden="true">↻</span><span>Atualizar</span></button>
+          <button id="operator-menu" class="operator-button" type="button" aria-expanded="false" aria-controls="operator-popover"><span>OP</span><div><strong>Operador</strong><small>Conta autenticada</small></div></button>
+          <div id="operator-popover" class="operator-popover" hidden>
+            <form method="post" action="/ops/logout"><input type="hidden" name="csrf" value="{{CSRF}}"><button type="submit">Sair</button></form>
+          </div>
         </div>
       </header>
 
       <section id="overview-view">
-        <div class="overview-toolbar">
-          <label>
-            Período
-            <select id="range-select">
-              <option value="24h">Últimas 24 horas</option>
-              <option value="7d" selected>Últimos 7 dias</option>
-              <option value="30d">Últimos 30 dias</option>
-            </select>
-          </label>
-          <span id="generated-at">Ainda não atualizado</span>
+        <div class="welcome-row">
+          <div><p class="eyebrow">VISÃO GERAL</p><h2>Atividade operacional</h2><p>Somente fatos persistidos no trace do V2.</p></div>
+          <div class="health-pill"><i class="online-dot" aria-hidden="true"></i><strong id="live-state" aria-live="polite">Conectando…</strong><small id="generated-at">Ainda não atualizado</small></div>
         </div>
         <section id="dashboard-alert" class="alert" hidden aria-live="polite"></section>
-        <section id="kpi-grid" class="kpi-grid" aria-label="Indicadores operacionais"></section>
-        <section class="analytics-grid">
-          <article>
-            <h2>Execuções no período</h2>
-            <div id="execution-series"></div>
+        <section id="kpi-grid" class="kpi-grid" aria-label="Indicadores operacionais" aria-live="polite"></section>
+        <section class="analytics-grid" aria-label="Indicadores analíticos">
+          <article class="analytics-panel volume-panel">
+            <div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h2>Execuções no período</h2></div><span class="panel-meta">Baldes UTC</span></div>
+            <div id="execution-series" class="volume-chart"></div>
           </article>
-          <article>
-            <h2>Estados atuais</h2>
+          <article class="analytics-panel">
+            <div class="panel-heading"><div><p class="eyebrow">ESTADO</p><h2>Estados atuais</h2></div></div>
             <div id="status-distribution"></div>
           </article>
-          <article>
-            <h2>Completude do trace</h2>
+          <article class="analytics-panel">
+            <div class="panel-heading"><div><p class="eyebrow">TRACE</p><h2>Completude do trace</h2></div></div>
             <div id="trace-distribution"></div>
           </article>
-          <article>
-            <h2>Marcos registrados</h2>
+          <article class="analytics-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MARCOS</p><h2>Marcos registrados</h2></div><span class="panel-meta">Categorias sobrepostas</span></div>
             <div id="milestones-chart"></div>
           </article>
-          <article>
-            <h2>Nós registrados</h2>
+          <article class="analytics-panel wide">
+            <div class="panel-heading"><div><p class="eyebrow">NÓS</p><h2>Nós registrados</h2></div></div>
             <div id="top-node-types"></div>
           </article>
         </section>
-        <section class="operations-panel">
-          <div class="table-toolbar">
-            <label>Lead ID <input id="lead-search" autocomplete="off"></label>
-            <label>Estado <select id="status-filter"><option value="">Todos</option></select></label>
-            <label>Completude <select id="completeness-filter"><option value="">Todas</option></select></label>
+
+        <section class="operations-panel" aria-labelledby="operations-title">
+          <div class="operations-head">
+            <div><p class="eyebrow">OPERAÇÕES</p><h2 id="operations-title">Execuções recentes</h2><p>Registros do período selecionado.</p></div>
+            <span class="live-badge"><i class="pulse-dot" aria-hidden="true"></i>Atualização ao vivo</span>
           </div>
-          <div id="empty-state" hidden>Nenhuma execução registrada neste período.</div>
-          <table>
-            <caption>Execuções operacionais no período selecionado</caption>
-            <thead>
-              <tr>
-                <th scope="col">Lead</th>
-                <th scope="col">Execução</th>
-                <th scope="col">Recebida</th>
-                <th scope="col">Duração</th>
-                <th scope="col">Estado</th>
-                <th scope="col">Trace</th>
-                <th scope="col">Nó atual</th>
-                <th scope="col">Nós</th>
-                <th scope="col">Marcos</th>
-                <th scope="col">Motivo terminal</th>
-              </tr>
-            </thead>
-            <tbody id="execution-table-body"></tbody>
-          </table>
+          <div class="table-toolbar">
+            <label class="search-box"><span aria-hidden="true">⌕</span><input id="lead-search" type="text" autocomplete="off" aria-label="Buscar Lead ID"></label>
+            <label>Estado<select id="status-filter"><option value="">Todos</option></select></label>
+            <label>Completude<select id="completeness-filter"><option value="">Todas</option></select></label>
+            <span id="result-count" class="result-count">0 execuções</span>
+          </div>
+          <div id="empty-state" class="empty-state" hidden>Nenhuma execução registrada neste período.</div>
+          <div class="table-wrap">
+            <table>
+              <caption>Execuções operacionais no período selecionado</caption>
+              <thead><tr><th scope="col">Lead</th><th scope="col">Execução</th><th scope="col">Recebida</th><th scope="col">Duração</th><th scope="col">Estado</th><th scope="col">Trace</th><th scope="col">Nó atual</th><th scope="col">Nós</th><th scope="col">Marcos</th><th scope="col">Motivo terminal</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead>
+              <tbody id="execution-table-body"></tbody>
+            </table>
+          </div>
           <div id="execution-mobile-list" class="execution-mobile-list"></div>
         </section>
       </section>
+    </main>
 
-      <section id="execution-view" hidden>
-        <button id="back-to-overview" type="button">Voltar à visão geral</button>
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside class="execution-drawer" aria-hidden="true" id="execution-drawer" aria-labelledby="drawer-title">
+      <header class="drawer-header">
+        <div><p class="eyebrow">EXECUÇÃO</p><h2 id="drawer-title">Execução</h2><p id="drawer-lead">Não registrado</p></div>
+        <button id="drawer-close" type="button" aria-label="Fechar detalhes da execução">×</button>
+      </header>
+      <div class="drawer-content">
+        <div class="drawer-status"><span id="drawer-status" class="status-chip">Não registrado</span><span id="drawer-trace" class="status-chip">Não registrado</span></div>
+        <div id="drawer-summary" class="fact-grid"></div>
         <div class="execution-detail">
           <section class="canvas-shell">
-            <div class="canvas-toolbar">
-              <strong id="canvas-title">Execução</strong>
-              <div>
-                <button id="zoom-out" type="button" aria-label="Reduzir zoom">−</button>
-                <button id="zoom-in" type="button" aria-label="Aumentar zoom">+</button>
-                <button id="fit-canvas" type="button">Fit</button>
-              </div>
-            </div>
-            <div id="execution-canvas" class="execution-canvas" tabindex="0" role="region" aria-label="Canvas da execução">
-              <svg id="edges" aria-hidden="true"></svg>
-              <div id="nodes" class="nodes"></div>
-            </div>
+            <div class="canvas-toolbar"><strong id="canvas-title">Execução</strong><div><button id="zoom-out" type="button" aria-label="Reduzir zoom">−</button><button id="zoom-in" type="button" aria-label="Aumentar zoom">+</button><button id="fit-canvas" type="button">Fit</button></div></div>
+            <div id="execution-canvas" class="execution-canvas" tabindex="0" role="region" aria-label="Canvas da execução"><svg id="edges" aria-hidden="true"></svg><div id="nodes" class="nodes"></div></div>
           </section>
           <aside class="inspector">
             <p class="eyebrow">INSPETOR</p>
             <h2 id="node-title">Nenhum nó selecionado</h2>
-            <section id="input-panel" class="io-panel">
-              <div class="panel-head">
-                <strong>Input</strong>
-                <button id="load-full-input" type="button" hidden>Carregar permitido</button>
-              </div>
-              <pre id="input-summary">{}</pre>
-              <pre id="input-full" hidden></pre>
-            </section>
-            <section id="output-panel" class="io-panel">
-              <div class="panel-head">
-                <strong>Output</strong>
-                <button id="load-full-output" type="button" hidden>Carregar permitido</button>
-              </div>
-              <pre id="output-summary">{}</pre>
-              <pre id="output-full" hidden></pre>
-            </section>
-            <details>
-              <summary>Metadados técnicos</summary>
-              <pre id="metadata">{}</pre>
-            </details>
-            <details>
-              <summary>Erro sanitizado</summary>
-              <pre id="node-error">null</pre>
-            </details>
+            <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" type="button" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>
+            <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" type="button" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>
+            <details><summary>Metadados técnicos</summary><pre id="metadata">{}</pre></details>
+            <details><summary>Erro sanitizado</summary><pre id="node-error">null</pre></details>
           </aside>
         </div>
-      </section>
-    </main>
+      </div>
+    </aside>
   </div>
   <script src="/ops/static/ops.js" defer></script>
 </body>

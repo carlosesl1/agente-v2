@@ -14,55 +14,34 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1] / "v2_ops" / "static"
 VOID_ELEMENTS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 EXPECTED_IDS = {
-    "app-sidebar",
-    "back-to-overview",
-    "canvas-title",
-    "completeness-filter",
-    "dashboard-alert",
-    "edges",
-    "empty-state",
-    "execution-canvas",
-    "execution-mobile-list",
-    "execution-series",
-    "execution-table-body",
-    "execution-view",
-    "fit-canvas",
-    "generated-at",
-    "input-full",
-    "input-panel",
-    "input-summary",
-    "kpi-grid",
-    "lead-search",
-    "live-state",
-    "load-full-input",
-    "load-full-output",
-    "metadata",
-    "milestones-chart",
-    "nav-execution",
-    "nav-overview",
-    "node-error",
-    "node-title",
-    "nodes",
-    "output-full",
-    "output-panel",
-    "output-summary",
-    "overview-view",
-    "range-select",
-    "status-distribution",
-    "status-filter",
-    "top-node-types",
-    "trace-distribution",
-    "zoom-in",
-    "zoom-out",
+    "app-sidebar", "sidebar-backdrop", "mobile-menu", "sidebar-close",
+    "nav-overview", "nav-execution", "live-state", "source-health-state",
+    "generated-at", "range-select", "refresh-dashboard", "operator-menu",
+    "operator-popover", "dashboard-alert", "overview-view", "kpi-grid",
+    "execution-series", "status-distribution", "trace-distribution",
+    "milestones-chart", "top-node-types", "lead-search", "status-filter",
+    "completeness-filter", "result-count", "operations-title", "empty-state",
+    "execution-table-body", "execution-mobile-list", "drawer-backdrop",
+    "execution-drawer", "drawer-close", "drawer-title", "drawer-lead",
+    "drawer-status", "drawer-trace", "drawer-summary", "canvas-title",
+    "execution-canvas", "edges", "nodes", "fit-canvas", "zoom-in",
+    "zoom-out", "node-title", "input-panel", "input-summary", "input-full",
+    "load-full-input", "output-panel", "output-summary", "output-full",
+    "load-full-output", "metadata", "node-error",
 }
 EXPECTED_CONTROLS = (
     ("button", None, "submit"),
-    ("button", "back-to-overview", "button"),
+    ("button", "drawer-close", "button"),
     ("button", "fit-canvas", "button"),
     ("button", "load-full-input", "button"),
     ("button", "load-full-output", "button"),
+    ("button", "mobile-menu", "button"),
     ("button", "nav-execution", "button"),
     ("button", "nav-overview", "button"),
+    ("button", "operator-menu", "button"),
+    ("button", "refresh-dashboard", "button"),
+    ("button", "sidebar-close", "button"),
+    ("button", "sidebar-backdrop", "button"),
     ("button", "zoom-in", "button"),
     ("button", "zoom-out", "button"),
     ("input", None, "hidden"),
@@ -164,6 +143,16 @@ def control_type(element: Element) -> str | None:
 def assert_dashboard_dom_contract(html: str) -> None:
     root = parse_html(html)
     by_id = elements_by_id(root)
+    controls = [
+        element
+        for element in root.descendants()
+        if element.tag in {"button", "input", "select"}
+    ]
+    control_contract = Counter(
+        (element.tag, element.attrs.get("id"), control_type(element))
+        for element in controls
+    )
+    assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected control tag/id/type"
     assert set(by_id) == EXPECTED_IDS
     for element in by_id.values():
         parent = element.parent
@@ -172,25 +161,21 @@ def assert_dashboard_dom_contract(html: str) -> None:
             parent = parent.parent
 
     overview = by_id["overview-view"]
-    execution = by_id["execution-view"]
-    assert overview.parent is execution.parent
-    assert overview.parent is not None and overview.parent.tag == "main"
-    assert overview.parent.children.index(overview) < overview.parent.children.index(execution)
-    assert "hidden" not in overview.attrs
-    assert "hidden" in execution.attrs
-
+    drawer = by_id["execution-drawer"]
     canvas = by_id["execution-canvas"]
-    inspector = next(element for element in root.descendants("aside") if "inspector" in (element.attrs.get("class") or "").split())
-    assert is_descendant(canvas, execution), "canvas must descend from execution-view"
-    assert is_descendant(inspector, execution), "inspector must descend from execution-view"
+    assert overview.parent is not None and overview.parent.tag == "main"
+    assert drawer.tag == "aside"
+    assert drawer.attrs.get("aria-hidden") == "true", "drawer must start closed"
+    assert "open" not in (drawer.attrs.get("class") or "").split(), "drawer must start closed"
+    assert is_descendant(canvas, drawer)
+    assert is_descendant(by_id["input-panel"], drawer)
+    assert is_descendant(by_id["output-panel"], drawer)
+    assert "hidden" in by_id["drawer-backdrop"].attrs
 
     input_panel = by_id["input-panel"]
     output_panel = by_id["output-panel"]
-    assert input_panel.parent is output_panel.parent
     assert "hidden" not in input_panel.attrs, "hidden Input"
     assert "hidden" not in output_panel.attrs, "hidden Output"
-    assert is_descendant(input_panel, inspector)
-    assert is_descendant(output_panel, inspector)
 
     controls = [element for element in root.descendants() if element.tag in {"button", "input", "select"}]
     control_contract = Counter(
@@ -223,7 +208,7 @@ def assert_dashboard_dom_contract(html: str) -> None:
     ]
     assert len(submit_controls) == 1
     assert submit_controls[0].parent is logout_form
-    assert submit_controls[0].text().strip() == "Logout"
+    assert submit_controls[0].text().strip() == "Sair"
     assert set(map(id, anonymous_controls)) == {id(csrf[0]), id(submit_controls[0])}
     assert not [element for element in controls if "formaction" in element.attrs]
 
@@ -247,41 +232,29 @@ def test_dashboard_shell_dom_contract() -> None:
     (
         (
             lambda html: html.replace(
-                '<section id="input-panel" class="io-panel">',
-                '<section class="io-panel" hidden id="input-panel">',
+                'aria-hidden="true" id="execution-drawer"',
+                'aria-hidden="false" id="execution-drawer"',
             ),
-            "hidden Input",
+            "drawer must start closed",
         ),
         (
             lambda html: html.replace(
-                '          <aside class="inspector">',
-                '        </div>\n      </section>\n      <aside class="inspector">',
+                '<div id="drawer-summary"',
+                '<button id="retry-execution" type="button">Retry</button><div id="drawer-summary"',
+            ),
+            "unexpected control tag/id/type",
+        ),
+        (
+            lambda html: html.replace(
+                '    <aside class="execution-drawer" aria-hidden="true" id="execution-drawer"',
+                '    <template><aside class="execution-drawer" aria-hidden="true" id="execution-drawer"',
                 1,
             ).replace(
-                '          </aside>\n        </div>\n      </section>',
-                '      </aside>',
+                '    </aside>\n  </div>\n  <script',
+                '    </aside></template>\n  </div>\n  <script',
                 1,
             ),
-            "inspector must descend from execution-view",
-        ),
-        (
-            lambda html: html.replace('id="generated-at"', 'id="range-select"'),
-            "duplicate id",
-        ),
-        (
-            lambda html: html.replace(
-                '      <section id="overview-view">',
-                '      <button type="submit">Excluir</button>\n      <section id="overview-view">',
-            ),
-            "unexpected control tag/id/type",
-        ),
-        (
-            lambda html: html.replace(
-                '<input id="lead-search" autocomplete="off">',
-                '<input id="lead-search" type="submit" autocomplete="off">',
-                1,
-            ),
-            "unexpected control tag/id/type",
+            "is inert",
         ),
     ),
 )
