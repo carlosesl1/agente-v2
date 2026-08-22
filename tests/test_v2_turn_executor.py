@@ -312,7 +312,7 @@ def test_critical_outcome_is_separate_from_material_state_facts() -> None:
     assert _state_model_facts(projection) == ()
 
 
-def test_phone_locale_authority_removes_a_stale_model_language_fact() -> None:
+def test_phone_locale_does_not_replace_confirmed_conversation_language() -> None:
     projection = ConversationProjection(
         stage=ConversationStage.RECEPTIONIST,
         desired_services=(),
@@ -326,8 +326,23 @@ def test_phone_locale_authority_removes_a_stale_model_language_fact() -> None:
 
     authoritative = _authoritative_phone_locale_projection(projection, "en")
 
-    assert authoritative.locale == "en"
-    assert tuple(fact.name for fact in authoritative.facts) == ("service",)
+    assert authoritative.locale == "pt-BR"
+    assert tuple(fact.name for fact in authoritative.facts) == ("language", "service")
+
+
+def test_phone_locale_is_used_only_when_conversation_has_no_language_fact() -> None:
+    projection = ConversationProjection(
+        stage=ConversationStage.RECEPTIONIST,
+        desired_services=(),
+        locale="pt-BR",
+        facts=(TypedFact("service", StringSlot("hostel"), "e" * 64),),
+        reservation_execution_projection=None,
+    )
+
+    fallback = _authoritative_phone_locale_projection(projection, "en")
+
+    assert fallback.locale == "en"
+    assert tuple(fact.name for fact in fallback.facts) == ("service",)
 
 
 def test_proposal_locale_normalizes_closed_model_language_aliases() -> None:
@@ -4364,6 +4379,28 @@ def test_non_authorizing_confirmation_review_commits_zero_effect_rows(
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_command_relays"
         ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+def test_foreign_phone_fallback_cannot_hide_pending_confirmation() -> None:
+    store, _model, _read_port, _second_batch, _executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=5),
+        confirmation_clock=FixedClock(),
+    )
+    try:
+        current = store.load_state(BATCH.lead_id)
+        projection = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert projection is not None
+
+        projected = _authoritative_phone_locale_projection(projection, "en")
+        pending = _enabled_reducer(
+            approval_ttl=timedelta(minutes=5)
+        ).pending_action(current.state.workflow, locale=projected.locale)
+
+        assert projected.locale == "pt-BR"
+        assert pending is not None
+        assert pending.summary_version == 1
     finally:
         store.close()
 

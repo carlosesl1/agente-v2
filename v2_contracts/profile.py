@@ -47,6 +47,7 @@ class PrivateCustomerBinding:
     observed_at: datetime
     expires_at: datetime
     complete: bool
+    gender: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.binding_id, "binding_id")
@@ -56,6 +57,7 @@ class PrivateCustomerBinding:
         email = _optional_text(self.email, "email")
         phone = _optional_text(self.phone_e164, "phone_e164")
         country = _optional_text(self.country_code, "country_code")
+        gender = _optional_text(self.gender, "gender")
         if email is not None and (
             email.count("@") != 1
             or any(char.isspace() for char in email)
@@ -66,6 +68,8 @@ class PrivateCustomerBinding:
             raise ValueError("phone_e164 must be canonical E.164")
         if country is not None and _COUNTRY_RE.fullmatch(country) is None:
             raise ValueError("country_code must be ISO alpha-2 uppercase")
+        if gender is not None and gender not in {"m", "f"}:
+            raise ValueError("gender must be m, f or None")
         observed = _utc(self.observed_at, "observed_at")
         expires = _utc(self.expires_at, "expires_at")
         if expires <= observed:

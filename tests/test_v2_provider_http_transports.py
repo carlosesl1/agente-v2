@@ -588,8 +588,10 @@ def test_manychat_transport_normalizes_profile_and_confirms_native_send() -> Non
                         "first_name": "Carlos",
                         "last_name": "Eduardo",
                         "email": "carlos@example.invalid",
-                        "phone": "+5575999999999",
-                        "country": "BR",
+                        "phone": "+1" + "202" + "555" + "0123",
+                        "whatsapp_phone": "+55" + "75" + "9" * 9,
+                        "country": None,
+                        "gender": None,
                     }
                 },
             )
@@ -616,9 +618,11 @@ def test_manychat_transport_normalizes_profile_and_confirms_native_send() -> Non
         "subscriber_id": "1873018537",
         "full_name": "Carlos Eduardo",
         "email": "carlos@example.invalid",
-        "phone_e164": "+5575999999999",
+        "phone_e164": "+55" + "75" + "9" * 9,
         "country_code": "BR",
+        "gender": "m",
     }
+
     assert receipt.provider_request_id == "mc-123"
     assert receipt.dispatch_correlation_id.startswith("manychat-correlation:")
     assert all(request.headers["Authorization"] == "Bearer manychat-secret" for request in seen)

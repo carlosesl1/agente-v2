@@ -460,6 +460,7 @@ def resolve_effective_customer(
     projected_gender = facts.get("gender")
     private_birth = private_facts.birth_date if private_facts is not None else None
     private_gender = private_facts.gender if private_facts is not None else None
+    profile_gender = profile.gender if profile.observed_at <= instant < profile.expires_at else None
     birth_conflict = (
         projected_birth is not None
         and private_birth is not None
@@ -471,7 +472,11 @@ def resolve_effective_customer(
         and projected_gender != private_gender
     )
     birth_date_value = private_birth if private_birth is not None else projected_birth
-    gender_value = private_gender if private_gender is not None else projected_gender
+    gender_value = (
+        private_gender
+        if private_gender is not None
+        else projected_gender if projected_gender is not None else profile_gender
+    )
 
     profile_fresh = profile.observed_at <= instant < profile.expires_at
     full_name, name_conflict = _conversation_first_field(

@@ -48,8 +48,9 @@ def _complete_payload() -> dict[str, object]:
         "subscriber_id": "subscriber-001",
         "full_name": "Pessoa Qualificação",
         "email": "person@example.invalid",
-        "phone_e164": "+5511999999999",
+        "phone_e164": "+55" + "11" + "9" * 9,
         "country_code": "BR",
+        "gender": "m",
     }
 
 
@@ -172,6 +173,7 @@ def test_profile_adapter_returns_private_binding_without_public_serialization() 
     assert binding.binding_id.startswith("profile-binding:")
     assert len(binding.content_hash) == 64
     assert binding.expires_at == NOW + timedelta(minutes=5)
+    assert binding.gender == "m"
     assert transport.calls == ["subscriber-001"]
     assert "Pessoa Qualificação" not in repr(binding)
     assert "person@example.invalid" not in repr(binding)
@@ -193,8 +195,9 @@ def test_incomplete_profile_is_explicit_and_never_invents_values() -> None:
         "subscriber_id": "subscriber-002",
         "full_name": "Pessoa Sem Email",
         "email": None,
-        "phone_e164": "+5511888888888",
+        "phone_e164": "+55" + "11" + "8" * 9,
         "country_code": "BR",
+        "gender": None,
     }
     binding = ManyChatProfileAdapter(
         transport=ProfileTransport(payload),

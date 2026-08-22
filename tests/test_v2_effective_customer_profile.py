@@ -35,6 +35,7 @@ def _profile(
     email: str | None = None,
     phone: str | None = PHONE,
     country: str | None = None,
+    gender: str | None = None,
 ) -> PrivateCustomerBinding:
     values = (full_name, email, phone, country)
     return PrivateCustomerBinding(
@@ -47,6 +48,7 @@ def _profile(
         observed_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=5),
         complete=all(value is not None for value in values),
+        gender=gender,
     )
 
 
@@ -105,6 +107,28 @@ def test_phone_only_manychat_plus_private_fallback_resolves_exact_customer(
     for value in (NAME, EMAIL, PHONE, COUNTRY):
         assert value not in repr(resolution)
         assert value not in repr(resolution.customer)
+
+
+def test_profile_gender_completes_single_activity_passenger_without_question(
+    tmp_path: Path,
+) -> None:
+    from reservation_domain import Party
+
+    private = _private_snapshot(
+        tmp_path,
+        ModelFact("birth_date", datetime(2000, 10, 18).date()),
+    )
+    resolution = resolve_effective_customer(
+        _profile(full_name="Carlos Eduardo", email=EMAIL, country="BR", gender="m"),
+        _projection(),
+        NOW,
+        private_facts=private,
+        activity_party=Party(adults=1, children=0),
+    )
+
+    assert resolution.ready is True
+    assert resolution.customer is not None
+    assert resolution.customer.gender == "m"
 
 
 def test_one_word_manychat_name_uses_private_full_name_fallback(tmp_path: Path) -> None:

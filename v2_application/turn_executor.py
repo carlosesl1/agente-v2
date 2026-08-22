@@ -669,6 +669,8 @@ def _private_customer_fact_names(
                 except (TypeError, ValueError):
                     continue
                 present.add(name)
+            if profile.gender in {"m", "f"}:
+                present.add("gender")
             if profile.phone_e164 is not None:
                 present.add("phone_e164")
     return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
@@ -765,8 +767,10 @@ def _authoritative_phone_locale_projection(
     language_facts = tuple(
         fact for fact in projection.facts if fact.name == "language"
     )
-    if len(language_facts) == 1 and language_facts[0].value.value == locale:
-        return replace(projection, locale=locale)
+    if len(language_facts) == 1:
+        confirmed_locale = language_facts[0].value.value
+        if confirmed_locale in {"pt-BR", "en"}:
+            return replace(projection, locale=confirmed_locale)
     return replace(
         projection,
         locale=locale,

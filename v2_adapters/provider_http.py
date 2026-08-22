@@ -17,8 +17,8 @@ import hmac
 import json
 import logging
 import re
-from pathlib import Path
 import unicodedata
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
@@ -3116,6 +3116,59 @@ class BokunHTTPTransport:
         return _currency(value or meta.get("currency") or "BRL")
 
 
+_MANYCHAT_MALE_FIRST_NAMES = frozenset(
+    {
+        "carlos", "eduardo", "joao", "jose", "lucas", "marcos", "mateus",
+        "matheus", "paulo", "pedro", "rafael", "ricardo", "roberto", "thiago",
+    }
+)
+_MANYCHAT_FEMALE_FIRST_NAMES = frozenset(
+    {
+        "ana", "beatriz", "camila", "carla", "fernanda", "gabriela", "julia",
+        "juliana", "larissa", "leticia", "luciana", "mariana", "patricia", "renata",
+    }
+)
+
+
+def _manychat_country_from_phone(phone: object) -> str | None:
+    if type(phone) is not str:
+        return None
+    for prefix, country in (
+        ("+55", "BR"),
+        ("+351", "PT"),
+        ("+44", "GB"),
+        ("+34", "ES"),
+        ("+33", "FR"),
+        ("+49", "DE"),
+        ("+39", "IT"),
+    ):
+        if phone.startswith(prefix):
+            return country
+    return None
+
+
+def _manychat_gender(value: object, full_name: str | None) -> str | None:
+    if type(value) is str:
+        normalized = value.strip().casefold()
+        if normalized in {"m", "male", "masculino"}:
+            return "m"
+        if normalized in {"f", "female", "feminino"}:
+            return "f"
+    if not full_name:
+        return None
+    first = full_name.split(maxsplit=1)[0].casefold()
+    first = "".join(
+        char
+        for char in unicodedata.normalize("NFKD", first)
+        if not unicodedata.combining(char)
+    )
+    if first in _MANYCHAT_MALE_FIRST_NAMES:
+        return "m"
+    if first in _MANYCHAT_FEMALE_FIRST_NAMES:
+        return "f"
+    return None
+
+
 class ManyChatHTTPTransport:
     """Read subscriber profiles and, only behind the outer gate, send text."""
 
@@ -3163,12 +3216,17 @@ class ManyChatHTTPTransport:
         first_name = _first(data, "first_name") or ""
         last_name = _first(data, "last_name") or ""
         full_name = " ".join(part for part in (first_name, last_name) if part) or None
+        phone = _first(data, "whatsapp_phone", "phone", "phone_e164")
+        country = (_first(data, "country", "country_code") or "").upper() or None
+        if country is None:
+            country = _manychat_country_from_phone(phone)
         return {
             "subscriber_id": subscriber_id,
             "full_name": full_name,
             "email": _first(data, "email"),
-            "phone_e164": _first(data, "phone", "phone_e164"),
-            "country_code": (_first(data, "country", "country_code") or "").upper() or None,
+            "phone_e164": phone,
+            "country_code": country,
+            "gender": _manychat_gender(data.get("gender"), full_name),
         }
 
     def send_text(

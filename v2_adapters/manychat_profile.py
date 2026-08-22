@@ -15,7 +15,7 @@ _E164_RE = re.compile(r"^\+[1-9][0-9]{7,14}$")
 _DIGITS_RE = re.compile(r"^[0-9]{8,15}$")
 _BR_LOCAL_RE = re.compile(r"^[1-9][1-9](?:9[0-9]{8}|[2-5][0-9]{7})$")
 _EXPECTED_FIELDS = frozenset(
-    ("subscriber_id", "full_name", "email", "phone_e164", "country_code")
+    ("subscriber_id", "full_name", "email", "phone_e164", "country_code", "gender")
 )
 
 
@@ -98,6 +98,7 @@ class ManyChatProfileAdapter:
                 country_code,
             ),
             "country_code": country_code,
+            "gender": _private_value(raw["gender"], "gender"),
         }
         canonical = json.dumps(
             {"subscriber_id": subscriber_id, **values},
@@ -115,7 +116,10 @@ class ManyChatProfileAdapter:
             + b"\0"
             + content_hash.encode("ascii")
         ).hexdigest()
-        complete = all(value is not None for value in values.values())
+        complete = all(
+            values[name] is not None
+            for name in ("full_name", "email", "phone_e164", "country_code")
+        )
         try:
             return PrivateCustomerBinding(
                 binding_id=f"profile-binding:{binding_hash}",
@@ -127,6 +131,7 @@ class ManyChatProfileAdapter:
                 observed_at=observed_at,
                 expires_at=observed_at + self._ttl,
                 complete=complete,
+                gender=values["gender"],
             )
         except (TypeError, ValueError) as exc:
             raise ManyChatProfilePayloadError("profile values failed validation") from exc
