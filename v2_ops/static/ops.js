@@ -34,6 +34,25 @@ const KPI_DEFINITIONS = [
   ["average_terminal_duration_ms", "Duração média terminal", "◷", "Apenas execuções terminais", "neutral"],
 ];
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const STATUS_PRESENTATION = Object.freeze({
+  pending: ["Pendente", "var(--warning-500)"],
+  running: ["Em execução", "var(--info-500)"],
+  running_stale: ["Execução atrasada", "var(--danger-600)"],
+  completed: ["Concluída", "var(--success-500)"],
+  failed: ["Falha", "var(--danger-600)"],
+  manual_review: ["Revisão manual", "var(--coral-500)"],
+});
+const TRACE_PRESENTATION = Object.freeze({
+  complete_trace: "Trace completo",
+  partial_trace: "Trace parcial",
+  ledger_only: "Somente ledger",
+});
+const MILESTONE_PRESENTATION = Object.freeze({
+  reservation: "Reserva",
+  payment: "Pagamento",
+  public_delivery: "Entrega pública",
+  handoff: "Handoff",
+});
 const $ = (id) => document.getElementById(id);
 const mobileNavigationMedia = window.matchMedia("(max-width: 720px)");
 
@@ -203,37 +222,67 @@ function renderKpis() {
 function renderExecutionSeries() {
   const root = $("execution-series");
   const points = state.snapshot ? state.snapshot.execution_series : [];
-  if (!points.length || points.every((point) => Number(point.count) === 0)) {
+  if (!points.length) {
     emptyMessage(root, "Nenhuma execução registrada.");
     return;
   }
   const width = 640;
   const height = 220;
-  const padding = 28;
+  const padding = 32;
   const maximum = Math.max(1, ...points.map((point) => Math.max(0, Number(point.count) || 0)));
   const svg = document.createElementNS(SVG_NAMESPACE, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Série de execuções no período");
-  const polyline = document.createElementNS(SVG_NAMESPACE, "polyline");
+  svg.setAttribute("aria-label", "Execuções registradas ao longo do período");
+  const grid = document.createElementNS(SVG_NAMESPACE, "g");
+  grid.setAttribute("class", "chart-grid");
+  for (let index = 0; index <= 4; index += 1) {
+    const y = padding + (index / 4) * (height - padding * 2);
+    const gridLine = document.createElementNS(SVG_NAMESPACE, "line");
+    gridLine.setAttribute("x1", String(padding));
+    gridLine.setAttribute("x2", String(width - padding));
+    gridLine.setAttribute("y1", y.toFixed(2));
+    gridLine.setAttribute("y2", y.toFixed(2));
+    grid.append(gridLine);
+  }
+  const area = document.createElementNS(SVG_NAMESPACE, "path");
+  area.setAttribute("class", "chart-area");
+  const line = document.createElementNS(SVG_NAMESPACE, "polyline");
+  line.setAttribute("class", "chart-line");
+  const markers = [];
   const coordinates = points.map((point, index) => {
     const denominator = Math.max(1, points.length - 1);
     const x = padding + (index / denominator) * (width - padding * 2);
     const count = Math.max(0, Number(point.count) || 0);
     const y = height - padding - (count / maximum) * (height - padding * 2);
     const marker = document.createElementNS(SVG_NAMESPACE, "circle");
+    marker.setAttribute("class", "chart-point");
     marker.setAttribute("cx", x.toFixed(2));
     marker.setAttribute("cy", y.toFixed(2));
     marker.setAttribute("r", "4");
     const title = document.createElementNS(SVG_NAMESPACE, "title");
     title.textContent = `${formatTimestamp(point.start_at)}: ${count}`;
     marker.append(title);
-    svg.append(marker);
+    markers.push(marker);
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   });
-  polyline.setAttribute("points", coordinates.join(" "));
-  polyline.setAttribute("fill", "none");
-  svg.prepend(polyline);
+  line.setAttribute("points", coordinates.join(" "));
+  const baseline = height - padding;
+  area.setAttribute(
+    "d",
+    `M ${padding} ${baseline} L ${coordinates.join(" L ")} L ${width - padding} ${baseline} Z`,
+  );
+  const maximumLabel = document.createElementNS(SVG_NAMESPACE, "text");
+  maximumLabel.setAttribute("class", "chart-axis-label");
+  maximumLabel.setAttribute("x", "4");
+  maximumLabel.setAttribute("y", String(padding + 4));
+  maximumLabel.textContent = String(maximum);
+  const zeroLabel = document.createElementNS(SVG_NAMESPACE, "text");
+  zeroLabel.setAttribute("class", "chart-axis-label");
+  zeroLabel.setAttribute("x", "18");
+  zeroLabel.setAttribute("y", String(baseline + 4));
+  zeroLabel.textContent = "0";
+  svg.replaceChildren(grid, area, line, ...markers, maximumLabel, zeroLabel);
   root.replaceChildren(svg);
 }
 
@@ -256,27 +305,95 @@ function labeledBar(label, count, maximum, suffix) {
   return row;
 }
 
-function renderDistribution(rootId, items, key) {
-  const root = $(rootId);
-  if (!items.length || items.every((item) => Number(item.count) === 0)) {
+function renderStatusDistribution() {
+  const root = $("status-distribution");
+  const items = state.snapshot ? state.snapshot.status_distribution : [];
+  if (!items.length) {
     emptyMessage(root, "Nenhum registro no período.");
     return;
   }
+  const normalized = items.map((item) => ({
+    key: String(item.status),
+    count: Math.max(0, Number(item.count) || 0),
+  }));
+  const total = normalized.reduce((sum, item) => sum + item.count, 0);
+  if (total === 0) {
+    emptyMessage(root, "Nenhum registro no período.");
+    return;
+  }
+  const donut = document.createElement("div");
+  donut.className = "donut";
+  donut.setAttribute("role", "img");
+  donut.setAttribute("aria-label", `${total} execuções distribuídas por estado`);
+  let offset = 0;
+  const segments = normalized.map((item) => {
+    const presentation = STATUS_PRESENTATION[item.key];
+    const start = offset;
+    offset += (item.count / total) * 100;
+    return `${presentation[1]} ${start.toFixed(2)}% ${offset.toFixed(2)}%`;
+  });
+  donut.style.setProperty("--donut-segments", segments.join(", "));
+  const center = document.createElement("strong");
+  center.className = "donut-center";
+  center.textContent = String(total);
+  const centerLabel = document.createElement("span");
+  centerLabel.textContent = "execuções";
+  donut.append(center, centerLabel);
+  const legend = document.createElement("div");
+  legend.className = "chart-legend";
+  for (const item of normalized) {
+    const presentation = STATUS_PRESENTATION[item.key];
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    const swatch = document.createElement("i");
+    swatch.style.setProperty("--legend-color", presentation[1]);
+    swatch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = presentation[0];
+    const count = document.createElement("strong");
+    count.textContent = String(item.count);
+    row.append(swatch, label, count);
+    legend.append(row);
+  }
+  root.replaceChildren(donut, legend);
+}
+
+function renderTraceDistribution() {
+  const root = $("trace-distribution");
+  const items = state.snapshot ? state.snapshot.trace_distribution : [];
+  if (!items.length) {
+    emptyMessage(root, "Nenhum registro de trace no período.");
+    return;
+  }
   const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
-  root.replaceChildren(...items.map((item) => labeledBar(displayValue(item[key]), item.count, maximum, "")));
+  const chart = document.createElement("div");
+  chart.className = "bar-chart trace-bars";
+  chart.replaceChildren(...items.map((item) => labeledBar(
+    TRACE_PRESENTATION[item.trace_completeness],
+    Math.max(0, Number(item.count) || 0),
+    maximum,
+    "",
+  )));
+  root.replaceChildren(chart);
 }
 
 function renderMilestones() {
   const root = $("milestones-chart");
   const items = state.snapshot ? state.snapshot.milestones : [];
-  if (!items.length || items.every((item) => Number(item.count) === 0)) {
+  if (!items.length) {
     emptyMessage(root, "Nenhum marco registrado.");
     return;
   }
   const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
-  root.replaceChildren(
-    ...items.map((item) => labeledBar(displayValue(item.milestone), item.count, maximum, "execuções com marco")),
-  );
+  const chart = document.createElement("div");
+  chart.className = "bar-chart milestone-bars";
+  chart.replaceChildren(...items.map((item) => labeledBar(
+    MILESTONE_PRESENTATION[item.milestone],
+    Math.max(0, Number(item.count) || 0),
+    maximum,
+    "execuções com marco",
+  )));
+  root.replaceChildren(chart);
 }
 
 function renderTopNodeTypes() {
@@ -287,9 +404,15 @@ function renderTopNodeTypes() {
     return;
   }
   const maximum = Math.max(1, ...items.map((item) => Math.max(0, Number(item.count) || 0)));
-  root.replaceChildren(
-    ...items.map((item, index) => labeledBar(`${index + 1}. ${displayValue(item.node_type)}`, item.count, maximum, "")),
-  );
+  const ranking = document.createElement("div");
+  ranking.className = "bar-chart node-ranking";
+  ranking.replaceChildren(...items.map((item, index) => labeledBar(
+    `${index + 1}. ${displayValue(item.node_type).replaceAll("_", " ")}`,
+    Math.max(0, Number(item.count) || 0),
+    maximum,
+    "",
+  )));
+  root.replaceChildren(ranking);
 }
 
 function filteredExecutions() {
@@ -400,8 +523,8 @@ function renderDashboard() {
   $("generated-at").textContent = `Atualizado em ${formatTimestamp(state.snapshot.generated_at)} UTC`;
   renderKpis();
   renderExecutionSeries();
-  renderDistribution("status-distribution", state.snapshot.status_distribution, "status");
-  renderDistribution("trace-distribution", state.snapshot.trace_distribution, "trace_completeness");
+  renderStatusDistribution();
+  renderTraceDistribution();
   renderMilestones();
   renderTopNodeTypes();
   populateFilter($("status-filter"), state.snapshot.status_distribution, "status", "Todos", state.statusFilter);

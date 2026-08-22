@@ -870,6 +870,25 @@ def test_mockup_fidelity_header_and_kpi_contract() -> None:
         assert selector in css
 
 
+def test_mockup_fidelity_analytics_are_closed_to_real_payload() -> None:
+    html, js, css = assets()
+    for title in (
+        "Execuções no período", "Estados atuais", "Completude do trace",
+        "Marcos registrados", "Nós registrados",
+    ):
+        assert title in html
+    for function_name in (
+        "renderStatusDistribution", "renderTraceDistribution",
+        "renderMilestones", "renderTopNodeTypes",
+    ):
+        assert f"function {function_name}(" in js
+    for token in ("chart-area", "chart-grid", "chart-point", "donut", "chart-legend", "bar-chart"):
+        assert token in js or f".{token}" in css
+    combined = (html + js).casefold()
+    for forbidden in ("funil", "receita", "conversão", "interesse", "motivo de handoff"):
+        assert forbidden not in combined
+
+
 def test_approved_visual_palette_and_responsive_structure() -> None:
     _, _, css = assets()
     for color in (
@@ -923,7 +942,8 @@ def test_javascript_dashboard_contract_is_safe_and_explicit() -> None:
         "loadDashboard",
         "renderKpis",
         "renderExecutionSeries",
-        "renderDistribution",
+        "renderStatusDistribution",
+        "renderTraceDistribution",
         "renderMilestones",
         "renderTopNodeTypes",
         "renderExecutionTable",
@@ -1041,9 +1061,21 @@ function snapshot(label, executions, executionSeries = []) {
       completed: executions, failed: 0, manual_review: 0,
       technical_completion_rate: 100, average_terminal_duration_ms: 1000},
     execution_series: executionSeries,
-    status_distribution: [{status: 'completed', count: executions}],
-    trace_distribution: [{trace_completeness: 'complete_trace', count: executions}],
-    milestones: [], top_node_types: [], executions: [],
+    status_distribution: [
+      {status: 'completed', count: Math.max(0, executions - 1)},
+      {status: 'running', count: executions ? 1 : 0},
+      {status: 'failed', count: 0},
+    ],
+    trace_distribution: [
+      {trace_completeness: 'complete_trace', count: executions},
+      {trace_completeness: 'partial_trace', count: 0},
+      {trace_completeness: 'ledger_only', count: 0},
+    ],
+    milestones: [
+      {milestone: 'reservation', count: 1}, {milestone: 'payment', count: 1},
+      {milestone: 'public_delivery', count: 0}, {milestone: 'handoff', count: 0},
+    ],
+    top_node_types: [{node_type: 'maya_request', count: executions}], executions: [],
   };
 }
 
@@ -1223,6 +1255,23 @@ test('Task 2 omits empty sparklines but retains the factual execution note', asy
   await expect(page.locator('#kpi-grid .sparkline')).toHaveCount(0);
   await expect(page.locator('#kpi-grid .kpi-series > span')).toHaveCount(8);
   await expect(page.locator('#kpi-grid .kpi-series > span').first()).toHaveText('Execuções no período');
+});
+
+test('Task 3 renders all five analytics roots from nonzero real distributions', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('analytics', 3, [
+    {start_at: '2026-08-21T10:00:00Z', count: 1},
+    {start_at: '2026-08-21T11:00:00Z', count: 3},
+  ]));
+  await expect(page.locator('#status-distribution .donut-center')).toHaveText('3');
+  await expect(page.locator('#execution-series')).toContainText('1');
+  await expect(page.locator('#status-distribution')).toContainText('Concluída');
+  await expect(page.locator('#status-distribution')).toContainText('Falha');
+  await expect(page.locator('#trace-distribution')).toContainText('Trace completo');
+  await expect(page.locator('#trace-distribution')).toContainText('Trace parcial');
+  await expect(page.locator('#milestones-chart')).toContainText('Reserva');
+  await expect(page.locator('#milestones-chart')).toContainText('Entrega pública');
+  await expect(page.locator('#top-node-types')).toContainText('maya request');
 });
 
 test('dashboard ignores inverted A/B ranges', async ({page}) => {
@@ -1477,5 +1526,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 19 tests using 1 worker" in output, output
-    assert "19 passed" in output, output
+    assert "Running 20 tests using 1 worker" in output, output
+    assert "20 passed" in output, output

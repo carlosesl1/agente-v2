@@ -135,3 +135,4 @@
 - Promotion remains blocked until Carlos explicitly authorizes it after reviewing evidence.
 - Mockup fidelity Task 1: semantic shell and closed drawer DOM contract.
 - Mockup fidelity Task 2: executive shell interactions and factual KPI components.
+- Mockup fidelity Task 3: high-density analytics over existing payload only.
