@@ -143,11 +143,30 @@ function shortExecutionId(value) {
   return identifier.length > 18 ? `${identifier.slice(0, 8)}…${identifier.slice(-7)}` : identifier;
 }
 
-function statusBadge(value) {
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  badge.textContent = displayValue(value);
-  return badge;
+function executionStatusPresentation(status) {
+  return Object.freeze({
+    pending: ["Pendente", "pending"],
+    running: ["Em execução", "active"],
+    running_stale: ["Execução atrasada", "failed"],
+    completed: ["Concluída", "completed"],
+    failed: ["Falha", "failed"],
+    manual_review: ["Revisão manual", "handoff"],
+  })[status] ?? [displayValue(status), "neutral"];
+}
+
+function tracePresentation(value) {
+  return Object.freeze({
+    complete_trace: ["Trace completo", "completed"],
+    partial_trace: ["Trace parcial", "pending"],
+    ledger_only: ["Somente ledger", "neutral"],
+  })[value] ?? [displayValue(value), "neutral"];
+}
+
+function statusChip(presentation) {
+  const chip = document.createElement("span");
+  chip.className = `status-chip ${presentation[1]}`;
+  chip.textContent = presentation[0];
+  return chip;
 }
 
 function emptyMessage(root, message) {
@@ -429,7 +448,16 @@ function renderTopNodeTypes() {
 }
 
 function filteredExecutions() {
-  const executions = state.snapshot ? state.snapshot.executions : [];
+  const snapshotExecutions = state.snapshot && Array.isArray(state.snapshot.executions)
+    ? state.snapshot.executions
+    : [];
+  const executions = snapshotExecutions.filter((execution) => (
+    execution !== null
+    && typeof execution === "object"
+    && !Array.isArray(execution)
+    && typeof execution.lead_id === "string"
+    && typeof execution.execution_id === "string"
+  ));
   return executions.filter((execution) => (
     (!state.leadFilter || execution.lead_id === state.leadFilter)
     && (!state.statusFilter || execution.status === state.statusFilter)
@@ -437,80 +465,175 @@ function filteredExecutions() {
   ));
 }
 
-function milestoneText(execution) {
-  const facts = [
-    ["reserva", execution.has_reservation],
-    ["pagamento", execution.has_payment],
-    ["entrega pública", execution.has_public_delivery],
-    ["handoff", execution.has_handoff],
-  ];
-  return facts.map(([label, present]) => `${label}: ${present ? "Sim" : "Não"}`).join(" · ");
-}
-
-function executionFacts(execution) {
+function milestoneLabels(execution) {
   return [
-    ["Lead ID", displayValue(execution.lead_id)],
-    ["Execução", shortExecutionId(execution.execution_id)],
-    ["Recebida", formatTimestamp(execution.received_at)],
-    ["Duração", formatDuration(execution.duration_ms)],
-    ["Estado", displayValue(execution.status)],
-    ["Completude", displayValue(execution.trace_completeness)],
-    ["Nó atual", displayValue(execution.current_node_type)],
-    ["Nós", String(Number(execution.node_count) || 0)],
-    ["Marcos", milestoneText(execution)],
-    ["Motivo terminal", displayValue(execution.terminal_reason)],
-  ];
+    execution.has_reservation && "Reserva",
+    execution.has_payment && "Pagamento",
+    execution.has_public_delivery && "Entrega",
+    execution.has_handoff && "Handoff",
+  ].filter(Boolean);
 }
 
-function executionLink(execution) {
+function leadInitials(leadId) {
+  const displayed = displayValue(leadId);
+  const parts = displayed.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return displayed.slice(0, 2).toUpperCase();
+}
+
+function makeExecutionOpenButton(execution, label) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "execution-link";
-  button.textContent = shortExecutionId(execution.execution_id);
-  button.setAttribute("title", String(execution.execution_id));
-  button.addEventListener("click", () => openExecution(execution.execution_id).catch(handleDashboardError));
+  button.className = "execution-link row-open";
+  button.title = execution.execution_id;
+  button.setAttribute("aria-label", label);
+  button.textContent = label;
+  button.addEventListener("click", (event) => {
+    openExecution(execution.execution_id, event.currentTarget).catch(handleDashboardError);
+  });
   return button;
+}
+
+function appendLeadIdentity(root, execution) {
+  const avatar = document.createElement("span");
+  avatar.className = "lead-avatar";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = leadInitials(execution.lead_id);
+  const identity = document.createElement("span");
+  identity.className = "lead-identity";
+  identity.textContent = execution.lead_id;
+  root.append(avatar, identity);
+}
+
+function appendMilestones(root, execution) {
+  const labels = milestoneLabels(execution);
+  if (!labels.length) {
+    root.textContent = "Nenhum registrado";
+    return;
+  }
+  const list = document.createElement("span");
+  list.className = "milestone-list";
+  for (const label of labels) {
+    const item = document.createElement("span");
+    item.className = "milestone-label";
+    item.textContent = label;
+    list.append(item);
+  }
+  root.append(list);
+}
+
+function textCell(value, className = "") {
+  const cell = document.createElement("td");
+  cell.className = className;
+  cell.textContent = value;
+  return cell;
+}
+
+function makeDesktopExecutionRow(execution) {
+  const row = document.createElement("tr");
+  row.dataset.executionId = execution.execution_id;
+  const lead = document.createElement("td");
+  lead.className = "lead-cell";
+  const leadContent = document.createElement("span");
+  leadContent.className = "lead-cell-content";
+  appendLeadIdentity(leadContent, execution);
+  lead.append(leadContent);
+
+  const executionId = textCell(shortExecutionId(execution.execution_id), "execution-id-cell");
+  executionId.title = execution.execution_id;
+  const status = document.createElement("td");
+  status.append(statusChip(executionStatusPresentation(execution.status)));
+  const trace = document.createElement("td");
+  trace.append(statusChip(tracePresentation(execution.trace_completeness)));
+  const milestones = document.createElement("td");
+  appendMilestones(milestones, execution);
+  const action = document.createElement("td");
+  action.className = "row-action";
+  action.append(makeExecutionOpenButton(execution, "Ver detalhes"));
+
+  row.append(
+    lead,
+    executionId,
+    textCell(formatTimestamp(execution.received_at)),
+    textCell(formatDuration(execution.duration_ms)),
+    status,
+    trace,
+    textCell(displayValue(execution.current_node_type)),
+    textCell(String(Math.max(0, Number(execution.node_count) || 0))),
+    milestones,
+    textCell(displayValue(execution.terminal_reason)),
+    action,
+  );
+  return row;
+}
+
+function makeMobileFact(label, value) {
+  const fact = document.createElement("div");
+  fact.className = "service-mobile-fact";
+  const heading = document.createElement("strong");
+  heading.textContent = label;
+  const content = document.createElement("span");
+  content.textContent = value;
+  fact.append(heading, content);
+  return fact;
+}
+
+function makeMobileExecutionCard(execution) {
+  const card = document.createElement("article");
+  card.className = "execution-mobile-card";
+  card.dataset.executionId = execution.execution_id;
+  const top = document.createElement("div");
+  top.className = "service-mobile-top";
+  const lead = document.createElement("div");
+  lead.className = "lead-cell";
+  appendLeadIdentity(lead, execution);
+  const executionId = document.createElement("span");
+  executionId.className = "mobile-execution-id";
+  executionId.title = execution.execution_id;
+  executionId.textContent = shortExecutionId(execution.execution_id);
+  top.append(lead, executionId);
+
+  const chips = document.createElement("div");
+  chips.className = "service-mobile-chips";
+  chips.append(
+    statusChip(executionStatusPresentation(execution.status)),
+    statusChip(tracePresentation(execution.trace_completeness)),
+  );
+  const milestones = document.createElement("div");
+  milestones.className = "service-mobile-fact mobile-milestones";
+  const milestoneHeading = document.createElement("strong");
+  milestoneHeading.textContent = "Marcos";
+  const milestoneContent = document.createElement("span");
+  appendMilestones(milestoneContent, execution);
+  milestones.append(milestoneHeading, milestoneContent);
+  const action = document.createElement("div");
+  action.className = "service-mobile-action";
+  action.append(makeExecutionOpenButton(execution, "Ver detalhes"));
+
+  card.append(
+    top,
+    chips,
+    makeMobileFact("Recebida", formatTimestamp(execution.received_at)),
+    makeMobileFact("Nós", String(Math.max(0, Number(execution.node_count) || 0))),
+    milestones,
+    action,
+  );
+  return card;
 }
 
 function renderExecutionTable() {
   const tableRoot = $("execution-table-body");
   const mobileRoot = $("execution-mobile-list");
   const executions = filteredExecutions();
-  const rows = [];
-  const cards = [];
-  for (const execution of executions) {
-    const facts = executionFacts(execution);
-    const row = document.createElement("tr");
-    facts.forEach(([, value], index) => {
-      const cell = document.createElement("td");
-      if (index === 1) cell.append(executionLink(execution));
-      else if (index === 4) cell.append(statusBadge(value));
-      else cell.textContent = value;
-      row.append(cell);
-    });
-    rows.push(row);
-
-    const card = document.createElement("article");
-    card.className = "execution-mobile-card";
-    for (const [label, value] of facts) {
-      const fact = document.createElement("div");
-      const heading = document.createElement("strong");
-      heading.textContent = label;
-      if (label === "Execução") fact.append(heading, executionLink(execution));
-      else {
-        const content = document.createElement("span");
-        content.textContent = value;
-        fact.append(heading, content);
-      }
-      card.append(fact);
-    }
-    cards.push(card);
-  }
-  tableRoot.replaceChildren(...rows);
-  mobileRoot.replaceChildren(...cards);
+  $("result-count").textContent = `${executions.length} ${executions.length === 1 ? "execução" : "execuções"}`;
+  tableRoot.replaceChildren(...executions.map(makeDesktopExecutionRow));
+  mobileRoot.replaceChildren(...executions.map(makeMobileExecutionCard));
   const empty = $("empty-state");
   empty.hidden = executions.length !== 0;
-  empty.textContent = state.snapshot && state.snapshot.executions.length
+  const sourceExecutions = state.snapshot && Array.isArray(state.snapshot.executions)
+    ? state.snapshot.executions
+    : [];
+  empty.textContent = sourceExecutions.length
     ? "Nenhuma execução corresponde aos filtros exatos."
     : "Nenhuma execução registrada neste período.";
 }

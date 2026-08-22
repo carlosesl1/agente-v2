@@ -136,3 +136,4 @@
 - Mockup fidelity Task 1: semantic shell and closed drawer DOM contract.
 - Mockup fidelity Task 2: executive shell interactions and factual KPI components.
 - Mockup fidelity Task 3: high-density analytics over existing payload only.
+- Mockup fidelity Task 4: polished operations table and mobile cards.

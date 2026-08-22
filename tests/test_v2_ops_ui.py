@@ -870,6 +870,22 @@ def test_mockup_fidelity_header_and_kpi_contract() -> None:
         assert selector in css
 
 
+def test_operations_surface_matches_mockup_without_new_fields() -> None:
+    html, js, css = assets()
+    for token in ("operations-head", "live-badge", "search-box", "result-count", "table-wrap"):
+        assert token in html
+    for token in ("lead-cell", "lead-avatar", "status-chip", "row-open", "service-mobile-top"):
+        assert token in js
+    assert '$("result-count").textContent' in js
+    for field in (
+        "lead_id", "execution_id", "received_at", "duration_ms", "status",
+        "trace_completeness", "current_node_type", "node_count",
+        "has_reservation", "has_payment", "has_public_delivery",
+        "has_handoff", "terminal_reason",
+    ):
+        assert field in js
+
+
 def test_mockup_fidelity_analytics_are_closed_to_real_payload() -> None:
     html, js, css = assets()
     for title in (
@@ -1074,6 +1090,7 @@ const fs = require('fs');
 const html = fs.readFileSync('/static/index.html', 'utf8')
   .replace('  <script src="/ops/static/ops.js" defer></script>\n', '');
 const js = fs.readFileSync('/static/ops.js', 'utf8');
+const css = fs.readFileSync('/static/ops.css', 'utf8');
 
 function snapshot(label, executions, executionSeries = []) {
   return {
@@ -1112,6 +1129,7 @@ function nodes(executionId) {
 
 async function setup(page) {
   await page.setContent(html);
+  await page.addStyleTag({content: css});
   await page.evaluate(() => {
     window.__requests = [];
     window.__eventSources = [];
@@ -1414,6 +1432,69 @@ test('Task 3 causally renders five exact analytics sources and adversarial struc
   }
 });
 
+test('Task 4 renders factual desktop rows and mobile cards from the same exact-filtered executions', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 800});
+  await setup(page);
+  const payload = snapshot('operations', 3);
+  payload.executions = [
+    {
+      lead_id: 'lead-one', execution_id: 'execution-one', received_at: '2026-08-21T10:00:00Z',
+      duration_ms: 1250, status: 'completed', trace_completeness: 'complete_trace',
+      current_node_type: 'maya_response', node_count: 2, has_reservation: true,
+      has_payment: false, has_public_delivery: true, has_handoff: false,
+      terminal_reason: 'completed',
+    },
+    {
+      lead_id: 'lead-two', execution_id: 'execution-two', received_at: 'invalid',
+      duration_ms: null, status: 'future_status', trace_completeness: 'future_trace',
+      current_node_type: null, node_count: 0, has_reservation: false,
+      has_payment: false, has_public_delivery: false, has_handoff: false,
+      terminal_reason: null,
+    },
+    {
+      lead_id: 'lead-three', execution_id: 'execution-three', received_at: '2026-08-21T11:00:00Z',
+      duration_ms: 0, status: 'running', trace_completeness: 'partial_trace',
+      current_node_type: 'model_request', node_count: 1, has_reservation: false,
+      has_payment: true, has_public_delivery: false, has_handoff: true,
+      terminal_reason: null,
+    },
+    null,
+    42,
+  ];
+  await resolveRequest(page, 0, 200, payload);
+
+  await expect(page.locator('#result-count')).toHaveText('3 execuções');
+  await expect(page.locator('#execution-table-body > tr')).toHaveCount(3);
+  await expect(page.locator('.execution-mobile-card')).toHaveCount(3);
+  expect(await page.locator('#execution-table-body > tr').evaluateAll(rows =>
+    rows.map(row => row.dataset.executionId))).toEqual(['execution-one', 'execution-two', 'execution-three']);
+  expect(await page.locator('.execution-mobile-card').evaluateAll(cards =>
+    cards.map(card => card.dataset.executionId))).toEqual(['execution-one', 'execution-two', 'execution-three']);
+  await expect(page.locator('#execution-table-body .status-chip').first()).toContainText('Concluída');
+  await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('future_status');
+  await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('future_trace');
+  await expect(page.locator('#execution-table-body > tr').nth(1)).toContainText('Nenhum registrado');
+
+  await page.fill('#lead-search', ' lead-one ');
+  await expect(page.locator('#result-count')).toHaveText('1 execução');
+  await expect(page.locator('#execution-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('.execution-mobile-card')).toHaveCount(1);
+  await expect(page.locator('#execution-table-body > tr .row-open')).toHaveCount(1);
+  await expect(page.locator('.execution-mobile-card .row-open')).toHaveCount(1);
+  await page.fill('#lead-search', 'lead');
+  await expect(page.locator('#result-count')).toHaveText('0 execuções');
+  await expect(page.locator('#execution-table-body > tr')).toHaveCount(0);
+  await expect(page.locator('.execution-mobile-card')).toHaveCount(0);
+  await page.fill('#lead-search', 'lead-one');
+
+  await page.setViewportSize({width: 390, height: 844});
+  await expect(page.locator('.execution-mobile-card')).toHaveCount(1);
+  await expect(page.locator('.operations-panel table')).toBeHidden();
+  await page.click('.execution-mobile-card .row-open');
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  expect((await paths(page))[1]).toBe('/ops/api/executions/execution-one/nodes');
+});
+
 test('dashboard ignores inverted A/B ranges', async ({page}) => {
   await setup(page);
   await resolveRequest(page, 0, 200, snapshot('initial', 1));
@@ -1637,6 +1718,7 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
                 (spec, "/work/ops.spec.js"),
                 (ROOT / "index.html", "/static/index.html"),
                 (ROOT / "ops.js", "/static/ops.js"),
+                (ROOT / "ops.css", "/static/ops.css"),
             ):
                 copied = subprocess.run(
                     ["docker", "cp", str(source), f"{container}:{target}"],
@@ -1666,5 +1748,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 20 tests using 1 worker" in output, output
-    assert "20 passed" in output, output
+    assert "Running 21 tests using 1 worker" in output, output
+    assert "21 passed" in output, output
