@@ -1072,6 +1072,25 @@ def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
         assert token in js
     assert "state.fullEpoch.input" in js
     assert "state.fullEpoch.output" in js
+    summary_validator = javascript_function_body(js, "isExecutionSummary")
+    for token in (
+        'execution !== null',
+        'typeof execution === "object"',
+        '!Array.isArray(execution)',
+        'typeof execution.lead_id === "string"',
+        'execution.lead_id.trim() !== ""',
+        'typeof execution.execution_id === "string"',
+        'execution.execution_id.trim() !== ""',
+        'typeof execution.status === "string"',
+        'typeof execution.trace_completeness === "string"',
+        'typeof execution.has_reservation === "boolean"',
+        'typeof execution.has_payment === "boolean"',
+        'typeof execution.has_public_delivery === "boolean"',
+        'typeof execution.has_handoff === "boolean"',
+    ):
+        assert token in summary_validator
+    assert ".filter(isExecutionSummary)" in javascript_function_body(js, "filteredExecutions")
+    assert "isExecutionSummary(item)" in javascript_function_body(js, "renderDrawerSummary")
     assert 'payload.value ?? { status: "not_recorded" }' in js
     for token in (
         "lead_id",
@@ -1746,7 +1765,17 @@ test('reconnect clears only the live error after dashboard success', async ({pag
 
 test('Task 5 execution opens as factual drawer and restores overview context and focus', async ({page}) => {
   await setup(page);
-  await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+  const payload = snapshotWithExecution('initial', 'A');
+  payload.executions.push(snapshotWithExecution('malformed', 'INVALID-SUMMARY', {
+    lead_id: 7,
+    status: 'invalid-summary-status',
+    trace_completeness: 'invalid-summary-trace',
+    received_at: '2099-01-02T03:04:05Z',
+    current_node_type: 'invalid-summary-node',
+    terminal_reason: 'invalid-summary-terminal',
+    has_reservation: 'false',
+  }).executions[0]);
+  await resolveRequest(page, 0, 200, payload);
   await page.evaluate(() => {
     const originalRenderCanvas = renderCanvas;
     window.__task5RenderCount = 0;
@@ -1782,6 +1811,23 @@ test('Task 5 execution opens as factual drawer and restores overview context and
   await expect(trigger).toBeFocused();
 
   await page.locator('#refresh-dashboard').focus();
+  const requestCountBeforeInvalidSummary = (await paths(page)).length;
+  await page.evaluate(() => { openExecution('INVALID-SUMMARY').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(requestCountBeforeInvalidSummary + 1);
+  expect((await paths(page))[requestCountBeforeInvalidSummary]).toBe('/ops/api/executions/INVALID-SUMMARY/nodes');
+  await expect(page.locator('#drawer-title')).toHaveText('INVALID-SUMMARY');
+  await expect(page.locator('#drawer-lead')).toHaveText('Não registrado');
+  await expect(page.locator('#drawer-status')).toHaveText('Não registrado');
+  await expect(page.locator('#drawer-trace')).toHaveText('Não registrado');
+  await expect(page.locator('#drawer-summary')).toContainText('Não registrado');
+  await expect(page.locator('#drawer-summary')).toContainText('Nenhum registrado');
+  await expect(page.locator('#drawer-summary')).not.toContainText('Reserva');
+  await expect(page.locator('#drawer-summary')).not.toContainText('invalid-summary');
+  await expect(page.locator('#drawer-summary')).not.toContainText('2099');
+  expect((await paths(page)).length).toBe(requestCountBeforeInvalidSummary + 1);
+  await page.evaluate(() => closeExecutionDrawer());
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+
   await page.evaluate(() => { openExecution('MISSING').catch(handleDashboardError); });
   await expect(page.locator('#drawer-title')).toHaveText('MISSING');
   await expect(page.locator('#drawer-lead')).toHaveText('Não registrado');
@@ -1796,7 +1842,21 @@ test('Task 5 closing while detail is pending invalidates response and keeps draw
   await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
   await page.click('#execution-table-body .execution-link');
   await expect.poll(async () => (await paths(page)).length).toBe(2);
+  const epochsBeforeClose = await page.evaluate(() => ({
+    detail: state.detailEpoch,
+    input: state.fullEpoch.input,
+    output: state.fullEpoch.output,
+  }));
   await page.click('#drawer-close');
+  expect(await page.evaluate(() => ({
+    detail: state.detailEpoch,
+    input: state.fullEpoch.input,
+    output: state.fullEpoch.output,
+  }))).toEqual({
+    detail: epochsBeforeClose.detail + 1,
+    input: epochsBeforeClose.input + 1,
+    output: epochsBeforeClose.output + 1,
+  });
   await resolveRequest(page, 1, 200, nodes('A'));
   await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'true');
   await expect(page.locator('#nodes')).toBeEmpty();

@@ -447,11 +447,8 @@ function renderTopNodeTypes() {
   root.replaceChildren(ranking);
 }
 
-function filteredExecutions() {
-  const snapshotExecutions = state.snapshot && Array.isArray(state.snapshot.executions)
-    ? state.snapshot.executions
-    : [];
-  const executions = snapshotExecutions.filter((execution) => (
+function isExecutionSummary(execution) {
+  return (
     execution !== null
     && typeof execution === "object"
     && !Array.isArray(execution)
@@ -465,7 +462,14 @@ function filteredExecutions() {
     && typeof execution.has_payment === "boolean"
     && typeof execution.has_public_delivery === "boolean"
     && typeof execution.has_handoff === "boolean"
-  ));
+  );
+}
+
+function filteredExecutions() {
+  const snapshotExecutions = state.snapshot && Array.isArray(state.snapshot.executions)
+    ? state.snapshot.executions
+    : [];
+  const executions = snapshotExecutions.filter(isExecutionSummary);
   return executions.filter((execution) => (
     (!state.leadFilter || execution.lead_id === state.leadFilter)
     && (!state.statusFilter || execution.status === state.statusFilter)
@@ -591,10 +595,7 @@ function renderDrawerSummary(executionId) {
     ? state.snapshot.executions
     : [];
   const execution = executions.find((item) => (
-    item !== null
-    && typeof item === "object"
-    && !Array.isArray(item)
-    && item.execution_id === executionId
+    isExecutionSummary(item) && item.execution_id === executionId
   )) || null;
   $("drawer-title").textContent = shortExecutionId(executionId || "Execução");
   $("drawer-lead").textContent = displayValue(execution && execution.lead_id);
@@ -868,8 +869,6 @@ function setExecutionDrawerOpen(open) {
 
 function closeExecutionDrawer({ restoreFocus = true } = {}) {
   state.detailEpoch += 1;
-  state.fullEpoch.input += 1;
-  state.fullEpoch.output += 1;
   const detailTrigger = state.detailTrigger;
   state.detailTrigger = null;
   setExecutionDrawerOpen(false);
