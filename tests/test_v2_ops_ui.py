@@ -161,6 +161,7 @@ def assert_task2_javascript_contract(js: str) -> None:
 
     mobile = javascript_function_body(js, "setMobileNavigationOpen")
     assert "restoreFocus" in mobile
+    assert "mobileNavigationMedia.matches" in mobile
     assert '.setAttribute("inert", "")' in mobile
     assert '.setAttribute("aria-hidden", "true")' in mobile
     assert '.removeAttribute("inert")' in mobile
@@ -180,6 +181,10 @@ def assert_task2_javascript_contract(js: str) -> None:
     assert '$("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError))' in js
     assert '$("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true))' in js
     assert '$("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false, true))' in js
+    assert 'const mobileNavigationMedia = window.matchMedia("(max-width: 720px)")' in js
+    assert js.count('window.matchMedia("(max-width: 720px)")') == 1
+    assert 'mobileNavigationMedia.addEventListener("change", () => {' in js
+    assert "setMobileNavigationOpen(state.mobileNavigationOpen);" in js
     assert 'if (state.operatorMenuOpen) setOperatorMenuOpen(false, true)' in js
     assert 'if (state.mobileNavigationOpen) setMobileNavigationOpen(false, true)' in js
 
@@ -1140,6 +1145,30 @@ test('Task 2 operator popover closes outside and restores trigger focus on Escap
   await expect(page.locator('#operator-menu')).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('Task 2 closed sidebar synchronizes inert state across desktop and mobile resizes without stealing focus', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 800});
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  const sidebar = page.locator('#app-sidebar');
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
+  await expect(sidebar).not.toHaveAttribute('inert', '');
+  await expect(sidebar).not.toHaveAttribute('aria-hidden', 'true');
+  await page.locator('#refresh-dashboard').focus();
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+
+  await page.setViewportSize({width: 390, height: 844});
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
+  await expect(sidebar).toHaveAttribute('inert', '');
+  await expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+
+  await page.setViewportSize({width: 1280, height: 800});
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
+  await expect(sidebar).not.toHaveAttribute('inert', '');
+  await expect(sidebar).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+});
+
 test('Task 2 mobile navigation is inert when closed and restores trigger focus', async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await setup(page);
@@ -1448,5 +1477,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 18 tests using 1 worker" in output, output
-    assert "18 passed" in output, output
+    assert "Running 19 tests using 1 worker" in output, output
+    assert "19 passed" in output, output

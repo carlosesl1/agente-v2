@@ -35,6 +35,7 @@ const KPI_DEFINITIONS = [
 ];
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
+const mobileNavigationMedia = window.matchMedia("(max-width: 720px)");
 
 function showJSON(element, value) {
   element.textContent = JSON.stringify(value, null, 2);
@@ -53,7 +54,7 @@ function setMobileNavigationOpen(open, restoreFocus = false) {
   sidebar.classList.toggle("mobile-open", state.mobileNavigationOpen);
   $("sidebar-backdrop").hidden = !state.mobileNavigationOpen;
   $("mobile-menu").setAttribute("aria-expanded", String(state.mobileNavigationOpen));
-  const sidebarClosed = window.matchMedia("(max-width: 720px)").matches && !state.mobileNavigationOpen;
+  const sidebarClosed = mobileNavigationMedia.matches && !state.mobileNavigationOpen;
   if (sidebarClosed) {
     sidebar.setAttribute("inert", "");
     sidebar.setAttribute("aria-hidden", "true");
@@ -693,6 +694,9 @@ $("completeness-filter").addEventListener("change", (event) => {
 $("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true));
 $("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false, true));
 $("sidebar-backdrop").addEventListener("click", () => setMobileNavigationOpen(false, true));
+mobileNavigationMedia.addEventListener("change", () => {
+  setMobileNavigationOpen(state.mobileNavigationOpen);
+});
 $("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError));
 $("operator-menu").addEventListener("click", () => setOperatorMenuOpen(!state.operatorMenuOpen));
 $("drawer-close").addEventListener("click", showOverview);
