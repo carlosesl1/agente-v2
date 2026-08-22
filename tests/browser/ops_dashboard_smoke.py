@@ -129,7 +129,12 @@ const artifacts = '/artifacts';
       page.locator('button[type="submit"]').click(),
     ]);
     await page.locator('#kpi-grid .kpi-card').first().waitFor();
+    if (!(await page.locator('#app-sidebar .brand-lockup').isVisible())) throw new Error('desktop brand lockup missing');
     if (await page.locator('#kpi-grid .kpi-card').count() !== 8) throw new Error('expected exactly eight KPI cards');
+    if (await page.locator('#kpi-grid .kpi-icon').count() !== 8) throw new Error('expected eight KPI icons');
+    if (!(await page.locator('.welcome-row').isVisible())) throw new Error('welcome row missing');
+    if (await page.locator('.analytics-panel').count() !== 5) throw new Error('expected five analytics panels');
+    if (!(await page.locator('.operations-head').isVisible())) throw new Error('operations heading missing');
     const cards = await page.locator('#kpi-grid .kpi-card').allTextContents();
     const expectedCards = [
       ['Execuções', '2'], ['Leads distintos', '2'], ['Em andamento', '1'],
@@ -140,7 +145,13 @@ const artifacts = '/artifacts';
       if (!cards.some(card => card.includes(label) && card.includes(value))) throw new Error(`missing KPI ${{label}}=${{value}}`);
     }}
     const noOverflow = async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth);
-    if (!(await noOverflow())) throw new Error('desktop body overflow');
+    const desktopLayout = await page.evaluate(() => ({{
+      noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth,
+      sidebarWidth: Math.round(document.querySelector('#app-sidebar').getBoundingClientRect().width),
+      kpiColumns: getComputedStyle(document.querySelector('#kpi-grid')).gridTemplateColumns.split(' ').length,
+      analyticsRows: [...document.querySelectorAll('.analytics-panel')].reduce((rows, panel) => rows.add(Math.round(panel.getBoundingClientRect().top)), new Set()).size,
+    }}));
+    if (!desktopLayout.noOverflow || desktopLayout.sidebarWidth < 230 || desktopLayout.kpiColumns !== 4 || desktopLayout.analyticsRows !== 2) throw new Error(JSON.stringify(desktopLayout));
     await page.screenshot({{path: path.join(artifacts, 'desktop-1440x1000.png'), fullPage: true}});
 
     await page.selectOption('#range-select', '24h');
@@ -154,8 +165,11 @@ const artifacts = '/artifacts';
     if (await page.locator('#execution-table-body tr').count() !== 1) throw new Error('lead filter count mismatch');
     const title = await page.locator('#execution-table-body .execution-link').getAttribute('title');
     if (title !== expectedExecution) throw new Error(`unexpected execution ${{title}}`);
-    await page.locator('#execution-table-body .execution-link').click();
+    const desktopTrigger = page.locator('#execution-table-body .execution-link');
+    await desktopTrigger.click();
     await page.locator('#nodes .node').first().waitFor();
+    if (!(await page.locator('#overview-view').isVisible())) throw new Error('overview hidden behind desktop drawer');
+    if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'false') throw new Error('desktop drawer aria state mismatch');
     if (!(await page.locator('#execution-canvas').isVisible())) throw new Error('canvas is not visible');
     if (!(await page.locator('#input-panel').isVisible()) || !(await page.locator('#output-panel').isVisible())) throw new Error('Input/Output panels are not visible');
     if (!(await page.locator('#input-summary').textContent()).includes('request-tech-001')) throw new Error('Input summary mismatch');
@@ -164,22 +178,64 @@ const artifacts = '/artifacts';
     await page.click('#load-full-output');
     await page.waitForFunction(() => document.querySelector('#input-full')?.textContent.includes('input-tech'));
     await page.waitForFunction(() => document.querySelector('#output-full')?.textContent.includes('output-tech'));
+    const desktopDrawer = await page.locator('#execution-drawer').evaluate(el => ({{
+      width: el.getBoundingClientRect().width,
+      viewport: window.innerWidth,
+    }}));
+    if (desktopDrawer.width < 700 || desktopDrawer.width > desktopDrawer.viewport * .92 + 1) throw new Error(`desktop drawer width mismatch: ${{JSON.stringify(desktopDrawer)}}`);
     const canvasScroll = await page.evaluate(() => {{ const el = document.querySelector('#execution-canvas'); return getComputedStyle(el).overflowX === 'auto' && el.scrollWidth > el.clientWidth; }});
     if (!canvasScroll) throw new Error('canvas does not preserve internal horizontal scroll');
     if (!(await noOverflow())) throw new Error('desktop detail body overflow');
-    await page.click('#back-to-overview');
+    await page.screenshot({{path: path.join(artifacts, 'drawer-desktop-1440x1000.png')}});
+    await page.keyboard.press('Escape');
+    if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'true') throw new Error('Escape did not close desktop drawer');
+    if (!(await desktopTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore desktop trigger focus');
 
     await page.setViewportSize({{width: 390, height: 844}});
     await page.waitForTimeout(100);
     if (!(await noOverflow())) throw new Error('mobile body overflow');
-    if (!(await page.locator('#execution-mobile-list').isVisible())) throw new Error('mobile cards are not visible');
-    if (await page.locator('.operations-panel table').isVisible()) throw new Error('desktop table is visible on mobile');
+    if (!(await page.locator('#mobile-menu').isVisible())) throw new Error('mobile menu missing');
+    if (await page.locator('.operations-panel table').isVisible()) throw new Error('desktop table visible on mobile');
+    if (!(await page.locator('#execution-mobile-list').isVisible())) throw new Error('mobile cards missing');
+    const mobileLayout = await page.evaluate(() => ({{
+      kpiColumns: getComputedStyle(document.querySelector('#kpi-grid')).gridTemplateColumns.split(' ').length,
+      sidebarPosition: getComputedStyle(document.querySelector('#app-sidebar')).position,
+      closedSidebarRight: Math.round(document.querySelector('#app-sidebar').getBoundingClientRect().right),
+      kpiContentContained: [...document.querySelectorAll('#kpi-grid .kpi-card')].every(card => {{
+        const cardRect = card.getBoundingClientRect();
+        return [...card.querySelectorAll('.sparkline')].every(sparkline => {{
+          const sparklineRect = sparkline.getBoundingClientRect();
+          return sparklineRect.left >= cardRect.left - 1 && sparklineRect.right <= cardRect.right + 1;
+        }});
+      }}),
+    }}));
+    if (mobileLayout.kpiColumns !== 2 || mobileLayout.sidebarPosition !== 'fixed' || mobileLayout.closedSidebarRight > 0 || !mobileLayout.kpiContentContained) throw new Error(`mobile layout mismatch: ${{JSON.stringify(mobileLayout)}}`);
+    await page.click('#mobile-menu');
+    if (!(await page.locator('#app-sidebar').evaluate(el => el.classList.contains('mobile-open')))) throw new Error('mobile sidebar did not open');
+    await page.locator('#sidebar-backdrop').click({{position: {{x: 380, y: 100}}}});
     const mobileCards = await page.locator('.execution-mobile-card').count();
     if (mobileCards !== 1) throw new Error(`mobile filtered card count mismatch: ${{mobileCards}}`);
     await page.screenshot({{path: path.join(artifacts, 'mobile-390x844.png'), fullPage: true}});
-    await page.locator('.execution-mobile-card .execution-link').click();
+    const mobileTrigger = page.locator('.execution-mobile-card .execution-link');
+    await mobileTrigger.click();
     await page.locator('#nodes .node').first().waitFor();
+    if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'false') throw new Error('mobile drawer aria state mismatch');
+    if (!(await page.locator('#execution-canvas').isVisible()) || !(await page.locator('#input-panel').isVisible()) || !(await page.locator('#output-panel').isVisible())) throw new Error('mobile canvas or inspector missing');
+    await page.click('#load-full-input');
+    await page.click('#load-full-output');
+    await page.waitForFunction(() => document.querySelector('#input-full')?.textContent.includes('input-tech'));
+    await page.waitForFunction(() => document.querySelector('#output-full')?.textContent.includes('output-tech'));
+    const mobileDrawer = await page.evaluate(() => {{
+      const drawer = document.querySelector('#execution-drawer').getBoundingClientRect();
+      const canvas = document.querySelector('.canvas-shell').getBoundingClientRect();
+      const inspector = document.querySelector('.inspector').getBoundingClientRect();
+      return {{width: drawer.width, viewport: window.innerWidth, inspectorStacks: inspector.top >= canvas.bottom - 1}};
+    }});
+    if (Math.abs(mobileDrawer.width - mobileDrawer.viewport) > 1 || !mobileDrawer.inspectorStacks) throw new Error(`mobile drawer layout mismatch: ${{JSON.stringify(mobileDrawer)}}`);
     if (!(await noOverflow())) throw new Error('mobile detail body overflow');
+    await page.screenshot({{path: path.join(artifacts, 'drawer-mobile-390x844.png')}});
+    await page.keyboard.press('Escape');
+    if (!(await mobileTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore mobile trigger focus');
 
     await page.waitForTimeout(100);
     if (errors.length) throw new Error(`page/console errors: ${{errors.join(' | ')}}`);
@@ -199,6 +255,8 @@ def main() -> None:
     screenshots = (
         ARTIFACTS / "desktop-1440x1000.png",
         ARTIFACTS / "mobile-390x844.png",
+        ARTIFACTS / "drawer-desktop-1440x1000.png",
+        ARTIFACTS / "drawer-mobile-390x844.png",
     )
     for screenshot in screenshots:
         screenshot.unlink(missing_ok=True)
@@ -261,6 +319,8 @@ def main() -> None:
         print("ops_dashboard_smoke=PASS")
         print(f"desktop_screenshot={screenshots[0]}")
         print(f"mobile_screenshot={screenshots[1]}")
+        print(f"drawer_desktop_screenshot={screenshots[2]}")
+        print(f"drawer_mobile_screenshot={screenshots[3]}")
     finally:
         subprocess.run(
             [str(DOCKER), "rm", "-f", container],

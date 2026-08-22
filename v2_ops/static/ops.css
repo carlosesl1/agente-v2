@@ -416,6 +416,9 @@ body.drawer-open { overflow: hidden; }
   .overview-toolbar label, .overview-toolbar select { width: 100%; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .kpi-card { min-height: 112px; padding: 15px; }
+  .kpi-card .kpi-foot { align-items: stretch; flex-direction: column; }
+  .kpi-series { width: 100%; margin-left: 0; justify-content: space-between; }
+  .sparkline { width: 58px; }
   .kpi-card::before { margin-bottom: 16px; }
   .kpi-card strong { font-size: 23px; }
   .analytics-grid { gap: 12px; margin-top: 12px; }
@@ -453,7 +456,7 @@ body.drawer-open { overflow: hidden; }
 }
 
 @media (max-width: 720px) {
-  .sidebar { width: min(82vw, 300px); padding: 22px 18px; transform: translateX(-105%); transition: transform .2s ease; }
+  .sidebar { width: min(82vw, 300px); padding: 22px 18px; transform: translateX(-105%); }
   .sidebar.mobile-open { transform: translateX(0); }
   .sidebar-close { position: absolute; top: 14px; right: 14px; display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid rgba(255,252,247,.3); border-radius: 9px; background: transparent; color: var(--ivory-50); }
   .sidebar-backdrop { position: fixed; inset: 0; z-index: 25; display: block; border: 0; background: rgba(23,58,39,.38); }
