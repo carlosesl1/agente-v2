@@ -1765,15 +1765,29 @@ test('reconnect clears only the live error after dashboard success', async ({pag
 
 test('Task 5 execution opens as factual drawer and restores overview context and focus', async ({page}) => {
   await setup(page);
+  const specialLeadId = 'lead [special] "#/?:&';
+  const specialExecutionId = 'execution [special] "#/?:&';
   const payload = snapshotWithExecution('initial', 'A');
+  payload.executions.push({
+    lead_id: specialLeadId, execution_id: specialExecutionId, received_at: 'invalid',
+    duration_ms: null, status: 'future_status', trace_completeness: 'future_trace',
+    current_node_type: null, node_count: 0, has_reservation: false,
+    has_payment: false, has_public_delivery: false, has_handoff: false,
+    terminal_reason: null,
+  });
   payload.executions.push(snapshotWithExecution('malformed', 'INVALID-SUMMARY', {
-    lead_id: 7,
-    status: 'invalid-summary-status',
-    trace_completeness: 'invalid-summary-trace',
+    lead_id: 707070,
+    status: 'invalid-summary-status-sentinel',
+    trace_completeness: 'invalid-summary-trace-sentinel',
     received_at: '2099-01-02T03:04:05Z',
-    current_node_type: 'invalid-summary-node',
-    terminal_reason: 'invalid-summary-terminal',
+    duration_ms: 987654,
+    current_node_type: 'invalid-summary-node-sentinel',
+    node_count: 54321,
+    terminal_reason: 'invalid-summary-terminal-sentinel',
     has_reservation: 'false',
+    has_payment: true,
+    has_public_delivery: true,
+    has_handoff: true,
   }).executions[0]);
   await resolveRequest(page, 0, 200, payload);
   await page.evaluate(() => {
@@ -1784,7 +1798,7 @@ test('Task 5 execution opens as factual drawer and restores overview context and
       return originalRenderCanvas();
     };
   });
-  const trigger = page.locator('#execution-table-body .execution-link');
+  const trigger = page.locator('#execution-table-body .execution-link').first();
   await trigger.focus();
   await trigger.click();
   await resolveRequest(page, 1, 200, nodes('A'));
@@ -1811,6 +1825,32 @@ test('Task 5 execution opens as factual drawer and restores overview context and
   await expect(trigger).toBeFocused();
 
   await page.locator('#refresh-dashboard').focus();
+  const requestCountBeforeSpecialSummary = (await paths(page)).length;
+  await page.evaluate(executionId => {
+    openExecution(executionId).catch(handleDashboardError);
+  }, specialExecutionId);
+  await expect.poll(async () => (await paths(page)).length).toBe(requestCountBeforeSpecialSummary + 1);
+  expect((await paths(page))[requestCountBeforeSpecialSummary]).toBe(
+    `/ops/api/executions/${encodeURIComponent(specialExecutionId)}/nodes`,
+  );
+  await expect(page.locator('#drawer-lead')).toHaveText(specialLeadId);
+  await expect(page.locator('#drawer-status')).toHaveText('future_status');
+  await expect(page.locator('#drawer-trace')).toHaveText('future_trace');
+  expect(await page.locator('#drawer-summary .drawer-fact').evaluateAll(facts => facts.map(fact => ({
+    label: fact.querySelector('strong').textContent,
+    value: fact.querySelector('span').textContent,
+  })))).toEqual([
+    {label: 'Recebida', value: 'Não registrado'},
+    {label: 'Duração', value: 'Não registrado'},
+    {label: 'Nó atual', value: 'Não registrado'},
+    {label: 'Nós', value: '0'},
+    {label: 'Motivo terminal', value: 'Não registrado'},
+    {label: 'Marcos', value: 'Nenhum registrado'},
+  ]);
+  expect((await paths(page)).length).toBe(requestCountBeforeSpecialSummary + 1);
+  await page.evaluate(() => closeExecutionDrawer());
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+
   const requestCountBeforeInvalidSummary = (await paths(page)).length;
   await page.evaluate(() => { openExecution('INVALID-SUMMARY').catch(handleDashboardError); });
   await expect.poll(async () => (await paths(page)).length).toBe(requestCountBeforeInvalidSummary + 1);
@@ -1819,11 +1859,27 @@ test('Task 5 execution opens as factual drawer and restores overview context and
   await expect(page.locator('#drawer-lead')).toHaveText('Não registrado');
   await expect(page.locator('#drawer-status')).toHaveText('Não registrado');
   await expect(page.locator('#drawer-trace')).toHaveText('Não registrado');
-  await expect(page.locator('#drawer-summary')).toContainText('Não registrado');
-  await expect(page.locator('#drawer-summary')).toContainText('Nenhum registrado');
-  await expect(page.locator('#drawer-summary')).not.toContainText('Reserva');
-  await expect(page.locator('#drawer-summary')).not.toContainText('invalid-summary');
-  await expect(page.locator('#drawer-summary')).not.toContainText('2099');
+  expect(await page.locator('#drawer-summary .drawer-fact').evaluateAll(facts => facts.map(fact => ({
+    label: fact.querySelector('strong').textContent,
+    value: fact.querySelector('span').textContent,
+  })))).toEqual([
+    {label: 'Recebida', value: 'Não registrado'},
+    {label: 'Duração', value: 'Não registrado'},
+    {label: 'Nó atual', value: 'Não registrado'},
+    {label: 'Nós', value: 'Não registrado'},
+    {label: 'Motivo terminal', value: 'Não registrado'},
+    {label: 'Marcos', value: 'Nenhum registrado'},
+  ]);
+  const invalidSummaryPresentation = await page.locator(
+    '#drawer-lead, #drawer-status, #drawer-trace, #drawer-summary',
+  ).allTextContents();
+  for (const sentinel of [
+    '707070', 'invalid-summary-status-sentinel', 'invalid-summary-trace-sentinel',
+    '2099', '987.7 s', 'invalid-summary-node-sentinel', '54321',
+    'invalid-summary-terminal-sentinel', 'Reserva', 'Pagamento', 'Entrega', 'Handoff',
+  ]) {
+    expect(invalidSummaryPresentation.join(' ')).not.toContain(sentinel);
+  }
   expect((await paths(page)).length).toBe(requestCountBeforeInvalidSummary + 1);
   await page.evaluate(() => closeExecutionDrawer());
   await expect(page.locator('#refresh-dashboard')).toBeFocused();
