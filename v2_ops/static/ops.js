@@ -251,8 +251,9 @@ function renderExecutionSeries() {
   line.setAttribute("class", "chart-line");
   const markers = [];
   const coordinates = points.map((point, index) => {
-    const denominator = Math.max(1, points.length - 1);
-    const x = padding + (index / denominator) * (width - padding * 2);
+    const x = points.length === 1
+      ? width / 2
+      : padding + (index / (points.length - 1)) * (width - padding * 2);
     const count = Math.max(0, Number(point.count) || 0);
     const y = height - padding - (count / maximum) * (height - padding * 2);
     const marker = document.createElementNS(SVG_NAMESPACE, "circle");
@@ -268,9 +269,11 @@ function renderExecutionSeries() {
   });
   line.setAttribute("points", coordinates.join(" "));
   const baseline = height - padding;
+  const firstX = markers[0].getAttribute("cx");
+  const lastX = markers[markers.length - 1].getAttribute("cx");
   area.setAttribute(
     "d",
-    `M ${padding} ${baseline} L ${coordinates.join(" L ")} L ${width - padding} ${baseline} Z`,
+    `M ${firstX} ${baseline} L ${coordinates.join(" L ")} L ${lastX} ${baseline} Z`,
   );
   const maximumLabel = document.createElementNS(SVG_NAMESPACE, "text");
   maximumLabel.setAttribute("class", "chart-axis-label");
@@ -305,9 +308,19 @@ function labeledBar(label, count, maximum, suffix) {
   return row;
 }
 
+function closedStatusDistribution() {
+  const items = state.snapshot ? state.snapshot.status_distribution : [];
+  return items.filter((item) => (
+    item !== null
+    && typeof item === "object"
+    && !Array.isArray(item)
+    && Object.prototype.hasOwnProperty.call(STATUS_PRESENTATION, String(item.status))
+  ));
+}
+
 function renderStatusDistribution() {
   const root = $("status-distribution");
-  const items = state.snapshot ? state.snapshot.status_distribution : [];
+  const items = closedStatusDistribution();
   if (!items.length) {
     emptyMessage(root, "Nenhum registro no período.");
     return;
@@ -527,7 +540,7 @@ function renderDashboard() {
   renderTraceDistribution();
   renderMilestones();
   renderTopNodeTypes();
-  populateFilter($("status-filter"), state.snapshot.status_distribution, "status", "Todos", state.statusFilter);
+  populateFilter($("status-filter"), closedStatusDistribution(), "status", "Todos", state.statusFilter);
   populateFilter(
     $("completeness-filter"),
     state.snapshot.trace_distribution,

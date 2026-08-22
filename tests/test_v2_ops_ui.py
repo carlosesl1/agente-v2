@@ -884,6 +884,27 @@ def test_mockup_fidelity_analytics_are_closed_to_real_payload() -> None:
         assert f"function {function_name}(" in js
     for token in ("chart-area", "chart-grid", "chart-point", "donut", "chart-legend", "bar-chart"):
         assert token in js or f".{token}" in css
+
+    # The canonical desktop composition is exactly 2 + 3 panels over six columns.
+    for panel_class in (
+        "analytics-panel panel-volume", "analytics-panel panel-status",
+        "analytics-panel panel-trace", "analytics-panel panel-milestones",
+        "analytics-panel panel-nodes",
+    ):
+        assert panel_class in html
+    compact_css = re.sub(r"\s+", "", css)
+    assert ".analytics-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));" in compact_css
+    assert ".panel-volume,.panel-status{grid-column:span3;}" in compact_css
+    assert ".panel-trace,.panel-milestones,.panel-nodes{grid-column:span2;}" in compact_css
+    assert ".analytics-panel.wide" not in css
+    tablet_css = compact_css.split("@media(max-width:1100px)", 1)[1].split("@media(max-width:720px)", 1)[0]
+    assert ".analytics-panel{min-height:0" in tablet_css
+    assert ".analytics-panel{min-height:0" in compact_css.split("@media(max-width:720px)", 1)[1]
+
+    closed_status = javascript_function_body(js, "closedStatusDistribution")
+    status_renderer = javascript_function_body(js, "renderStatusDistribution")
+    assert "Object.prototype.hasOwnProperty.call(STATUS_PRESENTATION" in closed_status
+    assert "const items = closedStatusDistribution()" in status_renderer
     combined = (html + js).casefold()
     for forbidden in ("funil", "receita", "conversão", "interesse", "motivo de handoff"):
         assert forbidden not in combined
@@ -1257,21 +1278,140 @@ test('Task 2 omits empty sparklines but retains the factual execution note', asy
   await expect(page.locator('#kpi-grid .kpi-series > span').first()).toHaveText('Execuções no período');
 });
 
-test('Task 3 renders all five analytics roots from nonzero real distributions', async ({page}) => {
+test('Task 3 causally renders five exact analytics sources and adversarial structures', async ({page}) => {
   await setup(page);
-  await resolveRequest(page, 0, 200, snapshot('analytics', 3, [
-    {start_at: '2026-08-21T10:00:00Z', count: 1},
-    {start_at: '2026-08-21T11:00:00Z', count: 3},
-  ]));
-  await expect(page.locator('#status-distribution .donut-center')).toHaveText('3');
-  await expect(page.locator('#execution-series')).toContainText('1');
-  await expect(page.locator('#status-distribution')).toContainText('Concluída');
-  await expect(page.locator('#status-distribution')).toContainText('Falha');
-  await expect(page.locator('#trace-distribution')).toContainText('Trace completo');
-  await expect(page.locator('#trace-distribution')).toContainText('Trace parcial');
-  await expect(page.locator('#milestones-chart')).toContainText('Reserva');
-  await expect(page.locator('#milestones-chart')).toContainText('Entrega pública');
-  await expect(page.locator('#top-node-types')).toContainText('maya request');
+  const exclusive = snapshot('analytics-exclusive', 12, [
+    {start_at: '2026-08-21T10:00:00Z', count: 17},
+    {start_at: '2026-08-21T11:00:00Z', count: 29},
+  ]);
+  exclusive.status_distribution = [
+    {status: 'completed', count: 7},
+    {status: 'running', count: 5},
+    {status: 'future_status_101', count: 101},
+  ];
+  exclusive.trace_distribution = [
+    {trace_completeness: 'complete_trace', count: 13},
+    {trace_completeness: 'partial_trace', count: 0},
+  ];
+  exclusive.milestones = [
+    {milestone: 'payment', count: 11},
+    {milestone: 'handoff', count: -23},
+  ];
+  exclusive.top_node_types = [
+    {node_type: 'exclusive_node_19', count: 19},
+    {node_type: 'nan_node_31', count: null},
+  ];
+  await resolveRequest(page, 0, 200, exclusive);
+
+  const svg = page.locator('#execution-series svg[role="img"]');
+  await expect(svg).toHaveCount(1);
+  await expect(svg).toHaveAttribute('aria-label', 'Execuções registradas ao longo do período');
+  await expect(svg.locator(':scope > .chart-grid')).toHaveCount(1);
+  await expect(svg.locator(':scope > .chart-grid > line')).toHaveCount(5);
+  await expect(svg.locator(':scope > path.chart-area')).toHaveCount(1);
+  await expect(svg.locator(':scope > polyline.chart-line')).toHaveCount(1);
+  await expect(svg.locator(':scope > circle.chart-point')).toHaveCount(2);
+  await expect(svg.locator('circle.chart-point > title')).toHaveCount(2);
+  await expect(svg.locator('circle.chart-point > title').nth(0)).toContainText(': 17');
+  await expect(svg.locator('circle.chart-point > title').nth(1)).toContainText(': 29');
+  await expect(svg.locator('polyline.chart-line')).toHaveAttribute(
+    'points', '32.00,96.55 608.00,32.00',
+  );
+  expect(await page.locator('#execution-series').evaluate(root => {
+    const values = [...root.querySelectorAll('[points], [d], circle')]
+      .flatMap(node => [...node.attributes].map(attribute => attribute.value));
+    return values.every(value => !/NaN|Infinity/.test(value));
+  })).toBe(true);
+
+  await expect(page.locator('#status-distribution .donut-center')).toHaveText('12');
+  await expect(page.locator('#status-distribution .chart-legend')).toContainText('Concluída');
+  await expect(page.locator('#status-distribution .chart-legend')).toContainText('Em execução');
+  await expect(page.locator('#status-distribution')).not.toContainText('future_status_101');
+  expect(await page.locator('#status-distribution .donut').evaluate(element =>
+    element.style.getPropertyValue('--donut-segments'))).toBe(
+      'var(--success-500) 0.00% 58.33%, var(--info-500) 58.33% 100.00%',
+    );
+  await expect(page.locator('#trace-distribution')).toContainText('13');
+  await expect(page.locator('#trace-distribution')).not.toContainText('17');
+  await expect(page.locator('#milestones-chart')).toContainText('11 execuções com marco');
+  await expect(page.locator('#milestones-chart')).not.toContainText('13');
+  await expect(page.locator('#top-node-types')).toContainText('exclusive node 19');
+  await expect(page.locator('#top-node-types')).toContainText('19');
+  expect(await page.locator('#trace-distribution .bar-value').evaluateAll(elements =>
+    elements.map(element => element.style.width))).toEqual(['100%', '0%']);
+  expect(await page.locator('#milestones-chart .bar-value').evaluateAll(elements =>
+    elements.map(element => element.style.width))).toEqual(['100%', '0%']);
+  expect(await page.locator('#top-node-types .bar-value').evaluateAll(elements =>
+    elements.map(element => element.style.width))).toEqual(['100%', '0%']);
+
+  const adversarial = snapshot('adversarial', 4, [
+    {start_at: '2026-08-21T12:00:00Z', count: 5},
+  ]);
+  adversarial.status_distribution = [
+    null, 42, {status: 'future_status_999', count: 999},
+    {status: 'completed', count: null}, {status: 'running', count: -8},
+    {status: 'failed', count: 4},
+  ];
+  adversarial.trace_distribution = [{trace_completeness: 'ledger_only', count: 23}];
+  adversarial.milestones = [{milestone: 'reservation', count: 31}];
+  adversarial.top_node_types = [{node_type: 'continuity_node_37', count: 37}];
+  await page.evaluate(payload => {
+    payload.status_distribution[3].count = Number.NaN;
+    state.snapshot = payload;
+    renderDashboard();
+  }, adversarial);
+  await expect(page.locator('#status-distribution .donut-center')).toHaveText('4');
+  await expect(page.locator('#status-distribution .chart-legend .legend-row')).toHaveCount(3);
+  await expect(page.locator('#status-distribution')).not.toContainText('future_status_999');
+  await expect(page.locator('#trace-distribution')).toContainText('23');
+  await expect(page.locator('#milestones-chart')).toContainText('31 execuções com marco');
+  await expect(page.locator('#top-node-types')).toContainText('continuity node 37');
+
+  const unitSvg = page.locator('#execution-series svg[role="img"]');
+  await expect(unitSvg.locator('circle.chart-point')).toHaveAttribute('cx', '320.00');
+  await expect(unitSvg.locator('polyline.chart-line')).toHaveAttribute('points', '320.00,32.00');
+  await expect(unitSvg.locator('path.chart-area')).toHaveAttribute(
+    'd', 'M 320.00 188 L 320.00,32.00 L 320.00 188 Z',
+  );
+
+  const zeroCatalogs = snapshot('zero-catalogs', 0, []);
+  zeroCatalogs.status_distribution = [
+    {status: 'completed', count: null}, {status: 'running', count: -2},
+  ];
+  zeroCatalogs.trace_distribution = [
+    {trace_completeness: 'complete_trace', count: null},
+    {trace_completeness: 'partial_trace', count: -3},
+  ];
+  zeroCatalogs.milestones = [{milestone: 'public_delivery', count: null}];
+  zeroCatalogs.top_node_types = [{node_type: 'zero_node', count: -9}];
+  await page.evaluate(payload => {
+    payload.status_distribution[0].count = Number.NaN;
+    payload.trace_distribution[0].count = Number.NaN;
+    payload.milestones[0].count = Number.NaN;
+    state.snapshot = payload;
+    renderDashboard();
+  }, zeroCatalogs);
+  await expect(page.locator('#execution-series .empty-chart')).toHaveCount(1);
+  await expect(page.locator('#status-distribution .donut')).toHaveCount(0);
+  await expect(page.locator('#status-distribution .empty-chart')).toHaveCount(1);
+  await expect(page.locator('#trace-distribution .bar-row')).toHaveCount(2);
+  await expect(page.locator('#milestones-chart .bar-row')).toHaveCount(1);
+  await expect(page.locator('#top-node-types .bar-row')).toHaveCount(1);
+  expect(await page.locator('.bar-value').evaluateAll(elements =>
+    elements.map(element => element.style.width))).toEqual(['0%', '0%', '0%', '0%']);
+
+  const emptyArrays = snapshot('empty-arrays', 0, []);
+  emptyArrays.status_distribution = [];
+  emptyArrays.trace_distribution = [];
+  emptyArrays.milestones = [];
+  emptyArrays.top_node_types = [];
+  await page.evaluate(payload => { state.snapshot = payload; renderDashboard(); }, emptyArrays);
+  for (const root of [
+    '#execution-series', '#status-distribution', '#trace-distribution',
+    '#milestones-chart', '#top-node-types',
+  ]) {
+    await expect(page.locator(`${root} > .empty-chart`)).toHaveCount(1);
+  }
 });
 
 test('dashboard ignores inverted A/B ranges', async ({page}) => {
