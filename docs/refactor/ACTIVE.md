@@ -139,3 +139,4 @@
 - Mockup fidelity Task 4: polished operations table and mobile cards.
 - Mockup fidelity Task 5: context-preserving execution drawer with race guarantees.
 - Mockup fidelity Task 6: real-browser desktop/mobile/drawer qualification PASS.
+- Mockup fidelity Task 7: full canonical regression, immutable read-only/DB audit and documentation handoff complete — `IMPLEMENTATION VERIFIED — NOT DEPLOYED`; publication remains separately gated.
