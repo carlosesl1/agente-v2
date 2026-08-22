@@ -1061,10 +1061,17 @@ def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
         assert f'addEventListener("{event}"' in js
     assert "setInterval" not in js
     assert "state.snapshot =" in js
-    assert '$("execution-drawer").classList.add("open")' in js
-    assert '$("execution-drawer").setAttribute("aria-hidden", "false")' in js
-    assert '$("execution-drawer").classList.remove("open")' in js
-    assert '$("execution-drawer").setAttribute("aria-hidden", "true")' in js
+    assert '$("execution-drawer").classList.toggle("open", state.drawerOpen)' in js
+    assert '$("execution-drawer").setAttribute("aria-hidden", String(!state.drawerOpen))' in js
+    assert '$("drawer-backdrop").hidden = !state.drawerOpen' in js
+    assert 'document.body.classList.toggle("drawer-open", state.drawerOpen)' in js
+    assert "closeExecutionDrawer" in js
+    assert "detailTrigger" in js
+    assert 'event.key !== "Escape"' in js
+    for token in ("dashboardEpoch", "detailEpoch", "fullEpoch"):
+        assert token in js
+    assert "state.fullEpoch.input" in js
+    assert "state.fullEpoch.output" in js
     assert 'payload.value ?? { status: "not_recorded" }' in js
     for token in (
         "lead_id",
@@ -1125,6 +1132,20 @@ function nodes(executionId) {
     technical_metadata: {execution: executionId}, error: null,
     has_full_input: true, has_full_output: true,
   }]};
+}
+
+function snapshotWithExecution(label, executionId, overrides = {}) {
+  const payload = snapshot(label, 1);
+  payload.executions = [{
+    lead_id: `lead-${executionId}`, execution_id: executionId,
+    received_at: '2026-08-21T10:00:00Z', duration_ms: 1250,
+    status: 'completed', trace_completeness: 'complete_trace',
+    current_node_type: `type_${executionId}`, node_count: 2,
+    has_reservation: true, has_payment: false,
+    has_public_delivery: true, has_handoff: false,
+    terminal_reason: 'completed', ...overrides,
+  }];
+  return payload;
 }
 
 async function setup(page) {
@@ -1722,6 +1743,88 @@ test('reconnect clears only the live error after dashboard success', async ({pag
   await page.evaluate(() => window.__eventSource.emit('ready'));
   await expect(page.locator('#dashboard-alert')).toBeHidden();
 });
+
+test('Task 5 execution opens as factual drawer and restores overview context and focus', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+  await page.evaluate(() => {
+    const originalRenderCanvas = renderCanvas;
+    window.__task5RenderCount = 0;
+    renderCanvas = () => {
+      window.__task5RenderCount += 1;
+      return originalRenderCanvas();
+    };
+  });
+  const trigger = page.locator('#execution-table-body .execution-link');
+  await trigger.focus();
+  await trigger.click();
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#execution-drawer')).toHaveClass(/open/);
+  await expect(page.locator('#drawer-backdrop')).toBeVisible();
+  await expect(page.locator('body')).toHaveClass(/drawer-open/);
+  await expect(page.locator('#overview-view')).toBeVisible();
+  await expect(page.locator('#drawer-title')).toHaveText('A');
+  await expect(page.locator('#drawer-lead')).toHaveText('lead-A');
+  await expect(page.locator('#drawer-summary')).toContainText('Recebida');
+  await expect(page.locator('#drawer-summary')).toContainText('Duração');
+  await expect(page.locator('#drawer-summary')).toContainText('1.3 s');
+  await expect(page.locator('#drawer-summary')).toContainText('Nó atual');
+  await expect(page.locator('#drawer-summary')).toContainText('type_A');
+  await expect(page.locator('#drawer-summary')).toContainText('Marcos');
+  await expect(page.locator('#drawer-summary')).toContainText('Reserva, Entrega');
+  expect(await page.evaluate(() => window.__task5RenderCount)).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#execution-drawer')).not.toHaveClass(/open/);
+  await expect(page.locator('#drawer-backdrop')).toBeHidden();
+  await expect(page.locator('body')).not.toHaveClass(/drawer-open/);
+  await expect(trigger).toBeFocused();
+
+  await page.locator('#refresh-dashboard').focus();
+  await page.evaluate(() => { openExecution('MISSING').catch(handleDashboardError); });
+  await expect(page.locator('#drawer-title')).toHaveText('MISSING');
+  await expect(page.locator('#drawer-lead')).toHaveText('Não registrado');
+  await expect(page.locator('#drawer-summary')).toContainText('Não registrado');
+  await expect(page.locator('#drawer-summary')).not.toContainText('lead-A');
+  await page.evaluate(() => closeExecutionDrawer());
+  await expect(page.locator('#refresh-dashboard')).toBeFocused();
+});
+
+test('Task 5 closing while detail is pending invalidates response and keeps drawer clear', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+  await page.click('#execution-table-body .execution-link');
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await page.click('#drawer-close');
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#nodes')).toBeEmpty();
+  await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
+  await expect(page.locator('#input-summary')).toHaveText('{}');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
+
+test('Task 5 obsolete full after close and reopen cannot change another execution or alert', async ({page}) => {
+  await setup(page);
+  const payload = snapshotWithExecution('initial', 'A');
+  payload.executions.push(snapshotWithExecution('other', 'B').executions[0]);
+  await resolveRequest(page, 0, 200, payload);
+  await page.locator('#execution-table-body .execution-link').nth(0).click();
+  await resolveRequest(page, 1, 200, nodes('A'));
+  await page.click('#load-full-input');
+  await page.click('#drawer-close');
+  await page.locator('#execution-table-body .execution-link').nth(1).click();
+  await resolveRequest(page, 3, 200, nodes('B'));
+  await resolveRequest(page, 2, 200, {value: {execution: 'A', secret: 'obsolete'}});
+  await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#canvas-title')).toHaveText('B');
+  await expect(page.locator('#node-title')).toHaveText('type B');
+  await expect(page.locator('#input-summary')).toContainText('"B"');
+  await expect(page.locator('#input-full')).toBeHidden();
+  await expect(page.locator('#input-full')).not.toContainText('obsolete');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
 """
 
 
@@ -1800,5 +1903,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 21 tests using 1 worker" in output, output
-    assert "21 passed" in output, output
+    assert "Running 24 tests using 1 worker" in output, output
+    assert "24 passed" in output, output

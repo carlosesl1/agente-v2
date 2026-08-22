@@ -575,6 +575,45 @@ function makeDesktopExecutionRow(execution) {
   return row;
 }
 
+function fact(label, value) {
+  const item = document.createElement("div");
+  item.className = "drawer-fact";
+  const heading = document.createElement("strong");
+  heading.textContent = label;
+  const content = document.createElement("span");
+  content.textContent = value;
+  item.append(heading, content);
+  return item;
+}
+
+function renderDrawerSummary(executionId) {
+  const executions = state.snapshot && Array.isArray(state.snapshot.executions)
+    ? state.snapshot.executions
+    : [];
+  const execution = executions.find((item) => (
+    item !== null
+    && typeof item === "object"
+    && !Array.isArray(item)
+    && item.execution_id === executionId
+  )) || null;
+  $("drawer-title").textContent = shortExecutionId(executionId || "Execução");
+  $("drawer-lead").textContent = displayValue(execution && execution.lead_id);
+  const status = executionStatusPresentation(execution && execution.status);
+  $("drawer-status").className = `status-chip ${status[1]}`;
+  $("drawer-status").textContent = status[0];
+  const trace = tracePresentation(execution && execution.trace_completeness);
+  $("drawer-trace").className = `status-chip ${trace[1]}`;
+  $("drawer-trace").textContent = trace[0];
+  $("drawer-summary").replaceChildren(
+    fact("Recebida", formatTimestamp(execution && execution.received_at)),
+    fact("Duração", formatDuration(execution && execution.duration_ms)),
+    fact("Nó atual", displayValue(execution && execution.current_node_type)),
+    fact("Nós", displayValue(execution && execution.node_count)),
+    fact("Motivo terminal", displayValue(execution && execution.terminal_reason)),
+    fact("Marcos", execution ? milestoneLabels(execution).join(", ") || "Nenhum registrado" : "Nenhum registrado"),
+  );
+}
+
 function makeMobileFact(label, value) {
   const fact = document.createElement("div");
   fact.className = "service-mobile-fact";
@@ -740,6 +779,7 @@ function renderCanvas() {
     const element = document.createElement("button");
     element.type = "button";
     element.className = `node${node.node_id === state.selectedNode ? " selected" : ""}`;
+    element.dataset.nodeId = node.node_id;
     element.style.left = `${position.x}px`;
     element.style.top = `${position.y}px`;
     const kind = document.createElement("div");
@@ -803,16 +843,67 @@ function selectNode(nodeId) {
   $("output-full").hidden = true;
   $("load-full-input").hidden = !node.has_full_input;
   $("load-full-output").hidden = !node.has_full_output;
-  renderCanvas();
+  for (const element of $("nodes").querySelectorAll(".node")) {
+    element.classList.toggle("selected", element.dataset.nodeId === nodeId);
+  }
+}
+
+function clearDetail(executionId = "Execução") {
+  state.selectedExecution = executionId === "Execução" ? null : executionId;
+  state.nodes = [];
+  state.selectedNode = null;
+  $("canvas-title").textContent = executionId;
+  $("nodes").replaceChildren();
+  $("edges").replaceChildren();
+  clearInspector();
+}
+
+function setExecutionDrawerOpen(open) {
+  state.drawerOpen = Boolean(open);
+  $("execution-drawer").classList.toggle("open", state.drawerOpen);
+  $("execution-drawer").setAttribute("aria-hidden", String(!state.drawerOpen));
+  $("drawer-backdrop").hidden = !state.drawerOpen;
+  document.body.classList.toggle("drawer-open", state.drawerOpen);
+}
+
+function closeExecutionDrawer({ restoreFocus = true } = {}) {
+  state.detailEpoch += 1;
+  state.fullEpoch.input += 1;
+  state.fullEpoch.output += 1;
+  const detailTrigger = state.detailTrigger;
+  state.detailTrigger = null;
+  setExecutionDrawerOpen(false);
+  clearDetail();
+  renderDrawerSummary(null);
+  $("nav-execution").removeAttribute("aria-current");
+  $("nav-overview").setAttribute("aria-current", "page");
+  $("range-select").value = state.range;
+  $("lead-search").value = state.leadFilter;
+  $("status-filter").value = state.statusFilter;
+  $("completeness-filter").value = state.completenessFilter;
+  renderExecutionTable();
+  if (!restoreFocus || !detailTrigger) return;
+  let focusTarget = detailTrigger.node instanceof HTMLElement && detailTrigger.node.isConnected
+    ? detailTrigger.node
+    : null;
+  if (!focusTarget) {
+    for (const button of document.querySelectorAll(".row-open")) {
+      const container = detailTrigger.surface === "mobile"
+        ? button.closest(".execution-mobile-card")
+        : button.closest("#execution-table-body > tr");
+      if (container && container.dataset.executionId === detailTrigger.executionId) {
+        focusTarget = button;
+        break;
+      }
+    }
+  }
+  if (focusTarget) focusTarget.focus();
 }
 
 async function refreshOpenExecution(executionId, epoch) {
   if (!executionId) return false;
   if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) return false;
-  state.nodes = [];
-  $("canvas-title").textContent = executionId;
-  clearInspector();
-  renderCanvas();
+  clearDetail(executionId);
   let payload;
   try {
     payload = await getJSON(`/ops/api/executions/${encodeURIComponent(executionId)}/nodes`);
@@ -824,18 +915,13 @@ async function refreshOpenExecution(executionId, epoch) {
   }
   if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) return false;
   state.nodes = payload.nodes;
-  $("canvas-title").textContent = executionId;
-  clearInspector();
   renderCanvas();
   if (state.nodes.length) selectNode(state.nodes[0].node_id);
   return true;
 }
 
-async function openExecution(executionId, trigger) {
+async function openExecution(executionId, trigger = null) {
   const epoch = ++state.detailEpoch;
-  state.selectedExecution = executionId;
-  state.nodes = [];
-  state.drawerOpen = true;
   const mobileContainer = trigger && typeof trigger.closest === "function"
     ? trigger.closest(".execution-mobile-card")
     : null;
@@ -850,13 +936,9 @@ async function openExecution(executionId, trigger) {
       surface: mobileContainer ? "mobile" : "desktop",
     }
     : null;
-  $("canvas-title").textContent = executionId;
-  $("drawer-title").textContent = executionId;
-  clearInspector();
-  renderCanvas();
-  $("execution-drawer").classList.add("open");
-  $("execution-drawer").setAttribute("aria-hidden", "false");
-  $("drawer-backdrop").hidden = false;
+  clearDetail(executionId);
+  renderDrawerSummary(executionId);
+  setExecutionDrawerOpen(true);
   $("nav-overview").removeAttribute("aria-current");
   $("nav-execution").disabled = false;
   $("nav-execution").setAttribute("aria-current", "page");
@@ -864,32 +946,7 @@ async function openExecution(executionId, trigger) {
 }
 
 function showOverview() {
-  const detailTrigger = state.detailTrigger;
-  state.drawerOpen = false;
-  $("execution-drawer").classList.remove("open");
-  $("execution-drawer").setAttribute("aria-hidden", "true");
-  $("drawer-backdrop").hidden = true;
-  $("nav-execution").removeAttribute("aria-current");
-  $("nav-overview").setAttribute("aria-current", "page");
-  $("range-select").value = state.range;
-  $("lead-search").value = state.leadFilter;
-  $("status-filter").value = state.statusFilter;
-  $("completeness-filter").value = state.completenessFilter;
-  renderExecutionTable();
-  let focusTarget = detailTrigger && detailTrigger.node.isConnected ? detailTrigger.node : null;
-  if (!focusTarget && detailTrigger) {
-    for (const button of document.querySelectorAll(".row-open")) {
-      const container = detailTrigger.surface === "mobile"
-        ? button.closest(".execution-mobile-card")
-        : button.closest("#execution-table-body > tr");
-      if (container && container.dataset.executionId === detailTrigger.executionId) {
-        focusTarget = button;
-        break;
-      }
-    }
-  }
-  if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
-  state.detailTrigger = null;
+  closeExecutionDrawer();
 }
 
 async function loadFull(side) {

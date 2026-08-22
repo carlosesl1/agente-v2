@@ -137,3 +137,4 @@
 - Mockup fidelity Task 2: executive shell interactions and factual KPI components.
 - Mockup fidelity Task 3: high-density analytics over existing payload only.
 - Mockup fidelity Task 4: polished operations table and mobile cards.
+- Mockup fidelity Task 5: context-preserving execution drawer with race guarantees.
