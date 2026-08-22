@@ -142,6 +142,46 @@ def test_bokun_read_adapter_sends_composition_and_returns_public_counts() -> Non
     assert observation.public_payload["children"] == 1
     assert observation.public_payload["participants"] == 3
     assert observation.public_payload["start_time"] == "08:30"
+    assert observation.public_payload["availability_statement"] == (
+        "AVAILABLE: this activity is available on 2026-11-18 "
+        "for exactly 2 adults and 1 child."
+    )
+
+
+def test_bokun_read_returns_explicit_unavailable_statement_for_exact_scope() -> None:
+    def transport(_operation: str, _payload: dict[str, object]) -> dict[str, object]:
+        return {
+            "product_id": "product:tour-4ps",
+            "bokun_product_id": "912303",
+            "start_time_id": "start-4ps",
+            "rate_id": "rate-4ps",
+            "adult_pricing_category_id": "adult-1",
+            "child_pricing_category_id": "child-1",
+            "product_public_name": "Roteiro dos 4Ps",
+            "total_amount": "0.00",
+            "currency": "BRL",
+            "available": False,
+        }
+
+    observation = BokunReadAdapter(
+        transport=transport,
+        clock=SimpleNamespace(now=lambda: NOW),
+        ttl=timedelta(minutes=5),
+    ).read(
+        ReadRequest(
+            request_id="read:unavailable-statement",
+            kind=ReadKind.ACTIVITY,
+            product_id="product:tour-4ps",
+            activity_date=date(2026, 11, 18),
+            adults=1,
+            children=0,
+        )
+    )
+
+    assert observation.public_payload["availability_statement"] == (
+        "UNAVAILABLE: this activity is unavailable on 2026-11-18 "
+        "for exactly 1 adult and 0 children."
+    )
 
 
 def test_bokun_private_reread_preserves_selected_public_start_time() -> None:

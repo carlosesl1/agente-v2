@@ -224,11 +224,11 @@ def test_missing_age_or_suitability_guidance_never_becomes_reassurance() -> None
     assert "pergunte naturalmente pelo contexto relevante" in PROMPT
 
 
-def test_activity_availability_is_literal_and_group_metadata_cannot_invert_it() -> None:
-    assert "available=true significa disponível para a data e composição exatas consultadas" in PROMPT
-    assert "available=false significa indisponível para a data e composição exatas consultadas" in PROMPT
-    assert "metadados de grupo não podem inverter `available`" in PROMPT.casefold()
-    assert "Nunca deduza disponibilidade por total_amount" in PROMPT
+def test_activity_availability_semantics_are_not_duplicated_in_the_prompt() -> None:
+    assert "available=true significa disponível" not in PROMPT
+    assert "available=false significa indisponível" not in PROMPT
+    assert "metadados de grupo não podem inverter `available`" not in PROMPT.casefold()
+    assert "Nunca deduza disponibilidade por total_amount" not in PROMPT
 
 
 def test_luna_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:

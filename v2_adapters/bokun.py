@@ -85,6 +85,19 @@ def _fee_inclusive_public_fields(
     }
 
 
+def _availability_statement(
+    *, available: bool, activity_date: object, adults: int, children: int
+) -> str:
+    status = "AVAILABLE" if available else "UNAVAILABLE"
+    meaning = "available" if available else "unavailable"
+    adult_label = "adult" if adults == 1 else "adults"
+    child_label = "child" if children == 1 else "children"
+    return (
+        f"{status}: this activity is {meaning} on {activity_date} "
+        f"for exactly {adults} {adult_label} and {children} {child_label}."
+    )
+
+
 class BokunReadAdapter:
     def __init__(self, *, transport, clock, ttl: timedelta) -> None:
         self._transport, self._clock, self._ttl = validated_adapter(
@@ -355,6 +368,12 @@ class BokunReadAdapter:
             "total_amount": amount,
             "currency": currency,
             "available": available,
+            "availability_statement": _availability_statement(
+                available=available,
+                activity_date=request.activity_date,
+                adults=adults,
+                children=children,
+            ),
             **fee_fields,
         }
         start_time = _public_start_time(response)
