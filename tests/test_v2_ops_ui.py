@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import pytest
 
@@ -29,27 +29,54 @@ EXPECTED_IDS = {
     "load-full-input", "output-panel", "output-summary", "output-full",
     "load-full-output", "metadata", "node-error",
 }
+
+
+class InteractiveContract(NamedTuple):
+    tag: str
+    element_id: str | None
+    effective_type: str | None
+    effective_destination: str | None
+    effective_owner: tuple[object, ...] | None
+    effective_submit_method: str | None
+    enabled: bool
+    role: str | None
+    tabindex: str | None
+    contenteditable: str | None
+    stable_identity: tuple[str, str, str | None] | None
+
+
+LOGOUT_OWNER = ("form", 0, None, "post", "/ops/logout")
 EXPECTED_CONTROLS = (
-    ("button", None, "submit", "/ops/logout", ("post", "/ops/logout")),
-    ("button", "drawer-close", "button", None, None),
-    ("button", "fit-canvas", "button", None, None),
-    ("button", "load-full-input", "button", None, None),
-    ("button", "load-full-output", "button", None, None),
-    ("button", "mobile-menu", "button", None, None),
-    ("button", "nav-execution", "button", None, None),
-    ("button", "nav-overview", "button", None, None),
-    ("button", "operator-menu", "button", None, None),
-    ("button", "refresh-dashboard", "button", None, None),
-    ("button", "sidebar-close", "button", None, None),
-    ("button", "sidebar-backdrop", "button", None, None),
-    ("button", "zoom-in", "button", None, None),
-    ("button", "zoom-out", "button", None, None),
-    ("input", None, "hidden", None, ("post", "/ops/logout")),
-    ("input", "lead-search", "text", None, None),
-    ("select", "completeness-filter", None, None, None),
-    ("select", "range-select", None, None, None),
-    ("select", "status-filter", None, None, None),
+    InteractiveContract("button", None, "submit", "/ops/logout", LOGOUT_OWNER, "post", True, None, None, None, None),
+    InteractiveContract("button", "drawer-close", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "fit-canvas", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "load-full-input", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "load-full-output", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "mobile-menu", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "nav-execution", "button", None, None, None, False, None, None, None, None),
+    InteractiveContract("button", "nav-overview", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "operator-menu", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "refresh-dashboard", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "sidebar-close", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "sidebar-backdrop", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "zoom-in", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "zoom-out", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("div", "execution-canvas", None, None, None, None, True, "region", "0", None, None),
+    InteractiveContract("input", None, "hidden", None, LOGOUT_OWNER, None, True, None, None, None, None),
+    InteractiveContract("input", "lead-search", "text", None, None, None, True, None, None, None, None),
+    InteractiveContract("select", "completeness-filter", None, None, None, None, True, None, None, None, None),
+    InteractiveContract("select", "range-select", None, None, None, None, True, None, None, None, None),
+    InteractiveContract("select", "status-filter", None, None, None, None, True, None, None, None, None),
+    InteractiveContract("summary", None, None, None, None, None, True, None, None, None, ("Erro sanitizado", "details", None)),
+    InteractiveContract("summary", None, None, None, None, None, True, None, None, None, ("Metadados técnicos", "details", None)),
 )
+
+FORM_ASSOCIATED_TAGS = {"button", "fieldset", "input", "object", "output", "select", "textarea"}
+ARIA_CONTROL_ROLES = {
+    "button", "link", "checkbox", "radio", "switch", "tab", "option",
+    "menuitem", "menuitemcheckbox", "menuitemradio", "slider", "spinbutton",
+    "textbox", "combobox", "listbox", "treeitem", "gridcell",
+}
 
 
 @dataclass
@@ -140,22 +167,53 @@ def control_type(element: Element) -> str | None:
     return declared_type.casefold() if declared_type is not None else None
 
 
+def contenteditable_state(element: Element) -> str | None:
+    declared = element.attrs.get("contenteditable")
+    if "contenteditable" not in element.attrs:
+        return None
+    normalized = (declared or "").strip().casefold()
+    return normalized if normalized in {"true", "plaintext-only"} else "true" if normalized == "" else None
+
+
+def is_effectively_disabled(element: Element) -> bool:
+    if "disabled" in element.attrs:
+        return True
+    parent = element.parent
+    while parent is not None:
+        if parent.tag == "fieldset" and "disabled" in parent.attrs:
+            legends = [child for child in parent.children if child.tag == "legend"]
+            if legends and (element is legends[0] or is_descendant(element, legends[0])):
+                parent = parent.parent
+                continue
+            return True
+        parent = parent.parent
+    return False
+
+
+def is_interactive_surface(element: Element) -> bool:
+    role_tokens = set((element.attrs.get("role") or "").casefold().split())
+    return (
+        element.tag in FORM_ASSOCIATED_TAGS
+        or (element.tag in {"a", "area"} and "href" in element.attrs)
+        or element.tag == "summary"
+        or element.tag in {"iframe", "embed"}
+        or (element.tag in {"audio", "video"} and "controls" in element.attrs)
+        or "tabindex" in element.attrs
+        or contenteditable_state(element) is not None
+        or bool(role_tokens & ARIA_CONTROL_ROLES)
+    )
+
+
 def semantic_interactive_inventory(
     root: Element,
-) -> list[tuple[Element, Element | None, tuple[object, ...]]]:
+) -> list[tuple[Element, Element | None, InteractiveContract]]:
     forms = root.descendants("form")
-    form_associated_tags = {"button", "input", "select", "textarea"}
-    interactive = [
-        element
-        for element in root.descendants()
-        if element.tag in form_associated_tags
-        or (element.tag == "a" and "href" in element.attrs)
-    ]
-    inventory: list[tuple[Element, Element | None, tuple[object, ...]]] = []
+    interactive = [element for element in root.descendants() if is_interactive_surface(element)]
+    inventory: list[tuple[Element, Element | None, InteractiveContract]] = []
 
     for element in interactive:
         owner: Element | None = None
-        if element.tag in form_associated_tags:
+        if element.tag in FORM_ASSOCIATED_TAGS:
             explicit_owner = element.attrs.get("form")
             if explicit_owner is not None:
                 matching_forms = [form for form in forms if form.attrs.get("id") == explicit_owner]
@@ -172,24 +230,55 @@ def semantic_interactive_inventory(
         owner_contract = None
         if owner is not None:
             owner_contract = (
+                "form",
+                forms.index(owner),
+                owner.attrs.get("id"),
                 (owner.attrs.get("method") or "get").casefold(),
                 owner.attrs.get("action") or "",
             )
 
         destination = None
-        if element.tag == "a":
+        if element.tag in {"a", "area"}:
             destination = element.attrs.get("href")
-        elif control_type(element) == "submit":
+        elif element.tag == "iframe" or element.tag == "embed" or element.tag in {"audio", "video"}:
+            destination = element.attrs.get("src")
+        elif element.tag == "object":
+            destination = element.attrs.get("data")
+        elif element.tag in {"button", "input"} and control_type(element) in {"submit", "image"}:
             destination = element.attrs.get("formaction")
             if destination is None and owner is not None:
                 destination = owner.attrs.get("action") or ""
 
-        contract = (
-            element.tag,
-            element.attrs.get("id"),
-            control_type(element),
-            destination,
-            owner_contract,
+        submit_method = None
+        if element.tag in {"button", "input"} and control_type(element) in {"submit", "image"}:
+            submit_method = element.attrs.get("formmethod")
+            if submit_method is None and owner is not None:
+                submit_method = owner.attrs.get("method") or "get"
+            submit_method = submit_method.casefold() if submit_method is not None else None
+
+        stable_identity = None
+        if element.tag == "summary":
+            parent = element.parent
+            stable_identity = (
+                " ".join(element.text().split()),
+                parent.tag if parent is not None else "#document",
+                parent.attrs.get("id") if parent is not None else None,
+            )
+
+        role = element.attrs.get("role")
+        tabindex = element.attrs.get("tabindex")
+        contract = InteractiveContract(
+            tag=element.tag,
+            element_id=element.attrs.get("id"),
+            effective_type=control_type(element),
+            effective_destination=destination,
+            effective_owner=owner_contract,
+            effective_submit_method=submit_method,
+            enabled=not is_effectively_disabled(element),
+            role=" ".join(role.casefold().split()) if role is not None else None,
+            tabindex=tabindex.strip() if tabindex is not None else None,
+            contenteditable=contenteditable_state(element),
+            stable_identity=stable_identity,
         )
         inventory.append((element, owner, contract))
 
@@ -201,8 +290,44 @@ def assert_dashboard_dom_contract(html: str) -> None:
     by_id = elements_by_id(root)
     interactive_inventory = semantic_interactive_inventory(root)
     controls = [element for element, _, _ in interactive_inventory]
+
+    forms = root.descendants("form")
+    assert len(forms) == 1
+    logout_form = forms[0]
+    assert (logout_form.attrs.get("method") or "get").casefold() == "post"
+    assert logout_form.attrs.get("action") == "/ops/logout"
+    assert "formaction" not in logout_form.attrs
+    csrf = [element for element in controls if element.tag == "input" and element.attrs.get("name") == "csrf"]
+    assert len(csrf) == 1
+    csrf_record = next((owner, contract) for element, owner, contract in interactive_inventory if element is csrf[0])
+    assert (
+        csrf_record[0] is logout_form
+        and csrf_record[1].enabled
+        and csrf[0].attrs.get("type") == "hidden"
+        and csrf[0].attrs.get("name") == "csrf"
+        and csrf[0].attrs.get("value") == "{{CSRF}}"
+    ), "logout CSRF semantics"
+
+    enabled_submits = [
+        (element, owner, contract)
+        for element, owner, contract in interactive_inventory
+        if element.tag in {"button", "input"}
+        and control_type(element) in {"submit", "image"}
+        and contract.enabled
+    ]
+    assert len(enabled_submits) == 1, "logout submit semantics"
+    submit, submit_owner, submit_contract = enabled_submits[0]
+    assert (
+        submit_owner is logout_form
+        and submit_contract.effective_submit_method == "post"
+        and submit_contract.effective_destination == "/ops/logout"
+    ), "logout submit semantics"
+    assert submit.text().strip() == "Sair"
+    assert not [element for element in controls if "formaction" in element.attrs]
+
     control_contract = Counter(contract for _, _, contract in interactive_inventory)
     assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected interactive element contract"
+
     assert set(by_id) == EXPECTED_IDS
     for element in by_id.values():
         parent = element.parent
@@ -227,39 +352,13 @@ def assert_dashboard_dom_contract(html: str) -> None:
     assert "hidden" not in input_panel.attrs, "hidden Input"
     assert "hidden" not in output_panel.attrs, "hidden Output"
 
-    anonymous_controls = [element for element in controls if not element.attrs.get("id")]
-    assert len(anonymous_controls) == 2
-
-    forms = root.descendants("form")
-    assert len(forms) == 1
-    logout_form = forms[0]
-    assert (logout_form.attrs.get("method") or "get").casefold() == "post"
-    assert logout_form.attrs.get("action") == "/ops/logout"
-    assert "formaction" not in logout_form.attrs
-    csrf = [
-        element
-        for element in logout_form.descendants("input")
-        if element.attrs.get("name") == "csrf"
-    ]
-    assert len(csrf) == 1
-    assert csrf[0].attrs.get("type") == "hidden"
-    assert csrf[0].attrs.get("value") == "{{CSRF}}"
-    csrf_owner = next(owner for element, owner, _ in interactive_inventory if element is csrf[0])
-    assert csrf_owner is logout_form, "effective form owner"
-
-    submit_controls = [
+    anonymous_form_controls = [
         element
         for element in controls
-        if element.tag in {"button", "input"} and control_type(element) == "submit"
+        if element.tag in FORM_ASSOCIATED_TAGS and not element.attrs.get("id")
     ]
-    assert len(submit_controls) == 1
-    submit_owner = next(
-        owner for element, owner, _ in interactive_inventory if element is submit_controls[0]
-    )
-    assert submit_owner is logout_form, "effective form owner"
-    assert submit_controls[0].text().strip() == "Sair"
-    assert set(map(id, anonymous_controls)) == {id(csrf[0]), id(submit_controls[0])}
-    assert not [element for element in controls if "formaction" in element.attrs]
+    assert len(anonymous_form_controls) == 2
+    assert set(map(id, anonymous_form_controls)) == {id(csrf[0]), id(submit)}
 
     links = root.descendants("link")
     scripts = [element.attrs.get("src") for element in root.descendants("script")]
@@ -320,6 +419,55 @@ def test_dashboard_shell_dom_contract() -> None:
                 '<button form="ghost" type="submit">Sair</button>',
             ),
             "effective form owner",
+        ),
+        (
+            lambda html: html.replace(
+                '<button type="submit">Sair</button>',
+                '<button type="submit" formmethod="get">Sair</button>',
+            ),
+            "logout submit semantics",
+        ),
+        (
+            lambda html: html.replace(
+                '<input type="hidden" name="csrf"',
+                '<input disabled type="hidden" name="csrf"',
+            ),
+            "logout CSRF semantics",
+        ),
+        (
+            lambda html: html.replace(
+                '<button type="submit">Sair</button>',
+                '<button disabled type="submit">Sair</button>',
+            ),
+            "logout submit semantics",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<details><summary>Ação extra</summary>extra</details><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<map name="extra"><area href="/ops/retry" alt="Retry"></map><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<div role="button" tabindex="0">Ação extra</div><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<div contenteditable="true">Ação extra</div><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
         ),
         (
             lambda html: html.replace(
