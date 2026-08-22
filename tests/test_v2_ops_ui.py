@@ -795,6 +795,25 @@ def test_html_has_no_commercial_claims() -> None:
         assert forbidden not in lowered
 
 
+def test_mockup_fidelity_header_and_kpi_contract() -> None:
+    html, js, css = assets()
+    for token in (
+        "brand-lockup", "readonly-chip", "welcome-row", "health-pill",
+        "header-actions", "refresh-dashboard", "operator-popover",
+    ):
+        assert token in html
+    for function_name in ("refreshDashboard", "setMobileNavigationOpen"):
+        assert f"function {function_name}(" in js or f"async function {function_name}(" in js
+    for token in ("kpi-top", "kpi-icon", "kpi-label", "kpi-value", "kpi-foot", "sparkline"):
+        assert token in js
+    assert 'setAttribute("aria-expanded"' in js
+    assert "execution_series" in js
+    assert "previous period" not in js.casefold()
+    assert "período anterior" not in (html + js).casefold()
+    for selector in (".brand-lockup", ".welcome-row", ".health-pill", ".kpi-icon", ".sparkline"):
+        assert selector in css
+
+
 def test_approved_visual_palette_and_responsive_structure() -> None:
     _, _, css = assets()
     for color in (
@@ -892,20 +911,25 @@ def test_javascript_uses_the_closed_state_cards_and_exact_filters() -> None:
         ("leadFilter", '""'),
         ("zoom", "1"),
         ("connected", "false"),
+        ("mobileNavigationOpen", "false"),
+        ("operatorMenuOpen", "false"),
+        ("dashboardLoading", "false"),
+        ("drawerOpen", "false"),
+        ("detailTrigger", "null"),
     ):
         assert f"{field}: {initial}" in js
 
-    for key, label in (
-        ("executions", "Execuções"),
-        ("distinct_leads", "Leads distintos"),
-        ("in_progress", "Em andamento"),
-        ("completed", "Concluídas"),
-        ("failed", "Falhas"),
-        ("manual_review", "Revisão manual"),
-        ("technical_completion_rate", "Conclusão técnica"),
-        ("average_terminal_duration_ms", "Duração média terminal"),
+    for definition in (
+        '["executions", "Execuções", "◎", "Eventos recebidos no período", "neutral"]',
+        '["distinct_leads", "Leads distintos", "◇", "IDs distintos no período", "neutral"]',
+        '["in_progress", "Em andamento", "◌", "Pending, running e stale", "active"]',
+        '["completed", "Concluídas", "✓", "Conclusão técnica", "success"]',
+        '["failed", "Falhas", "!", "Estado técnico failed", "danger"]',
+        '["manual_review", "Revisão manual", "↗", "Estado manual_review", "warning"]',
+        '["technical_completion_rate", "Conclusão técnica", "%", "Concluídas sobre execuções", "success"]',
+        '["average_terminal_duration_ms", "Duração média terminal", "◷", "Apenas execuções terminais", "neutral"]',
     ):
-        assert f'["{key}", "{label}"]' in js
+        assert definition in js
 
     assert "execution.lead_id === state.leadFilter" in js
     assert "execution.status === state.statusFilter" in js
@@ -924,10 +948,10 @@ def test_javascript_preserves_detail_and_uses_sse_without_polling() -> None:
         assert f'addEventListener("{event}"' in js
     assert "setInterval" not in js
     assert "state.snapshot =" in js
-    assert '$("overview-view").hidden = true' in js
-    assert '$("execution-view").hidden = false' in js
-    assert '$("overview-view").hidden = false' in js
-    assert '$("execution-view").hidden = true' in js
+    assert '$("execution-drawer").classList.add("open")' in js
+    assert '$("execution-drawer").setAttribute("aria-hidden", "false")' in js
+    assert '$("execution-drawer").classList.remove("open")' in js
+    assert '$("execution-drawer").setAttribute("aria-hidden", "true")' in js
     assert 'payload.value ?? { status: "not_recorded" }' in js
     for token in (
         "lead_id",

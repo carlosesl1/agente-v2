@@ -16,17 +16,22 @@ const state = {
   fullEpoch: { input: 0, output: 0 },
   dashboardError: null,
   liveError: null,
+  mobileNavigationOpen: false,
+  operatorMenuOpen: false,
+  dashboardLoading: false,
+  drawerOpen: false,
+  detailTrigger: null,
 };
 
 const KPI_DEFINITIONS = [
-  ["executions", "Execuções"],
-  ["distinct_leads", "Leads distintos"],
-  ["in_progress", "Em andamento"],
-  ["completed", "Concluídas"],
-  ["failed", "Falhas"],
-  ["manual_review", "Revisão manual"],
-  ["technical_completion_rate", "Conclusão técnica"],
-  ["average_terminal_duration_ms", "Duração média terminal"],
+  ["executions", "Execuções", "◎", "Eventos recebidos no período", "neutral"],
+  ["distinct_leads", "Leads distintos", "◇", "IDs distintos no período", "neutral"],
+  ["in_progress", "Em andamento", "◌", "Pending, running e stale", "active"],
+  ["completed", "Concluídas", "✓", "Conclusão técnica", "success"],
+  ["failed", "Falhas", "!", "Estado técnico failed", "danger"],
+  ["manual_review", "Revisão manual", "↗", "Estado manual_review", "warning"],
+  ["technical_completion_rate", "Conclusão técnica", "%", "Concluídas sobre execuções", "success"],
+  ["average_terminal_duration_ms", "Duração média terminal", "◷", "Apenas execuções terminais", "neutral"],
 ];
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
@@ -40,6 +45,19 @@ function renderAlert() {
   const messages = [state.dashboardError, state.liveError].filter(Boolean);
   alert.textContent = messages.join(" ");
   alert.hidden = messages.length === 0;
+}
+
+function setMobileNavigationOpen(open) {
+  state.mobileNavigationOpen = Boolean(open);
+  $("app-sidebar").classList.toggle("mobile-open", state.mobileNavigationOpen);
+  $("sidebar-backdrop").hidden = !state.mobileNavigationOpen;
+  $("mobile-menu").setAttribute("aria-expanded", String(state.mobileNavigationOpen));
+}
+
+function setOperatorMenuOpen(open) {
+  state.operatorMenuOpen = Boolean(open);
+  $("operator-popover").hidden = !state.operatorMenuOpen;
+  $("operator-menu").setAttribute("aria-expanded", String(state.operatorMenuOpen));
 }
 
 async function getJSON(path) {
@@ -108,17 +126,63 @@ function emptyMessage(root, message) {
   root.replaceChildren(paragraph);
 }
 
+function createSparkline(points) {
+  if (!points.length) return null;
+  const width = 66;
+  const height = 23;
+  const maximum = Math.max(1, ...points.map((point) => Math.max(0, Number(point.count) || 0)));
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  svg.setAttribute("class", "sparkline");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Execuções no período");
+  const polyline = document.createElementNS(SVG_NAMESPACE, "polyline");
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+    const count = Math.max(0, Number(point.count) || 0);
+    const y = height - 2 - (count / maximum) * (height - 4);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  polyline.setAttribute("points", coordinates.join(" "));
+  polyline.setAttribute("fill", "none");
+  svg.append(polyline);
+  return svg;
+}
+
 function renderKpis() {
   const root = $("kpi-grid");
   const metrics = state.snapshot ? state.snapshot.metrics : {};
-  const cards = KPI_DEFINITIONS.map(([key, label]) => {
+  const points = state.snapshot ? state.snapshot.execution_series : [];
+  const cards = KPI_DEFINITIONS.map(([key, label, icon, description, tone]) => {
     const card = document.createElement("article");
-    card.className = "kpi-card";
+    card.className = `kpi-card ${tone}`;
+    const top = document.createElement("div");
+    top.className = "kpi-top";
+    const iconElement = document.createElement("span");
+    iconElement.className = "kpi-icon";
+    iconElement.setAttribute("aria-hidden", "true");
+    iconElement.textContent = icon;
     const heading = document.createElement("span");
+    heading.className = "kpi-label";
     heading.textContent = label;
+    top.append(iconElement, heading);
     const value = document.createElement("strong");
+    value.className = "kpi-value";
     value.textContent = formatMetric(key, metrics[key]);
-    card.append(heading, value);
+    const foot = document.createElement("div");
+    foot.className = "kpi-foot";
+    const descriptionElement = document.createElement("span");
+    descriptionElement.textContent = description;
+    foot.append(descriptionElement);
+    const series = document.createElement("div");
+    series.className = "kpi-series";
+    const note = document.createElement("span");
+    note.textContent = "Execuções no período";
+    series.append(note);
+    const sparkline = createSparkline(points);
+    if (sparkline) series.append(sparkline);
+    foot.append(series);
+    card.append(top, value, foot);
     return card;
   });
   root.replaceChildren(...cards);
@@ -367,6 +431,18 @@ async function loadDashboard() {
   return true;
 }
 
+async function refreshDashboard() {
+  if (state.dashboardLoading) return;
+  state.dashboardLoading = true;
+  $("refresh-dashboard").disabled = true;
+  try {
+    await loadDashboard();
+  } finally {
+    state.dashboardLoading = false;
+    $("refresh-dashboard").disabled = false;
+  }
+}
+
 function nodePosition(index) {
   const column = index % 3;
   const row = Math.floor(index / 3);
@@ -480,11 +556,15 @@ async function openExecution(executionId) {
   const epoch = ++state.detailEpoch;
   state.selectedExecution = executionId;
   state.nodes = [];
+  state.drawerOpen = true;
+  state.detailTrigger = document.activeElement;
   $("canvas-title").textContent = executionId;
+  $("drawer-title").textContent = executionId;
   clearInspector();
   renderCanvas();
-  $("overview-view").hidden = true;
-  $("execution-view").hidden = false;
+  $("execution-drawer").classList.add("open");
+  $("execution-drawer").setAttribute("aria-hidden", "false");
+  $("drawer-backdrop").hidden = false;
   $("nav-overview").removeAttribute("aria-current");
   $("nav-execution").disabled = false;
   $("nav-execution").setAttribute("aria-current", "page");
@@ -492,8 +572,10 @@ async function openExecution(executionId) {
 }
 
 function showOverview() {
-  $("overview-view").hidden = false;
-  $("execution-view").hidden = true;
+  state.drawerOpen = false;
+  $("execution-drawer").classList.remove("open");
+  $("execution-drawer").setAttribute("aria-hidden", "true");
+  $("drawer-backdrop").hidden = true;
   $("nav-execution").removeAttribute("aria-current");
   $("nav-overview").setAttribute("aria-current", "page");
   $("range-select").value = state.range;
@@ -501,6 +583,10 @@ function showOverview() {
   $("status-filter").value = state.statusFilter;
   $("completeness-filter").value = state.completenessFilter;
   renderExecutionTable();
+  if (state.detailTrigger && typeof state.detailTrigger.focus === "function") {
+    state.detailTrigger.focus();
+  }
+  state.detailTrigger = null;
 }
 
 async function loadFull(side) {
@@ -539,6 +625,7 @@ function markDisconnected() {
   state.connected = false;
   state.liveError = "Atualização ao vivo indisponível. Os últimos dados recebidos permanecem visíveis.";
   $("live-state").textContent = "Desconectado";
+  $("source-health-state").textContent = "Desconectado";
   renderAlert();
 }
 
@@ -559,6 +646,7 @@ function connectLive() {
     state.connected = true;
     state.liveError = null;
     $("live-state").textContent = "Ao vivo";
+    $("source-health-state").textContent = "Online";
     renderAlert();
   });
   source.addEventListener("change", () => {
@@ -591,9 +679,19 @@ $("completeness-filter").addEventListener("change", (event) => {
   state.completenessFilter = event.target.value;
   renderExecutionTable();
 });
-$("back-to-overview").addEventListener("click", showOverview);
-$("nav-overview").addEventListener("click", showOverview);
+$("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true));
+$("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false));
+$("sidebar-backdrop").addEventListener("click", () => setMobileNavigationOpen(false));
+$("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError));
+$("operator-menu").addEventListener("click", () => setOperatorMenuOpen(!state.operatorMenuOpen));
+$("drawer-close").addEventListener("click", showOverview);
+$("drawer-backdrop").addEventListener("click", showOverview);
+$("nav-overview").addEventListener("click", () => {
+  showOverview();
+  setMobileNavigationOpen(false);
+});
 $("nav-execution").addEventListener("click", () => {
+  setMobileNavigationOpen(false);
   if (state.selectedExecution) openExecution(state.selectedExecution).catch(handleDashboardError);
 });
 $("load-full-input").addEventListener("click", () => loadFull("input").catch(handleDashboardError));
@@ -610,6 +708,19 @@ $("fit-canvas").addEventListener("click", () => {
   state.zoom = 1;
   $("execution-canvas").scrollTo(0, 0);
   renderCanvas();
+});
+document.addEventListener("click", (event) => {
+  if (
+    state.operatorMenuOpen
+    && !$("operator-menu").contains(event.target)
+    && !$("operator-popover").contains(event.target)
+  ) setOperatorMenuOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (state.operatorMenuOpen) setOperatorMenuOpen(false);
+  if (state.mobileNavigationOpen) setMobileNavigationOpen(false);
+  if (state.drawerOpen) showOverview();
 });
 
 loadDashboard().catch(handleDashboardError);
