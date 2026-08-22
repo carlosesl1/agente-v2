@@ -30,25 +30,25 @@ EXPECTED_IDS = {
     "load-full-output", "metadata", "node-error",
 }
 EXPECTED_CONTROLS = (
-    ("button", None, "submit"),
-    ("button", "drawer-close", "button"),
-    ("button", "fit-canvas", "button"),
-    ("button", "load-full-input", "button"),
-    ("button", "load-full-output", "button"),
-    ("button", "mobile-menu", "button"),
-    ("button", "nav-execution", "button"),
-    ("button", "nav-overview", "button"),
-    ("button", "operator-menu", "button"),
-    ("button", "refresh-dashboard", "button"),
-    ("button", "sidebar-close", "button"),
-    ("button", "sidebar-backdrop", "button"),
-    ("button", "zoom-in", "button"),
-    ("button", "zoom-out", "button"),
-    ("input", None, "hidden"),
-    ("input", "lead-search", "text"),
-    ("select", "completeness-filter", None),
-    ("select", "range-select", None),
-    ("select", "status-filter", None),
+    ("button", None, "submit", "/ops/logout", ("post", "/ops/logout")),
+    ("button", "drawer-close", "button", None, None),
+    ("button", "fit-canvas", "button", None, None),
+    ("button", "load-full-input", "button", None, None),
+    ("button", "load-full-output", "button", None, None),
+    ("button", "mobile-menu", "button", None, None),
+    ("button", "nav-execution", "button", None, None),
+    ("button", "nav-overview", "button", None, None),
+    ("button", "operator-menu", "button", None, None),
+    ("button", "refresh-dashboard", "button", None, None),
+    ("button", "sidebar-close", "button", None, None),
+    ("button", "sidebar-backdrop", "button", None, None),
+    ("button", "zoom-in", "button", None, None),
+    ("button", "zoom-out", "button", None, None),
+    ("input", None, "hidden", None, ("post", "/ops/logout")),
+    ("input", "lead-search", "text", None, None),
+    ("select", "completeness-filter", None, None, None),
+    ("select", "range-select", None, None, None),
+    ("select", "status-filter", None, None, None),
 )
 
 
@@ -140,19 +140,69 @@ def control_type(element: Element) -> str | None:
     return declared_type.casefold() if declared_type is not None else None
 
 
+def semantic_interactive_inventory(
+    root: Element,
+) -> list[tuple[Element, Element | None, tuple[object, ...]]]:
+    forms = root.descendants("form")
+    form_associated_tags = {"button", "input", "select", "textarea"}
+    interactive = [
+        element
+        for element in root.descendants()
+        if element.tag in form_associated_tags
+        or (element.tag == "a" and "href" in element.attrs)
+    ]
+    inventory: list[tuple[Element, Element | None, tuple[object, ...]]] = []
+
+    for element in interactive:
+        owner: Element | None = None
+        if element.tag in form_associated_tags:
+            explicit_owner = element.attrs.get("form")
+            if explicit_owner is not None:
+                matching_forms = [form for form in forms if form.attrs.get("id") == explicit_owner]
+                assert len(matching_forms) == 1, "effective form owner"
+                owner = matching_forms[0]
+            else:
+                parent = element.parent
+                while parent is not None:
+                    if parent.tag == "form":
+                        owner = parent
+                        break
+                    parent = parent.parent
+
+        owner_contract = None
+        if owner is not None:
+            owner_contract = (
+                (owner.attrs.get("method") or "get").casefold(),
+                owner.attrs.get("action") or "",
+            )
+
+        destination = None
+        if element.tag == "a":
+            destination = element.attrs.get("href")
+        elif control_type(element) == "submit":
+            destination = element.attrs.get("formaction")
+            if destination is None and owner is not None:
+                destination = owner.attrs.get("action") or ""
+
+        contract = (
+            element.tag,
+            element.attrs.get("id"),
+            control_type(element),
+            destination,
+            owner_contract,
+        )
+        inventory.append((element, owner, contract))
+
+    return inventory
+
+
 def assert_dashboard_dom_contract(html: str) -> None:
     root = parse_html(html)
     by_id = elements_by_id(root)
-    controls = [
-        element
-        for element in root.descendants()
-        if element.tag in {"button", "input", "select"}
-    ]
-    control_contract = Counter(
-        (element.tag, element.attrs.get("id"), control_type(element))
-        for element in controls
-    )
-    assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected control tag/id/type"
+    interactive_inventory = semantic_interactive_inventory(root)
+    controls = [element for element, _, _ in interactive_inventory]
+    control_contract = Counter(contract for _, _, contract in interactive_inventory)
+    assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected interactive element contract"
     assert set(by_id) == EXPECTED_IDS
     for element in by_id.values():
         parent = element.parent
@@ -177,12 +227,6 @@ def assert_dashboard_dom_contract(html: str) -> None:
     assert "hidden" not in input_panel.attrs, "hidden Input"
     assert "hidden" not in output_panel.attrs, "hidden Output"
 
-    controls = [element for element in root.descendants() if element.tag in {"button", "input", "select"}]
-    control_contract = Counter(
-        (element.tag, element.attrs.get("id"), control_type(element))
-        for element in controls
-    )
-    assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected control tag/id/type"
     anonymous_controls = [element for element in controls if not element.attrs.get("id")]
     assert len(anonymous_controls) == 2
 
@@ -200,6 +244,8 @@ def assert_dashboard_dom_contract(html: str) -> None:
     assert len(csrf) == 1
     assert csrf[0].attrs.get("type") == "hidden"
     assert csrf[0].attrs.get("value") == "{{CSRF}}"
+    csrf_owner = next(owner for element, owner, _ in interactive_inventory if element is csrf[0])
+    assert csrf_owner is logout_form, "effective form owner"
 
     submit_controls = [
         element
@@ -207,7 +253,10 @@ def assert_dashboard_dom_contract(html: str) -> None:
         if element.tag in {"button", "input"} and control_type(element) == "submit"
     ]
     assert len(submit_controls) == 1
-    assert submit_controls[0].parent is logout_form
+    submit_owner = next(
+        owner for element, owner, _ in interactive_inventory if element is submit_controls[0]
+    )
+    assert submit_owner is logout_form, "effective form owner"
     assert submit_controls[0].text().strip() == "Sair"
     assert set(map(id, anonymous_controls)) == {id(csrf[0]), id(submit_controls[0])}
     assert not [element for element in controls if "formaction" in element.attrs]
@@ -242,7 +291,35 @@ def test_dashboard_shell_dom_contract() -> None:
                 '<div id="drawer-summary"',
                 '<button id="retry-execution" type="button">Retry</button><div id="drawer-summary"',
             ),
-            "unexpected control tag/id/type",
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<textarea name="operator-note"></textarea><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<div id="drawer-summary"',
+                '<a href="/ops/retry">Retry</a><div id="drawer-summary"',
+            ),
+            "unexpected interactive element contract",
+        ),
+        (
+            lambda html: html.replace(
+                '<input type="hidden" name="csrf"',
+                '<input form="ghost" type="hidden" name="csrf"',
+            ),
+            "effective form owner",
+        ),
+        (
+            lambda html: html.replace(
+                '<button type="submit">Sair</button>',
+                '<button form="ghost" type="submit">Sair</button>',
+            ),
+            "effective form owner",
         ),
         (
             lambda html: html.replace(
