@@ -105,6 +105,21 @@ def test_lodging_read_binds_dates_occupancy_price_and_private_offer_id() -> None
     ]
 
 
+def test_lodging_read_treats_empty_options_as_confirmed_unavailability() -> None:
+    reads = CloudbedsReadAdapter(
+        transport=lambda operation, payload: {"options": []},
+        clock=FixedClock(),
+        ttl=timedelta(minutes=5),
+    )
+
+    observation = reads.read(LODGING_REQUEST)
+
+    assert observation.request_hash == LODGING_REQUEST.canonical_hash()
+    assert observation.provider == "cloudbeds"
+    assert observation.public_payload == {"options": []}
+    assert len(observation.private_binding_hash) == 64
+
+
 def test_query_hash_is_stable_across_new_request_id_but_request_hash_is_not() -> None:
     reread = replace(LODGING_REQUEST, request_id="read-lodging-002")
 

@@ -123,8 +123,8 @@ class CloudbedsReadAdapter:
         }
         response = exact_dict(self._transport("lodging", query), "Cloudbeds response")
         raw_options = response.get("options")
-        if type(raw_options) is not list or not raw_options:
-            raise ProviderReadError("Cloudbeds response requires at least one option")
+        if type(raw_options) is not list:
+            raise ProviderReadError("Cloudbeds response options must be a list")
         public_options: list[dict[str, object]] = []
         private_options: list[dict[str, str]] = []
         for raw in raw_options:
