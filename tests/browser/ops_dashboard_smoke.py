@@ -149,9 +149,17 @@ const artifacts = '/artifacts';
       noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth,
       sidebarWidth: Math.round(document.querySelector('#app-sidebar').getBoundingClientRect().width),
       kpiColumns: getComputedStyle(document.querySelector('#kpi-grid')).gridTemplateColumns.split(' ').length,
-      analyticsRows: [...document.querySelectorAll('.analytics-panel')].reduce((rows, panel) => rows.add(Math.round(panel.getBoundingClientRect().top)), new Set()).size,
+      analyticsRowOccupancies: Array.from([...document.querySelectorAll('.analytics-panel')]
+        .reduce((rows, panel) => {{
+          const top = Math.round(panel.getBoundingClientRect().top);
+          rows.set(top, (rows.get(top) || 0) + 1);
+          return rows;
+        }}, new Map())
+        .entries())
+        .sort(([left], [right]) => left - right)
+        .map(([, occupancy]) => occupancy),
     }}));
-    if (!desktopLayout.noOverflow || desktopLayout.sidebarWidth < 230 || desktopLayout.kpiColumns !== 4 || desktopLayout.analyticsRows !== 2) throw new Error(JSON.stringify(desktopLayout));
+    if (!desktopLayout.noOverflow || desktopLayout.sidebarWidth < 230 || desktopLayout.kpiColumns !== 4 || JSON.stringify(desktopLayout.analyticsRowOccupancies) !== '[2,3]') throw new Error(JSON.stringify(desktopLayout));
     await page.screenshot({{path: path.join(artifacts, 'desktop-1440x1000.png'), fullPage: true}});
 
     await page.selectOption('#range-select', '24h');
@@ -203,9 +211,16 @@ const artifacts = '/artifacts';
       closedSidebarRight: Math.round(document.querySelector('#app-sidebar').getBoundingClientRect().right),
       kpiContentContained: [...document.querySelectorAll('#kpi-grid .kpi-card')].every(card => {{
         const cardRect = card.getBoundingClientRect();
-        return [...card.querySelectorAll('.sparkline')].every(sparkline => {{
-          const sparklineRect = sparkline.getBoundingClientRect();
-          return sparklineRect.left >= cardRect.left - 1 && sparklineRect.right <= cardRect.right + 1;
+        const expectedSelectors = [
+          '.kpi-foot', '.kpi-series', '.sparkline', '.kpi-label', '.kpi-value',
+          '.kpi-foot > span', '.kpi-series > span',
+        ];
+        return card.scrollWidth <= card.clientWidth && expectedSelectors.every(selector => {{
+          const elements = card.querySelectorAll(selector);
+          if (elements.length !== 1) return false;
+          const elementRect = elements[0].getBoundingClientRect();
+          return elementRect.left >= cardRect.left - 1 && elementRect.right <= cardRect.right + 1
+            && elementRect.top >= cardRect.top - 1 && elementRect.bottom <= cardRect.bottom + 1;
         }});
       }}),
     }}));
@@ -250,52 +265,62 @@ const artifacts = '/artifacts';
 
 
 def main() -> None:
-    _require_browser_capability()
-    ARTIFACTS.mkdir(parents=True, exist_ok=True)
     screenshots = (
         ARTIFACTS / "desktop-1440x1000.png",
         ARTIFACTS / "mobile-390x844.png",
         ARTIFACTS / "drawer-desktop-1440x1000.png",
         ARTIFACTS / "drawer-mobile-390x844.png",
     )
-    for screenshot in screenshots:
-        screenshot.unlink(missing_ok=True)
-
-    container = f"ops-dashboard-smoke-{os.getpid()}"
-    key = b"t" * 32
-    now = datetime.now(timezone.utc).replace(microsecond=0)
     database = ARTIFACTS / "smoke.sqlite3"
     spec = ARTIFACTS / "smoke.js"
     server_module = ARTIFACTS / "smoke_server.py"
-    database.unlink(missing_ok=True)
-    execution_id = _write_fixture(database, key, now)
-    password_hash = hash_password(PASSWORD, salt=b"s" * 16)
-    server_module.write_text(
-        "from pathlib import Path\n"
-        "from v2_ops.app import create_ops_app\n"
-        "from v2_ops.settings import OpsWebSettings\n"
-        "from v2_ops.store import SQLiteOpsTraceReader\n"
-        f"key = {key!r}\n"
-        "database = Path('/artifacts/smoke.sqlite3')\n"
-        "settings = OpsWebSettings(\n"
-        f"    username={USERNAME!r}, password_hash={password_hash!r},\n"
-        "    session_key=b'k' * 32, trace_path=database, trace_key=key,\n"
-        "    secure_cookie=False, release_sha='a' * 40,\n"
-        "    image_digest='sha256:' + 'b' * 64, config_fingerprint='c' * 64,\n"
-        ")\n"
-        "app = create_ops_app(settings, reader=SQLiteOpsTraceReader(database, key))\n",
-        encoding="utf-8",
+    generated = (
+        database,
+        Path(f"{database}-wal"),
+        Path(f"{database}-shm"),
+        spec,
+        server_module,
     )
-    spec.write_text(_browser_spec("http://127.0.0.1:18765", execution_id), encoding="utf-8")
-    command = (
-        "set -eu; server=''; "
-        "cleanup() { if [ -n \"$server\" ]; then kill \"$server\" 2>/dev/null || true; "
-        "wait \"$server\" 2>/dev/null || true; fi; }; trap cleanup EXIT INT TERM; "
-        "PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
-        "python3 -m uvicorn smoke_server:app --host 127.0.0.1 --port 18765 "
-        "--log-level warning --no-access-log & server=$!; node smoke.js"
-    )
+    container = f"ops-dashboard-smoke-{os.getpid()}"
+    browser_capability_ready = False
     try:
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        for screenshot in screenshots:
+            screenshot.unlink(missing_ok=True)
+        for path in generated:
+            path.unlink(missing_ok=True)
+        _require_browser_capability()
+        browser_capability_ready = True
+
+        key = b"t" * 32
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        execution_id = _write_fixture(database, key, now)
+        password_hash = hash_password(PASSWORD, salt=b"s" * 16)
+        server_module.write_text(
+            "from pathlib import Path\n"
+            "from v2_ops.app import create_ops_app\n"
+            "from v2_ops.settings import OpsWebSettings\n"
+            "from v2_ops.store import SQLiteOpsTraceReader\n"
+            f"key = {key!r}\n"
+            "database = Path('/artifacts/smoke.sqlite3')\n"
+            "settings = OpsWebSettings(\n"
+            f"    username={USERNAME!r}, password_hash={password_hash!r},\n"
+            "    session_key=b'k' * 32, trace_path=database, trace_key=key,\n"
+            "    secure_cookie=False, release_sha='a' * 40,\n"
+            "    image_digest='sha256:' + 'b' * 64, config_fingerprint='c' * 64,\n"
+            ")\n"
+            "app = create_ops_app(settings, reader=SQLiteOpsTraceReader(database, key))\n",
+            encoding="utf-8",
+        )
+        spec.write_text(_browser_spec("http://127.0.0.1:18765", execution_id), encoding="utf-8")
+        command = (
+            "set -eu; server=''; "
+            "cleanup() { if [ -n \"$server\" ]; then kill \"$server\" 2>/dev/null || true; "
+            "wait \"$server\" 2>/dev/null || true; fi; }; trap cleanup EXIT INT TERM; "
+            "PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
+            "python3 -m uvicorn smoke_server:app --host 127.0.0.1 --port 18765 "
+            "--log-level warning --no-access-log & server=$!; node smoke.js"
+        )
         completed = subprocess.run(
             [
                 str(DOCKER), "run", "--rm", "--name", container,
@@ -322,14 +347,34 @@ def main() -> None:
         print(f"drawer_desktop_screenshot={screenshots[2]}")
         print(f"drawer_mobile_screenshot={screenshots[3]}")
     finally:
-        subprocess.run(
-            [str(DOCKER), "rm", "-f", container],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for generated in (database, spec, server_module):
-            generated.unlink(missing_ok=True)
+        primary_failure = sys.exc_info()[0] is not None
+        cleanup_error: OSError | None = None
+        if browser_capability_ready:
+            try:
+                subprocess.run(
+                    [str(DOCKER), "rm", "-f", container],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError as exc:
+                if not primary_failure:
+                    cleanup_error = exc
+        for path in generated:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                if not primary_failure and cleanup_error is None:
+                    cleanup_error = exc
+        if primary_failure or cleanup_error is not None:
+            for screenshot in screenshots:
+                try:
+                    screenshot.unlink(missing_ok=True)
+                except OSError:
+                    if not primary_failure and cleanup_error is None:
+                        raise
+        if cleanup_error is not None:
+            raise cleanup_error
 
 
 if __name__ == "__main__":
