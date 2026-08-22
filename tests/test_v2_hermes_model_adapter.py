@@ -58,6 +58,13 @@ def test_commercial_progression_suffix_distinguishes_immediate_and_progressive_h
     assert "continue collecting the next useful safe commercial facts" in suffix
 
 
+def test_grounding_reviewer_treats_activity_availability_as_literal() -> None:
+    prompt = hermes_model_module._GROUNDING_REVIEW_SYSTEM_PROMPT
+    assert "available=false directly supports an unavailable claim" in prompt
+    assert "available=true directly supports an available claim" in prompt
+    assert "never infer availability from total_amount" in prompt
+
+
 def _v8_request(
     *,
     source_event_id: str = "batch:v8-minimal",

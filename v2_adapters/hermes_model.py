@@ -317,6 +317,13 @@ support a claim that an age does not prevent an activity, that no confirmation i
 or that a person is suitable. Honest statements that guidance is absent, natural
 questions, and clearly marked uncertainty are not unsupported claims.
 
+For current activity observations, interpret the exact boolean literally:
+available=false directly supports an unavailable claim for that date and party, while
+available=true directly supports an available claim. Never invert the boolean and
+never infer availability from total_amount, price fields, group_status, existing_group,
+group_participants, or solo_group_booking. A total_amount beside available=false is not a
+confirmed purchasable final price and does not contradict an unavailable claim.
+
 Return exactly one JSON object with only decision and unsupported_chunk_indices.
 Use supported with an empty list when every material claim is grounded. Use unsupported
 with the sorted unique zero-based indices of every unsupported chunk. Return no public
