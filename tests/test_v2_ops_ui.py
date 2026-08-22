@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from typing import Callable, NamedTuple
@@ -132,6 +133,55 @@ def assets() -> tuple[str, str, str]:
         (ROOT / name).read_text(encoding="utf-8")
         for name in ("index.html", "ops.js", "ops.css")
     )
+
+
+def javascript_function_body(js: str, name: str) -> str:
+    match = re.search(rf"(?:async\s+)?function\s+{re.escape(name)}\s*\([^)]*\)\s*\{{", js)
+    assert match is not None, f"missing JavaScript function: {name}"
+    depth = 1
+    index = match.end()
+    while index < len(js) and depth:
+        if js[index] == "{":
+            depth += 1
+        elif js[index] == "}":
+            depth -= 1
+        index += 1
+    assert depth == 0, f"unclosed JavaScript function: {name}"
+    return js[match.end():index - 1]
+
+
+def assert_task2_javascript_contract(js: str) -> None:
+    refresh = javascript_function_body(js, "refreshDashboard")
+    assert refresh.index("if (state.dashboardLoading) return") < refresh.index("state.dashboardLoading = true")
+    assert refresh.index("state.dashboardLoading = true") < refresh.index('$("refresh-dashboard").disabled = true')
+    assert re.search(r"try\s*\{\s*await loadDashboard\(\);\s*\}\s*finally\s*\{", refresh)
+    finally_body = refresh.split("finally", 1)[1]
+    assert "state.dashboardLoading = false" in finally_body
+    assert '$("refresh-dashboard").disabled = false' in finally_body
+
+    mobile = javascript_function_body(js, "setMobileNavigationOpen")
+    assert "restoreFocus" in mobile
+    assert '.setAttribute("inert", "")' in mobile
+    assert '.setAttribute("aria-hidden", "true")' in mobile
+    assert '.removeAttribute("inert")' in mobile
+    assert '.removeAttribute("aria-hidden")' in mobile
+    assert '$("mobile-menu").focus()' in mobile
+
+    operator = javascript_function_body(js, "setOperatorMenuOpen")
+    assert "restoreFocus" in operator
+    assert '$("operator-menu").focus()' in operator
+
+    top_level_loads = re.findall(r"^loadDashboard\(\)\.catch\(handleDashboardError\);$", js, re.MULTILINE)
+    top_level_live = re.findall(r"^connectLive\(\);$", js, re.MULTILINE)
+    assert len(top_level_loads) == 1, "exactly one top-level dashboard startup"
+    assert len(top_level_live) == 1, "exactly one top-level live startup"
+    assert js.rstrip().endswith("loadDashboard().catch(handleDashboardError);\nconnectLive();")
+
+    assert '$("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError))' in js
+    assert '$("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true))' in js
+    assert '$("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false, true))' in js
+    assert 'if (state.operatorMenuOpen) setOperatorMenuOpen(false, true)' in js
+    assert 'if (state.mobileNavigationOpen) setMobileNavigationOpen(false, true)' in js
 
 
 def parse_html(html: str) -> Element:
@@ -797,6 +847,7 @@ def test_html_has_no_commercial_claims() -> None:
 
 def test_mockup_fidelity_header_and_kpi_contract() -> None:
     html, js, css = assets()
+    assert_task2_javascript_contract(js)
     for token in (
         "brand-lockup", "readonly-chip", "welcome-row", "health-pill",
         "header-actions", "refresh-dashboard", "operator-popover",
@@ -978,13 +1029,13 @@ const html = fs.readFileSync('/static/index.html', 'utf8')
   .replace('  <script src="/ops/static/ops.js" defer></script>\n', '');
 const js = fs.readFileSync('/static/ops.js', 'utf8');
 
-function snapshot(label, executions) {
+function snapshot(label, executions, executionSeries = []) {
   return {
     generated_at: '2026-08-21T12:00:00Z', range: label,
     metrics: {executions, distinct_leads: executions, in_progress: 0,
       completed: executions, failed: 0, manual_review: 0,
       technical_completion_rate: 100, average_terminal_duration_ms: 1000},
-    execution_series: [],
+    execution_series: executionSeries,
     status_distribution: [{status: 'completed', count: executions}],
     trace_distribution: [{trace_completeness: 'complete_trace', count: executions}],
     milestones: [], top_node_types: [], executions: [],
@@ -1005,6 +1056,7 @@ async function setup(page) {
   await page.setContent(html);
   await page.evaluate(() => {
     window.__requests = [];
+    window.__eventSources = [];
     window.fetch = (path, options) => new Promise((resolve, reject) => {
       window.__requests.push({path: String(path), options, resolve, reject});
     });
@@ -1021,6 +1073,7 @@ async function setup(page) {
       constructor(path) {
         this.path = path;
         this.listeners = {};
+        window.__eventSources.push(this);
         window.__eventSource = this;
       }
       addEventListener(name, callback) { this.listeners[name] = callback; }
@@ -1043,6 +1096,105 @@ async function resolveRequest(page, index, status, payload) {
 async function paths(page) {
   return page.evaluate(() => window.__requests.map(request => request.path));
 }
+
+test('Task 2 startup creates exactly one initial load and one EventSource', async ({page}) => {
+  await setup(page);
+  expect(await paths(page)).toEqual(['/ops/api/dashboard?range=7d']);
+  expect(await page.evaluate(() => window.__eventSources.map(source => source.path)))
+    .toEqual(['/ops/api/events']);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.waitForTimeout(0);
+  expect((await paths(page)).length).toBe(1);
+  expect(await page.evaluate(() => window.__eventSources.length)).toBe(1);
+});
+
+test('Task 2 refresh is deduplicated, disabled while pending, and released on success and error', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.click('#refresh-dashboard');
+  await page.evaluate(() => document.querySelector('#refresh-dashboard').click());
+  expect((await paths(page)).length).toBe(2);
+  await expect(page.locator('#refresh-dashboard')).toBeDisabled();
+  await resolveRequest(page, 1, 200, snapshot('refreshed', 2));
+  await expect(page.locator('#refresh-dashboard')).toBeEnabled();
+  await page.click('#refresh-dashboard');
+  expect((await paths(page)).length).toBe(3);
+  await expect(page.locator('#refresh-dashboard')).toBeDisabled();
+  await resolveRequest(page, 2, 503, {status: 'source_unavailable'});
+  await expect(page.locator('#refresh-dashboard')).toBeEnabled();
+});
+
+test('Task 2 operator popover closes outside and restores trigger focus on Escape', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.click('#operator-menu');
+  await expect(page.locator('#operator-popover')).toBeVisible();
+  await page.evaluate(() => document.body.dispatchEvent(new MouseEvent('click', {bubbles: true})));
+  await expect(page.locator('#operator-popover')).toBeHidden();
+  await expect(page.locator('#operator-menu')).toBeFocused();
+  await page.click('#operator-menu');
+  await page.locator('#operator-popover button[type="submit"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#operator-popover')).toBeHidden();
+  await expect(page.locator('#operator-menu')).toBeFocused();
+  await expect(page.locator('#operator-menu')).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Task 2 mobile navigation is inert when closed and restores trigger focus', async ({page}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  const sidebar = page.locator('#app-sidebar');
+  await expect(sidebar).toHaveAttribute('inert', '');
+  await expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+  await page.click('#mobile-menu');
+  await expect(sidebar).toHaveClass(/mobile-open/);
+  await expect(sidebar).not.toHaveAttribute('inert', '');
+  await expect(sidebar).not.toHaveAttribute('aria-hidden', 'true');
+  await page.locator('#sidebar-close').focus();
+  await page.keyboard.press('Escape');
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
+  await expect(sidebar).toHaveAttribute('inert', '');
+  await expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#mobile-menu')).toBeFocused();
+  expect(await page.evaluate(() => {
+    document.querySelector('#sidebar-close').focus();
+    return document.activeElement.id;
+  })).toBe('mobile-menu');
+});
+
+test('Task 2 renders exactly eight safe KPI components from execution_series points', async ({page}) => {
+  await setup(page);
+  const payload = snapshot('initial', 3, [{count: 1}, {count: 3}]);
+  payload.metrics.executions = '<img src=x onerror=alert(1)>';
+  payload.kpi_series = [{count: 99}];
+  await resolveRequest(page, 0, 200, payload);
+  const cards = page.locator('#kpi-grid > .kpi-card');
+  await expect(cards).toHaveCount(8);
+  for (let index = 0; index < 8; index += 1) {
+    const card = cards.nth(index);
+    await expect(card.locator(':scope > .kpi-top')).toHaveCount(1);
+    await expect(card.locator(':scope > .kpi-top > .kpi-icon')).toHaveCount(1);
+    await expect(card.locator(':scope > .kpi-top > .kpi-label')).toHaveCount(1);
+    await expect(card.locator(':scope > .kpi-value')).toHaveCount(1);
+    await expect(card.locator(':scope > .kpi-foot')).toHaveCount(1);
+    await expect(card.locator('.kpi-series')).toContainText('Execuções no período');
+  }
+  await expect(page.locator('#kpi-grid img')).toHaveCount(0);
+  await expect(cards.first().locator('.kpi-value')).toHaveText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#kpi-grid .sparkline')).toHaveCount(8);
+  await expect(page.locator('#kpi-grid .sparkline polyline').first())
+    .toHaveAttribute('points', '0.00,14.67 66.00,2.00');
+});
+
+test('Task 2 omits empty sparklines but retains the factual execution note', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('empty', 0, []));
+  await expect(page.locator('#kpi-grid > .kpi-card')).toHaveCount(8);
+  await expect(page.locator('#kpi-grid .sparkline')).toHaveCount(0);
+  await expect(page.locator('#kpi-grid .kpi-series > span')).toHaveCount(8);
+  await expect(page.locator('#kpi-grid .kpi-series > span').first()).toHaveText('Execuções no período');
+});
 
 test('dashboard ignores inverted A/B ranges', async ({page}) => {
   await setup(page);
@@ -1230,7 +1382,11 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
         check=False,
     )
     if docker_probe.returncode != 0:
-        pytest.skip("Playwright Chromium container is unavailable")
+        pytest.fail(
+            "Playwright Chromium container is unavailable: "
+            + docker_probe.stdout
+            + docker_probe.stderr
+        )
     browser_cache = ROOT.parents[1] / "artifacts" / "ops-dashboard" / "playwright"
     package = browser_cache / "node_modules" / "@playwright" / "test" / "package.json"
     assert package.is_file(), f"cached @playwright/test package is unavailable: {browser_cache}"
@@ -1290,5 +1446,7 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
                 check=False,
             )
     output = completed.stdout + completed.stderr
+    print(output)
     assert completed.returncode == 0, output
-    assert "12 passed" in output, output
+    assert "Running 18 tests using 1 worker" in output, output
+    assert "18 passed" in output, output

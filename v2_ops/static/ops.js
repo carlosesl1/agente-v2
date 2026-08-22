@@ -47,17 +47,28 @@ function renderAlert() {
   alert.hidden = messages.length === 0;
 }
 
-function setMobileNavigationOpen(open) {
+function setMobileNavigationOpen(open, restoreFocus = false) {
   state.mobileNavigationOpen = Boolean(open);
-  $("app-sidebar").classList.toggle("mobile-open", state.mobileNavigationOpen);
+  const sidebar = $("app-sidebar");
+  sidebar.classList.toggle("mobile-open", state.mobileNavigationOpen);
   $("sidebar-backdrop").hidden = !state.mobileNavigationOpen;
   $("mobile-menu").setAttribute("aria-expanded", String(state.mobileNavigationOpen));
+  const sidebarClosed = window.matchMedia("(max-width: 720px)").matches && !state.mobileNavigationOpen;
+  if (sidebarClosed) {
+    sidebar.setAttribute("inert", "");
+    sidebar.setAttribute("aria-hidden", "true");
+  } else {
+    sidebar.removeAttribute("inert");
+    sidebar.removeAttribute("aria-hidden");
+  }
+  if (sidebarClosed && restoreFocus) $("mobile-menu").focus();
 }
 
-function setOperatorMenuOpen(open) {
+function setOperatorMenuOpen(open, restoreFocus = false) {
   state.operatorMenuOpen = Boolean(open);
   $("operator-popover").hidden = !state.operatorMenuOpen;
   $("operator-menu").setAttribute("aria-expanded", String(state.operatorMenuOpen));
+  if (!state.operatorMenuOpen && restoreFocus) $("operator-menu").focus();
 }
 
 async function getJSON(path) {
@@ -680,18 +691,18 @@ $("completeness-filter").addEventListener("change", (event) => {
   renderExecutionTable();
 });
 $("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true));
-$("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false));
-$("sidebar-backdrop").addEventListener("click", () => setMobileNavigationOpen(false));
+$("sidebar-close").addEventListener("click", () => setMobileNavigationOpen(false, true));
+$("sidebar-backdrop").addEventListener("click", () => setMobileNavigationOpen(false, true));
 $("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError));
 $("operator-menu").addEventListener("click", () => setOperatorMenuOpen(!state.operatorMenuOpen));
 $("drawer-close").addEventListener("click", showOverview);
 $("drawer-backdrop").addEventListener("click", showOverview);
 $("nav-overview").addEventListener("click", () => {
   showOverview();
-  setMobileNavigationOpen(false);
+  setMobileNavigationOpen(false, true);
 });
 $("nav-execution").addEventListener("click", () => {
-  setMobileNavigationOpen(false);
+  setMobileNavigationOpen(false, true);
   if (state.selectedExecution) openExecution(state.selectedExecution).catch(handleDashboardError);
 });
 $("load-full-input").addEventListener("click", () => loadFull("input").catch(handleDashboardError));
@@ -714,14 +725,16 @@ document.addEventListener("click", (event) => {
     state.operatorMenuOpen
     && !$("operator-menu").contains(event.target)
     && !$("operator-popover").contains(event.target)
-  ) setOperatorMenuOpen(false);
+  ) setOperatorMenuOpen(false, $("operator-popover").contains(document.activeElement));
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (state.operatorMenuOpen) setOperatorMenuOpen(false);
-  if (state.mobileNavigationOpen) setMobileNavigationOpen(false);
+  if (state.operatorMenuOpen) setOperatorMenuOpen(false, true);
+  if (state.mobileNavigationOpen) setMobileNavigationOpen(false, true);
   if (state.drawerOpen) showOverview();
 });
 
+setMobileNavigationOpen(false);
+setOperatorMenuOpen(false);
 loadDashboard().catch(handleDashboardError);
 connectLive();
