@@ -364,6 +364,15 @@ def assert_dashboard_dom_contract(html: str) -> None:
     operator_popover = by_id["operator-popover"]
     assert logout_form.parent is operator_popover, "logout form must be directly owned by operator popover"
     assert "hidden" not in logout_form.attrs, "logout form must remain visibly toggleable"
+    assert "hidden" in operator_popover.attrs, "operator popover must start hidden"
+    current: Element | None = logout_form
+    while current is not None:
+        if "hidden" in current.attrs:
+            assert current is operator_popover, "only operator popover may hide logout ancestry"
+        if current is root:
+            break
+        current = current.parent
+    assert current is root, "logout ancestry must reach active document"
     assert (logout_form.attrs.get("method") or "get").casefold() == "post"
     assert logout_form.attrs.get("action") == "/ops/logout"
     assert "formaction" not in logout_form.attrs
@@ -646,6 +655,24 @@ def test_dashboard_shell_dom_contract() -> None:
             ),
             "unexpected interactive element contract",
             id="swapped-summary-disclosure-bindings",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '<div id="operator-popover" class="operator-popover" hidden>',
+                '<div id="operator-popover" class="operator-popover">',
+                1,
+            ),
+            "operator popover must start hidden",
+            id="logout-operator-popover-not-hidden",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '<div class="header-actions">',
+                '<div class="header-actions" hidden>',
+                1,
+            ),
+            "only operator popover may hide logout ancestry",
+            id="logout-outer-ancestor-hidden",
         ),
         pytest.param(
             lambda html: html.replace(
