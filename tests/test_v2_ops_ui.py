@@ -361,6 +361,9 @@ def assert_dashboard_dom_contract(html: str) -> None:
     logout_form = forms[0]
     assert belongs_to_active_document(logout_form, root), "logout form must belong to active document"
     assert not has_inert_ancestry(logout_form), "logout form must not have inert ancestry"
+    operator_popover = by_id["operator-popover"]
+    assert logout_form.parent is operator_popover, "logout form must be directly owned by operator popover"
+    assert "hidden" not in logout_form.attrs, "logout form must remain visibly toggleable"
     assert (logout_form.attrs.get("method") or "get").casefold() == "post"
     assert logout_form.attrs.get("action") == "/ops/logout"
     assert "formaction" not in logout_form.attrs
@@ -419,8 +422,35 @@ def assert_dashboard_dom_contract(html: str) -> None:
 
     input_panel = by_id["input-panel"]
     output_panel = by_id["output-panel"]
-    assert "hidden" not in input_panel.attrs, "hidden Input"
-    assert "hidden" not in output_panel.attrs, "hidden Output"
+    inspectors = [
+        element
+        for element in root.descendants("aside")
+        if "inspector" in (element.attrs.get("class") or "").split()
+    ]
+    assert len(inspectors) == 1, "exactly one aside.inspector"
+    inspector = inspectors[0]
+    execution_details = [
+        element
+        for element in root.descendants()
+        if "execution-detail" in (element.attrs.get("class") or "").split()
+    ]
+    assert len(execution_details) == 1, "exactly one execution detail"
+    execution_detail = execution_details[0]
+    assert inspector.parent is execution_detail, "inspector must be directly under execution detail"
+    assert is_descendant(execution_detail, drawer), "execution detail must be under drawer"
+    assert input_panel.parent is inspector, "Input must be a direct child of inspector"
+    assert output_panel.parent is inspector, "Output must be a direct child of inspector"
+
+    for element in (inspector, input_panel, output_panel):
+        current: Element | None = element
+        while current is not None:
+            assert current.tag != "template", "inspector chain must remain visible and active"
+            assert "inert" not in current.attrs, "inspector chain must remain visible and active"
+            assert "hidden" not in current.attrs, "inspector chain must remain visible and active"
+            if current is drawer:
+                break
+            current = current.parent
+        assert current is drawer, "inspector chain must remain under drawer"
 
     anonymous_form_controls = [
         element
@@ -616,6 +646,67 @@ def test_dashboard_shell_dom_contract() -> None:
             ),
             "unexpected interactive element contract",
             id="swapped-summary-disclosure-bindings",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '<form method="post" action="/ops/logout">',
+                '<form hidden method="post" action="/ops/logout">',
+                1,
+            ),
+            "logout form must remain visibly toggleable",
+            id="logout-form-hidden",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '<form method="post" action="/ops/logout">',
+                '<div hidden><form method="post" action="/ops/logout">',
+                1,
+            ).replace(
+                '</button></form>',
+                '</button></form></div>',
+                1,
+            ),
+            "logout form must be directly owned by operator popover",
+            id="logout-hidden-intermediate-wrapper",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '<aside class="inspector">',
+                '<aside class="inspector" hidden>',
+                1,
+            ),
+            "inspector chain must remain visible and active",
+            id="inspector-hidden",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '            <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" type="button" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>\n',
+                '',
+                1,
+            ).replace(
+                '          </aside>\n        </div>',
+                '          </aside>\n'
+                '          <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" type="button" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>\n'
+                '        </div>',
+                1,
+            ),
+            "Input must be a direct child of inspector",
+            id="input-panel-moved-outside-inspector",
+        ),
+        pytest.param(
+            lambda html: html.replace(
+                '            <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" type="button" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>\n',
+                '',
+                1,
+            ).replace(
+                '          </aside>\n        </div>',
+                '          </aside>\n'
+                '          <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" type="button" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>\n'
+                '        </div>',
+                1,
+            ),
+            "Output must be a direct child of inspector",
+            id="output-panel-moved-outside-inspector",
         ),
         (
             lambda html: html.replace(
