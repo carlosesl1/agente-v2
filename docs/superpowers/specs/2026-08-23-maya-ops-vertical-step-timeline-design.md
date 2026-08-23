@@ -78,7 +78,7 @@ Não exibir na linha tentativa, status, duração, horário, descrição auxilia
 
 ## Restrições
 
-- Mudança limitada a `v2_ops/static/ops.js`, `v2_ops/static/ops.css` e provas diretamente relacionadas.
+- Mudança limitada a `v2_ops/static/index.html`, `v2_ops/static/ops.js`, `v2_ops/static/ops.css` e provas diretamente relacionadas.
 - Nenhuma mudança em contratos backend/API, autenticação, dados, runtime do agente, providers ou V3.
 - Aplicação permanece autenticada e read-only.
 - Nenhum dado demonstrativo, banco, screenshot, credencial ou artefato de browser será versionado.
