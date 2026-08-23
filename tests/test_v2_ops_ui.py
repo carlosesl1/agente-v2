@@ -875,6 +875,28 @@ def test_mockup_fidelity_header_and_kpi_contract() -> None:
     for selector in (".brand-lockup", ".welcome-row", ".health-pill", ".kpi-icon", ".sparkline"):
         assert selector in css
 
+    compact_css = re.sub(r"\s+", "", css)
+    for rule in (
+        "--header-control-height:48px;",
+        ".header-actions{position:relative;display:flex;align-items:flex-end;",
+        ".range-control{display:grid;grid-template-rows:autovar(--header-control-height);",
+        ".range-controlselect,.icon-button,.operator-button{height:var(--header-control-height);min-height:var(--header-control-height);",
+        ".icon-button,.operator-button{align-self:end;",
+        "#live-state::before{content:none;",
+        ".health-pill{display:grid;grid-template-columns:8pxminmax(0,1fr);",
+        ".health-pill.online-dot{grid-row:1/3;align-self:center;",
+        ".kpi-card{min-height:132px;padding:17px;display:flex;min-width:0;flex-direction:column;",
+        ".kpi-card.kpi-value{flex:00auto;",
+        ".kpi-card.kpi-foot{min-height:25px;display:grid;grid-template-columns:minmax(0,1fr)auto;align-items:end;",
+        ".kpi-series{display:grid;grid-column:1/-1;grid-template-columns:minmax(74px,auto)66px;align-items:end;",
+        ".kpi-series>span{max-width:none;white-space:normal;overflow-wrap:normal;word-break:keep-all;",
+        ".sparkline{width:66px;height:23px;flex:00auto;overflow:hidden;",
+    ):
+        assert rule in compact_css
+    mobile_css = compact_css.split("@media(max-width:720px)", 1)[1]
+    assert ".range-control,.icon-button>span:last-child,.operator-buttondiv{display:none;" not in mobile_css
+    assert ".range-control>span,.icon-button>span:last-child,.operator-buttondiv{display:none;" in mobile_css
+
 
 def test_lucide_subset_is_local_official_and_closed() -> None:
     html, js, _ = assets()

@@ -97,21 +97,30 @@ def _require_browser_capability() -> None:
 
 def _browser_spec(base_url: str, execution_id: str) -> str:
     return f"""
-const {{ chromium }} = require('/pw/node_modules/playwright');
+const {{ test }} = require('/pw/node_modules/@playwright/test');
 const path = require('path');
 const baseURL = {base_url!r};
 const expectedExecution = {execution_id!r};
 const artifacts = '/artifacts';
 
-(async () => {{
-  const browser = await chromium.launch({{headless: true}});
+test('desktop and mobile operational dashboard geometry', async ({{browser}}) => {{
   const errors = [];
+  const knownBaseConsole = [];
   const failedRequests = [];
-  try {{
     const context = await browser.newContext({{viewport: {{width: 1440, height: 1000}}}});
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(`pageerror: ${{error.message}}`));
-    page.on('console', message => {{ if (message.type() === 'error') errors.push(`console: ${{message.text()}}`); }});
+    page.on('console', message => {{
+      if (message.type() !== 'error') return;
+      const location = message.location();
+      const detail = `console: ${{message.text()}} @ ${{JSON.stringify(location)}}`;
+      if (message.text().startsWith('Refused to apply inline style because it violates')
+          && location.url === `${{baseURL}}/ops/` && location.lineNumber === 9) {{
+        knownBaseConsole.push(detail);
+      }} else {{
+        errors.push(detail);
+      }}
+    }});
     page.on('requestfailed', request => failedRequests.push(`${{request.method()}} ${{request.url()}}: ${{request.failure()?.errorText}}`));
 
     let loginReady = false;
@@ -149,6 +158,105 @@ const artifacts = '/artifacts';
       if (!cards.some(card => card.includes(label) && card.includes(value))) throw new Error(`missing KPI ${{label}}=${{value}}`);
     }}
     const noOverflow = async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth);
+    const geometryContract = async viewport => page.evaluate(viewport => {{
+      const tolerance = 1;
+      const controls = [...document.querySelectorAll('#range-select, #refresh-dashboard, #operator-menu')];
+      const controlRects = controls.map(node => node.getBoundingClientRect());
+      const heights = controlRects.map(rect => rect.height);
+      const headerRect = document.querySelector('.dashboard-header').getBoundingClientRect();
+      const controlTopSpread = Math.max(...controlRects.map(rect => rect.top)) - Math.min(...controlRects.map(rect => rect.top));
+      const mobileMenuRect = document.querySelector('#mobile-menu').getBoundingClientRect();
+      const compactMobileHeader = viewport !== 'mobile-390x844' || (
+        headerRect.height <= 85 && controlTopSpread <= tolerance
+        && Math.abs(mobileMenuRect.height - 48) <= tolerance
+        && Math.abs(mobileMenuRect.top - controlRects[0].top) <= tolerance
+      );
+      const healthIndicatorCount = document.querySelectorAll('.health-pill .online-dot').length;
+      const cards = [...document.querySelectorAll('#kpi-grid > .kpi-card')];
+      const rowHeights = [...cards.reduce((rows, card) => {{
+        const rect = card.getBoundingClientRect();
+        const top = Math.round(rect.top);
+        rows.set(top, [...(rows.get(top) || []), rect.height]);
+        return rows;
+      }}, new Map()).values()];
+      const rowsEqual = rowHeights.every(row => Math.max(...row) - Math.min(...row) <= tolerance);
+      const selectors = [
+        '.kpi-top', '.kpi-value', '.kpi-foot', '.kpi-foot > span',
+        '.kpi-series', '.kpi-series > span', '.sparkline',
+      ];
+      const kpiChecks = cards.map((card, index) => {{
+        const cardRect = card.getBoundingClientRect();
+        const description = card.querySelector('.kpi-foot > span');
+        const series = card.querySelector('.kpi-series');
+        const descriptionRange = document.createRange();
+        descriptionRange.selectNodeContents(description);
+        const descriptionRect = descriptionRange.getBoundingClientRect();
+        const seriesRect = series.getBoundingClientRect();
+        const verticalOverlap = descriptionRect.top < seriesRect.bottom - tolerance
+          && seriesRect.top < descriptionRect.bottom - tolerance;
+        const siblingsDoNotOverlap = !verticalOverlap || descriptionRect.right <= seriesRect.left + tolerance;
+        const contained = selectors.every(selector => {{
+          const elements = card.querySelectorAll(selector);
+          if (elements.length !== 1) return false;
+          const rect = elements[0].getBoundingClientRect();
+          return rect.left >= cardRect.left - tolerance && rect.right <= cardRect.right + tolerance
+            && rect.top >= cardRect.top - tolerance && rect.bottom <= cardRect.bottom + tolerance;
+        }});
+        return {{index, scrollContained: card.scrollWidth <= card.clientWidth, siblingsDoNotOverlap, contained}};
+      }});
+      const kpiGeometry = cards.length === 8 && rowsEqual
+        && kpiChecks.every(check => check.scrollContained && check.siblingsDoNotOverlap && check.contained);
+      const labelsDoNotStackSingleWords = [...document.querySelectorAll('.kpi-series > span')].every(label => {{
+        const textNode = [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+        if (!textNode) return false;
+        const words = [...textNode.textContent.matchAll(/\\S+/g)];
+        const lines = [];
+        for (const word of words) {{
+          const range = document.createRange();
+          range.setStart(textNode, word.index);
+          range.setEnd(textNode, word.index + word[0].length);
+          const rect = range.getBoundingClientRect();
+          const line = lines.find(item => Math.abs(item.top - rect.top) <= tolerance);
+          if (line) line.words += 1;
+          else lines.push({{top: rect.top, words: 1}});
+        }}
+        return !lines.some((line, index) => line.words === 1 && lines[index + 1]?.words === 1);
+      }});
+      return {{
+        viewport,
+        headerGeometry: heights.length === 3 && heights.every(height => Math.abs(height - 48) <= tolerance),
+        compactMobileHeader,
+        headerHeight: headerRect.height,
+        controlTopSpread,
+        controlTops: controlRects.map(rect => rect.top),
+        controlLefts: controlRects.map(rect => rect.left),
+        headerActions: (() => {{
+          const node = document.querySelector('.header-actions');
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return {{top: rect.top, left: rect.left, width: rect.width, height: rect.height, flexDirection: style.flexDirection, alignItems: style.alignItems}};
+        }})(),
+        rangeControl: (() => {{
+          const rect = document.querySelector('.range-control').getBoundingClientRect();
+          const style = getComputedStyle(document.querySelector('.range-control'));
+          return {{top: rect.top, left: rect.left, width: rect.width, height: rect.height, gridTemplateRows: style.gridTemplateRows}};
+        }})(),
+        mobileMenuHeight: mobileMenuRect.height,
+        heights,
+        healthIndicatorCount,
+        kpiGeometry,
+        kpiFailures: kpiChecks.filter(check => !check.scrollContained || !check.siblingsDoNotOverlap || !check.contained),
+        labelsDoNotStackSingleWords,
+        horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }};
+    }}, viewport);
+    const assertGeometry = geometry => {{
+      if (!geometry.headerGeometry || !geometry.compactMobileHeader) throw new Error(`headerGeometry ${{JSON.stringify(geometry)}}`);
+      if (geometry.healthIndicatorCount !== 1) throw new Error(`healthIndicatorCount ${{JSON.stringify(geometry)}}`);
+      if (!geometry.kpiGeometry || !geometry.labelsDoNotStackSingleWords) throw new Error(`kpiGeometry ${{JSON.stringify(geometry)}}`);
+      if (geometry.horizontalOverflow > 1) throw new Error(`horizontalOverflow ${{JSON.stringify(geometry)}}`);
+      console.log(`geometry_${{geometry.viewport}}=PASS`);
+    }};
     const desktopLayout = await page.evaluate(() => ({{
       noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth,
       sidebarWidth: Math.round(document.querySelector('#app-sidebar').getBoundingClientRect().width),
@@ -164,7 +272,8 @@ const artifacts = '/artifacts';
         .map(([, occupancy]) => occupancy),
     }}));
     if (!desktopLayout.noOverflow || desktopLayout.sidebarWidth < 230 || desktopLayout.kpiColumns !== 4 || JSON.stringify(desktopLayout.analyticsRowOccupancies) !== '[2,3]') throw new Error(JSON.stringify(desktopLayout));
-    await page.screenshot({{path: path.join(artifacts, 'desktop-1440x1000.png'), fullPage: true}});
+    assertGeometry(await geometryContract('desktop-1440x1000'));
+    await page.screenshot({{path: path.join(artifacts, 'desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
 
     await page.selectOption('#range-select', '24h');
     await page.locator('#kpi-grid .kpi-card strong').first().waitFor();
@@ -198,7 +307,7 @@ const artifacts = '/artifacts';
     const canvasScroll = await page.evaluate(() => {{ const el = document.querySelector('#execution-canvas'); return getComputedStyle(el).overflowX === 'auto' && el.scrollWidth > el.clientWidth; }});
     if (!canvasScroll) throw new Error('canvas does not preserve internal horizontal scroll');
     if (!(await noOverflow())) throw new Error('desktop detail body overflow');
-    await page.screenshot({{path: path.join(artifacts, 'drawer-desktop-1440x1000.png')}});
+    await page.screenshot({{path: path.join(artifacts, 'drawer-desktop-1440x1000.png'), animations: 'allow', caret: 'initial'}});
     await page.keyboard.press('Escape');
     if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'true') throw new Error('Escape did not close desktop drawer');
     if (!(await desktopTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore desktop trigger focus');
@@ -229,12 +338,13 @@ const artifacts = '/artifacts';
       }}),
     }}));
     if (mobileLayout.kpiColumns !== 2 || mobileLayout.sidebarPosition !== 'fixed' || mobileLayout.closedSidebarRight > 0 || !mobileLayout.kpiContentContained) throw new Error(`mobile layout mismatch: ${{JSON.stringify(mobileLayout)}}`);
+    assertGeometry(await geometryContract('mobile-390x844'));
     await page.click('#mobile-menu');
     if (!(await page.locator('#app-sidebar').evaluate(el => el.classList.contains('mobile-open')))) throw new Error('mobile sidebar did not open');
     await page.locator('#sidebar-backdrop').click({{position: {{x: 380, y: 100}}}});
     const mobileCards = await page.locator('.execution-mobile-card').count();
     if (mobileCards !== 1) throw new Error(`mobile filtered card count mismatch: ${{mobileCards}}`);
-    await page.screenshot({{path: path.join(artifacts, 'mobile-390x844.png'), fullPage: true}});
+    await page.screenshot({{path: path.join(artifacts, 'mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
     const mobileTrigger = page.locator('.execution-mobile-card .execution-link');
     await mobileTrigger.click();
     await page.locator('#nodes .node').first().waitFor();
@@ -252,19 +362,17 @@ const artifacts = '/artifacts';
     }});
     if (Math.abs(mobileDrawer.width - mobileDrawer.viewport) > 1 || !mobileDrawer.inspectorStacks) throw new Error(`mobile drawer layout mismatch: ${{JSON.stringify(mobileDrawer)}}`);
     if (!(await noOverflow())) throw new Error('mobile detail body overflow');
-    await page.screenshot({{path: path.join(artifacts, 'drawer-mobile-390x844.png')}});
+    await page.screenshot({{path: path.join(artifacts, 'drawer-mobile-390x844.png'), animations: 'allow', caret: 'initial'}});
     await page.keyboard.press('Escape');
     if (!(await mobileTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore mobile trigger focus');
 
     await page.waitForTimeout(100);
+    if (knownBaseConsole.length !== 1) throw new Error(`known base CSP diagnostic changed: ${{knownBaseConsole.join(' | ')}}`);
     if (errors.length) throw new Error(`page/console errors: ${{errors.join(' | ')}}`);
     if (failedRequests.length) throw new Error(`failed requests: ${{failedRequests.join(' | ')}}`);
     await context.close();
     console.log('browser_contract=PASS');
-  }} finally {{
-    await browser.close();
-  }}
-}})().catch(error => {{ console.error(error.stack || error); process.exit(1); }});
+}});
 """
 
 
@@ -276,12 +384,13 @@ def main() -> None:
         ARTIFACTS / "drawer-mobile-390x844.png",
     )
     database = ARTIFACTS / "smoke.sqlite3"
-    spec = ARTIFACTS / "smoke.js"
+    spec = ARTIFACTS / "smoke.spec.js"
     server_module = ARTIFACTS / "smoke_server.py"
     generated = (
         database,
         Path(f"{database}-wal"),
         Path(f"{database}-shm"),
+        ARTIFACTS / "smoke.js",
         spec,
         server_module,
     )
@@ -326,7 +435,9 @@ def main() -> None:
             "wait \"$server\" 2>/dev/null || true; fi; }; trap cleanup EXIT INT TERM; "
             "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/repo:/venv/lib/python3.12/site-packages "
             "python3 -m uvicorn smoke_server:app --host 127.0.0.1 --port 18765 "
-            "--log-level warning --no-access-log & server=$!; node smoke.js"
+            "--log-level warning --no-access-log & server=$!; "
+            "/pw/node_modules/.bin/playwright test smoke.spec.js --reporter=line --workers=1 "
+            "--output=/tmp/ops-smoke-results"
         )
         completed = subprocess.run(
             [
@@ -343,7 +454,13 @@ def main() -> None:
             check=False,
         )
         output = completed.stdout + completed.stderr
-        if completed.returncode != 0 or "browser_contract=PASS" not in output:
+        if (
+            completed.returncode != 0
+            or "browser_contract=PASS" not in output
+            or "Running 1 test using 1 worker" not in output
+            or "1 passed" not in output
+            or "skipped" in output.casefold()
+        ):
             raise RuntimeError(f"real browser smoke failed (exit={completed.returncode}):\n{output}")
         residual_bytecode = _smoke_bytecode_paths()
         if residual_bytecode:
@@ -351,7 +468,10 @@ def main() -> None:
         for screenshot in screenshots:
             if not screenshot.is_file() or screenshot.stat().st_size == 0:
                 raise RuntimeError(f"browser smoke did not produce screenshot: {screenshot}")
+        print(output.strip())
         print("ops_dashboard_smoke=PASS")
+        print("chromium_workers=1")
+        print("chromium_skips=0")
         print(f"desktop_screenshot={screenshots[0]}")
         print(f"mobile_screenshot={screenshots[1]}")
         print(f"drawer_desktop_screenshot={screenshots[2]}")
