@@ -34,29 +34,35 @@ def _write_fixture(path: Path, key: bytes, now: datetime) -> str:
     try:
         completed = OpsExecution("event-tech-completed", "lead-tech-completed", now - timedelta(hours=12))
         writer.write_execution(completed)
-        node = OpsNodeStart(
-            execution_id=completed.execution_id,
-            node_type=NodeType.MAYA_REQUEST,
-            ordinal=1,
-            started_at=completed.received_at,
-            input_summary={"request_id": "request-tech-001", "message_hash": "a" * 64},
-            input_full={"request_id": "request-tech-001", "fixture_code": "input-tech"},
+        node_fixtures = (
+            (NodeType.MAYA_REQUEST, "request-tech-001", "output-tech-001"),
+            (NodeType.PROVIDER_READ_REQUEST, "request-tech-002", "output-tech-002"),
+            (NodeType.MAYA_RESPONSE, "request-tech-003", "output-tech-003"),
         )
-        writer.start_node(node)
-        writer.finish_node(
-            OpsNodeFinish.from_start(
+        nodes = []
+        for ordinal, (node_type, request_code, output_code) in enumerate(node_fixtures, 1):
+            node = OpsNodeStart(
+                execution_id=completed.execution_id,
+                node_type=node_type,
+                ordinal=ordinal,
+                started_at=completed.received_at + timedelta(milliseconds=ordinal * 100),
+                input_summary={"request_id": request_code, "message_hash": f"{ordinal}" * 64},
+                input_full={"request_id": request_code, "fixture_code": f"input-tech-{ordinal:03d}"},
+            )
+            writer.start_node(node)
+            writer.finish_node(OpsNodeFinish.from_start(
                 node,
                 status=ExecutionStatus.COMPLETED,
-                completed_at=completed.received_at + timedelta(seconds=2),
-                output_summary={"status": "ok", "result_code": "output-tech"},
-                output_full={"status": "ok", "fixture_code": "output-tech"},
-            )
-        )
+                completed_at=node.started_at + timedelta(milliseconds=100),
+                output_summary={"status": "ok", "result_code": output_code},
+                output_full={"status": "ok", "fixture_code": output_code},
+            ))
+            nodes.append(node)
         writer.write_execution(
             replace(
                 completed,
                 status=ExecutionStatus.COMPLETED,
-                current_node_id=node.node_id,
+                current_node_id=nodes[-1].node_id,
                 completed_at=completed.received_at + timedelta(seconds=2),
                 terminal_reason="technical_fixture_complete",
             )
@@ -152,6 +158,38 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
       if (!cards.some(card => card.includes(label) && card.includes(value))) throw new Error(`missing KPI ${{label}}=${{value}}`);
     }}
     const noOverflow = async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.body.clientWidth);
+    const timelineContract = async viewport => page.evaluate(viewport => {{
+      const timeline = document.querySelector('#execution-timeline');
+      const steps = [...timeline.querySelectorAll(':scope > .timeline-item > .execution-step')];
+      const markers = steps.map(step => step.querySelector('.step-marker').getBoundingClientRect());
+      const names = steps.map(step => step.querySelector('.step-name').getBoundingClientRect());
+      const timelineRect = timeline.getBoundingClientRect();
+      const centerSpread = Math.max(...markers.map(rect => rect.left + rect.width / 2))
+        - Math.min(...markers.map(rect => rect.left + rect.width / 2));
+      return {{
+        viewport,
+        count: steps.length,
+        numbers: steps.map(step => step.querySelector('.step-marker').textContent.trim()),
+        names: steps.map(step => step.querySelector('.step-name').textContent.trim()),
+        nodeIds: steps.map(step => step.getAttribute('data-node-id')),
+        buttonTypes: steps.map(step => step.getAttribute('type')),
+        currentCount: steps.filter(step => step.getAttribute('aria-current') === 'step').length,
+        centerSpread,
+        ordered: markers.every((rect, index) => index === 0 || rect.top > markers[index - 1].top),
+        touchTargets: steps.every(step => step.getBoundingClientRect().height >= (viewport === 'mobile' ? 44 : 48)),
+        contained: [...markers, ...names].every(rect => rect.left >= timelineRect.left - 1 && rect.right <= timelineRect.right + 1),
+        horizontalOverflow: timeline.scrollWidth - timeline.clientWidth,
+      }};
+    }}, viewport);
+    const assertTimeline = timeline => {{
+      if (timeline.count !== 3) throw new Error(`timeline count ${{JSON.stringify(timeline)}}`);
+      if (JSON.stringify(timeline.numbers) !== '["1","2","3"]') throw new Error(`timeline numbers ${{JSON.stringify(timeline)}}`);
+      if (!timeline.names.every(name => name.length > 0)) throw new Error(`timeline names ${{JSON.stringify(timeline)}}`);
+      if (!timeline.nodeIds.every(Boolean) || !timeline.buttonTypes.every(type => type === 'button')) throw new Error(`timeline semantics ${{JSON.stringify(timeline)}}`);
+      if (timeline.currentCount !== 1 || timeline.centerSpread > 1 || !timeline.ordered || !timeline.touchTargets || !timeline.contained || timeline.horizontalOverflow > 1) {{
+        throw new Error(`timeline geometry ${{JSON.stringify(timeline)}}`);
+      }}
+    }};
     const geometryContract = async viewport => page.evaluate(viewport => {{
       const tolerance = 1;
       const controls = [...document.querySelectorAll('#range-select, #refresh-dashboard, #operator-menu')];
@@ -284,13 +322,24 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     if (title !== expectedExecution) throw new Error(`unexpected execution ${{title}}`);
     const desktopTrigger = page.locator('#execution-table-body .execution-link');
     await desktopTrigger.click();
-    await page.locator('#nodes .node').first().waitFor();
+    await page.locator('#execution-timeline .execution-step').first().waitFor();
     if (!(await page.locator('#overview-view').isVisible())) throw new Error('overview hidden behind desktop drawer');
     if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'false') throw new Error('desktop drawer aria state mismatch');
-    if (!(await page.locator('#execution-canvas').isVisible())) throw new Error('canvas is not visible');
+    if (await page.locator('#execution-timeline > .timeline-item > .execution-step').count() !== 3) throw new Error('timeline hierarchy/count mismatch');
+    const firstStep = page.locator('#execution-timeline .execution-step').first();
+    if (!(await firstStep.getAttribute('data-node-id'))) throw new Error('first step data-node-id missing');
+    if (await firstStep.getAttribute('aria-current') !== 'step') throw new Error('first step not current');
     if (!(await page.locator('#input-panel').isVisible()) || !(await page.locator('#output-panel').isVisible())) throw new Error('Input/Output panels are not visible');
     if (!(await page.locator('#input-summary').textContent()).includes('request-tech-001')) throw new Error('Input summary mismatch');
-    if (!(await page.locator('#output-summary').textContent()).includes('output-tech')) throw new Error('Output summary mismatch');
+    if (!(await page.locator('#output-summary').textContent()).includes('output-tech-001')) throw new Error('Output summary mismatch');
+    const secondStep = page.locator('#execution-timeline .execution-step').nth(1);
+    await secondStep.click();
+    if (await secondStep.getAttribute('aria-current') !== 'step') throw new Error('second step not current');
+    if (await page.locator('#execution-timeline [aria-current="step"]').count() !== 1) throw new Error('multiple current steps');
+    if (!(await page.locator('#input-summary').textContent()).includes('request-tech-002')) throw new Error('second step input mismatch');
+    if (!(await page.locator('#output-summary').textContent()).includes('output-tech-002')) throw new Error('second step output mismatch');
+    if (!(await secondStep.evaluate(element => element === document.activeElement))) throw new Error('clicked step did not receive focus');
+    console.log('timeline_selection=PASS');
     await page.click('#load-full-input');
     await page.click('#load-full-output');
     await page.waitForFunction(() => document.querySelector('#input-full')?.textContent.includes('input-tech'));
@@ -300,10 +349,28 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
       viewport: window.innerWidth,
     }}));
     if (desktopDrawer.width < 700 || desktopDrawer.width > desktopDrawer.viewport * .92 + 1) throw new Error(`desktop drawer width mismatch: ${{JSON.stringify(desktopDrawer)}}`);
-    const canvasScroll = await page.evaluate(() => {{ const el = document.querySelector('#execution-canvas'); return getComputedStyle(el).overflowX === 'auto' && el.scrollWidth > el.clientWidth; }});
-    if (!canvasScroll) throw new Error('canvas does not preserve internal horizontal scroll');
+    assertTimeline(await timelineContract('desktop'));
+    const fallbackNumbers = await page.evaluate(() => {{
+      const ordinals = state.nodes.map(node => node.ordinal);
+      const selectedNode = state.selectedNode;
+      try {{
+        state.nodes[0].ordinal = 0;
+        state.nodes[1].ordinal = -1;
+        state.nodes[2].ordinal = 1.5;
+        renderTimeline();
+        return [...document.querySelectorAll('#execution-timeline .step-marker')]
+          .map(marker => marker.textContent.trim());
+      }} finally {{
+        state.nodes.forEach((node, index) => {{ node.ordinal = ordinals[index]; }});
+        renderTimeline();
+        selectNode(selectedNode);
+      }}
+    }});
+    if (JSON.stringify(fallbackNumbers) !== '["1","2","3"]') throw new Error(`ordinal fallback mismatch: ${{JSON.stringify(fallbackNumbers)}}`);
+    console.log('timeline_ordinal_fallback=PASS');
     if (!(await noOverflow())) throw new Error('desktop detail body overflow');
     await page.screenshot({{path: path.join(artifacts, 'drawer-desktop-1440x1000.png'), animations: 'allow', caret: 'initial'}});
+    console.log('timeline_desktop=PASS');
     await page.keyboard.press('Escape');
     if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'true') throw new Error('Escape did not close desktop drawer');
     if (!(await desktopTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore desktop trigger focus');
@@ -343,22 +410,25 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     await page.screenshot({{path: path.join(artifacts, 'mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
     const mobileTrigger = page.locator('.execution-mobile-card .execution-link');
     await mobileTrigger.click();
-    await page.locator('#nodes .node').first().waitFor();
+    await page.locator('#execution-timeline .execution-step').first().waitFor();
     if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'false') throw new Error('mobile drawer aria state mismatch');
-    if (!(await page.locator('#execution-canvas').isVisible()) || !(await page.locator('#input-panel').isVisible()) || !(await page.locator('#output-panel').isVisible())) throw new Error('mobile canvas or inspector missing');
+    if (!(await page.locator('#execution-timeline').isVisible()) || !(await page.locator('#input-panel').isVisible()) || !(await page.locator('#output-panel').isVisible())) throw new Error('mobile timeline or inspector missing');
     await page.click('#load-full-input');
     await page.click('#load-full-output');
     await page.waitForFunction(() => document.querySelector('#input-full')?.textContent.includes('input-tech'));
     await page.waitForFunction(() => document.querySelector('#output-full')?.textContent.includes('output-tech'));
     const mobileDrawer = await page.evaluate(() => {{
       const drawer = document.querySelector('#execution-drawer').getBoundingClientRect();
-      const canvas = document.querySelector('.canvas-shell').getBoundingClientRect();
+      const timeline = document.querySelector('.canvas-shell').getBoundingClientRect();
       const inspector = document.querySelector('.inspector').getBoundingClientRect();
-      return {{width: drawer.width, viewport: window.innerWidth, inspectorStacks: inspector.top >= canvas.bottom - 1}};
+      return {{width: drawer.width, viewport: window.innerWidth, inspectorStacks: inspector.top >= timeline.bottom - 1}};
     }});
     if (Math.abs(mobileDrawer.width - mobileDrawer.viewport) > 1 || !mobileDrawer.inspectorStacks) throw new Error(`mobile drawer layout mismatch: ${{JSON.stringify(mobileDrawer)}}`);
+    assertTimeline(await timelineContract('mobile'));
     if (!(await noOverflow())) throw new Error('mobile detail body overflow');
+    await page.locator('#execution-timeline').evaluate(element => element.scrollIntoView({{block: 'start'}}));
     await page.screenshot({{path: path.join(artifacts, 'drawer-mobile-390x844.png'), animations: 'allow', caret: 'initial'}});
+    console.log('timeline_mobile=PASS');
     await page.keyboard.press('Escape');
     if (!(await mobileTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore mobile trigger focus');
 
@@ -449,9 +519,16 @@ def main() -> None:
             check=False,
         )
         output = completed.stdout + completed.stderr
+        required_markers = (
+            "browser_contract=PASS",
+            "timeline_desktop=PASS",
+            "timeline_mobile=PASS",
+            "timeline_selection=PASS",
+            "timeline_ordinal_fallback=PASS",
+        )
         if (
             completed.returncode != 0
-            or "browser_contract=PASS" not in output
+            or any(marker not in output for marker in required_markers)
             or "Running 1 test using 1 worker" not in output
             or "1 passed" not in output
             or "skipped" in output.casefold()
