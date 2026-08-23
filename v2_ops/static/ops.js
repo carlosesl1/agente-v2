@@ -9,7 +9,6 @@ const state = {
   statusFilter: "",
   completenessFilter: "",
   leadFilter: "",
-  zoom: 1,
   connected: false,
   dashboardEpoch: 0,
   detailEpoch: 0,
@@ -776,49 +775,33 @@ async function refreshDashboard() {
   }
 }
 
-function nodePosition(index) {
-  const column = index % 3;
-  const row = Math.floor(index / 3);
-  return { x: 55 + column * 270, y: 55 + row * 145 };
-}
-
-function renderCanvas() {
-  const nodesRoot = $("nodes");
-  const edgesRoot = $("edges");
-  nodesRoot.replaceChildren();
-  edgesRoot.replaceChildren();
-  const positions = new Map();
+function renderTimeline() {
+  const timeline = $("execution-timeline");
+  timeline.replaceChildren();
   state.nodes.forEach((node, index) => {
-    const position = nodePosition(index);
-    positions.set(node.node_id, position);
+    const ordinal = Number(node.ordinal);
+    const stepNumber = Number.isInteger(ordinal) && ordinal > 0 ? ordinal : index + 1;
+    const selected = node.node_id === state.selectedNode;
+    const item = document.createElement("li");
+    item.className = "timeline-item";
     const element = document.createElement("button");
     element.type = "button";
-    element.className = `node${node.node_id === state.selectedNode ? " selected" : ""}`;
+    element.className = "execution-step";
     element.dataset.nodeId = node.node_id;
-    element.style.left = `${position.x}px`;
-    element.style.top = `${position.y}px`;
-    const kind = document.createElement("div");
-    kind.className = "kind";
-    kind.textContent = displayValue(node.node_type).replaceAll("_", " ");
-    const ordinal = document.createElement("strong");
-    ordinal.textContent = `#${Number(node.ordinal) || 0} · tentativa ${Number(node.attempt) || 0}`;
-    const status = document.createElement("div");
-    status.className = "status";
-    status.textContent = displayValue(node.status);
-    element.append(kind, ordinal, status);
+    if (selected) element.setAttribute("aria-current", "step");
+
+    const marker = document.createElement("span");
+    marker.className = "step-marker";
+    marker.textContent = String(stepNumber);
+    const name = document.createElement("span");
+    name.className = "step-name";
+    name.textContent = displayValue(node.node_type).replaceAll("_", " ");
+
+    element.append(marker, name);
     element.addEventListener("click", () => selectNode(node.node_id));
-    nodesRoot.append(element);
+    item.append(element);
+    timeline.append(item);
   });
-  state.nodes.forEach((node, index) => {
-    if (index === 0) return;
-    const from = positions.get(state.nodes[index - 1].node_id);
-    const to = positions.get(node.node_id);
-    const path = document.createElementNS(SVG_NAMESPACE, "path");
-    path.setAttribute("class", "edge");
-    path.setAttribute("d", `M ${from.x + 178} ${from.y + 38} C ${from.x + 220} ${from.y + 38}, ${to.x - 42} ${to.y + 38}, ${to.x} ${to.y + 38}`);
-    edgesRoot.append(path);
-  });
-  nodesRoot.style.transform = `scale(${Math.max(0.5, Math.min(1.6, Number(state.zoom) || 1))})`;
 }
 
 function clearInspector() {
@@ -858,8 +841,11 @@ function selectNode(nodeId) {
   $("output-full").hidden = true;
   $("load-full-input").hidden = !node.has_full_input;
   $("load-full-output").hidden = !node.has_full_output;
-  for (const element of $("nodes").querySelectorAll(".node")) {
-    element.classList.toggle("selected", element.dataset.nodeId === nodeId);
+  for (const element of $("execution-timeline").querySelectorAll(".execution-step")) {
+    const selected = element.dataset.nodeId === nodeId;
+    element.classList.toggle("selected", selected);
+    if (selected) element.setAttribute("aria-current", "step");
+    else element.removeAttribute("aria-current");
   }
 }
 
@@ -868,8 +854,7 @@ function clearDetail(executionId = "Execução") {
   state.nodes = [];
   state.selectedNode = null;
   $("canvas-title").textContent = executionId;
-  $("nodes").replaceChildren();
-  $("edges").replaceChildren();
+  $("execution-timeline").replaceChildren();
   clearInspector();
 }
 
@@ -928,7 +913,7 @@ async function refreshOpenExecution(executionId, epoch) {
   }
   if (epoch !== state.detailEpoch || executionId !== state.selectedExecution) return false;
   state.nodes = payload.nodes;
-  renderCanvas();
+  renderTimeline();
   if (state.nodes.length) selectNode(state.nodes[0].node_id);
   return true;
 }
@@ -1072,19 +1057,6 @@ $("nav-execution").addEventListener("click", () => {
 });
 $("load-full-input").addEventListener("click", () => loadFull("input").catch(handleDashboardError));
 $("load-full-output").addEventListener("click", () => loadFull("output").catch(handleDashboardError));
-$("zoom-in").addEventListener("click", () => {
-  state.zoom = Math.min(1.6, state.zoom + 0.1);
-  renderCanvas();
-});
-$("zoom-out").addEventListener("click", () => {
-  state.zoom = Math.max(0.5, state.zoom - 0.1);
-  renderCanvas();
-});
-$("fit-canvas").addEventListener("click", () => {
-  state.zoom = 1;
-  $("execution-canvas").scrollTo(0, 0);
-  renderCanvas();
-});
 document.addEventListener("click", (event) => {
   if (
     state.operatorMenuOpen

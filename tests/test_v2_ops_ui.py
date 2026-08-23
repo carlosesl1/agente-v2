@@ -31,8 +31,7 @@ EXPECTED_IDS = {
     "execution-table-body", "execution-mobile-list", "drawer-backdrop",
     "execution-drawer", "drawer-close", "drawer-title", "drawer-lead",
     "drawer-status", "drawer-trace", "drawer-summary", "canvas-title",
-    "execution-canvas", "edges", "nodes", "fit-canvas", "zoom-in",
-    "zoom-out", "node-title", "input-panel", "input-summary", "input-full",
+    "execution-timeline", "node-title", "input-panel", "input-summary", "input-full",
     "load-full-input", "output-panel", "output-summary", "output-full",
     "load-full-output", "metadata", "node-error",
 } | LUCIDE_SYMBOL_IDS
@@ -59,7 +58,6 @@ LOGOUT_OWNER = ("form", 0, None, "post", "/ops/logout")
 EXPECTED_CONTROLS = (
     InteractiveContract("button", None, "submit", "/ops/logout", LOGOUT_OWNER, "post", True, None, None, None, None, True, True, False),
     InteractiveContract("button", "drawer-close", "button", None, None, None, True, None, None, None, None),
-    InteractiveContract("button", "fit-canvas", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "load-full-input", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "load-full-output", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "mobile-menu", "button", None, None, None, True, None, None, None, None),
@@ -69,9 +67,6 @@ EXPECTED_CONTROLS = (
     InteractiveContract("button", "refresh-dashboard", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "sidebar-close", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "sidebar-backdrop", "button", None, None, None, True, None, None, None, None),
-    InteractiveContract("button", "zoom-in", "button", None, None, None, True, None, None, None, None),
-    InteractiveContract("button", "zoom-out", "button", None, None, None, True, None, None, None, None),
-    InteractiveContract("div", "execution-canvas", None, None, None, None, True, "region", "0", None, None),
     InteractiveContract("input", None, "hidden", None, LOGOUT_OWNER, None, True, None, None, None, None, True, False, True),
     InteractiveContract("input", "lead-search", "text", None, None, None, True, None, None, None, None),
     InteractiveContract("select", "completeness-filter", None, None, None, None, True, None, None, None, None),
@@ -154,6 +149,51 @@ def javascript_function_body(js: str, name: str) -> str:
         index += 1
     assert depth == 0, f"unclosed JavaScript function: {name}"
     return js[match.end():index - 1]
+
+
+def assert_vertical_timeline_contract(html: str, js: str, css: str) -> None:
+    root = parse_html(html)
+    by_id = elements_by_id(root)
+    timeline = by_id["execution-timeline"]
+    assert timeline.tag == "ol"
+    assert timeline.attrs.get("aria-label") == "Passos da execução"
+    assert timeline.attrs.get("role") is None
+
+    for removed_id in ("execution-canvas", "edges", "fit-canvas", "zoom-in", "zoom-out"):
+        assert removed_id not in by_id
+
+    render = javascript_function_body(js, "renderTimeline")
+    assert 'document.createElement("li")' in render
+    assert 'item.className = "timeline-item"' in render
+    assert 'document.createElement("button")' in render
+    assert 'element.className = "execution-step"' in render
+    assert 'element.setAttribute("aria-current", "step")' in render
+    assert 'marker.className = "step-marker"' in render
+    assert 'name.className = "step-name"' in render
+    assert "marker.textContent" in render
+    assert "name.textContent" in render
+    assert "node.node_type" in render
+    assert "node.ordinal" in render
+    assert "node.attempt" not in render
+    assert "node.status" not in render
+    assert "document.createElementNS" not in render
+    assert ".style." not in render
+
+    assert "function nodePosition(" not in js
+    assert "function renderCanvas(" not in js
+    assert "state.zoom" not in js
+    assert '$("edges")' not in js
+    assert '$("zoom-in")' not in js
+    assert '$("zoom-out")' not in js
+    assert '$("fit-canvas")' not in js
+
+    for selector in (
+        '.execution-timeline', '.timeline-item', '.execution-step', '.step-marker', '.step-name',
+        '.execution-step[aria-current="step"]', ".execution-step:focus-visible",
+    ):
+        assert selector in css
+    for removed_selector in ("#edges", ".edge {", ".nodes {", ".node {"):
+        assert removed_selector not in css
 
 
 def assert_task2_javascript_contract(js: str) -> None:
@@ -480,12 +520,13 @@ def assert_dashboard_dom_contract(html: str) -> None:
 
     overview = by_id["overview-view"]
     drawer = by_id["execution-drawer"]
-    canvas = by_id["execution-canvas"]
+    timeline = by_id["execution-timeline"]
     assert overview.parent is not None and overview.parent.tag == "main"
     assert drawer.tag == "aside"
     assert drawer.attrs.get("aria-hidden") == "true", "drawer must start closed"
     assert "open" not in (drawer.attrs.get("class") or "").split(), "drawer must start closed"
-    assert is_descendant(canvas, drawer)
+    assert timeline.tag == "ol"
+    assert is_descendant(timeline, drawer)
     assert is_descendant(by_id["input-panel"], drawer)
     assert is_descendant(by_id["output-panel"], drawer)
     assert "hidden" in by_id["drawer-backdrop"].attrs
@@ -543,6 +584,11 @@ def test_dashboard_shell_dom_contract() -> None:
     assert_dashboard_dom_contract(html)
     assert "SOMENTE LEITURA" in html
     assert "Dados demonstrativos" not in html
+
+
+def test_execution_detail_uses_numbered_vertical_timeline_only() -> None:
+    html, js, css = assets()
+    assert_vertical_timeline_contract(html, js, css)
 
 
 @pytest.mark.parametrize(
@@ -832,11 +878,10 @@ def test_accessibility_metadata_is_explicit() -> None:
     headers = table[0].descendants("th")
     assert headers and all(header.attrs.get("scope") == "col" for header in headers)
 
-    canvas = by_id["execution-canvas"]
-    assert canvas.attrs.get("role") == "region"
-    assert canvas.attrs.get("aria-label") == "Canvas da execução"
-    assert by_id["zoom-out"].attrs.get("aria-label") == "Reduzir zoom"
-    assert by_id["zoom-in"].attrs.get("aria-label") == "Aumentar zoom"
+    timeline = by_id["execution-timeline"]
+    assert timeline.tag == "ol"
+    assert timeline.attrs.get("aria-label") == "Passos da execução"
+    assert timeline.attrs.get("role") is None
 
 
 def test_html_has_no_commercial_claims() -> None:
@@ -1076,7 +1121,7 @@ def test_javascript_dashboard_contract_is_safe_and_explicit() -> None:
         "filteredExecutions",
         "openExecution",
         "showOverview",
-        "renderCanvas",
+        "renderTimeline",
         "selectNode",
         "connectLive",
     ):
@@ -1084,7 +1129,7 @@ def test_javascript_dashboard_contract_is_safe_and_explicit() -> None:
 
     assert "textContent" in js
     assert "document.createElement(" in js
-    assert "document.createElementNS(" in js
+    assert "document.createElementNS(" not in javascript_function_body(js, "renderTimeline")
     assert "replaceChildren" in js
     assert "setAttribute" in js
     assert "innerHTML" not in js
@@ -1111,7 +1156,6 @@ def test_javascript_uses_the_closed_state_cards_and_exact_filters() -> None:
         ("statusFilter", '""'),
         ("completenessFilter", '""'),
         ("leadFilter", '""'),
-        ("zoom", "1"),
         ("connected", "false"),
         ("mobileNavigationOpen", "false"),
         ("operatorMenuOpen", "false"),
@@ -1775,11 +1819,11 @@ test('SSE detail refresh clears loading state and remains clear after 503', asyn
   await expect.poll(async () => (await paths(page)).length).toBe(4);
   await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
   await expect(page.locator('#input-summary')).toHaveText('{}');
-  await expect(page.locator('#nodes')).toBeEmpty();
+  await expect(page.locator('#execution-timeline')).toBeEmpty();
   await resolveRequest(page, 3, 503, {status: 'source_unavailable'});
   await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
   await expect(page.locator('#metadata')).toHaveText('{}');
-  await expect(page.locator('#nodes')).toBeEmpty();
+  await expect(page.locator('#execution-timeline')).toBeEmpty();
 });
 
 test('input and output full loads remain independent in both response orders', async ({page}) => {
@@ -1880,11 +1924,11 @@ test('Task 5 execution opens as factual drawer and restores overview context and
   }).executions[0]);
   await resolveRequest(page, 0, 200, payload);
   await page.evaluate(() => {
-    const originalRenderCanvas = renderCanvas;
+    const originalRenderTimeline = renderTimeline;
     window.__task5RenderCount = 0;
-    renderCanvas = () => {
+    renderTimeline = () => {
       window.__task5RenderCount += 1;
-      return originalRenderCanvas();
+      return originalRenderTimeline();
     };
   });
   const trigger = page.locator('#execution-table-body .execution-link').first();
@@ -2004,7 +2048,7 @@ test('Task 5 closing while detail is pending invalidates response and keeps draw
   });
   await resolveRequest(page, 1, 200, nodes('A'));
   await expect(page.locator('#execution-drawer')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.locator('#nodes')).toBeEmpty();
+  await expect(page.locator('#execution-timeline')).toBeEmpty();
   await expect(page.locator('#node-title')).toHaveText('Nenhum nó selecionado');
   await expect(page.locator('#input-summary')).toHaveText('{}');
   await expect(page.locator('#dashboard-alert')).toBeHidden();

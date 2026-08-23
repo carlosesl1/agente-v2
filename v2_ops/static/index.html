@@ -124,9 +124,9 @@
         <div class="drawer-status"><span id="drawer-status" class="status-chip">Não registrado</span><span id="drawer-trace" class="status-chip">Não registrado</span></div>
         <div id="drawer-summary" class="fact-grid"></div>
         <div class="execution-detail">
-          <section class="canvas-shell">
-            <div class="canvas-toolbar"><strong id="canvas-title">Execução</strong><div><button id="zoom-out" type="button" aria-label="Reduzir zoom">−</button><button id="zoom-in" type="button" aria-label="Aumentar zoom">+</button><button id="fit-canvas" type="button">Fit</button></div></div>
-            <div id="execution-canvas" class="execution-canvas" tabindex="0" role="region" aria-label="Canvas da execução"><svg id="edges" aria-hidden="true"></svg><div id="nodes" class="nodes"></div></div>
+          <section class="canvas-shell timeline-shell">
+            <div class="canvas-toolbar"><strong id="canvas-title">Execução</strong></div>
+            <ol id="execution-timeline" class="execution-timeline" aria-label="Passos da execução"></ol>
           </section>
           <aside class="inspector">
             <p class="eyebrow">INSPETOR</p>
