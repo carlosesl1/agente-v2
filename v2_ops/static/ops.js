@@ -24,14 +24,14 @@ const state = {
 };
 
 const KPI_DEFINITIONS = [
-  ["executions", "Execuções", "◎", "Eventos recebidos no período", "neutral"],
-  ["distinct_leads", "Leads distintos", "◇", "IDs distintos no período", "neutral"],
-  ["in_progress", "Em andamento", "◌", "Pending, running e stale", "active"],
-  ["completed", "Concluídas", "✓", "Conclusão técnica", "success"],
-  ["failed", "Falhas", "!", "Estado técnico failed", "danger"],
-  ["manual_review", "Revisão manual", "↗", "Estado manual_review", "warning"],
-  ["technical_completion_rate", "Conclusão técnica", "%", "Concluídas sobre execuções", "success"],
-  ["average_terminal_duration_ms", "Duração média terminal", "◷", "Apenas execuções terminais", "neutral"],
+  ["executions", "Execuções", "activity", "Eventos recebidos no período", "neutral"],
+  ["distinct_leads", "Leads distintos", "users", "IDs distintos no período", "neutral"],
+  ["in_progress", "Em andamento", "loader-circle", "Pending, running e stale", "active"],
+  ["completed", "Concluídas", "circle-check", "Conclusão técnica", "success"],
+  ["failed", "Falhas", "circle-alert", "Estado técnico failed", "danger"],
+  ["manual_review", "Revisão manual", "user-round-check", "Estado manual_review", "warning"],
+  ["technical_completion_rate", "Conclusão técnica", "percent", "Concluídas sobre execuções", "success"],
+  ["average_terminal_duration_ms", "Duração média terminal", "clock", "Apenas execuções terminais", "neutral"],
 ];
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const STATUS_PRESENTATION = Object.freeze({
@@ -55,6 +55,20 @@ const MILESTONE_PRESENTATION = Object.freeze({
 });
 const $ = (id) => document.getElementById(id);
 const mobileNavigationMedia = window.matchMedia("(max-width: 720px)");
+
+function createLucideIcon(name, className = "") {
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  svg.setAttribute("class", `lucide ${className}`.trim());
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS(SVG_NAMESPACE, "use");
+  use.setAttribute("href", `#lucide-${name}`);
+  svg.append(use);
+  return svg;
+}
 
 function showJSON(element, value) {
   element.textContent = JSON.stringify(value, null, 2);
@@ -211,7 +225,7 @@ function renderKpis() {
     const iconElement = document.createElement("span");
     iconElement.className = "kpi-icon";
     iconElement.setAttribute("aria-hidden", "true");
-    iconElement.textContent = icon;
+    iconElement.append(createLucideIcon(icon));
     const heading = document.createElement("span");
     heading.className = "kpi-label";
     heading.textContent = label;

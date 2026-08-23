@@ -14,6 +14,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "v2_ops" / "static"
 VOID_ELEMENTS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+LUCIDE_SYMBOL_IDS = {
+    "lucide-activity", "lucide-circle-alert", "lucide-circle-check",
+    "lucide-clock", "lucide-command", "lucide-house", "lucide-loader-circle",
+    "lucide-menu", "lucide-percent", "lucide-refresh-cw", "lucide-search",
+    "lucide-user-round-check", "lucide-users", "lucide-x",
+}
 EXPECTED_IDS = {
     "app-sidebar", "sidebar-backdrop", "mobile-menu", "sidebar-close",
     "nav-overview", "nav-execution", "live-state", "source-health-state",
@@ -29,7 +35,7 @@ EXPECTED_IDS = {
     "zoom-out", "node-title", "input-panel", "input-summary", "input-full",
     "load-full-input", "output-panel", "output-summary", "output-full",
     "load-full-output", "metadata", "node-error",
-}
+} | LUCIDE_SYMBOL_IDS
 
 
 class InteractiveContract(NamedTuple):
@@ -870,6 +876,59 @@ def test_mockup_fidelity_header_and_kpi_contract() -> None:
         assert selector in css
 
 
+def test_lucide_subset_is_local_official_and_closed() -> None:
+    html, js, _ = assets()
+    notice = (ROOT / "LUCIDE-NOTICE.txt").read_text(encoding="utf-8")
+    expected_icons = {
+        "activity",
+        "circle-alert",
+        "circle-check",
+        "clock",
+        "command",
+        "house",
+        "loader-circle",
+        "menu",
+        "percent",
+        "refresh-cw",
+        "search",
+        "user-round-check",
+        "users",
+        "x",
+    }
+
+    assert '<svg class="lucide-sprite"' in html
+    assert 'id="lucide-refresh-cw"' in html
+    assert 'id="lucide-search"' in html
+    assert 'function createLucideIcon(name, className = "")' in js
+    assert 'setAttribute("href", `#lucide-${name}`)' in js
+    assert "Lucide" in notice and "ISC License" in notice
+    for improvised in ("⌂", "⌘", "☰", "↻", "⌕", "◎", "◇", "◌", "◷"):
+        assert improvised not in html + js
+    assert "×" not in html + js
+
+    symbol_names = set(re.findall(r'<symbol id="lucide-([a-z0-9-]+)"', html))
+    shell_names = set(re.findall(r'<use href="#lucide-([a-z0-9-]+)"></use>', html))
+    kpi_names = set(re.findall(
+        r'^\s*\["[^"]+", "[^"]+", "([a-z0-9-]+)",',
+        js,
+        re.MULTILINE,
+    ))
+    assert kpi_names == {
+        "activity", "users", "loader-circle", "circle-check",
+        "circle-alert", "user-round-check", "percent", "clock",
+    }
+    assert symbol_names == shell_names | kpi_names == expected_icons
+    assert f"Vendored subset: {', '.join(sorted(expected_icons))}" in notice
+
+    for symbol in re.findall(r"<symbol\b.*?</symbol>", html, re.DOTALL):
+        assert 'viewBox="0 0 24 24"' in symbol
+        assert 'stroke="currentColor"' in symbol
+        assert 'fill="none"' in symbol
+        assert 'stroke-width="2"' in symbol
+        assert 'stroke-linecap="round"' in symbol
+        assert 'stroke-linejoin="round"' in symbol
+
+
 def test_operations_surface_matches_mockup_without_new_fields() -> None:
     html, js, css = assets()
     for token in ("operations-head", "live-badge", "search-box", "result-count", "table-wrap"):
@@ -1033,14 +1092,14 @@ def test_javascript_uses_the_closed_state_cards_and_exact_filters() -> None:
         assert f"{field}: {initial}" in js
 
     for definition in (
-        '["executions", "Execuções", "◎", "Eventos recebidos no período", "neutral"]',
-        '["distinct_leads", "Leads distintos", "◇", "IDs distintos no período", "neutral"]',
-        '["in_progress", "Em andamento", "◌", "Pending, running e stale", "active"]',
-        '["completed", "Concluídas", "✓", "Conclusão técnica", "success"]',
-        '["failed", "Falhas", "!", "Estado técnico failed", "danger"]',
-        '["manual_review", "Revisão manual", "↗", "Estado manual_review", "warning"]',
-        '["technical_completion_rate", "Conclusão técnica", "%", "Concluídas sobre execuções", "success"]',
-        '["average_terminal_duration_ms", "Duração média terminal", "◷", "Apenas execuções terminais", "neutral"]',
+        '["executions", "Execuções", "activity", "Eventos recebidos no período", "neutral"]',
+        '["distinct_leads", "Leads distintos", "users", "IDs distintos no período", "neutral"]',
+        '["in_progress", "Em andamento", "loader-circle", "Pending, running e stale", "active"]',
+        '["completed", "Concluídas", "circle-check", "Conclusão técnica", "success"]',
+        '["failed", "Falhas", "circle-alert", "Estado técnico failed", "danger"]',
+        '["manual_review", "Revisão manual", "user-round-check", "Estado manual_review", "warning"]',
+        '["technical_completion_rate", "Conclusão técnica", "percent", "Concluídas sobre execuções", "success"]',
+        '["average_terminal_duration_ms", "Duração média terminal", "clock", "Apenas execuções terminais", "neutral"]',
     ):
         assert definition in js
 
