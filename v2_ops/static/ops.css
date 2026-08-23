@@ -44,6 +44,7 @@ button, input, select { font: inherit; }
 button, select { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .48; }
 [hidden] { display: none !important; }
+.lucide-sprite { position: absolute; }
 
 button, input, select, summary { outline: none; }
 :focus-visible {

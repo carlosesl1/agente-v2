@@ -899,7 +899,7 @@ def test_mockup_fidelity_header_and_kpi_contract() -> None:
 
 
 def test_lucide_subset_is_local_official_and_closed() -> None:
-    html, js, _ = assets()
+    html, js, css = assets()
     notice = (ROOT / "LUCIDE-NOTICE.txt").read_text(encoding="utf-8")
     expected_icons = {
         "activity",
@@ -918,7 +918,15 @@ def test_lucide_subset_is_local_official_and_closed() -> None:
         "x",
     }
 
-    assert '<svg class="lucide-sprite"' in html
+    root = parse_html(html)
+    sprites = [
+        element
+        for element in root.descendants("svg")
+        if "lucide-sprite" in (element.attrs.get("class") or "").split()
+    ]
+    assert len(sprites) == 1
+    assert "style" not in sprites[0].attrs, "Lucide sprite must not require CSP-blocked inline style"
+    assert ".lucide-sprite{position:absolute;" in re.sub(r"\s+", "", css)
     assert 'id="lucide-refresh-cw"' in html
     assert 'id="lucide-search"' in html
     assert 'function createLucideIcon(name, className = "")' in js

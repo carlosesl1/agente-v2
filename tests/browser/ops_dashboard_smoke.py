@@ -105,7 +105,6 @@ const artifacts = '/artifacts';
 
 test('desktop and mobile operational dashboard geometry', async ({{browser}}) => {{
   const errors = [];
-  const knownBaseConsole = [];
   const failedRequests = [];
     const context = await browser.newContext({{viewport: {{width: 1440, height: 1000}}}});
     const page = await context.newPage();
@@ -114,12 +113,7 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
       if (message.type() !== 'error') return;
       const location = message.location();
       const detail = `console: ${{message.text()}} @ ${{JSON.stringify(location)}}`;
-      if (message.text().startsWith('Refused to apply inline style because it violates')
-          && location.url === `${{baseURL}}/ops/` && location.lineNumber === 9) {{
-        knownBaseConsole.push(detail);
-      }} else {{
-        errors.push(detail);
-      }}
+      errors.push(detail);
     }});
     page.on('requestfailed', request => failedRequests.push(`${{request.method()}} ${{request.url()}}: ${{request.failure()?.errorText}}`));
 
@@ -224,7 +218,9 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
       }});
       return {{
         viewport,
-        headerGeometry: heights.length === 3 && heights.every(height => Math.abs(height - 48) <= tolerance),
+        headerGeometry: heights.length === 3
+          && heights.every(height => Math.abs(height - 48) <= tolerance)
+          && controlTopSpread <= tolerance,
         compactMobileHeader,
         headerHeight: headerRect.height,
         controlTopSpread,
@@ -367,7 +363,6 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     if (!(await mobileTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore mobile trigger focus');
 
     await page.waitForTimeout(100);
-    if (knownBaseConsole.length !== 1) throw new Error(`known base CSP diagnostic changed: ${{knownBaseConsole.join(' | ')}}`);
     if (errors.length) throw new Error(`page/console errors: ${{errors.join(' | ')}}`);
     if (failedRequests.length) throw new Error(`failed requests: ${{failedRequests.join(' | ')}}`);
     await context.close();
