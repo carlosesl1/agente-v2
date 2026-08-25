@@ -358,6 +358,71 @@ def test_bokun_v2_submit_booking_id_confirms_without_readback() -> None:
     assert all(request.headers["X-Bokun-Signature"] for request in seen)
 
 
+def test_bokun_v2_uses_sole_passenger_identity_for_required_main_contact_details() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-booking-1",
+                            "date": 1786406400000,
+                            "activity": {"id": 913372},
+                            "startTime": {"id": 3210363},
+                            "rate": {"id": 2375672},
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": "passenger-booking-1",
+                                    "pricingCategoryId": "857489",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        if len(seen) == 2:
+            return httpx.Response(200, request=request, json=_checkout())
+        body = json.loads(request.content)
+        contact = {
+            item["questionId"]: item["values"][0]
+            for item in body["shoppingCart"]["bookingAnswers"][
+                "mainContactDetails"
+            ]
+        }
+        assert contact["firstName"] == "Carlos"
+        assert contact["lastName"] == "Eduardo Silva Leite"
+        assert contact["dateOfBirth"] == "1990-01-02"
+        assert contact["gender"] == "m"
+        return httpx.Response(
+            200,
+            request=request,
+            json={"booking": {"bookingId": "booking-full-name-123"}},
+        )
+
+    payload = _dispatch_payload()
+    customer = payload["customer"]
+    assert isinstance(customer, dict)
+    passengers = customer["passengers"]
+    assert isinstance(passengers, list) and isinstance(passengers[0], dict)
+    passengers[0]["full_name"] = "Carlos Eduardo Silva Leite"
+
+    result = _transport(handler)(
+        "book_activity",
+        payload,
+        idempotency_key="idem:bokun-full-name-001",
+    )
+
+    assert result == {"status": "confirmed", "booking_id": "booking-full-name-123"}
+    assert [request.method for request in seen] == ["POST", "GET", "POST"]
+
+
 def test_bokun_v2_uses_authenticated_foreign_phone_for_english_locale() -> None:
     seen: list[httpx.Request] = []
 

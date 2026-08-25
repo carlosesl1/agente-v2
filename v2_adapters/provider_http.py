@@ -1979,13 +1979,22 @@ class BokunHTTPTransport:
             "nationality": country,
             "language": contact_language,
         }
-        if passengers[0]["full_name"] == main_name:
+        sole_passenger_contact = len(passengers) == 1 and adults + children == 1
+        if sole_passenger_contact or passengers[0]["full_name"] == main_name:
+            primary_passenger = passengers[0]
             main_contact.update(
                 {
-                    "dateOfBirth": passengers[0]["dateOfBirth"],
-                    "gender": passengers[0]["gender"],
+                    "dateOfBirth": primary_passenger["dateOfBirth"],
+                    "gender": primary_passenger["gender"],
                 }
             )
+            if sole_passenger_contact:
+                main_contact.update(
+                    {
+                        "firstName": primary_passenger["firstName"],
+                        "lastName": primary_passenger["lastName"],
+                    }
+                )
         try:
             submit_body = self._submit_body_v2(
                 checkout_payload,
