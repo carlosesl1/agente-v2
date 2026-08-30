@@ -9,6 +9,17 @@
 - No deploy, restart, canary promotion, broad rollout, production provider POST, or real external effect is authorized by this phase.
 - Authorized by Carlos Eduardo on 2026-08-11 after the natural-conversation audit: continue with the prompt/skill/process and provider-information approach before adding controller complexity. The approved implementation reuses the existing prompt and read tools; it adds no new skill inventory or controller gate.
 
+## Active successor — complete Maya Ops existing-data dashboard
+
+- Authorized by Carlos Eduardo on 2026-08-30 after reviewing the proposed next delivery: implement, verify and publish reversibly the conservative visual refinement plus Leads, per-lead history, standalone Executions, Reservations, Payments, Handoffs and CSV exports.
+- Branch: `feature/maya-ops-existing-data-dashboard`.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/maya-ops-existing-data-dashboard`.
+- Public starting release: `c228148e110a6b0f7aeb5ca43758db85e4b64f3e`; preserve its image/Compose as immediate rollback.
+- Written design: `docs/superpowers/specs/2026-08-30-maya-ops-complete-existing-data-dashboard-design.md`; it requires final written-spec review before the implementation plan.
+- Data authority expands only for this dashboard service to the exact allowlisted production-root SQLite files in the written design, all opened with `mode=ro`, `query_only=ON` and mounted read-only. No sandbox store, raw SQL browser access or inferred commercial field is authorized.
+- Effect boundary remains closed: no agent/prompt/tool/provider change, no reservation/payment/handoff/message effect, no replay/retry/requeue, and no V3 work.
+- Deployment authority is limited to building and recreating `v2-ops` after all gates. GA API, worker and router must keep their existing container identities/start times; any failed gate requires immediate rollback.
+
 ## Approved parallel design-only lane — Ops dashboard from existing data
 
 - Authorized by Carlos Eduardo on 2026-08-21: design a visual operational panel using only data already persisted in the dedicated Ops trace; do not change the agent, its instrumentation, its prompts, its tools, its providers or its effects.
