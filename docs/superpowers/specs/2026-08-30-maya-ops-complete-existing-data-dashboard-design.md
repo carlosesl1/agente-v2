@@ -259,6 +259,8 @@ Criar `v2_ops/records.py` com responsabilidade exclusiva por:
 
 O reader não importa adaptadores de provider, writers, workers, modelos ou módulos V3.
 
+Ele também não reutiliza `SQLiteBoundaryStore.open_readonly_v8()` nem os readers de domínio/projeção existentes. A auditoria do store ativo mostrou que o reader semântico legado rejeita os bytes V8 atualmente persistidos, enquanto as consultas SQLite fechadas em `mode=ro` e `query_only=ON` funcionam. O dashboard terá, portanto, autenticação própria do subconjunto exato de tabelas/colunas e parsers públicos independentes, sem abrir a validação do runtime nem transformar uma incompatibilidade legada em indisponibilidade do painel.
+
 A consistência é por snapshot eventual: as conexões são abertas e transações de leitura iniciadas em uma janela curta, mas não se promete transação ACID entre arquivos diferentes.
 
 ## Configuração e montagem
@@ -292,6 +294,8 @@ Regras:
 - API, worker e router GA não são recriados;
 - código lê apenas os nomes raiz declarados, ignorando `sandbox-*`;
 - healthcheck prova o serviço web; o dark smoke prova todos os endpoints e fontes.
+
+O `Dockerfile.v2-ops` preserva a imagem mínima e seu `COPY v2_ops /app/v2_ops`; essa diretiva deve incluir `v2_ops/records.py` sem copiar `reservation_boundary`, `reservation_domain`, `reservation_execution`, `v2_application` ou `v2_host`. O smoke de imagem prova `import v2_ops.records` e a ausência desses módulos de runtime na composição do serviço Ops.
 
 ## Interface e navegação
 
@@ -428,6 +432,8 @@ Um único teste, um worker e zero skips, nos viewports:
 
 - `1440x1000`;
 - `390x844`.
+
+Antes do RED/GREEN do browser, o ambiente deve autenticar a imagem fixada `mcr.microsoft.com/playwright:v1.55.0-noble`; se ela não estiver no daemon local, deve ser obtida explicitamente. Ausência da imagem é falha de pré-requisito e não pode virar skip nem ser reportada como regressão do produto.
 
 O smoke deve:
 
