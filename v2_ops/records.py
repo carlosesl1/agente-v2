@@ -744,7 +744,11 @@ class SQLiteRecordsReader:
     ) -> RecordsSnapshot:
         try:
             links = self._execution_links(executions)
-            self._validate_generated_at_and_limit(generated_at, limit)
+            self._validate_generated_at_and_limit(
+                generated_at,
+                limit,
+                maximum=200,
+            )
             projected = self._consistent_projection(links)
             return RecordsSnapshot(
                 generated_at=generated_at,
@@ -785,7 +789,11 @@ class SQLiteRecordsReader:
         try:
             exact_lead_id = _require_text(lead_id, "lead id", maximum=256)
             links = self._execution_links(executions)
-            self._validate_generated_at_and_limit(generated_at, limit)
+            self._validate_generated_at_and_limit(
+                generated_at,
+                limit,
+                maximum=10_000,
+            )
             projected = self._consistent_projection(links)
             summary = next(
                 (value for value in projected.leads if value.lead_id == exact_lead_id),
@@ -863,10 +871,15 @@ class SQLiteRecordsReader:
         return links
 
     @staticmethod
-    def _validate_generated_at_and_limit(generated_at: datetime, limit: int) -> None:
+    def _validate_generated_at_and_limit(
+        generated_at: datetime,
+        limit: int,
+        *,
+        maximum: int,
+    ) -> None:
         if type(generated_at) is not datetime or generated_at.tzinfo is not timezone.utc:
             raise ValueError("generated_at must be an exact UTC datetime")
-        if type(limit) is not int or not 1 <= limit <= 10_000:
+        if type(limit) is not int or not 1 <= limit <= maximum:
             raise ValueError("limit is outside the closed range")
 
     def _consistent_projection(
@@ -949,6 +962,30 @@ class SQLiteRecordsReader:
                     )
         return tuple(values)
 
+    @staticmethod
+    def _copy_validated_source(
+        source: Path,
+        destination: Path,
+        expected: os.stat_result,
+    ) -> None:
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+        descriptor = os.open(source, flags)
+        try:
+            actual = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(actual.st_mode)
+                or actual.st_dev != expected.st_dev
+                or actual.st_ino != expected.st_ino
+            ):
+                raise RecordsSourceError()
+            with (
+                os.fdopen(descriptor, "rb", closefd=False) as reader,
+                destination.open("xb") as writer,
+            ):
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+        finally:
+            os.close(descriptor)
+
     def _connection(self, path: Path, *, source: bool) -> sqlite3.Connection:
         if source:
             if self._validated_source_path(path, required=True) is None:
@@ -977,12 +1014,22 @@ class SQLiteRecordsReader:
         root = self._validated_root()
         for source_name in _SOURCE_NAMES:
             source = root / source_name
-            if self._validated_source_path(source, required=True) is None:
+            source_details = self._validated_source_path(source, required=True)
+            if source_details is None:
                 raise RecordsSourceError()
-            shutil.copyfile(source, destination / source_name)
+            self._copy_validated_source(
+                source,
+                destination / source_name,
+                source_details,
+            )
             wal = Path(f"{source}-wal")
-            if self._validated_source_path(wal, required=False) is not None:
-                shutil.copyfile(wal, destination / f"{source_name}-wal")
+            wal_details = self._validated_source_path(wal, required=False)
+            if wal_details is not None:
+                self._copy_validated_source(
+                    wal,
+                    destination / f"{source_name}-wal",
+                    wal_details,
+                )
             self._validated_source_path(Path(f"{source}-shm"), required=False)
             if os.path.lexists(Path(f"{source}-journal")):
                 raise RecordsSourceError()

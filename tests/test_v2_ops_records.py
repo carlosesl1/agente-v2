@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError, asdict, fields
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -230,6 +231,12 @@ def test_snapshot_and_lead_detail_have_closed_bounded_contracts(tmp_path: Path) 
     assert len(detail.facts) == 1
     assert detail.truncated is True
     assert "manifest_json" not in json.dumps(asdict(detail), default=str)
+    with pytest.raises(RecordsSourceError, match="^records source unavailable$"):
+        reader.snapshot(
+            executions=links,
+            generated_at=GENERATED_AT,
+            limit=201,
+        )
 
 
 def test_snapshot_is_immutable_and_reader_does_not_mutate_sqlite_family(
@@ -354,6 +361,54 @@ def test_reader_authenticates_sidecars_real_tables_and_file_change_token(
     connection.commit()
     connection.close()
     assert reader.change_token() != first
+
+
+def test_reader_fd_copy_rejects_transient_symlink_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "records"
+    identity = write_records_fixture(root)
+    outside = tmp_path / "outside"
+    write_records_fixture(outside)
+    outside_connection = sqlite3.connect(outside / "inbox.sqlite3")
+    outside_connection.execute(
+        "UPDATE inbound_events SET lead_id='outside-lead'"
+    )
+    outside_connection.commit()
+    outside_connection.close()
+    target = root / "inbox.sqlite3"
+    backup = root / "inbox.sqlite3.original"
+    real_open = os.open
+    swapped = False
+
+    def swap_before_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        candidate = Path(path)
+        if candidate == target and not swapped:
+            swapped = True
+            target.rename(backup)
+            target.symlink_to(outside / "inbox.sqlite3")
+            try:
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+            finally:
+                target.unlink()
+                backup.rename(target)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_before_open)
+    with pytest.raises(RecordsSourceError, match="^records source unavailable$"):
+        SQLiteRecordsReader(root).snapshot(
+            executions=_execution_links(identity.lead_id),
+            generated_at=GENERATED_AT,
+        )
+    assert swapped is True
 
 
 def test_reader_preserves_existing_live_wal_and_shm_sidecars(tmp_path: Path) -> None:

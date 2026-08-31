@@ -487,6 +487,7 @@ def create_ops_app(
         RecordsSnapshot,
         tuple[ExecutionLink, ...],
         bool,
+        str,
     ] | None = None
     records_cache_lock = asyncio.Lock()
     app = FastAPI(
@@ -557,26 +558,54 @@ def create_ops_app(
         RecordsSnapshot,
         tuple[ExecutionLink, ...],
         bool,
+        str,
     ]:
         nonlocal records_cache
         if commercial_reader is None:
             raise RecordsSourceError()
         async with records_cache_lock:
             instant = _now()
-            if records_cache is not None and instant - records_cache[0] < timedelta(seconds=2):
-                return (
-                    records_cache[1],
-                    records_cache[2],
-                    records_cache[3],
-                    records_cache[4],
-                )
             try:
-                execution_links, trace_truncated = trace_execution_links()
-                snapshot = commercial_reader.snapshot(
-                    executions=execution_links,
-                    generated_at=instant,
-                    limit=_PUBLIC_LIMIT + 1,
-                )
+                for _attempt in range(3):
+                    execution_links, trace_truncated = trace_execution_links()
+                    commercial_token = commercial_reader.change_token()
+                    trace_token = hashlib.sha256(
+                        json.dumps(
+                            {
+                                "executions": [
+                                    _execution_link_public(value)
+                                    for value in execution_links
+                                ],
+                                "truncated": trace_truncated,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    source_token = hashlib.sha256(
+                        f"{commercial_token}:{trace_token}".encode("ascii")
+                    ).hexdigest()
+                    if (
+                        records_cache is not None
+                        and instant - records_cache[0] < timedelta(seconds=2)
+                        and records_cache[5] == source_token
+                    ):
+                        return (
+                            records_cache[1],
+                            records_cache[2],
+                            records_cache[3],
+                            records_cache[4],
+                            records_cache[5],
+                        )
+                    snapshot = commercial_reader.snapshot(
+                        executions=execution_links,
+                        generated_at=instant,
+                        limit=_PUBLIC_LIMIT,
+                    )
+                    if commercial_reader.change_token() == commercial_token:
+                        break
+                else:
+                    raise RecordsSourceError()
                 payload = _records_payload(
                     snapshot,
                     trace_truncated=trace_truncated,
@@ -589,8 +618,9 @@ def create_ops_app(
                 snapshot,
                 execution_links,
                 trace_truncated,
+                source_token,
             )
-            return payload, snapshot, execution_links, trace_truncated
+            return payload, snapshot, execution_links, trace_truncated, source_token
 
     @app.get("/ops/healthz")
     async def health() -> JSONResponse:
@@ -778,7 +808,9 @@ def create_ops_app(
         if request.query_params:
             return JSONResponse(status_code=422, content={"status": "invalid_query"})
         try:
-            payload, _snapshot, _executions, _truncated = await records_snapshot()
+            payload, _snapshot, _executions, _truncated, _source_token = (
+                await records_snapshot()
+            )
         except RecordsSourceError:
             return JSONResponse(
                 status_code=503,
@@ -794,7 +826,9 @@ def create_ops_app(
         if request.query_params or not _valid_public_id(lead_id):
             return JSONResponse(status_code=422, content={"status": "invalid_query"})
         try:
-            _payload, _snapshot, execution_links, trace_truncated = await records_snapshot()
+            _payload, _snapshot, execution_links, trace_truncated, _source_token = (
+                await records_snapshot()
+            )
             if commercial_reader is None:
                 raise RecordsSourceError()
             detail = commercial_reader.lead_detail(
@@ -844,7 +878,9 @@ def create_ops_app(
         elif query_items:
             return JSONResponse(status_code=422, content={"status": "invalid_query"})
         try:
-            _payload, snapshot, execution_links, _truncated = await records_snapshot()
+            _payload, snapshot, execution_links, _truncated, _source_token = (
+                await records_snapshot()
+            )
         except RecordsSourceError:
             return JSONResponse(
                 status_code=503,
@@ -994,8 +1030,13 @@ def create_ops_app(
                     records_change_token: str | None = None
                     if commercial_reader is not None:
                         try:
-                            _payload, _snapshot, _links, _truncated = await records_snapshot()
-                            records_change_token = commercial_reader.change_token()
+                            (
+                                _payload,
+                                _snapshot,
+                                _links,
+                                _truncated,
+                                records_change_token,
+                            ) = await records_snapshot()
                         except RecordsSourceError:
                             records_change_token = "unavailable"
                             yield (

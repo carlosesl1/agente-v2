@@ -292,8 +292,77 @@ def test_sse_combines_records_change_token_without_second_endpoint() -> None:
     source = inspect.getsource(create_ops_app)
 
     assert source.count('@app.get("/ops/api/events")') == 1
-    assert "commercial_reader.change_token()" in source
+    assert "records_change_token," in source
+    assert ") = await records_snapshot()" in source
+    assert 'records_change_token = commercial_reader.change_token()' not in source
     assert '"records_change_token"' in source
+
+
+def test_records_cache_invalidates_inside_ttl_when_source_token_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instant = [NOW]
+    client, root, _identity = _build_records_client(tmp_path)
+    monkeypatch.setattr(ops_app, "_now", lambda: instant[0])
+    _login(client)
+    first = client.get("/ops/api/records")
+    assert first.status_code == 200
+
+    connection = sqlite3.connect(root / "inbox.sqlite3")
+    connection.execute(
+        "UPDATE inbound_events SET lead_id='manychat:cache-change-visible'"
+    )
+    connection.commit()
+    connection.close()
+    instant[0] = NOW + timedelta(seconds=1)
+
+    changed = client.get(
+        "/ops/api/records",
+        headers={"If-None-Match": first.headers["etag"]},
+    )
+
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != first.headers["etag"]
+    assert any(
+        lead["lead_id"] == "manychat:cache-change-visible"
+        for lead in changed.json()["leads"]
+    )
+
+
+def test_records_cache_invalidates_inside_ttl_when_trace_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instant = [NOW]
+    client, _root, _identity = _build_records_client(tmp_path)
+    monkeypatch.setattr(ops_app, "_now", lambda: instant[0])
+    _login(client)
+    first = client.get("/ops/api/records")
+    assert first.status_code == 200
+
+    writer = SQLiteOpsTraceWriter((tmp_path / "ops.sqlite3").resolve(), b"t" * 32)
+    writer.write_execution(
+        OpsExecution(
+            "execution-cache-trace-visible",
+            "manychat:trace-cache-visible",
+            NOW + timedelta(milliseconds=1),
+        )
+    )
+    writer.close()
+    instant[0] = NOW + timedelta(seconds=1)
+
+    changed = client.get(
+        "/ops/api/records",
+        headers={"If-None-Match": first.headers["etag"]},
+    )
+
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != first.headers["etag"]
+    assert any(
+        lead["lead_id"] == "manychat:trace-cache-visible"
+        for lead in changed.json()["leads"]
+    )
 
 
 @pytest.mark.parametrize(
