@@ -2370,6 +2370,12 @@ test('successful lead detail does not clear an independent records-list failure'
   await resolveRequest(page, 0, 200, snapshot('initial', 1));
   await resolveRecordRequest(page, 0, 503, {status: 'records_source_unavailable'});
   await expect(page.locator('#dashboard-alert')).toContainText('Fontes comerciais indisponíveis.');
+  const expectedRecordsError = 'Fontes comerciais indisponíveis. Os últimos dados recebidos permanecem visíveis.';
+  await expect.poll(() => page.evaluate(() => ({
+    dashboardError: state.dashboardError,
+    recordsListError: state.recordsListError,
+    leadDetailError: state.leadDetailError,
+  }))).toEqual({dashboardError: null, recordsListError: expectedRecordsError, leadDetailError: null});
 
   await page.evaluate(() => { openLead('lead-A').catch(handleDashboardError); });
   await expect.poll(async () => (await paths(page)).length).toBe(2);
@@ -2377,6 +2383,11 @@ test('successful lead detail does not clear an independent records-list failure'
 
   await expect(page.locator('#lead-detail-title')).toHaveText('lead-A');
   await expect(page.locator('#dashboard-alert')).toContainText('Fontes comerciais indisponíveis.');
+  expect(await page.evaluate(() => ({
+    dashboardError: state.dashboardError,
+    recordsListError: state.recordsListError,
+    leadDetailError: state.leadDetailError,
+  }))).toEqual({dashboardError: null, recordsListError: expectedRecordsError, leadDetailError: null});
 });
 
 test('successful records list does not clear an independent lead-detail failure', async ({page}) => {
@@ -2388,6 +2399,12 @@ test('successful records list does not clear an independent lead-detail failure'
   await expect.poll(async () => (await paths(page)).length).toBe(2);
   await resolveRequest(page, 1, 500, {status: 'failed'});
   await expect(page.locator('#dashboard-alert')).toContainText('Não foi possível carregar o detalhe do lead.');
+  const expectedDetailError = 'Não foi possível carregar o detalhe do lead.';
+  expect(await page.evaluate(() => ({
+    dashboardError: state.dashboardError,
+    recordsListError: state.recordsListError,
+    leadDetailError: state.leadDetailError,
+  }))).toEqual({dashboardError: null, recordsListError: null, leadDetailError: expectedDetailError});
 
   await page.evaluate(() => { loadRecords().catch(handleDashboardError); });
   await expect.poll(async () => (await recordPaths(page)).length).toBe(2);
@@ -2395,6 +2412,11 @@ test('successful records list does not clear an independent lead-detail failure'
 
   await expect(page.locator('#overview-lead-list')).toContainText('lead-refreshed');
   await expect(page.locator('#dashboard-alert')).toContainText('Não foi possível carregar o detalhe do lead.');
+  expect(await page.evaluate(() => ({
+    dashboardError: state.dashboardError,
+    recordsListError: state.recordsListError,
+    leadDetailError: state.leadDetailError,
+  }))).toEqual({dashboardError: null, recordsListError: null, leadDetailError: expectedDetailError});
 });
 
 test('manual refresh reloads the selected lead through its protected epoch flow', async ({page}) => {
@@ -2420,6 +2442,43 @@ test('manual refresh reloads the selected lead through its protected epoch flow'
   await expect(page.locator('#lead-facts')).toContainText('2099-12-31');
   await expect(page.locator('#lead-facts')).not.toContainText('2026-09-10');
   await expect(page.locator('#refresh-dashboard')).toBeEnabled();
+});
+
+test('manual refresh cannot overwrite a newer selected lead when its detail resolves late', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openLead('lead-A').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await resolveRequest(page, 1, 200, leadDetail('lead-A'));
+  await expect(page.locator('#lead-detail-title')).toHaveText('lead-A');
+
+  await page.click('#refresh-dashboard');
+  await expect(page.locator('#refresh-dashboard')).toBeDisabled();
+  await expect.poll(async () => (await paths(page)).length).toBe(3);
+  await resolveRequest(page, 2, 200, snapshot('refreshed', 2));
+  await expect.poll(async () => (await paths(page)).length).toBe(4);
+  expect((await paths(page))[3]).toBe('/ops/api/leads/lead-A');
+
+  await page.evaluate(() => { openLead('lead-B').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(5);
+  expect((await paths(page))[4]).toBe('/ops/api/leads/lead-B');
+  const currentB = leadDetail('lead-B');
+  currentB.lead.facts[0].value = 'B-current';
+  await resolveRequest(page, 4, 200, currentB);
+  await expect(page.locator('#lead-detail-title')).toHaveText('lead-B');
+  await expect(page.locator('#lead-facts')).toContainText('B-current');
+
+  const staleA = leadDetail('lead-A');
+  staleA.lead.facts[0].value = 'A-stale';
+  await resolveRequest(page, 3, 200, staleA);
+  await expect(page.locator('#refresh-dashboard')).toBeEnabled();
+  await expect(page.locator('#lead-detail-title')).toHaveText('lead-B');
+  await expect(page.locator('#lead-facts')).toContainText('B-current');
+  await expect(page.locator('#lead-facts')).not.toContainText('A-stale');
+  expect(await page.evaluate(() => ({
+    selectedLeadId: state.selectedLeadId,
+    detailLeadId: state.leadDetail && state.leadDetail.summary && state.leadDetail.summary.lead_id,
+  }))).toEqual({selectedLeadId: 'lead-B', detailLeadId: 'lead-B'});
 });
 
 test('record and lead-detail validators reject coercion and empty identities', async ({page}) => {
@@ -2526,5 +2585,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 32 tests using 1 worker" in output, output
-    assert "32 passed" in output, output
+    assert "Running 33 tests using 1 worker" in output, output
+    assert "33 passed" in output, output
