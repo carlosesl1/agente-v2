@@ -202,9 +202,16 @@ function isRecordObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isNonEmptyText(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isSafeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 function safeCount(value) {
-  const count = Number(value);
-  return Number.isInteger(count) && count >= 0 ? count : 0;
+  return isSafeCount(value) ? value : 0;
 }
 
 function formatMoney(minor, currency) {
@@ -831,35 +838,56 @@ function recordCollection(name, validator) {
 
 function isLeadRecord(value) {
   return isRecordObject(value)
-    && typeof value.lead_id === "string"
-    && value.lead_id.trim() !== ""
-    && typeof value.state_code === "string"
-    && typeof value.state_label === "string";
+    && isNonEmptyText(value.lead_id)
+    && isNonEmptyText(value.state_code)
+    && isNonEmptyText(value.state_label)
+    && [
+      "fact_count", "dialogue_turn_count", "passenger_manifest_count",
+      "inbound_count", "public_reply_count", "execution_count",
+      "reservation_count", "payment_count", "payment_initiation_count",
+      "settled_payment_count", "handoff_count",
+    ].every((name) => isSafeCount(value[name]));
 }
 
 function isReservationRecord(value) {
   return isRecordObject(value)
-    && typeof value.command_id === "string"
-    && typeof value.status_code === "string"
-    && typeof value.status_label === "string"
+    && isNonEmptyText(value.command_id)
+    && isNonEmptyText(value.workflow_id)
+    && isNonEmptyText(value.draft_id)
+    && isNonEmptyText(value.status_code)
+    && isNonEmptyText(value.status_label)
     && Array.isArray(value.components)
     && isRecordObject(value.customer);
 }
 
 function isPaymentRecord(value) {
   return isRecordObject(value)
-    && typeof value.record_id === "string"
-    && typeof value.phase === "string"
-    && typeof value.status_code === "string"
-    && typeof value.status_label === "string"
+    && isNonEmptyText(value.record_id)
+    && isNonEmptyText(value.payment_id)
+    && isNonEmptyText(value.phase)
+    && isNonEmptyText(value.status_code)
+    && isNonEmptyText(value.status_label)
+    && typeof value.settled === "boolean"
     && Array.isArray(value.steps);
 }
 
 function isHandoffRecord(value) {
   return isRecordObject(value)
-    && typeof value.handoff_id === "string"
-    && typeof value.status_code === "string"
-    && typeof value.status_label === "string";
+    && isNonEmptyText(value.handoff_id)
+    && isNonEmptyText(value.incident_key)
+    && isNonEmptyText(value.status_code)
+    && isNonEmptyText(value.status_label);
+}
+
+function isLeadDetailRecord(value, leadId) {
+  return isRecordObject(value)
+    && isLeadRecord(value.summary)
+    && value.summary.lead_id === leadId
+    && [
+      "facts", "dialogue_turns", "passenger_manifests", "inbound_events",
+      "public_replies", "reservations", "payments", "handoffs", "executions",
+    ].every((name) => Array.isArray(value[name]))
+    && typeof value.truncated === "boolean";
 }
 
 function recordStatusPresentation(code, label) {
@@ -1298,7 +1326,7 @@ function renderLeadDialogue(lead) {
 
 function renderLeadDetail() {
   const lead = state.leadDetail;
-  if (!isRecordObject(lead) || !isLeadRecord(lead.summary)) return false;
+  if (!isLeadDetailRecord(lead, state.selectedLeadId)) return false;
   const summary = lead.summary;
   $("lead-detail").hidden = false;
   $("lead-detail-title").textContent = summary.lead_id;
@@ -1420,9 +1448,7 @@ async function openLead(leadId, trigger = null, preserve = false) {
   if (epoch !== state.leadDetailEpoch || leadId !== state.selectedLeadId) return false;
   if (
     !isRecordObject(payload)
-    || !isRecordObject(payload.lead)
-    || !isRecordObject(payload.lead.summary)
-    || payload.lead.summary.lead_id !== leadId
+    || !isLeadDetailRecord(payload.lead, leadId)
   ) {
     const error = new Error("invalid_lead_payload");
     state.recordsError = "Não foi possível carregar o detalhe do lead.";

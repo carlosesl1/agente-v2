@@ -2364,6 +2364,33 @@ test('records list ignores an obsolete response and keeps the latest payload', a
   await expect(page.locator('#overview-lead-list')).not.toContainText('lead-old');
   await expect(page.locator('#dashboard-alert')).toBeHidden();
 });
+
+test('record and lead-detail validators reject coercion and empty identities', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  const malformed = records();
+  malformed.leads.push({...malformed.leads[0], lead_id: 'invalid-count-lead', reservation_count: true});
+  malformed.reservations.push({...malformed.reservations[0], command_id: ''});
+  malformed.payments.push({...malformed.payments[0], record_id: '   '});
+  malformed.handoffs.push({
+    lead_id: null, handoff_id: '', incident_key: '', reason_code: null,
+    status_code: 'open', status_label: 'Aberto', event_count: 0, receipt_count: 0,
+    created_at: '2026-08-30T10:00:00Z', updated_at: '2026-08-30T10:00:00Z',
+  });
+  await page.evaluate(payload => { state.records = payload; renderRecords(); }, malformed);
+  await expect(page.locator('#lead-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('#reservation-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('#payment-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('#handoff-table-body > tr')).toHaveCount(0);
+  expect(await page.evaluate(() => safeCount(true))).toBe(0);
+
+  await page.evaluate(() => { openLead('malformed-lead').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await resolveRequest(page, 1, 200, {lead: {summary: {lead_id: 'malformed-lead'}}});
+  await expect(page.locator('#dashboard-alert')).toContainText('Não foi possível carregar o detalhe do lead.');
+  await expect(page.locator('#export-lead-history')).toBeDisabled();
+  await expect(page.locator('#lead-detail-summary')).toBeEmpty();
+});
 """
 
 
@@ -2442,5 +2469,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 28 tests using 1 worker" in output, output
-    assert "28 passed" in output, output
+    assert "Running 29 tests using 1 worker" in output, output
+    assert "29 passed" in output, output
