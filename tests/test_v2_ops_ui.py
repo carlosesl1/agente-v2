@@ -2365,6 +2365,63 @@ test('records list ignores an obsolete response and keeps the latest payload', a
   await expect(page.locator('#dashboard-alert')).toBeHidden();
 });
 
+test('successful lead detail does not clear an independent records-list failure', async ({page}) => {
+  await setup(page, {autoRecords: false});
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await resolveRecordRequest(page, 0, 503, {status: 'records_source_unavailable'});
+  await expect(page.locator('#dashboard-alert')).toContainText('Fontes comerciais indisponíveis.');
+
+  await page.evaluate(() => { openLead('lead-A').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await resolveRequest(page, 1, 200, leadDetail('lead-A'));
+
+  await expect(page.locator('#lead-detail-title')).toHaveText('lead-A');
+  await expect(page.locator('#dashboard-alert')).toContainText('Fontes comerciais indisponíveis.');
+});
+
+test('successful records list does not clear an independent lead-detail failure', async ({page}) => {
+  await setup(page, {autoRecords: false});
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await resolveRecordRequest(page, 0, 200, records('lead-initial'));
+
+  await page.evaluate(() => { openLead('lead-A').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await resolveRequest(page, 1, 500, {status: 'failed'});
+  await expect(page.locator('#dashboard-alert')).toContainText('Não foi possível carregar o detalhe do lead.');
+
+  await page.evaluate(() => { loadRecords().catch(handleDashboardError); });
+  await expect.poll(async () => (await recordPaths(page)).length).toBe(2);
+  await resolveRecordRequest(page, 1, 200, records('lead-refreshed'));
+
+  await expect(page.locator('#overview-lead-list')).toContainText('lead-refreshed');
+  await expect(page.locator('#dashboard-alert')).toContainText('Não foi possível carregar o detalhe do lead.');
+});
+
+test('manual refresh reloads the selected lead through its protected epoch flow', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => { openLead('manychat:lead-1').catch(handleDashboardError); });
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  await resolveRequest(page, 1, 200, leadDetail('manychat:lead-1'));
+  await expect(page.locator('#lead-facts')).toContainText('2026-09-10');
+
+  await page.click('#refresh-dashboard');
+  await expect(page.locator('#refresh-dashboard')).toBeDisabled();
+  await expect.poll(async () => (await paths(page)).length).toBe(3);
+  await resolveRequest(page, 2, 200, snapshot('refreshed', 2));
+  await expect.poll(async () => (await paths(page)).length).toBe(4);
+  expect((await paths(page))[3]).toBe('/ops/api/leads/manychat%3Alead-1');
+  await expect(page.locator('#refresh-dashboard')).toBeDisabled();
+
+  const refreshed = leadDetail('manychat:lead-1');
+  refreshed.lead.facts[0].value = '2099-12-31';
+  await resolveRequest(page, 3, 200, refreshed);
+
+  await expect(page.locator('#lead-facts')).toContainText('2099-12-31');
+  await expect(page.locator('#lead-facts')).not.toContainText('2026-09-10');
+  await expect(page.locator('#refresh-dashboard')).toBeEnabled();
+});
+
 test('record and lead-detail validators reject coercion and empty identities', async ({page}) => {
   await setup(page);
   await resolveRequest(page, 0, 200, snapshot('initial', 1));
@@ -2469,5 +2526,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 29 tests using 1 worker" in output, output
-    assert "29 passed" in output, output
+    assert "Running 32 tests using 1 worker" in output, output
+    assert "32 passed" in output, output

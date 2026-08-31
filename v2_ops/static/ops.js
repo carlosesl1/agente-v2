@@ -20,7 +20,8 @@ const state = {
   detailEpoch: 0,
   fullEpoch: { input: 0, output: 0 },
   dashboardError: null,
-  recordsError: null,
+  recordsListError: null,
+  leadDetailError: null,
   liveError: null,
   mobileNavigationOpen: false,
   operatorMenuOpen: false,
@@ -122,7 +123,12 @@ function showJSON(element, value) {
 
 function renderAlert() {
   const alert = $("dashboard-alert");
-  const messages = [state.dashboardError, state.recordsError, state.liveError].filter(Boolean);
+  const messages = [
+    state.dashboardError,
+    state.recordsListError,
+    state.leadDetailError,
+    state.liveError,
+  ].filter(Boolean);
   alert.textContent = messages.join(" ");
   alert.hidden = messages.length === 0;
 }
@@ -1437,7 +1443,7 @@ async function openLead(leadId, trigger = null, preserve = false) {
       throw error;
     }
     if (error && error.message !== "authentication_required") {
-      state.recordsError = error.code === "source_unavailable"
+      state.leadDetailError = error.code === "source_unavailable"
         ? "Fontes comerciais indisponíveis. Os últimos dados recebidos permanecem visíveis."
         : "Não foi possível carregar o detalhe do lead.";
       renderAlert();
@@ -1451,13 +1457,13 @@ async function openLead(leadId, trigger = null, preserve = false) {
     || !isLeadDetailRecord(payload.lead, leadId)
   ) {
     const error = new Error("invalid_lead_payload");
-    state.recordsError = "Não foi possível carregar o detalhe do lead.";
+    state.leadDetailError = "Não foi possível carregar o detalhe do lead.";
     renderAlert();
     error.dashboardHandled = true;
     throw error;
   }
   state.leadDetail = payload.lead;
-  state.recordsError = null;
+  state.leadDetailError = null;
   renderAlert();
   renderLeadDetail();
   if (trigger instanceof HTMLElement && trigger.isConnected && !preserve) {
@@ -1487,7 +1493,7 @@ async function loadRecords() {
       throw error;
     }
     if (error && error.message !== "authentication_required") {
-      state.recordsError = error.code === "source_unavailable"
+      state.recordsListError = error.code === "source_unavailable"
         ? "Fontes comerciais indisponíveis. Os últimos dados recebidos permanecem visíveis."
         : "Não foi possível atualizar os dados comerciais.";
       renderAlert();
@@ -1504,13 +1510,13 @@ async function loadRecords() {
     || !Array.isArray(payload.handoffs)
   ) {
     const error = new Error("invalid_records_payload");
-    state.recordsError = "Não foi possível atualizar os dados comerciais.";
+    state.recordsListError = "Não foi possível atualizar os dados comerciais.";
     renderAlert();
     error.dashboardHandled = true;
     throw error;
   }
   state.records = payload;
-  state.recordsError = null;
+  state.recordsListError = null;
   renderAlert();
   renderRecords();
   return true;
@@ -1564,6 +1570,13 @@ async function refreshDashboard() {
     const results = await Promise.allSettled([loadDashboard(), loadRecords()]);
     for (const result of results) {
       if (result.status === "rejected") handleDashboardError(result.reason);
+    }
+    if (results[1].status === "fulfilled" && results[1].value && state.selectedLeadId) {
+      try {
+        await openLead(state.selectedLeadId, null, true);
+      } catch (error) {
+        handleDashboardError(error);
+      }
     }
   } finally {
     state.dashboardLoading = false;
