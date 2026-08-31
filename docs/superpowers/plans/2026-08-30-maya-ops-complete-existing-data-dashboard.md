@@ -83,7 +83,7 @@ Atualizar `tests/test_v2_ops_deploy_contract.py` para exigir exatamente duas mon
 
 ```python
 assert set(service["volumes"]) == {
-    "${V2_OPS_DATA_DIR:?required}:/data/ops:ro",
+    "${V2_OPS_DATA_DIR:-./data}:/data/ops:ro",
     "${V2_OPS_RECORDS_DATA_DIR:?required}:/data/records:ro",
 }
 assert environment["V2_OPS_RECORDS_PATH"] == "/data/records"
