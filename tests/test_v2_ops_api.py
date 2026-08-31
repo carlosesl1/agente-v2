@@ -124,6 +124,9 @@ def test_only_login_and_health_are_public(tmp_path: Path) -> None:
     assert client.get("/ops", follow_redirects=False).headers["location"] == "/ops/"
     assert client.get("/ops/", follow_redirects=False).status_code == 303
     assert client.get("/ops/api/executions").status_code == 401
+    assert client.get("/ops/api/records").status_code == 401
+    assert client.get("/ops/api/leads/manychat%3A123").status_code == 401
+    assert client.get("/ops/api/exports/leads.csv").status_code == 401
     assert client.get(f"/ops/api/executions/{execution_id}").status_code == 401
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404

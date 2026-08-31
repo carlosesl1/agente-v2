@@ -251,6 +251,7 @@ class RecordsSummary:
 @dataclass(frozen=True, slots=True)
 class LeadRecord:
     lead_id: str
+    first_activity_at: str | None
     last_activity_at: str | None
     state_code: str
     state_label: str
@@ -262,7 +263,10 @@ class LeadRecord:
     execution_count: int
     reservation_count: int
     payment_count: int
+    payment_initiation_count: int
+    settled_payment_count: int
     handoff_count: int
+    latest_execution_status: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +319,7 @@ class PublicReplyRecord:
 
 @dataclass(frozen=True, slots=True)
 class ReservationCustomer:
+    customer_ref: str | None
     full_name: str | None
     email: str | None
     phone_e164: str | None
@@ -579,13 +584,21 @@ class SQLiteRecordsReader:
             raise ValueError("records root must be an absolute pathlib.Path")
         self._root = root
 
-    def snapshot(self, executions: Sequence[ExecutionLink] = ()) -> RecordsSnapshot:
+    def snapshot(
+        self,
+        executions: Sequence[ExecutionLink] = (),
+        *,
+        generated_at: datetime | None = None,
+    ) -> RecordsSnapshot:
         try:
             links = tuple(executions)
             if any(type(link) is not ExecutionLink for link in links):
                 raise ValueError("execution links must be exact ExecutionLink values")
+            instant = datetime.now(timezone.utc) if generated_at is None else generated_at
+            if type(instant) is not datetime or instant.tzinfo is not timezone.utc:
+                raise ValueError("generated_at must be an exact UTC datetime")
             raw = self._read_sources()
-            return self._project(raw, links)
+            return self._project(raw, links, instant)
         except RecordsSourceError:
             raise
         except (
@@ -657,6 +670,7 @@ class SQLiteRecordsReader:
         self,
         raw: _RawSources,
         executions: tuple[ExecutionLink, ...],
+        generated_at: datetime,
     ) -> RecordsSnapshot:
         facts = self._facts(raw)
         turns = self._dialogue_turns(raw)
@@ -702,7 +716,7 @@ class SQLiteRecordsReader:
                 raw.table("v2-followup.sqlite3", "handoff_receipts")
             ),
         )
-        generated_at = datetime.now(timezone.utc).isoformat()
+        generated_at_text = generated_at.isoformat()
         token_material = {
             "summary": asdict(summary),
             "leads": [asdict(value) for value in leads],
@@ -719,7 +733,7 @@ class SQLiteRecordsReader:
             b"v2-ops-records-snapshot-v1\0" + _canonical_json(token_material).encode("utf-8")
         ).hexdigest()
         return RecordsSnapshot(
-            generated_at=generated_at,
+            generated_at=generated_at_text,
             change_token=change_token,
             source_names=_SOURCE_NAMES,
             summary=summary,
@@ -1016,6 +1030,9 @@ class SQLiteRecordsReader:
                 raise ValueError("reservation lacks components")
             customer_raw = _object(payload.get("customer"), "reservation customer")
             customer = ReservationCustomer(
+                customer_ref=_optional_text(
+                    customer_raw.get("customer_ref"), "customer reference", maximum=512
+                ),
                 full_name=_optional_text(customer_raw.get("full_name"), "full name", maximum=512),
                 email=_optional_text(customer_raw.get("email"), "email", maximum=512),
                 phone_e164=_optional_text(
@@ -1517,6 +1534,9 @@ class SQLiteRecordsReader:
             )
             lead_payments = tuple(item for item in payments if item.lead_id == lead_id)
             lead_handoffs = tuple(item for item in handoffs if item.lead_id == lead_id)
+            lead_executions = tuple(
+                item for item in executions if item.lead_id == lead_id
+            )
             if lead_handoffs:
                 state_code, state_label = "handoff_registered", "Handoff registrado"
             elif any(
@@ -1545,6 +1565,7 @@ class SQLiteRecordsReader:
             result.append(
                 LeadRecord(
                     lead_id=lead_id,
+                    first_activity_at=min(activity[lead_id]) if activity[lead_id] else None,
                     last_activity_at=max(activity[lead_id]) if activity[lead_id] else None,
                     state_code=state_code,
                     state_label=state_label,
@@ -1556,7 +1577,25 @@ class SQLiteRecordsReader:
                     execution_count=sum(link.lead_id == lead_id for link in executions),
                     reservation_count=len(lead_reservations),
                     payment_count=len(lead_payments),
+                    payment_initiation_count=sum(
+                        item.phase == "initiation" for item in lead_payments
+                    ),
+                    settled_payment_count=sum(
+                        item.phase == "settlement" and item.status_code == "settled"
+                        for item in lead_payments
+                    ),
                     handoff_count=len(lead_handoffs),
+                    latest_execution_status=(
+                        None
+                        if not lead_executions
+                        else max(
+                            lead_executions,
+                            key=lambda item: (
+                                item.completed_at or item.received_at,
+                                item.execution_id,
+                            ),
+                        ).status
+                    ),
                 )
             )
         result.sort(key=lambda item: item.lead_id)

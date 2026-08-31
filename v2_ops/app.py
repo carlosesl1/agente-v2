@@ -17,6 +17,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from v2_ops.auth import LoginLimiter, SessionClaims, SessionCodec, verify_password
 from v2_ops.contracts import ExecutionStatus
 from v2_ops.dashboard import DashboardRange, DashboardSnapshot, build_dashboard_snapshot
+from v2_ops.records import (
+    ExecutionLink,
+    HandoffRecord,
+    LeadRecord,
+    PaymentRecord,
+    RecordsSnapshot,
+    RecordsSourceError,
+    ReservationRecord,
+    SQLiteRecordsReader,
+)
+from v2_ops.records_csv import DATASETS, render_csv
 from v2_ops.settings import OpsWebSettings
 from v2_ops.store import OpsTraceStoreError, SQLiteOpsTraceReader
 
@@ -140,6 +151,337 @@ def _dashboard(value: DashboardSnapshot) -> dict[str, object]:
     }
 
 
+_PUBLIC_LIMIT = 200
+
+
+def _valid_public_id(value: str) -> bool:
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 256
+        and "\x00" not in value
+        and all(ord(character) >= 32 and ord(character) != 127 for character in value)
+    )
+
+
+def _lead_public(value: LeadRecord) -> dict[str, object]:
+    return {
+        "lead_id": value.lead_id,
+        "first_activity_at": value.first_activity_at,
+        "last_activity_at": value.last_activity_at,
+        "state_code": value.state_code,
+        "state_label": value.state_label,
+        "fact_count": value.fact_count,
+        "dialogue_turn_count": value.dialogue_turn_count,
+        "passenger_manifest_count": value.passenger_manifest_count,
+        "inbound_count": value.inbound_count,
+        "public_reply_count": value.public_reply_count,
+        "execution_count": value.execution_count,
+        "reservation_count": value.reservation_count,
+        "payment_count": value.payment_count,
+        "payment_initiation_count": value.payment_initiation_count,
+        "settled_payment_count": value.settled_payment_count,
+        "handoff_count": value.handoff_count,
+        "latest_execution_status": value.latest_execution_status,
+    }
+
+
+def _reservation_public(value: ReservationRecord) -> dict[str, object]:
+    return {
+        "lead_id": value.lead_id,
+        "command_id": value.command_id,
+        "workflow_id": value.workflow_id,
+        "draft_id": value.draft_id,
+        "draft_version": value.draft_version,
+        "operation": value.operation,
+        "status_code": value.status_code,
+        "status_label": value.status_label,
+        "certainty": value.certainty,
+        "normalized_status": value.normalized_status,
+        "provider_reference": value.provider_reference,
+        "bokun_booking_id": value.bokun_booking_id,
+        "cloudbeds_reservation_id": value.cloudbeds_reservation_id,
+        "total_minor": value.total_minor,
+        "currency": value.currency,
+        "payment_method": value.payment_method,
+        "customer": {
+            "customer_ref": value.customer.customer_ref,
+            "full_name": value.customer.full_name,
+            "email": value.customer.email,
+            "phone_e164": value.customer.phone_e164,
+            "country_code": value.customer.country_code,
+            "birth_date": value.customer.birth_date,
+            "gender": value.customer.gender,
+        },
+        "components": [
+            {
+                "service": component.service,
+                "public_label": component.public_label,
+                "start_date": component.start_date,
+                "start_time": component.start_time,
+                "end_date": component.end_date,
+                "adults": component.adults,
+                "children": component.children,
+                "available": component.available,
+                "lookup_id": component.lookup_id,
+                "offer_id": component.offer_id,
+                "provider_ref": component.provider_ref,
+                "amount_minor": component.amount_minor,
+                "currency": component.currency,
+            }
+            for component in value.components
+        ],
+        "created_at": value.created_at,
+        "updated_at": value.updated_at,
+    }
+
+
+def _payment_public(value: PaymentRecord) -> dict[str, object]:
+    return {
+        "lead_id": value.lead_id,
+        "phase": value.phase,
+        "payment_id": value.payment_id,
+        "initiation_id": value.initiation_id,
+        "settlement_command_id": value.settlement_command_id,
+        "reservation_anchor_id": value.reservation_anchor_id,
+        "method": value.method,
+        "amount_due_minor": value.amount_due_minor,
+        "amount_paid_minor": value.amount_paid_minor,
+        "currency": value.currency,
+        "due_kind": value.due_kind,
+        "status_code": value.status_code,
+        "status_label": value.status_label,
+        "reconciliation_status": value.reconciliation_status,
+        "payment_link_prepared": value.payment_link_prepared,
+        "steps": [
+            {
+                "step": item.step,
+                "status": item.status,
+                "updated_at": item.updated_at,
+            }
+            for item in value.steps
+        ],
+        "settled_at": value.settled_at,
+        "updated_at": value.updated_at,
+    }
+
+
+def _handoff_public(value: HandoffRecord) -> dict[str, object]:
+    return {
+        "lead_id": value.lead_id,
+        "handoff_id": value.handoff_id,
+        "incident_key": value.incident_key,
+        "reason_code": value.reason_code,
+        "status_code": value.status_code,
+        "status_label": value.status_label,
+        "event_count": value.event_count,
+        "receipt_count": value.receipt_count,
+        "created_at": value.created_at,
+        "updated_at": value.updated_at,
+    }
+
+
+def _manifest_public(value: object) -> dict[str, object]:
+    manifest_json = value.manifest_json
+    try:
+        decoded = json.loads(manifest_json)
+    except (json.JSONDecodeError, TypeError, UnicodeError) as exc:
+        raise RecordsSourceError() from exc
+    if (
+        type(decoded) is not dict
+        or set(decoded) != {"schema", "adults", "children", "passengers"}
+        or decoded["schema"] != "v2-passenger-manifest-v1"
+        or type(decoded["adults"]) is not int
+        or type(decoded["children"]) is not int
+        or decoded["adults"] < 1
+        or decoded["children"] < 0
+        or type(decoded["passengers"]) is not list
+        or len(decoded["passengers"]) != decoded["adults"] + decoded["children"]
+    ):
+        raise RecordsSourceError()
+    passengers: list[dict[str, object]] = []
+    expected_fields = {
+        "position",
+        "participant_type",
+        "full_name",
+        "birth_date",
+        "gender",
+        "country_code",
+    }
+    for expected_position, passenger in enumerate(decoded["passengers"], start=1):
+        if (
+            type(passenger) is not dict
+            or set(passenger) != expected_fields
+            or passenger["position"] != expected_position
+            or passenger["participant_type"] not in {"adult", "child"}
+            or any(
+                passenger[name] is not None and type(passenger[name]) is not str
+                for name in ("full_name", "birth_date", "gender", "country_code")
+            )
+        ):
+            raise RecordsSourceError()
+        passengers.append(
+            {
+                "position": passenger["position"],
+                "participant_type": passenger["participant_type"],
+                "full_name": passenger["full_name"],
+                "birth_date": passenger["birth_date"],
+                "gender": passenger["gender"],
+                "country_code": passenger["country_code"],
+            }
+        )
+    return {
+        "revision": value.revision,
+        "persisted_at": value.persisted_at,
+        "adults": decoded["adults"],
+        "children": decoded["children"],
+        "passengers": passengers,
+    }
+
+
+def _execution_link_public(value: ExecutionLink) -> dict[str, object]:
+    return {
+        "execution_id": value.execution_id,
+        "lead_id": value.lead_id,
+        "received_at": _json_value(value.received_at),
+        "completed_at": _json_value(value.completed_at),
+        "status": value.status,
+    }
+
+
+def _records_payload(
+    snapshot: RecordsSnapshot,
+    *,
+    trace_truncated: bool,
+) -> dict[str, object]:
+    collections = (
+        snapshot.leads,
+        snapshot.reservations,
+        snapshot.payments,
+        snapshot.handoffs,
+    )
+    return {
+        "generated_at": snapshot.generated_at,
+        "leads": [_lead_public(value) for value in snapshot.leads[:_PUBLIC_LIMIT]],
+        "reservations": [
+            _reservation_public(value) for value in snapshot.reservations[:_PUBLIC_LIMIT]
+        ],
+        "payments": [
+            _payment_public(value) for value in snapshot.payments[:_PUBLIC_LIMIT]
+        ],
+        "handoffs": [
+            _handoff_public(value) for value in snapshot.handoffs[:_PUBLIC_LIMIT]
+        ],
+        "truncated": trace_truncated
+        or any(len(values) > _PUBLIC_LIMIT for values in collections),
+    }
+
+
+def _lead_detail_payload(
+    lead: LeadRecord,
+    snapshot: RecordsSnapshot,
+    executions: tuple[ExecutionLink, ...],
+    *,
+    trace_truncated: bool,
+) -> dict[str, object]:
+    facts = tuple(value for value in snapshot.facts if value.lead_id == lead.lead_id)
+    turns = tuple(
+        value for value in snapshot.dialogue_turns if value.lead_id == lead.lead_id
+    )
+    manifests = tuple(
+        value for value in snapshot.passenger_manifests if value.lead_id == lead.lead_id
+    )
+    inbound = tuple(
+        value for value in snapshot.inbound_events if value.lead_id == lead.lead_id
+    )
+    replies = tuple(
+        value for value in snapshot.public_replies if value.lead_id == lead.lead_id
+    )
+    reservations = tuple(
+        value for value in snapshot.reservations if value.lead_id == lead.lead_id
+    )
+    payments = tuple(
+        value for value in snapshot.payments if value.lead_id == lead.lead_id
+    )
+    handoffs = tuple(
+        value for value in snapshot.handoffs if value.lead_id == lead.lead_id
+    )
+    linked_executions = tuple(
+        value for value in executions if value.lead_id == lead.lead_id
+    )
+    collections = (
+        facts,
+        turns,
+        manifests,
+        inbound,
+        replies,
+        reservations,
+        payments,
+        handoffs,
+        linked_executions,
+    )
+    return {
+        "summary": _lead_public(lead),
+        "facts": [
+            {
+                "name": value.name,
+                "value": value.value,
+                "revision": value.revision,
+                "persisted_at": value.persisted_at,
+            }
+            for value in facts[:_PUBLIC_LIMIT]
+        ],
+        "dialogue_turns": [
+            {
+                "source_turn_id": value.source_turn_id,
+                "customer_message": value.customer_message,
+                "assistant_reply_chunks": list(value.assistant_reply_chunks),
+                "committed_at": value.committed_at,
+            }
+            for value in turns[:_PUBLIC_LIMIT]
+        ],
+        "passenger_manifests": [
+            _manifest_public(value) for value in manifests[:_PUBLIC_LIMIT]
+        ],
+        "inbound_events": [
+            {
+                "event_id": value.event_id,
+                "status": value.status,
+                "occurred_at": value.occurred_at,
+                "completed_at": value.completed_at,
+                "payload_exposed": False,
+            }
+            for value in inbound[:_PUBLIC_LIMIT]
+        ],
+        "public_replies": [
+            {
+                "reply_id": value.reply_id,
+                "source": value.source,
+                "chunk_index": value.chunk_index,
+                "text": value.text,
+                "status": value.status,
+                "author": value.author,
+                "updated_at": value.updated_at,
+            }
+            for value in replies[:_PUBLIC_LIMIT]
+        ],
+        "reservations": [
+            _reservation_public(value) for value in reservations[:_PUBLIC_LIMIT]
+        ],
+        "payments": [
+            _payment_public(value) for value in payments[:_PUBLIC_LIMIT]
+        ],
+        "handoffs": [
+            _handoff_public(value) for value in handoffs[:_PUBLIC_LIMIT]
+        ],
+        "executions": [
+            _execution_link_public(value)
+            for value in linked_executions[:_PUBLIC_LIMIT]
+        ],
+        "truncated": trace_truncated
+        or any(len(values) > _PUBLIC_LIMIT for values in collections),
+    }
+
+
 def _etag_response(payload: object, request: Request) -> Response:
     body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     etag = '"' + hashlib.sha256(body).hexdigest() + '"'
@@ -192,16 +534,36 @@ def create_ops_app(
     settings: OpsWebSettings,
     *,
     reader: SQLiteOpsTraceReader | None = None,
+    records_reader: SQLiteRecordsReader | None = None,
 ) -> FastAPI:
     if type(settings) is not OpsWebSettings:
         raise TypeError("settings must be exact OpsWebSettings")
     trace_reader = reader or SQLiteOpsTraceReader(settings.trace_path, settings.trace_key)
     if type(trace_reader) is not SQLiteOpsTraceReader:
         raise TypeError("reader must be exact SQLiteOpsTraceReader")
+    if records_reader is not None and type(records_reader) is not SQLiteRecordsReader:
+        raise TypeError("records_reader must be exact SQLiteRecordsReader or None")
+    commercial_reader = (
+        records_reader
+        if records_reader is not None
+        else (
+            None
+            if settings.records_path is None
+            else SQLiteRecordsReader(settings.records_path)
+        )
+    )
     sessions = SessionCodec(settings.session_key, ttl=settings.session_ttl)
     limiter = LoginLimiter()
     dashboard_cache: dict[DashboardRange, tuple[datetime, dict[str, object]]] = {}
     dashboard_cache_lock = asyncio.Lock()
+    records_cache: tuple[
+        datetime,
+        dict[str, object],
+        RecordsSnapshot,
+        tuple[ExecutionLink, ...],
+        bool,
+    ] | None = None
+    records_cache_lock = asyncio.Lock()
     app = FastAPI(
         title="V2 Ops Read Only",
         docs_url=None,
@@ -233,6 +595,76 @@ def create_ops_app(
         if authenticated is None:
             return JSONResponse(status_code=401, content={"status": "authentication_required"})
         return authenticated
+
+    def trace_execution_links() -> tuple[tuple[ExecutionLink, ...], bool]:
+        values: list[ExecutionLink] = []
+        cursor: str | None = None
+        more_available = False
+        while len(values) <= _PUBLIC_LIMIT:
+            remaining = _PUBLIC_LIMIT + 1 - len(values)
+            page = trace_reader.list_executions(
+                limit=min(100, remaining),
+                cursor=cursor,
+                stale_after=settings.stale_after,
+            )
+            values.extend(
+                ExecutionLink(
+                    execution_id=item.execution_id,
+                    lead_id=item.lead_id,
+                    received_at=item.received_at,
+                    completed_at=item.completed_at,
+                    status=item.status,
+                )
+                for item in page.executions
+            )
+            if page.next_cursor is None:
+                more_available = False
+                break
+            if page.next_cursor == cursor:
+                raise RecordsSourceError()
+            more_available = True
+            cursor = page.next_cursor
+        truncated = len(values) > _PUBLIC_LIMIT or more_available
+        return tuple(values[: _PUBLIC_LIMIT + 1]), truncated
+
+    async def records_snapshot() -> tuple[
+        dict[str, object],
+        RecordsSnapshot,
+        tuple[ExecutionLink, ...],
+        bool,
+    ]:
+        nonlocal records_cache
+        if commercial_reader is None:
+            raise RecordsSourceError()
+        async with records_cache_lock:
+            instant = _now()
+            if records_cache is not None and instant - records_cache[0] < timedelta(seconds=2):
+                return (
+                    records_cache[1],
+                    records_cache[2],
+                    records_cache[3],
+                    records_cache[4],
+                )
+            try:
+                execution_links, trace_truncated = trace_execution_links()
+                snapshot = commercial_reader.snapshot(
+                    execution_links,
+                    generated_at=instant,
+                )
+                payload = _records_payload(
+                    snapshot,
+                    trace_truncated=trace_truncated,
+                )
+            except (OpsTraceStoreError, RecordsSourceError, TypeError, ValueError) as exc:
+                raise RecordsSourceError() from exc
+            records_cache = (
+                instant,
+                payload,
+                snapshot,
+                execution_links,
+                trace_truncated,
+            )
+            return payload, snapshot, execution_links, trace_truncated
 
     @app.get("/ops/healthz")
     async def health() -> JSONResponse:
@@ -412,6 +844,104 @@ def create_ops_app(
                 dashboard_cache[range_key] = (generated_at, payload)
         return _etag_response(payload, request)
 
+    @app.get("/ops/api/records")
+    async def records(request: Request) -> Response:
+        authenticated = require_api(request)
+        if type(authenticated) is not SessionClaims:
+            return authenticated
+        if request.query_params:
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        try:
+            payload, _snapshot, _executions, _truncated = await records_snapshot()
+        except RecordsSourceError:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "records_source_unavailable"},
+            )
+        return _etag_response(payload, request)
+
+    @app.get("/ops/api/leads/{lead_id}")
+    async def lead_detail(lead_id: str, request: Request) -> Response:
+        authenticated = require_api(request)
+        if type(authenticated) is not SessionClaims:
+            return authenticated
+        if request.query_params or not _valid_public_id(lead_id):
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        try:
+            _payload, snapshot, execution_links, trace_truncated = await records_snapshot()
+        except RecordsSourceError:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "records_source_unavailable"},
+            )
+        lead = next((value for value in snapshot.leads if value.lead_id == lead_id), None)
+        if lead is None:
+            return JSONResponse(status_code=404, content={"status": "not_found"})
+        try:
+            payload = {
+                "lead": _lead_detail_payload(
+                    lead,
+                    snapshot,
+                    execution_links,
+                    trace_truncated=trace_truncated,
+                )
+            }
+        except RecordsSourceError:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "records_source_unavailable"},
+            )
+        return _etag_response(payload, request)
+
+    @app.get("/ops/api/exports/{dataset}.csv")
+    async def export_records(dataset: str, request: Request) -> Response:
+        authenticated = require_api(request)
+        if type(authenticated) is not SessionClaims:
+            return authenticated
+        if dataset not in DATASETS:
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        selected_lead_id: str | None = None
+        query_items = tuple(request.query_params.multi_items())
+        if dataset == "lead-history":
+            if (
+                len(query_items) != 1
+                or query_items[0][0] != "lead_id"
+                or not _valid_public_id(query_items[0][1])
+            ):
+                return JSONResponse(status_code=422, content={"status": "invalid_query"})
+            selected_lead_id = query_items[0][1]
+        elif query_items:
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        try:
+            _payload, snapshot, execution_links, _truncated = await records_snapshot()
+        except RecordsSourceError:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "records_source_unavailable"},
+            )
+        if selected_lead_id is not None and not any(
+            value.lead_id == selected_lead_id for value in snapshot.leads
+        ):
+            return JSONResponse(status_code=404, content={"status": "not_found"})
+        try:
+            body = render_csv(
+                dataset,
+                snapshot=snapshot,
+                executions=execution_links,
+                lead_id=selected_lead_id,
+            )
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=422, content={"status": "invalid_query"})
+        return Response(
+            body,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="maya-ops-{dataset}.csv"'
+                )
+            },
+        )
+
     @app.get("/ops/api/harness")
     async def harness(request: Request) -> Response:
         if type(require_api(request)) is not SessionClaims:
@@ -504,9 +1034,25 @@ def create_ops_app(
             while not await request.is_disconnected():
                 try:
                     page = trace_reader.list_executions(limit=100, stale_after=settings.stale_after)
+                    records_change_token: str | None = None
+                    if commercial_reader is not None:
+                        try:
+                            _payload, snapshot, _links, _truncated = await records_snapshot()
+                            records_change_token = snapshot.change_token
+                        except RecordsSourceError:
+                            records_change_token = "unavailable"
+                            yield (
+                                "event: degraded\n"
+                                "data: {\"status\":\"records_source_unavailable\"}\n\n"
+                            )
                     current = hashlib.sha256(
                         json.dumps(
-                            [_execution(item) for item in page.executions],
+                            {
+                                "executions": [
+                                    _execution(item) for item in page.executions
+                                ],
+                                "records_change_token": records_change_token,
+                            },
                             sort_keys=True,
                             separators=(",", ":"),
                         ).encode("utf-8")
