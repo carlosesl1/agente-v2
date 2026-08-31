@@ -338,7 +338,11 @@ def _lead_detail_payload(
     lead = detail.summary
     facts = detail.facts
     turns = detail.dialogue_turns
-    manifests = detail.passenger_manifests
+    manifests = tuple(
+        value
+        for value in detail.passenger_manifests
+        if value.lead_id == lead.lead_id
+    )
     inbound = detail.inbound_events
     replies = detail.public_replies
     reservations = detail.reservations
@@ -898,7 +902,7 @@ def create_ops_app(
                     selected_lead_id,
                     executions=execution_links,
                     generated_at=snapshot.generated_at,
-                    limit=10_000,
+                    limit=_PUBLIC_LIMIT,
                 )
             except RecordsSourceError:
                 return JSONResponse(
@@ -907,11 +911,6 @@ def create_ops_app(
                 )
             if detail is None:
                 return JSONResponse(status_code=404, content={"status": "not_found"})
-            if detail.truncated:
-                return JSONResponse(
-                    status_code=503,
-                    content={"status": "records_source_unavailable"},
-                )
         try:
             body = render_csv(
                 dataset,

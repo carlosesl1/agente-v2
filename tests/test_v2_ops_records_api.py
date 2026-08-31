@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import io
 from pathlib import Path
 import inspect
 import json
@@ -16,7 +18,12 @@ from tests.v2_ops_records_fixture import write_records_fixture
 from v2_ops.app import create_ops_app
 from v2_ops.auth import hash_password
 from v2_ops.contracts import ExecutionStatus, OpsExecution
-from v2_ops.records import RecordsSourceError, SQLiteRecordsReader
+from v2_ops.records import (
+    PassengerManifestRecord,
+    RecordsSourceError,
+    SQLiteRecordsReader,
+    passenger_manifest_summary,
+)
 from v2_ops.settings import OpsWebSettings
 from v2_ops.store import SQLiteOpsTraceReader, SQLiteOpsTraceWriter
 
@@ -298,6 +305,55 @@ def test_sse_combines_records_change_token_without_second_endpoint() -> None:
     assert '"records_change_token"' in source
 
 
+def test_sse_change_event_matches_records_etag_after_commercial_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, root, _identity = _build_records_client(tmp_path)
+    _login(client)
+    first = client.get("/ops/api/records")
+    assert first.status_code == 200
+
+    disconnect_checks = 0
+
+    async def disconnect_after_two_iterations(_request: object) -> bool:
+        nonlocal disconnect_checks
+        disconnect_checks += 1
+        return disconnect_checks > 2
+
+    sleep_calls = 0
+
+    async def mutate_after_first_interval(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls != 1:
+            return
+        connection = sqlite3.connect(root / "inbox.sqlite3")
+        connection.execute(
+            "UPDATE inbound_events SET lead_id='manychat:sse-change-visible'"
+        )
+        connection.commit()
+        connection.close()
+
+    monkeypatch.setattr(ops_app.Request, "is_disconnected", disconnect_after_two_iterations)
+    monkeypatch.setattr(ops_app.asyncio, "sleep", mutate_after_first_interval)
+
+    events = client.get("/ops/api/events")
+    changed = client.get(
+        "/ops/api/records",
+        headers={"If-None-Match": first.headers["etag"]},
+    )
+
+    assert events.status_code == 200
+    assert events.text.count("event: change") == 1
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != first.headers["etag"]
+    assert any(
+        lead["lead_id"] == "manychat:sse-change-visible"
+        for lead in changed.json()["leads"]
+    )
+
+
 def test_records_cache_invalidates_inside_ttl_when_source_token_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -411,6 +467,142 @@ def test_csv_formula_cells_are_neutralized_and_lead_history_requires_exact_id(
     assert response.status_code == 200
     assert b"'=danger" in response.content
     assert b"=danger," not in response.content
+
+
+def test_csv_exports_are_capped_at_200_total_data_rows(tmp_path: Path) -> None:
+    client, root, identity = _build_records_client(tmp_path)
+    writer = SQLiteOpsTraceWriter((tmp_path / "ops.sqlite3").resolve(), b"t" * 32)
+    for index in range(205):
+        writer.write_execution(
+            OpsExecution(
+                f"execution-export-{index:03d}",
+                identity.lead_id,
+                NOW - timedelta(seconds=index + 1),
+            )
+        )
+    writer.close()
+    connection = sqlite3.connect(root / "inbox.sqlite3")
+    connection.executemany(
+        "INSERT INTO inbound_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                f"inbound-history-{index:03d}",
+                identity.lead_id,
+                "subscriber-history",
+                "conversation-history",
+                f"2026-08-29T11:{index % 60:02d}:00+00:00",
+                sqlite3.Binary(b"excluded"),
+                f"{index + 1000:064x}"[-64:],
+                "processed",
+                None,
+                None,
+                None,
+                f"2026-08-29T11:{index % 60:02d}:01+00:00",
+            )
+            for index in range(205)
+        ],
+    )
+    connection.commit()
+    connection.close()
+    _login(client)
+
+    executions = client.get("/ops/api/exports/executions.csv")
+    history = client.get(
+        f"/ops/api/exports/lead-history.csv?lead_id={quote(identity.lead_id, safe='')}"
+    )
+
+    assert executions.status_code == 200
+    assert history.status_code == 200
+    execution_rows = list(
+        csv.DictReader(io.StringIO(executions.content.decode("utf-8-sig")))
+    )
+    history_rows = list(csv.DictReader(io.StringIO(history.content.decode("utf-8-sig"))))
+    assert len(execution_rows) == 200
+    assert len(history_rows) == 200
+
+
+def test_valid_lead_history_truncation_is_exported_not_classified_as_source_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _root, identity = _build_records_client(tmp_path)
+    original = SQLiteRecordsReader.lead_detail
+    observed_limits: list[int] = []
+
+    def truncated_detail(
+        self: SQLiteRecordsReader,
+        lead_id: str,
+        **kwargs: object,
+    ) -> object:
+        observed_limits.append(int(kwargs["limit"]))
+        detail = original(self, lead_id, **kwargs)
+        assert detail is not None
+        return replace(detail, truncated=True)
+
+    monkeypatch.setattr(SQLiteRecordsReader, "lead_detail", truncated_detail)
+    _login(client)
+
+    response = client.get(
+        f"/ops/api/exports/lead-history.csv?lead_id={quote(identity.lead_id, safe='')}"
+    )
+
+    assert response.status_code == 200
+    assert observed_limits == [200]
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    assert len(rows) <= 200
+
+
+def test_foreign_manifest_owner_is_not_exposed_by_lead_detail_or_history_csv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, root, identity = _build_records_client(tmp_path)
+    reader = SQLiteRecordsReader(root)
+    detail = reader.lead_detail(identity.lead_id, generated_at=NOW)
+    assert detail is not None
+    foreign_manifest = passenger_manifest_summary(
+        PassengerManifestRecord(
+            lead_id="manychat:foreign-owner",
+            manifest_json=json.dumps(
+                {
+                    "schema": "v2-passenger-manifest-v1",
+                    "adults": 1,
+                    "children": 0,
+                    "passengers": [
+                        {
+                            "position": 1,
+                            "participant_type": "adult",
+                            "full_name": "FOREIGN_OWNER_SENTINEL",
+                            "birth_date": "1990-01-01",
+                            "gender": None,
+                            "country_code": "BR",
+                        }
+                    ],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            revision=1,
+            persisted_at=NOW.isoformat(),
+        )
+    )
+    poisoned = replace(detail, passenger_manifests=(foreign_manifest,))
+
+    def poisoned_detail(*_args: object, **_kwargs: object) -> object:
+        return poisoned
+
+    monkeypatch.setattr(SQLiteRecordsReader, "lead_detail", poisoned_detail)
+    _login(client)
+
+    api = client.get(f"/ops/api/leads/{quote(identity.lead_id, safe='')}")
+    history = client.get(
+        f"/ops/api/exports/lead-history.csv?lead_id={quote(identity.lead_id, safe='')}"
+    )
+
+    assert api.status_code == 200
+    assert history.status_code == 200
+    assert "FOREIGN_OWNER_SENTINEL" not in api.text
+    assert b"FOREIGN_OWNER_SENTINEL" not in history.content
 
 
 def test_lead_history_flattens_manifest_without_raw_json(tmp_path: Path) -> None:

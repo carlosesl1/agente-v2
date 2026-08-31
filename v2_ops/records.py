@@ -310,6 +310,7 @@ class PassengerRecord:
 
 @dataclass(frozen=True, slots=True)
 class PassengerManifestSummary:
+    lead_id: str
     revision: int
     persisted_at: str
     adults: int
@@ -650,6 +651,7 @@ def passenger_manifest_summary(value: PassengerManifestRecord) -> PassengerManif
                 )
             )
         return PassengerManifestSummary(
+            lead_id=value.lead_id,
             revision=value.revision,
             persisted_at=value.persisted_at,
             adults=decoded["adults"],

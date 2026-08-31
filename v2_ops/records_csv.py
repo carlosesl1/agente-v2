@@ -15,6 +15,7 @@ from v2_ops.records import (
 DATASETS = frozenset(
     {"leads", "executions", "reservations", "payments", "handoffs", "lead-history"}
 )
+_PUBLIC_EXPORT_LIMIT = 200
 
 _COLUMNS: dict[str, tuple[str, ...]] = {
     "leads": (
@@ -263,7 +264,7 @@ def _rows(
                 }
             )
     for manifest in lead_detail.passenger_manifests:
-        if lead_detail.summary.lead_id == lead_id:
+        if manifest.lead_id == lead_id:
             projected = passenger_manifest_public(manifest)
             history.append(
                 {
@@ -450,12 +451,16 @@ def render_csv(
         lineterminator="\r\n",
     )
     writer.writeheader()
-    for row in _rows(
-        dataset,
-        snapshot=snapshot,
-        executions=executions,
-        lead_id=lead_id,
-        lead_detail=lead_detail,
+    for index, row in enumerate(
+        _rows(
+            dataset,
+            snapshot=snapshot,
+            executions=executions,
+            lead_id=lead_id,
+            lead_detail=lead_detail,
+        )
     ):
+        if index >= _PUBLIC_EXPORT_LIMIT:
+            break
         writer.writerow({column: _cell(row.get(column)) for column in columns})
     return b"\xef\xbb\xbf" + output.getvalue().encode("utf-8")
