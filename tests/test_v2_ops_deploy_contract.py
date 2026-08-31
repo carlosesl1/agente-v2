@@ -28,6 +28,7 @@ def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
     assert re.search(r"^USER\s+(?!0|root)\S+", dockerfile, re.MULTILINE)
     assert "v2_ops" in dockerfile
     assert service["read_only"] is True
+    assert service["user"] == "1001:1001"
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
     assert service["tmpfs"]

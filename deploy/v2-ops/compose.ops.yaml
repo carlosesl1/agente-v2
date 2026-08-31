@@ -3,6 +3,7 @@ name: agente-v2-ops
 services:
   v2-ops:
     image: ${V2_OPS_IMAGE:-agente-v2-ops:local}
+    user: "1001:1001"
     restart: unless-stopped
     read_only: true
     init: true
