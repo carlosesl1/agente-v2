@@ -22,13 +22,29 @@ LUCIDE_SYMBOL_IDS = {
 }
 EXPECTED_IDS = {
     "app-sidebar", "sidebar-backdrop", "mobile-menu", "sidebar-close",
-    "nav-overview", "nav-execution", "live-state", "source-health-state",
+    "nav-overview", "nav-leads", "nav-execution", "nav-reservations",
+    "nav-payments", "nav-handoffs", "live-state", "source-health-state",
     "generated-at", "range-select", "refresh-dashboard", "operator-menu",
-    "operator-popover", "dashboard-alert", "overview-view", "kpi-grid",
+    "operator-popover", "dashboard-alert", "header-title", "header-subtitle",
+    "overview-view", "leads-view", "executions-view", "reservations-view",
+    "payments-view", "handoffs-view", "record-summary-grid", "overview-lead-list",
+    "kpi-grid",
     "execution-series", "status-distribution", "trace-distribution",
     "milestones-chart", "top-node-types", "lead-search", "status-filter",
     "completeness-filter", "result-count", "operations-title", "empty-state",
     "execution-table-body", "execution-mobile-list", "drawer-backdrop",
+    "lead-list-search", "lead-result-count", "lead-empty-state", "lead-table-body",
+    "leads-table-title", "reservations-table-title", "payments-table-title",
+    "handoffs-table-title", "overview-leads-title",
+    "lead-mobile-list", "lead-detail", "lead-detail-title", "lead-detail-state",
+    "lead-detail-summary", "lead-facts", "lead-dialogue", "lead-reservations",
+    "lead-payments", "lead-handoffs", "lead-executions", "reservation-result-count",
+    "reservation-empty-state", "reservation-table-body", "reservation-mobile-list",
+    "payment-result-count", "payment-empty-state", "payment-table-body",
+    "payment-mobile-list", "handoff-result-count", "handoff-empty-state",
+    "handoff-table-body", "handoff-mobile-list", "export-leads",
+    "export-lead-history", "export-executions", "export-reservations",
+    "export-payments", "export-handoffs",
     "execution-drawer", "drawer-close", "drawer-title", "drawer-lead",
     "drawer-status", "drawer-trace", "drawer-summary", "canvas-title",
     "execution-timeline", "node-title", "input-panel", "input-summary", "input-full",
@@ -58,17 +74,28 @@ LOGOUT_OWNER = ("form", 0, None, "post", "/ops/logout")
 EXPECTED_CONTROLS = (
     InteractiveContract("button", None, "submit", "/ops/logout", LOGOUT_OWNER, "post", True, None, None, None, None, True, True, False),
     InteractiveContract("button", "drawer-close", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "export-executions", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "export-handoffs", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "export-lead-history", "button", None, None, None, False, None, None, None, None),
+    InteractiveContract("button", "export-leads", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "export-payments", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "export-reservations", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "load-full-input", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "load-full-output", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "mobile-menu", "button", None, None, None, True, None, None, None, None),
-    InteractiveContract("button", "nav-execution", "button", None, None, None, False, None, None, None, None),
+    InteractiveContract("button", "nav-execution", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "nav-handoffs", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "nav-leads", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "nav-overview", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "nav-payments", "button", None, None, None, True, None, None, None, None),
+    InteractiveContract("button", "nav-reservations", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "operator-menu", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "refresh-dashboard", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "sidebar-close", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("button", "sidebar-backdrop", "button", None, None, None, True, None, None, None, None),
     InteractiveContract("input", None, "hidden", None, LOGOUT_OWNER, None, True, None, None, None, None, True, False, True),
     InteractiveContract("input", "lead-search", "text", None, None, None, True, None, None, None, None),
+    InteractiveContract("input", "lead-list-search", "text", None, None, None, True, None, None, None, None),
     InteractiveContract("select", "completeness-filter", None, None, None, None, True, None, None, None, None),
     InteractiveContract("select", "range-select", None, None, None, None, True, None, None, None, None),
     InteractiveContract("select", "status-filter", None, None, None, None, True, None, None, None, None),
@@ -200,7 +227,8 @@ def assert_task2_javascript_contract(js: str) -> None:
     refresh = javascript_function_body(js, "refreshDashboard")
     assert refresh.index("if (state.dashboardLoading) return") < refresh.index("state.dashboardLoading = true")
     assert refresh.index("state.dashboardLoading = true") < refresh.index('$("refresh-dashboard").disabled = true')
-    assert re.search(r"try\s*\{\s*await loadDashboard\(\);\s*\}\s*finally\s*\{", refresh)
+    assert "await Promise.allSettled([loadDashboard(), loadRecords()])" in refresh
+    assert re.search(r"try\s*\{.*?\}\s*finally\s*\{", refresh, re.DOTALL)
     finally_body = refresh.split("finally", 1)[1]
     assert "state.dashboardLoading = false" in finally_body
     assert '$("refresh-dashboard").disabled = false' in finally_body
@@ -218,11 +246,12 @@ def assert_task2_javascript_contract(js: str) -> None:
     assert "restoreFocus" in operator
     assert '$("operator-menu").focus()' in operator
 
-    top_level_loads = re.findall(r"^loadDashboard\(\)\.catch\(handleDashboardError\);$", js, re.MULTILINE)
     top_level_live = re.findall(r"^connectLive\(\);$", js, re.MULTILINE)
-    assert len(top_level_loads) == 1, "exactly one top-level dashboard startup"
     assert len(top_level_live) == 1, "exactly one top-level live startup"
-    assert js.rstrip().endswith("loadDashboard().catch(handleDashboardError);\nconnectLive();")
+    assert js.count('setActiveView("overview", false);') == 1
+    assert js.rstrip().endswith("});\nconnectLive();")
+    startup = js.rsplit('setActiveView("overview", false);', 1)[1]
+    assert "Promise.allSettled([loadDashboard(), loadRecords()])" in startup
 
     assert '$("refresh-dashboard").addEventListener("click", () => refreshDashboard().catch(handleDashboardError))' in js
     assert '$("mobile-menu").addEventListener("click", () => setMobileNavigationOpen(true))' in js
@@ -518,10 +547,26 @@ def assert_dashboard_dom_contract(html: str) -> None:
     assert control_contract == Counter(EXPECTED_CONTROLS), "unexpected interactive element contract"
     assert set(by_id) == EXPECTED_IDS
 
-    overview = by_id["overview-view"]
+    views = [
+        by_id["overview-view"],
+        by_id["leads-view"],
+        by_id["executions-view"],
+        by_id["reservations-view"],
+        by_id["payments-view"],
+        by_id["handoffs-view"],
+    ]
+    assert all(view.parent is not None and view.parent.tag == "main" for view in views)
+    assert "hidden" not in views[0].attrs
+    assert all("hidden" in view.attrs for view in views[1:])
+    assert [view.attrs["id"] for view in views] == [
+        "overview-view", "leads-view", "executions-view", "reservations-view",
+        "payments-view", "handoffs-view",
+    ]
+    lead_detail = by_id["lead-detail"]
+    assert is_descendant(lead_detail, by_id["leads-view"])
+    assert "hidden" in lead_detail.attrs
     drawer = by_id["execution-drawer"]
     timeline = by_id["execution-timeline"]
-    assert overview.parent is not None and overview.parent.tag == "main"
     assert drawer.tag == "aside"
     assert drawer.attrs.get("aria-hidden") == "true", "drawer must start closed"
     assert "open" not in (drawer.attrs.get("class") or "").split(), "drawer must start closed"
@@ -584,6 +629,38 @@ def test_dashboard_shell_dom_contract() -> None:
     assert_dashboard_dom_contract(html)
     assert "SOMENTE LEITURA" in html
     assert "Dados demonstrativos" not in html
+
+
+def test_complete_existing_records_views_are_factual_and_read_only() -> None:
+    html, js, _ = assets()
+    combined = (html + js).casefold()
+
+    for label in (
+        "Visão geral", "Leads", "Execuções", "Reservas", "Pagamentos", "Handoffs",
+    ):
+        assert label in html
+    for endpoint in (
+        "/ops/api/records",
+        "/ops/api/leads/",
+        "/ops/api/exports/",
+    ):
+        assert endpoint in js
+    for function_name in (
+        "setActiveView", "loadRecords", "renderRecordSummary", "renderLeads",
+        "openLead", "renderLeadDetail", "renderReservations", "renderPayments",
+        "renderHandoffs", "downloadDataset",
+    ):
+        assert f"function {function_name}(" in js or f"async function {function_name}(" in js
+
+    assert html.count('class="data-view"') == 5
+    assert 'id="overview-view"' in html
+    by_id = elements_by_id(parse_html(html))
+    assert "hidden" in by_id["lead-detail"].attrs
+    for forbidden in (
+        "editar lead", "alterar reserva", "confirmar reserva", "marcar como pago",
+        "liquidar pagamento", "solicitar handoff", "reenviar mensagem",
+    ):
+        assert forbidden not in combined
 
 
 def test_execution_detail_uses_numbered_vertical_timeline_only() -> None:
@@ -871,12 +948,13 @@ def test_accessibility_metadata_is_explicit() -> None:
     root = parse_html(html)
     by_id = elements_by_id(root)
 
-    table = root.descendants("table")
-    assert len(table) == 1
-    captions = table[0].descendants("caption")
-    assert len(captions) == 1 and captions[0].text().strip()
-    headers = table[0].descendants("th")
-    assert headers and all(header.attrs.get("scope") == "col" for header in headers)
+    tables = root.descendants("table")
+    assert len(tables) == 5
+    for table in tables:
+        captions = table.descendants("caption")
+        assert len(captions) == 1 and captions[0].text().strip()
+        headers = table.descendants("th")
+        assert headers and all(header.attrs.get("scope") == "col" for header in headers)
 
     timeline = by_id["execution-timeline"]
     assert timeline.tag == "ol"
@@ -893,7 +971,6 @@ def test_html_has_no_commercial_claims() -> None:
         "novos leads",
         "qualificados",
         "interesse",
-        "reservas confirmadas",
         "pagamento pago",
         "retry",
         "replay",
@@ -983,9 +1060,10 @@ def test_lucide_subset_is_local_official_and_closed() -> None:
 
     symbol_names = set(re.findall(r'<symbol id="lucide-([a-z0-9-]+)"', html))
     shell_names = set(re.findall(r'<use href="#lucide-([a-z0-9-]+)"></use>', html))
+    kpi_block = js.split("const KPI_DEFINITIONS = [", 1)[1].split("];", 1)[0]
     kpi_names = set(re.findall(
         r'^\s*\["[^"]+", "[^"]+", "([a-z0-9-]+)",',
-        js,
+        kpi_block,
         re.MULTILINE,
     ))
     assert kpi_names == {
@@ -1061,7 +1139,7 @@ def test_mockup_fidelity_analytics_are_closed_to_real_payload() -> None:
 
 
 def test_approved_visual_palette_and_responsive_structure() -> None:
-    _, _, css = assets()
+    html, _, css = assets()
     for color in (
         "#245634",
         "#173a27",
@@ -1085,6 +1163,11 @@ def test_approved_visual_palette_and_responsive_structure() -> None:
     assert "max-width:720px" in css.replace(" ", "")
     assert ":focus-visible" in css
     assert "prefers-reduced-motion" in css
+    assert '<section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">PERFIL</p>' in html
+    compact = re.sub(r"\s+", "", css)
+    assert "#lead-facts{grid-template-columns:repeat(2,minmax(0,1fr));}" in compact
+    mobile = compact.rsplit("@media(max-width:720px)", 1)[1]
+    assert "#lead-facts{grid-template-columns:minmax(0,1fr);}" in mobile
 
 
 def test_existing_javascript_and_css_read_only_markers_are_preserved() -> None:
@@ -1095,12 +1178,12 @@ def test_existing_javascript_and_css_read_only_markers_are_preserved() -> None:
     assert "fetch(" in js
     assert "method:" not in js
     for forbidden in (
-        "reserve",
-        "charge",
-        "payment link",
-        "retry",
-        "replay",
-        "send message",
+        'fetch("/reserve',
+        'fetch("/charge',
+        'fetch("/retry',
+        'fetch("/replay',
+        'fetch("/send',
+        "method: \"post\"",
     ):
         assert forbidden not in (html + js).casefold()
     assert "@media" in css
@@ -1138,7 +1221,6 @@ def test_javascript_dashboard_contract_is_safe_and_explicit() -> None:
         "SERVICES",
         "RANGE_MODELS",
         "demo-",
-        "payment_link",
         "request_handoff",
         "create_reservation",
     ):
@@ -1300,20 +1382,108 @@ function snapshotWithExecution(label, executionId, overrides = {}) {
   return payload;
 }
 
-async function setup(page) {
+function records(leadId = 'manychat:lead-1') {
+  return {
+    generated_at: '2026-08-30T12:00:00Z',
+    truncated: false,
+    leads: [{
+      lead_id: leadId, first_activity_at: '2026-08-29T10:00:00Z',
+      last_activity_at: '2026-08-30T11:00:00Z', state_code: 'reservation_confirmed',
+      state_label: 'Reserva confirmada', fact_count: 2, dialogue_turn_count: 1,
+      passenger_manifest_count: 0, inbound_count: 1, public_reply_count: 1,
+      execution_count: 1, reservation_count: 1, payment_count: 1,
+      payment_initiation_count: 1, settled_payment_count: 0, handoff_count: 0,
+      latest_execution_status: 'completed',
+    }],
+    reservations: [{
+      lead_id: leadId, command_id: 'cmd-1', workflow_id: 'wf-1', draft_id: 'draft-1',
+      draft_version: 1, operation: 'create_reservation', status_code: 'confirmed',
+      status_label: 'Confirmada', certainty: 'effect_confirmed', normalized_status: 'confirmed',
+      provider_reference: 'provider-ref-1', bokun_booking_id: null,
+      cloudbeds_reservation_id: null, total_minor: 33495, currency: 'BRL',
+      payment_method: 'stripe', customer: {
+        customer_ref: 'customer-1', full_name: 'Pessoa Teste', email: 'pessoa@example.test',
+        phone: '+5500000000000', country: 'BR', birth_date: null, gender: null,
+      },
+      components: [{kind: 'activity', title: 'Passeio Teste', activity_id: 'activity-1',
+        hotel_code: null, room_type: null, rate_plan: null, start_date: '2026-09-10',
+        end_date: null, start_time: '08:00', adults: 1, children: 0,
+        amount: '334.95', currency: 'BRL', availability_status: 'available'}],
+      created_at: '2026-08-30T10:00:00Z', updated_at: '2026-08-30T10:05:00Z',
+    }],
+    payments: [{
+      record_id: 'init-1', phase: 'initiation', lead_id: leadId, initiation_id: 'init-1',
+      settlement_id: null, payment_id: 'payment-1', reservation_anchor_id: 'draft-1',
+      method: 'stripe', status_code: 'link_ready', status_label: 'Link de pagamento preparado',
+      amount_due_minor: 33495, amount_paid_minor: null, currency: 'BRL', due_kind: 'total',
+      payment_link_prepared: true, settled: false, reconciliation_status: 'matched',
+      steps: [{step: 'product', status: 'accepted', updated_at: '2026-08-30T10:06:00Z'},
+        {step: 'payment_link', status: 'accepted', updated_at: '2026-08-30T10:07:00Z'}],
+      created_at: '2026-08-30T10:06:00Z', updated_at: '2026-08-30T10:07:00Z',
+      settled_at: null,
+    }],
+    handoffs: [],
+  };
+}
+
+function leadDetail(leadId = 'manychat:lead-1') {
+  const payload = records(leadId);
+  return {lead: {
+    summary: payload.leads[0],
+    facts: [
+      {name: 'travel_date', value: '2026-09-10', revision: 1, persisted_at: '2026-08-30T10:00:00Z'},
+      {name: 'unsafe', value: '<img src=x onerror=alert(1)>', revision: 1, persisted_at: '2026-08-30T10:01:00Z'},
+    ],
+    passenger_manifests: [],
+    dialogue_turns: [{
+      source_turn_id: 'turn-1', customer_message: 'Quero reservar o passeio',
+      assistant_reply_chunks: ['Posso ajudar com a reserva.'], committed_at: '2026-08-30T10:02:00Z',
+    }],
+    inbound_events: [{event_id: 'event-1', status: 'processed',
+      occurred_at: '2026-08-30T10:00:00Z', completed_at: '2026-08-30T10:02:00Z'}],
+    public_replies: [{reply_id: 'reply-1', source: 'boundary', status: 'delivered',
+      author: 'maya', text: 'Link enviado.', updated_at: '2026-08-30T10:08:00Z'}],
+    reservations: payload.reservations,
+    payments: payload.payments,
+    handoffs: payload.handoffs,
+    executions: [{execution_id: 'execution-lead-1', lead_id: leadId,
+      received_at: '2026-08-30T10:00:00Z', completed_at: '2026-08-30T10:02:00Z', status: 'completed'}],
+    truncated: false,
+  }};
+}
+
+async function setup(page, options = {}) {
+  const autoRecords = options.autoRecords !== false;
   await page.setContent(html);
   await page.addStyleTag({content: css});
-  await page.evaluate(() => {
+  await page.evaluate(([recordsPayload, autoRecords]) => {
     window.__requests = [];
+    window.__recordRequests = [];
     window.__eventSources = [];
-    window.fetch = (path, options) => new Promise((resolve, reject) => {
-      window.__requests.push({path: String(path), options, resolve, reject});
+    const response = (status, payload) => ({
+      status, ok: status >= 200 && status < 300,
+      json: async () => JSON.parse(JSON.stringify(payload)),
     });
-    window.__resolveRequest = (index, status, payload) => {
-      window.__requests[index].resolve({
-        status, ok: status >= 200 && status < 300,
-        json: async () => payload,
+    window.fetch = (path, requestOptions) => {
+      const requestPath = String(path);
+      if (requestPath === '/ops/api/records') {
+        if (autoRecords) {
+          window.__recordRequests.push({path: requestPath, options: requestOptions});
+          return Promise.resolve(response(200, recordsPayload));
+        }
+        return new Promise((resolve, reject) => {
+          window.__recordRequests.push({path: requestPath, options: requestOptions, resolve, reject});
+        });
+      }
+      return new Promise((resolve, reject) => {
+        window.__requests.push({path: requestPath, options: requestOptions, resolve, reject});
       });
+    };
+    window.__resolveRequest = (index, status, payload) => {
+      window.__requests[index].resolve(response(status, payload));
+    };
+    window.__resolveRecordRequest = (index, status, payload) => {
+      window.__recordRequests[index].resolve(response(status, payload));
     };
     window.__rejectRequest = (index, message) => {
       window.__requests[index].reject(new Error(message));
@@ -1330,7 +1500,7 @@ async function setup(page) {
       fail() { this.onerror(new Error('disconnected')); }
     }
     window.EventSource = DeterministicEventSource;
-  });
+  }, [records(), autoRecords]);
   await page.addScriptTag({content: js});
 }
 
@@ -1342,13 +1512,26 @@ async function resolveRequest(page, index, status, payload) {
   await page.waitForTimeout(0);
 }
 
+async function resolveRecordRequest(page, index, status, payload) {
+  await page.evaluate(
+    ([index, status, payload]) => window.__resolveRecordRequest(index, status, payload),
+    [index, status, payload],
+  );
+  await page.waitForTimeout(0);
+}
+
 async function paths(page) {
   return page.evaluate(() => window.__requests.map(request => request.path));
+}
+
+async function recordPaths(page) {
+  return page.evaluate(() => window.__recordRequests.map(request => request.path));
 }
 
 test('Task 2 startup creates exactly one initial load and one EventSource', async ({page}) => {
   await setup(page);
   expect(await paths(page)).toEqual(['/ops/api/dashboard?range=7d']);
+  expect(await recordPaths(page)).toEqual(['/ops/api/records']);
   expect(await page.evaluate(() => window.__eventSources.map(source => source.path)))
     .toEqual(['/ops/api/events']);
   await resolveRequest(page, 0, 200, snapshot('initial', 1));
@@ -1608,6 +1791,7 @@ test('Task 3 causally renders five exact analytics sources and adversarial struc
 test('Task 4 renders factual desktop rows and mobile cards from the same exact-filtered executions', async ({page}) => {
   await page.setViewportSize({width: 1280, height: 800});
   await setup(page);
+  await page.click('#nav-execution');
 
   for (const executions of [undefined, {not: 'an array'}]) {
     const malformedPayload = snapshot('malformed-operations', 0);
@@ -1923,6 +2107,7 @@ test('Task 5 execution opens as factual drawer and restores overview context and
     has_handoff: true,
   }).executions[0]);
   await resolveRequest(page, 0, 200, payload);
+  await page.click('#nav-execution');
   await page.evaluate(() => {
     const originalRenderTimeline = renderTimeline;
     window.__task5RenderCount = 0;
@@ -1939,7 +2124,7 @@ test('Task 5 execution opens as factual drawer and restores overview context and
   await expect(page.locator('#execution-drawer')).toHaveClass(/open/);
   await expect(page.locator('#drawer-backdrop')).toBeVisible();
   await expect(page.locator('body')).toHaveClass(/drawer-open/);
-  await expect(page.locator('#overview-view')).toBeVisible();
+  await expect(page.locator('#executions-view')).toBeVisible();
   await expect(page.locator('#drawer-title')).toHaveText('A');
   await expect(page.locator('#drawer-lead')).toHaveText('lead-A');
   await expect(page.locator('#drawer-summary')).toContainText('Recebida');
@@ -2029,6 +2214,7 @@ test('Task 5 execution opens as factual drawer and restores overview context and
 test('Task 5 closing while detail is pending invalidates response and keeps drawer clear', async ({page}) => {
   await setup(page);
   await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+  await page.click('#nav-execution');
   await page.click('#execution-table-body .execution-link');
   await expect.poll(async () => (await paths(page)).length).toBe(2);
   const epochsBeforeClose = await page.evaluate(() => ({
@@ -2059,6 +2245,7 @@ test('Task 5 obsolete full after close and reopen cannot change another executio
   const payload = snapshotWithExecution('initial', 'A');
   payload.executions.push(snapshotWithExecution('other', 'B').executions[0]);
   await resolveRequest(page, 0, 200, payload);
+  await page.click('#nav-execution');
   await page.locator('#execution-table-body .execution-link').nth(0).click();
   await resolveRequest(page, 1, 200, nodes('A'));
   await page.click('#load-full-input');
@@ -2072,6 +2259,109 @@ test('Task 5 obsolete full after close and reopen cannot change another executio
   await expect(page.locator('#input-summary')).toContainText('"B"');
   await expect(page.locator('#input-full')).toBeHidden();
   await expect(page.locator('#input-full')).not.toContainText('obsolete');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
+
+test('complete records navigation preserves factual reservation and payment semantics', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+
+  await expect(page.locator('#record-summary-grid > .record-summary-card')).toHaveCount(6);
+  await expect(page.locator('#record-summary-grid')).toContainText('1');
+  await page.click('#nav-leads');
+  await expect(page.locator('#leads-view')).toBeVisible();
+  await expect(page.locator('#overview-view')).toBeHidden();
+  await expect(page.locator('#header-title')).toHaveText('Leads');
+  await expect(page.locator('#range-select')).toBeHidden();
+  await expect(page.locator('#lead-table-body > tr')).toHaveCount(1);
+
+  await page.click('#nav-reservations');
+  await expect(page.locator('#reservation-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('#reservation-table-body')).toContainText('Confirmada');
+  await expect(page.locator('#reservation-table-body')).toContainText('Referência retornada: provider-ref-1');
+  await expect(page.locator('#reservation-table-body')).toContainText('334,95');
+  await expect(page.locator('#reservation-table-body')).not.toContainText('ID final Bókun');
+
+  await page.click('#nav-payments');
+  await expect(page.locator('#payment-table-body > tr')).toHaveCount(1);
+  await expect(page.locator('#payment-table-body')).toContainText('Link de pagamento preparado');
+  await expect(page.locator('#payment-table-body')).toContainText('334,95');
+  await expect(page.locator('#payment-table-body')).toContainText('Não registrado');
+  await expect(page.locator('#payment-table-body')).not.toContainText('Pagamento liquidado');
+
+  await page.click('#nav-handoffs');
+  await expect(page.locator('#handoff-empty-state')).toBeVisible();
+  await expect(page.locator('#handoff-empty-state')).toHaveText('Nenhum handoff registrado nas fontes ativas.');
+  await page.click('#nav-execution');
+  await expect(page.locator('#executions-view')).toBeVisible();
+  await expect(page.locator('#range-select')).toBeVisible();
+  await page.click('#nav-overview');
+  await expect(page.locator('#overview-view')).toBeVisible();
+  expect(await page.evaluate(() => window.__eventSources.length)).toBe(1);
+});
+
+test('lead selection renders safe factual detail and opens the existing trace drawer', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshotWithExecution('initial', 'A'));
+  await page.click('#nav-leads');
+  const leadButton = page.locator('#lead-table-body .lead-open');
+  await leadButton.click();
+  await expect.poll(async () => (await paths(page)).length).toBe(2);
+  expect((await paths(page))[1]).toBe('/ops/api/leads/manychat%3Alead-1');
+  await resolveRequest(page, 1, 200, leadDetail());
+
+  await expect(page.locator('#lead-detail')).toBeVisible();
+  await expect(page.locator('#lead-detail-title')).toHaveText('manychat:lead-1');
+  await expect(page.locator('#lead-facts')).toContainText('2026-09-10');
+  await expect(page.locator('#lead-facts')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#lead-facts img')).toHaveCount(0);
+  await expect(page.locator('#lead-dialogue')).toContainText('Quero reservar o passeio');
+  await expect(page.locator('#lead-dialogue')).toContainText('Posso ajudar com a reserva.');
+  await expect(page.locator('#lead-reservations')).toContainText('Confirmada');
+  await expect(page.locator('#lead-payments')).toContainText('pago Não registrado');
+  await expect(page.locator('#lead-handoffs')).toContainText('Nenhum handoff vinculado');
+  await expect(page.locator('#export-lead-history')).toBeEnabled();
+
+  const traceButton = page.locator('#lead-executions .lead-execution-open');
+  await traceButton.click();
+  await expect.poll(async () => (await paths(page)).length).toBe(3);
+  expect((await paths(page))[2]).toBe('/ops/api/executions/execution-lead-1/nodes');
+  await resolveRequest(page, 2, 200, nodes('execution-lead-1'));
+  await expect(page.locator('#execution-drawer')).toHaveClass(/open/);
+  await expect(page.locator('#execution-timeline > li.timeline-item')).toHaveCount(1);
+  await page.click('#drawer-close');
+  await expect(traceButton).toBeFocused();
+});
+
+test('lead detail ignores inverted A and B responses', async ({page}) => {
+  await setup(page);
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await page.evaluate(() => {
+    openLead('lead-A').catch(handleDashboardError);
+    openLead('lead-B').catch(handleDashboardError);
+  });
+  await expect.poll(async () => (await paths(page)).length).toBe(3);
+  await resolveRequest(page, 2, 200, leadDetail('lead-B'));
+  await resolveRequest(page, 1, 200, leadDetail('lead-A'));
+  await expect(page.locator('#lead-detail-title')).toHaveText('lead-B');
+  await expect(page.locator('#lead-detail')).toContainText('lead-B');
+  await expect(page.locator('#dashboard-alert')).toBeHidden();
+});
+
+test('records list ignores an obsolete response and keeps the latest payload', async ({page}) => {
+  await setup(page, {autoRecords: false});
+  await resolveRequest(page, 0, 200, snapshot('initial', 1));
+  await resolveRecordRequest(page, 0, 200, records('lead-initial'));
+  await page.evaluate(() => {
+    loadRecords().catch(handleDashboardError);
+    loadRecords().catch(handleDashboardError);
+  });
+  await expect.poll(async () => (await recordPaths(page)).length).toBe(3);
+  await resolveRecordRequest(page, 2, 200, records('lead-new'));
+  await resolveRecordRequest(page, 1, 200, records('lead-old'));
+  await expect(page.locator('#overview-lead-list')).toContainText('lead-new');
+  await expect(page.locator('#overview-lead-list')).not.toContainText('lead-old');
   await expect(page.locator('#dashboard-alert')).toBeHidden();
 });
 """
@@ -2152,5 +2442,5 @@ def test_javascript_runs_adversarial_interleavings_in_real_chromium() -> None:
     output = completed.stdout + completed.stderr
     print(output)
     assert completed.returncode == 0, output
-    assert "Running 24 tests using 1 worker" in output, output
-    assert "24 passed" in output, output
+    assert "Running 28 tests using 1 worker" in output, output
+    assert "28 passed" in output, output

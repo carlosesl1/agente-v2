@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import sqlite3
 import stat
+import tempfile
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import quote
 
@@ -249,7 +252,7 @@ class RecordsSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class LeadRecord:
+class LeadSummary:
     lead_id: str
     first_activity_at: str | None
     last_activity_at: str | None
@@ -293,6 +296,25 @@ class PassengerManifestRecord:
     manifest_json: str
     revision: int
     persisted_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class PassengerRecord:
+    position: int
+    participant_type: str
+    full_name: str | None
+    birth_date: str | None
+    gender: str | None
+    country_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PassengerManifestSummary:
+    revision: int
+    persisted_at: str
+    adults: int
+    children: int
+    passengers: tuple[PassengerRecord, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,6 +400,7 @@ class PaymentStepRecord:
 
 @dataclass(frozen=True, slots=True)
 class PaymentRecord:
+    record_id: str
     lead_id: str | None
     phase: str
     payment_id: str
@@ -391,6 +414,10 @@ class PaymentRecord:
     due_kind: str | None
     status_code: str
     status_label: str
+    settled: bool
+    workflow_status: str | None
+    ledger_status: str | None
+    outcome_certainty: str | None
     reconciliation_status: str | None
     payment_link_prepared: bool
     steps: tuple[PaymentStepRecord, ...]
@@ -414,11 +441,34 @@ class HandoffRecord:
 
 @dataclass(frozen=True, slots=True)
 class RecordsSnapshot:
-    generated_at: str
-    change_token: str
-    source_names: tuple[str, ...]
+    generated_at: datetime
+    leads: tuple[LeadSummary, ...]
+    reservations: tuple[ReservationRecord, ...]
+    payments: tuple[PaymentRecord, ...]
+    handoffs: tuple[HandoffRecord, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class LeadDetail:
+    generated_at: datetime
+    summary: LeadSummary
+    facts: tuple[CustomerFactRecord, ...]
+    dialogue_turns: tuple[DialogueTurnRecord, ...]
+    passenger_manifests: tuple[PassengerManifestSummary, ...]
+    inbound_events: tuple[InboundEventRecord, ...]
+    public_replies: tuple[PublicReplyRecord, ...]
+    reservations: tuple[ReservationRecord, ...]
+    payments: tuple[PaymentRecord, ...]
+    handoffs: tuple[HandoffRecord, ...]
+    executions: tuple[ExecutionLink, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectedRecords:
     summary: RecordsSummary
-    leads: tuple[LeadRecord, ...]
+    leads: tuple[LeadSummary, ...]
     facts: tuple[CustomerFactRecord, ...]
     dialogue_turns: tuple[DialogueTurnRecord, ...]
     passenger_manifests: tuple[PassengerManifestRecord, ...]
@@ -446,6 +496,16 @@ def _require_text(value: object, name: str, *, maximum: int = 4096) -> str:
 def _optional_text(value: object, name: str, *, maximum: int = 4096) -> str | None:
     if value is None:
         return None
+    return _require_text(value, name, maximum=maximum)
+
+
+def _optional_identifier(value: object, name: str, *, maximum: int = 256) -> str | None:
+    if type(value) is not str:
+        raise ValueError(f"invalid {name}")
+    if not value.strip():
+        return None
+    if value != value.strip():
+        raise ValueError(f"invalid {name}")
     return _require_text(value, name, maximum=maximum)
 
 
@@ -544,6 +604,93 @@ def _canonical_json(value: object) -> str:
     )
 
 
+def passenger_manifest_summary(value: PassengerManifestRecord) -> PassengerManifestSummary:
+    try:
+        decoded = _json_object(value.manifest_json, "passenger manifest")
+        if (
+            set(decoded) != {"schema", "adults", "children", "passengers"}
+            or decoded["schema"] != "v2-passenger-manifest-v1"
+            or type(decoded["adults"]) is not int
+            or type(decoded["children"]) is not int
+            or decoded["adults"] < 1
+            or decoded["children"] < 0
+            or type(decoded["passengers"]) is not list
+            or len(decoded["passengers"]) != decoded["adults"] + decoded["children"]
+        ):
+            raise ValueError("passenger manifest contract")
+        passengers: list[PassengerRecord] = []
+        expected_fields = {
+            "position",
+            "participant_type",
+            "full_name",
+            "birth_date",
+            "gender",
+            "country_code",
+        }
+        for expected_position, passenger in enumerate(decoded["passengers"], start=1):
+            if (
+                type(passenger) is not dict
+                or set(passenger) != expected_fields
+                or passenger["position"] != expected_position
+                or passenger["participant_type"] not in {"adult", "child"}
+                or any(
+                    passenger[name] is not None and type(passenger[name]) is not str
+                    for name in ("full_name", "birth_date", "gender", "country_code")
+                )
+            ):
+                raise ValueError("passenger contract")
+            passengers.append(
+                PassengerRecord(
+                    position=passenger["position"],
+                    participant_type=passenger["participant_type"],
+                    full_name=passenger["full_name"],
+                    birth_date=passenger["birth_date"],
+                    gender=passenger["gender"],
+                    country_code=passenger["country_code"],
+                )
+            )
+        return PassengerManifestSummary(
+            revision=value.revision,
+            persisted_at=value.persisted_at,
+            adults=decoded["adults"],
+            children=decoded["children"],
+            passengers=tuple(passengers),
+        )
+    except RecordsSourceError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RecordsSourceError() from exc
+
+
+def passenger_manifest_public(
+    value: PassengerManifestRecord | PassengerManifestSummary,
+) -> dict[str, object]:
+    summary = (
+        passenger_manifest_summary(value)
+        if type(value) is PassengerManifestRecord
+        else value
+    )
+    if type(summary) is not PassengerManifestSummary:
+        raise RecordsSourceError()
+    return {
+        "revision": summary.revision,
+        "persisted_at": summary.persisted_at,
+        "adults": summary.adults,
+        "children": summary.children,
+        "passengers": [
+            {
+                "position": passenger.position,
+                "participant_type": passenger.participant_type,
+                "full_name": passenger.full_name,
+                "birth_date": passenger.birth_date,
+                "gender": passenger.gender,
+                "country_code": passenger.country_code,
+            }
+            for passenger in summary.passengers
+        ],
+    }
+
+
 def _minor_amount(value: object, name: str) -> int:
     text = _require_text(value, name, maximum=64)
     try:
@@ -584,21 +731,37 @@ class SQLiteRecordsReader:
             raise ValueError("records root must be an absolute pathlib.Path")
         self._root = root
 
+    @property
+    def allowed_files(self) -> frozenset[str]:
+        return frozenset(_SOURCE_NAMES)
+
     def snapshot(
         self,
-        executions: Sequence[ExecutionLink] = (),
         *,
-        generated_at: datetime | None = None,
+        executions: Sequence[ExecutionLink] = (),
+        generated_at: datetime,
+        limit: int = 200,
     ) -> RecordsSnapshot:
         try:
-            links = tuple(executions)
-            if any(type(link) is not ExecutionLink for link in links):
-                raise ValueError("execution links must be exact ExecutionLink values")
-            instant = datetime.now(timezone.utc) if generated_at is None else generated_at
-            if type(instant) is not datetime or instant.tzinfo is not timezone.utc:
-                raise ValueError("generated_at must be an exact UTC datetime")
-            raw = self._read_sources()
-            return self._project(raw, links, instant)
+            links = self._execution_links(executions)
+            self._validate_generated_at_and_limit(generated_at, limit)
+            projected = self._consistent_projection(links)
+            return RecordsSnapshot(
+                generated_at=generated_at,
+                leads=projected.leads[:limit],
+                reservations=projected.reservations[:limit],
+                payments=projected.payments[:limit],
+                handoffs=projected.handoffs[:limit],
+                truncated=any(
+                    len(values) > limit
+                    for values in (
+                        projected.leads,
+                        projected.reservations,
+                        projected.payments,
+                        projected.handoffs,
+                    )
+                ),
+            )
         except RecordsSourceError:
             raise
         except (
@@ -611,6 +774,125 @@ class SQLiteRecordsReader:
         ) as exc:
             raise RecordsSourceError() from exc
 
+    def lead_detail(
+        self,
+        lead_id: str,
+        *,
+        executions: Sequence[ExecutionLink] = (),
+        generated_at: datetime,
+        limit: int = 200,
+    ) -> LeadDetail | None:
+        try:
+            exact_lead_id = _require_text(lead_id, "lead id", maximum=256)
+            links = self._execution_links(executions)
+            self._validate_generated_at_and_limit(generated_at, limit)
+            projected = self._consistent_projection(links)
+            summary = next(
+                (value for value in projected.leads if value.lead_id == exact_lead_id),
+                None,
+            )
+            if summary is None:
+                return None
+
+            def matching(values: Sequence[object]) -> tuple[object, ...]:
+                return tuple(
+                    value
+                    for value in values
+                    if getattr(value, "lead_id", None) == exact_lead_id
+                )
+
+            facts = matching(projected.facts)
+            turns = matching(projected.dialogue_turns)
+            raw_manifests = matching(projected.passenger_manifests)
+            if any(type(value) is not PassengerManifestRecord for value in raw_manifests):
+                raise ValueError("invalid passenger manifest projection")
+            manifests = tuple(
+                passenger_manifest_summary(value)
+                for value in raw_manifests
+            )
+            inbound = matching(projected.inbound_events)
+            replies = matching(projected.public_replies)
+            reservations = matching(projected.reservations)
+            payments = matching(projected.payments)
+            handoffs = matching(projected.handoffs)
+            exact_executions = tuple(
+                value for value in links if value.lead_id == exact_lead_id
+            )
+            collections = (
+                facts,
+                turns,
+                manifests,
+                inbound,
+                replies,
+                reservations,
+                payments,
+                handoffs,
+                exact_executions,
+            )
+            return LeadDetail(
+                generated_at=generated_at,
+                summary=summary,
+                facts=tuple(facts[:limit]),
+                dialogue_turns=tuple(turns[:limit]),
+                passenger_manifests=tuple(manifests[:limit]),
+                inbound_events=tuple(inbound[:limit]),
+                public_replies=tuple(replies[:limit]),
+                reservations=tuple(reservations[:limit]),
+                payments=tuple(payments[:limit]),
+                handoffs=tuple(handoffs[:limit]),
+                executions=exact_executions[:limit],
+                truncated=any(len(values) > limit for values in collections),
+            )
+        except RecordsSourceError:
+            raise
+        except (
+            OSError,
+            sqlite3.Error,
+            TypeError,
+            ValueError,
+            UnicodeError,
+            InvalidOperation,
+        ) as exc:
+            raise RecordsSourceError() from exc
+
+    @staticmethod
+    def _execution_links(executions: Sequence[ExecutionLink]) -> tuple[ExecutionLink, ...]:
+        links = tuple(executions)
+        if any(type(link) is not ExecutionLink for link in links):
+            raise ValueError("execution links must be exact ExecutionLink values")
+        return links
+
+    @staticmethod
+    def _validate_generated_at_and_limit(generated_at: datetime, limit: int) -> None:
+        if type(generated_at) is not datetime or generated_at.tzinfo is not timezone.utc:
+            raise ValueError("generated_at must be an exact UTC datetime")
+        if type(limit) is not int or not 1 <= limit <= 10_000:
+            raise ValueError("limit is outside the closed range")
+
+    def _consistent_projection(
+        self,
+        links: tuple[ExecutionLink, ...],
+    ) -> _ProjectedRecords:
+        for _attempt in range(3):
+            before_token = self.change_token()
+            raw = self._read_sources()
+            after_token = self.change_token()
+            if before_token == after_token:
+                return self._project(raw, links)
+        raise RecordsSourceError()
+
+    def change_token(self) -> str:
+        try:
+            fingerprint = self._source_fingerprint()
+            return hashlib.sha256(
+                b"v2-ops-records-files-v1\0"
+                + _canonical_json(fingerprint).encode("utf-8")
+            ).hexdigest()
+        except RecordsSourceError:
+            raise
+        except (OSError, TypeError, ValueError) as exc:
+            raise RecordsSourceError() from exc
+
     def _validated_root(self) -> Path:
         root = self._root
         if root.is_symlink() or not root.exists() or not root.is_dir():
@@ -620,58 +902,134 @@ class SQLiteRecordsReader:
             raise RecordsSourceError()
         return resolved
 
-    def _connection(self, path: Path) -> sqlite3.Connection:
+    def _validated_source_path(self, path: Path, *, required: bool) -> os.stat_result | None:
         root = self._validated_root()
-        if path.parent != root or path.is_symlink():
+        if path.parent != root:
+            raise RecordsSourceError()
+        if not os.path.lexists(path):
+            if required:
+                raise RecordsSourceError()
+            return None
+        if path.is_symlink():
             raise RecordsSourceError()
         details = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(details.st_mode) or path.resolve(strict=True) != path:
             raise RecordsSourceError()
+        return details
+
+    def _source_fingerprint(self) -> tuple[tuple[object, ...], ...]:
+        root = self._validated_root()
+        values: list[tuple[object, ...]] = []
+        for source_name in _SOURCE_NAMES:
+            source = root / source_name
+            details = self._validated_source_path(source, required=True)
+            if details is None:
+                raise RecordsSourceError()
+            values.append(
+                (
+                    source_name,
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_size,
+                    details.st_mtime_ns,
+                )
+            )
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(f"{source}{suffix}")
+                sidecar_details = self._validated_source_path(sidecar, required=False)
+                if sidecar_details is not None:
+                    values.append(
+                        (
+                            f"{source_name}{suffix}",
+                            sidecar_details.st_dev,
+                            sidecar_details.st_ino,
+                            sidecar_details.st_size,
+                            sidecar_details.st_mtime_ns,
+                        )
+                    )
+        return tuple(values)
+
+    def _connection(self, path: Path, *, source: bool) -> sqlite3.Connection:
+        if source:
+            if self._validated_source_path(path, required=True) is None:
+                raise RecordsSourceError()
+        elif path.is_symlink() or not path.is_file():
+            raise RecordsSourceError()
         uri = f"file:{quote(str(path), safe='/')}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=0.25)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA query_only=ON")
-        connection.execute("PRAGMA trusted_schema=OFF")
-        connection.execute("PRAGMA busy_timeout=250")
-        query_only = connection.execute("PRAGMA query_only").fetchone()
-        if query_only is None or query_only[0] != 1:
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA trusted_schema=OFF")
+            connection.execute("PRAGMA busy_timeout=250")
+            query_only = connection.execute("PRAGMA query_only").fetchone()
+            if query_only is None or query_only[0] != 1:
+                raise RecordsSourceError()
+            attached = connection.execute("PRAGMA database_list").fetchall()
+            if len(attached) != 1 or Path(attached[0][2]).resolve(strict=True) != path:
+                raise RecordsSourceError()
+            return connection
+        except BaseException:
             connection.close()
-            raise RecordsSourceError()
-        attached = connection.execute("PRAGMA database_list").fetchall()
-        if len(attached) != 1 or Path(attached[0][2]).resolve(strict=True) != path:
-            connection.close()
-            raise RecordsSourceError()
-        return connection
+            raise
+
+    def _copy_sources(self, destination: Path) -> None:
+        root = self._validated_root()
+        for source_name in _SOURCE_NAMES:
+            source = root / source_name
+            if self._validated_source_path(source, required=True) is None:
+                raise RecordsSourceError()
+            shutil.copyfile(source, destination / source_name)
+            wal = Path(f"{source}-wal")
+            if self._validated_source_path(wal, required=False) is not None:
+                shutil.copyfile(wal, destination / f"{source_name}-wal")
+            self._validated_source_path(Path(f"{source}-shm"), required=False)
+            if os.path.lexists(Path(f"{source}-journal")):
+                raise RecordsSourceError()
 
     def _read_sources(self) -> _RawSources:
-        root = self._validated_root()
         rows: dict[tuple[str, str], tuple[sqlite3.Row, ...]] = {}
-        for source_name in _SOURCE_NAMES:
-            path = root / source_name
-            connection = self._connection(path)
-            try:
-                for table, expected_columns in _SOURCE_TABLES[source_name].items():
-                    live_rows = connection.execute(
-                        f'PRAGMA table_info("{table}")'
-                    ).fetchall()
-                    live = {str(row[1]): str(row[2]).upper() for row in live_rows}
-                    if any(live.get(name) != declared for name, declared in expected_columns):
-                        raise RecordsSourceError()
-                    column_sql = ",".join(f'"{name}"' for name, _ in expected_columns)
-                    selected = connection.execute(
-                        f'SELECT {column_sql} FROM "{table}"'
-                    ).fetchall()
-                    rows[(source_name, table)] = tuple(selected)
-            finally:
-                connection.close()
+        with tempfile.TemporaryDirectory(prefix="v2-ops-records-") as directory:
+            copied_root = Path(directory)
+            self._copy_sources(copied_root)
+            for source_name in _SOURCE_NAMES:
+                path = copied_root / source_name
+                connection = self._connection(path, source=False)
+                try:
+                    connection.execute("BEGIN")
+                    for table, expected_columns in _SOURCE_TABLES[source_name].items():
+                        object_rows = connection.execute(
+                            "SELECT type FROM sqlite_schema WHERE name=?",
+                            (table,),
+                        ).fetchall()
+                        if len(object_rows) != 1 or object_rows[0][0] != "table":
+                            raise RecordsSourceError()
+                        live_rows = connection.execute(
+                            f'PRAGMA table_info("{table}")'
+                        ).fetchall()
+                        live = {str(row[1]): str(row[2]).upper() for row in live_rows}
+                        if any(
+                            live.get(name) != declared for name, declared in expected_columns
+                        ):
+                            raise RecordsSourceError()
+                        column_sql = ",".join(
+                            f'"{name}"' for name, _ in expected_columns
+                        )
+                        selected = connection.execute(
+                            f'SELECT {column_sql} FROM "{table}"'
+                        ).fetchall()
+                        rows[(source_name, table)] = tuple(selected)
+                finally:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    connection.close()
         return _RawSources(rows=rows)
 
     def _project(
         self,
         raw: _RawSources,
         executions: tuple[ExecutionLink, ...],
-        generated_at: datetime,
-    ) -> RecordsSnapshot:
+    ) -> _ProjectedRecords:
         facts = self._facts(raw)
         turns = self._dialogue_turns(raw)
         manifests = self._passenger_manifests(raw)
@@ -705,8 +1063,7 @@ class SQLiteRecordsReader:
                 item.phase == "initiation" for item in payments
             ),
             settled_payment_count=sum(
-                item.phase == "settlement" and item.status_code == "settled"
-                for item in payments
+                item.phase == "settlement" and item.settled for item in payments
             ),
             handoff_count=len(handoffs),
             payment_receipt_count=len(
@@ -716,26 +1073,7 @@ class SQLiteRecordsReader:
                 raw.table("v2-followup.sqlite3", "handoff_receipts")
             ),
         )
-        generated_at_text = generated_at.isoformat()
-        token_material = {
-            "summary": asdict(summary),
-            "leads": [asdict(value) for value in leads],
-            "facts": [asdict(value) for value in facts],
-            "turns": [asdict(value) for value in turns],
-            "manifests": [asdict(value) for value in manifests],
-            "inbound": [asdict(value) for value in inbound],
-            "replies": [asdict(value) for value in replies],
-            "reservations": [asdict(value) for value in reservations],
-            "payments": [asdict(value) for value in payments],
-            "handoffs": [asdict(value) for value in handoffs],
-        }
-        change_token = hashlib.sha256(
-            b"v2-ops-records-snapshot-v1\0" + _canonical_json(token_material).encode("utf-8")
-        ).hexdigest()
-        return RecordsSnapshot(
-            generated_at=generated_at_text,
-            change_token=change_token,
-            source_names=_SOURCE_NAMES,
+        return _ProjectedRecords(
             summary=summary,
             leads=leads,
             facts=facts,
@@ -925,10 +1263,14 @@ class SQLiteRecordsReader:
         boundary: dict[str, tuple[str, dict[str, object], str]] = {}
         for row in raw.table("v2-boundary.sqlite3", "boundary_commands"):
             command_id = _require_text(row["command_id"], "boundary command id", maximum=256)
+            command_type = _require_text(
+                row["command_type"], "boundary command type", maximum=128
+            )
+            if command_type != "reservation":
+                continue
             payload = _json_object(row["command_json"], "boundary command")
             if payload.get("type") != "reservation_command":
-                _wire_data(payload, "boundary command")
-                continue
+                raise ValueError("reservation command discriminator mismatch")
             data = self._reservation_command_data(
                 payload, expected_command_id=command_id
             )
@@ -975,7 +1317,11 @@ class SQLiteRecordsReader:
         bokun: dict[str, str] = {}
         for row in raw.table("v2-bokun-audit.sqlite3", "bokun_audit_tasks"):
             command_id = _require_text(row["command_id"], "Bokun command id", maximum=256)
-            booking_id = _require_text(row["booking_id"], "Bokun booking id", maximum=256)
+            booking_id = _optional_identifier(
+                row["booking_id"], "Bokun booking id", maximum=256
+            )
+            if booking_id is None:
+                continue
             if command_id in bokun and bokun[command_id] != booking_id:
                 raise ValueError("ambiguous Bokun booking id")
             bokun[command_id] = booking_id
@@ -985,9 +1331,11 @@ class SQLiteRecordsReader:
             command_id = _require_text(
                 row["command_id"], "Cloudbeds command id", maximum=256
             )
-            reservation_id = _require_text(
+            reservation_id = _optional_identifier(
                 row["reservation_id"], "Cloudbeds reservation id", maximum=256
             )
+            if reservation_id is None:
+                continue
             if command_id in cloudbeds and cloudbeds[command_id] != reservation_id:
                 raise ValueError("ambiguous Cloudbeds reservation id")
             cloudbeds[command_id] = reservation_id
@@ -1088,9 +1436,9 @@ class SQLiteRecordsReader:
                 ledger_status = _require_text(
                     ledger[command_id][1]["status"], "reservation ledger status", maximum=64
                 )
-                if ledger_status in {"queued", "leased", "dispatch_fenced"}:
-                    status_code = "processing"
-                    status_label = "Em processamento"
+                if ledger_status in {"outcome_recorded", "manual_review"}:
+                    status_code = "outcome_recorded"
+                    status_label = "Outcome registrado"
                 else:
                     status_code = "preparing"
                     status_label = "Em preparação"
@@ -1221,6 +1569,7 @@ class SQLiteRecordsReader:
                 raise ValueError("payment updated_at unavailable")
             reservation = anchors.get(anchor_id)
             payment = PaymentRecord(
+                record_id=initiation_id,
                 lead_id=reservation.lead_id if reservation is not None else None,
                 phase="initiation",
                 payment_id=payment_id,
@@ -1234,6 +1583,10 @@ class SQLiteRecordsReader:
                 due_kind=due_kind,
                 status_code=status_code,
                 status_label=_status_label(status_code, labels, "Iniciação"),
+                settled=False,
+                workflow_status=None,
+                ledger_status=None,
+                outcome_certainty=None,
                 reconciliation_status=reconciliation[0] if reconciliation is not None else None,
                 payment_link_prepared=link_ready,
                 steps=ordered_steps,
@@ -1338,14 +1691,19 @@ class SQLiteRecordsReader:
                     )
                     settled = certainty == "settled" and registered and target_confirmed
                     if settled:
-                        amount_paid = amount_due
                         settled_at = _timestamp(
                             ledger_row["outcome_recorded_at"],
                             "settlement outcome recorded_at",
                         )
-                status_code = "settled" if settled else certainty or ledger_status
+                status_code = (
+                    "settled"
+                    if settled
+                    else "outcome_recorded" if outcome is not None else "preparing"
+                )
                 labels = {
                     "settled": "Pagamento liquidado",
+                    "outcome_recorded": "Outcome de liquidação registrado",
+                    "preparing": "Liquidação em preparação",
                     "partial_settlement": "Liquidação parcial",
                     "dispatched_unknown": "Liquidação incerta",
                     "dispatched_no_effect": "Despachado sem efeito confirmado",
@@ -1362,6 +1720,7 @@ class SQLiteRecordsReader:
                     raise ValueError("settlement updated_at unavailable")
                 result.append(
                     PaymentRecord(
+                        record_id=settlement_command_id or payment_id,
                         lead_id=lead_id,
                         phase="settlement",
                         payment_id=payment_id,
@@ -1375,6 +1734,10 @@ class SQLiteRecordsReader:
                         due_kind=None,
                         status_code=status_code,
                         status_label=_status_label(status_code, labels, "Liquidação"),
+                        settled=settled,
+                        workflow_status=workflow_status,
+                        ledger_status=ledger_status if ledger_row is not None else None,
+                        outcome_certainty=certainty,
                         reconciliation_status=None,
                         payment_link_prepared=False,
                         steps=(),
@@ -1483,7 +1846,7 @@ class SQLiteRecordsReader:
         handoffs: tuple[HandoffRecord, ...],
         executions: tuple[ExecutionLink, ...],
         raw: _RawSources,
-    ) -> tuple[LeadRecord, ...]:
+    ) -> tuple[LeadSummary, ...]:
         lead_ids: set[str] = set(boundary_states)
         activity: dict[str, list[str]] = defaultdict(list)
 
@@ -1527,7 +1890,7 @@ class SQLiteRecordsReader:
         def count(values: Iterable[object], lead_id: str) -> int:
             return sum(getattr(value, "lead_id", None) == lead_id for value in values)
 
-        result: list[LeadRecord] = []
+        result: list[LeadSummary] = []
         for lead_id in sorted(lead_ids):
             lead_reservations = tuple(
                 item for item in reservations if item.lead_id == lead_id
@@ -1563,7 +1926,7 @@ class SQLiteRecordsReader:
             else:
                 state_code, state_label = "execution_only", "Somente execução"
             result.append(
-                LeadRecord(
+                LeadSummary(
                     lead_id=lead_id,
                     first_activity_at=min(activity[lead_id]) if activity[lead_id] else None,
                     last_activity_at=max(activity[lead_id]) if activity[lead_id] else None,

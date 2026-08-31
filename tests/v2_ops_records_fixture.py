@@ -322,11 +322,13 @@ def write_records_fixture(root: Path) -> RecordsFixtureIdentity:
                 updated_at TEXT NOT NULL
             )""",
             """CREATE TABLE execution_ledger (
-                command_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+                command_id TEXT PRIMARY KEY, status TEXT NOT NULL
+                    CHECK (status IN ('queued','preparing','dispatch_fenced','outcome_recorded','manual_review')),
                 claim_owner TEXT, fencing_token INTEGER NOT NULL,
                 lease_acquired_at TEXT, lease_expires_at TEXT,
                 claim_count INTEGER NOT NULL, preparation_failures INTEGER NOT NULL,
-                dispatch_slots_consumed INTEGER NOT NULL,
+                dispatch_slots_consumed INTEGER NOT NULL
+                    CHECK (dispatch_slots_consumed IN (0,1)),
                 dispatch_request_hash TEXT, dispatch_fenced_at TEXT,
                 outcome_json TEXT, outcome_hash TEXT, updated_at TEXT NOT NULL
             )""",
@@ -363,7 +365,7 @@ def write_records_fixture(root: Path) -> RecordsFixtureIdentity:
         "INSERT INTO execution_ledger VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             identity.command_id,
-            "completed",
+            "outcome_recorded",
             None,
             1,
             None,
@@ -415,7 +417,8 @@ def write_records_fixture(root: Path) -> RecordsFixtureIdentity:
                 initiation_id TEXT PRIMARY KEY, selection_json BLOB NOT NULL,
                 selection_hash TEXT NOT NULL, status TEXT NOT NULL,
                 claim_owner TEXT, fencing_token INTEGER NOT NULL,
-                lease_expires_at TEXT, dispatch_slots INTEGER NOT NULL,
+                lease_expires_at TEXT, dispatch_slots INTEGER NOT NULL
+                    CHECK (dispatch_slots IN (0,1)),
                 result_json BLOB, result_hash TEXT, updated_at TEXT NOT NULL
             )""",
             """CREATE TABLE stripe_reconciliations (
@@ -444,7 +447,7 @@ def write_records_fixture(root: Path) -> RecordsFixtureIdentity:
             None,
             1,
             None,
-            3,
+            1,
             sqlite3.Binary(b"encrypted-result-excluded"),
             "7" * 64,
             NOW,

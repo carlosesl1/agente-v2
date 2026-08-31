@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -14,6 +16,7 @@ if str(ROOT) not in sys.path:
 from v2_ops.auth import hash_password
 from v2_ops.contracts import ExecutionStatus, NodeType, OpsExecution, OpsNodeFinish, OpsNodeStart
 from v2_ops.store import SQLiteOpsTraceWriter
+from tests.v2_ops_records_fixture import write_records_fixture
 
 
 ARTIFACTS = ROOT / "artifacts" / "ops-dashboard"
@@ -27,6 +30,17 @@ PASSWORD = "ops-smoke-password"
 
 def _smoke_bytecode_paths() -> tuple[Path, ...]:
     return tuple(sorted((ARTIFACTS / "__pycache__").glob("smoke_server*.pyc")))
+
+
+def _records_fingerprint(root: Path) -> tuple[tuple[str, int, str], ...]:
+    return tuple(
+        (
+            str(path.relative_to(root)),
+            path.stat().st_size,
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        for path in sorted(path for path in root.rglob("*") if path.is_file())
+    )
 
 
 def _write_fixture(path: Path, key: bytes, now: datetime) -> str:
@@ -142,12 +156,18 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
       page.locator('button[type="submit"]').click(),
     ]);
     await page.locator('#kpi-grid .kpi-card').first().waitFor();
+    await page.locator('#record-summary-grid .record-summary-card').first().waitFor();
     if (!(await page.locator('#app-sidebar .brand-lockup').isVisible())) throw new Error('desktop brand lockup missing');
     if (await page.locator('#kpi-grid .kpi-card').count() !== 8) throw new Error('expected exactly eight KPI cards');
     if (await page.locator('#kpi-grid .kpi-icon').count() !== 8) throw new Error('expected eight KPI icons');
     if (!(await page.locator('.welcome-row').isVisible())) throw new Error('welcome row missing');
     if (await page.locator('.analytics-panel').count() !== 5) throw new Error('expected five analytics panels');
-    if (!(await page.locator('.operations-head').isVisible())) throw new Error('operations heading missing');
+    const recordsPayload = await page.evaluate(async () => {{
+      const response = await fetch('/ops/api/records', {{credentials: 'same-origin'}});
+      if (!response.ok) throw new Error(`records HTTP ${{response.status}}`);
+      return response.json();
+    }});
+    if (await page.locator('#record-summary-grid .record-summary-card').count() !== 6) throw new Error('expected six factual record cards');
     const cards = await page.locator('#kpi-grid .kpi-card').allTextContents();
     const expectedCards = [
       ['Execuções', '2'], ['Leads distintos', '2'], ['Em andamento', '1'],
@@ -307,10 +327,51 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     }}));
     if (!desktopLayout.noOverflow || desktopLayout.sidebarWidth < 230 || desktopLayout.kpiColumns !== 4 || JSON.stringify(desktopLayout.analyticsRowOccupancies) !== '[2,3]') throw new Error(JSON.stringify(desktopLayout));
     assertGeometry(await geometryContract('desktop-1440x1000'));
-    await page.screenshot({{path: path.join(artifacts, 'desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.screenshot({{path: path.join(artifacts, 'overview-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
+    await page.click('#nav-leads');
+    await page.locator('#lead-table-body > tr').first().waitFor();
+    if (await page.locator('#lead-table-body > tr').count() !== recordsPayload.leads.length) throw new Error('lead list cardinality mismatch');
+    if (!(await noOverflow())) throw new Error('desktop leads overflow');
+    await page.screenshot({{path: path.join(artifacts, 'leads-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    const commercialLead = recordsPayload.leads.find(lead => lead.reservation_count > 0 || lead.fact_count > 0);
+    if (!commercialLead) throw new Error('commercial fixture lead unavailable');
+    const commercialRow = page.locator('#lead-table-body > tr').filter({{hasText: commercialLead.lead_id}});
+    await commercialRow.locator('.lead-open').click();
+    await page.locator('#lead-detail-title').waitFor();
+    await page.waitForFunction(leadId => document.querySelector('#lead-detail-title')?.textContent === leadId, commercialLead.lead_id);
+    if (!(await page.locator('#lead-detail').isVisible())) throw new Error('lead detail missing');
+    if (!(await noOverflow())) throw new Error('desktop lead detail overflow');
+    await page.screenshot({{path: path.join(artifacts, 'lead-detail-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
+    await page.click('#nav-reservations');
+    if (await page.locator('#reservation-table-body > tr').count() !== recordsPayload.reservations.length) throw new Error('reservation cardinality mismatch');
+    const confirmedReservation = recordsPayload.reservations.find(reservation => reservation.status_code === 'confirmed');
+    if (confirmedReservation && !(await page.locator('#reservation-table-body').textContent()).includes(confirmedReservation.status_label)) throw new Error('confirmed reservation label missing');
+    if (!(await noOverflow())) throw new Error('desktop reservations overflow');
+    await page.screenshot({{path: path.join(artifacts, 'reservations-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
+    await page.click('#nav-payments');
+    if (await page.locator('#payment-table-body > tr').count() !== recordsPayload.payments.length) throw new Error('payment cardinality mismatch');
+    const unsettled = recordsPayload.payments.find(payment => payment.payment_link_prepared && !payment.settled);
+    if (unsettled) {{
+      const paymentText = await page.locator('#payment-table-body').textContent();
+      if (!paymentText.includes(unsettled.status_label) || !paymentText.includes('Não registrado')) throw new Error('payment initiation promoted or missing');
+    }}
+    if (!(await noOverflow())) throw new Error('desktop payments overflow');
+    await page.screenshot({{path: path.join(artifacts, 'payments-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
+    await page.click('#nav-handoffs');
+    if (await page.locator('#handoff-table-body > tr').count() !== recordsPayload.handoffs.length) throw new Error('handoff cardinality mismatch');
+    if (!recordsPayload.handoffs.length && !(await page.locator('#handoff-empty-state').isVisible())) throw new Error('factual handoff empty state missing');
+    if (!(await noOverflow())) throw new Error('desktop handoffs overflow');
+    await page.screenshot({{path: path.join(artifacts, 'handoffs-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
+    await page.click('#nav-execution');
+    if (!(await page.locator('.operations-head').isVisible())) throw new Error('operations heading missing');
+    await page.screenshot({{path: path.join(artifacts, 'executions-desktop-1440x1000.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
 
     await page.selectOption('#range-select', '24h');
-    await page.locator('#kpi-grid .kpi-card strong').first().waitFor();
     await page.waitForFunction(() => document.querySelector('#kpi-grid .kpi-card strong')?.textContent === '1');
     await page.selectOption('#range-select', '30d');
     await page.waitForFunction(() => document.querySelector('#kpi-grid .kpi-card strong')?.textContent === '3');
@@ -323,7 +384,7 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     const desktopTrigger = page.locator('#execution-table-body .execution-link');
     await desktopTrigger.click();
     await page.locator('#execution-timeline .execution-step').first().waitFor();
-    if (!(await page.locator('#overview-view').isVisible())) throw new Error('overview hidden behind desktop drawer');
+    if (!(await page.locator('#executions-view').isVisible())) throw new Error('execution context hidden behind desktop drawer');
     if (await page.locator('#execution-drawer').getAttribute('aria-hidden') !== 'false') throw new Error('desktop drawer aria state mismatch');
     if (await page.locator('#execution-timeline > .timeline-item > .execution-step').count() !== 3) throw new Error('timeline hierarchy/count mismatch');
     const firstStep = page.locator('#execution-timeline .execution-step').first();
@@ -377,10 +438,9 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
 
     await page.setViewportSize({{width: 390, height: 844}});
     await page.waitForTimeout(100);
+    await page.evaluate(() => setActiveView('overview', false));
     if (!(await noOverflow())) throw new Error('mobile body overflow');
     if (!(await page.locator('#mobile-menu').isVisible())) throw new Error('mobile menu missing');
-    if (await page.locator('.operations-panel table').isVisible()) throw new Error('desktop table visible on mobile');
-    if (!(await page.locator('#execution-mobile-list').isVisible())) throw new Error('mobile cards missing');
     const mobileLayout = await page.evaluate(() => ({{
       kpiColumns: getComputedStyle(document.querySelector('#kpi-grid')).gridTemplateColumns.split(' ').length,
       sidebarPosition: getComputedStyle(document.querySelector('#app-sidebar')).position,
@@ -402,12 +462,16 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     }}));
     if (mobileLayout.kpiColumns !== 2 || mobileLayout.sidebarPosition !== 'fixed' || mobileLayout.closedSidebarRight > 0 || !mobileLayout.kpiContentContained) throw new Error(`mobile layout mismatch: ${{JSON.stringify(mobileLayout)}}`);
     assertGeometry(await geometryContract('mobile-390x844'));
+    await page.screenshot({{path: path.join(artifacts, 'overview-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
     await page.click('#mobile-menu');
     if (!(await page.locator('#app-sidebar').evaluate(el => el.classList.contains('mobile-open')))) throw new Error('mobile sidebar did not open');
     await page.locator('#sidebar-backdrop').click({{position: {{x: 380, y: 100}}}});
+    await page.evaluate(() => setActiveView('executions', false));
+    if (await page.locator('.operations-panel table').isVisible()) throw new Error('desktop table visible on mobile');
+    if (!(await page.locator('#execution-mobile-list').isVisible())) throw new Error('mobile cards missing');
     const mobileCards = await page.locator('.execution-mobile-card').count();
     if (mobileCards !== 1) throw new Error(`mobile filtered card count mismatch: ${{mobileCards}}`);
-    await page.screenshot({{path: path.join(artifacts, 'mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.screenshot({{path: path.join(artifacts, 'executions-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
     const mobileTrigger = page.locator('.execution-mobile-card .execution-link');
     await mobileTrigger.click();
     await page.locator('#execution-timeline .execution-step').first().waitFor();
@@ -432,6 +496,25 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
     await page.keyboard.press('Escape');
     if (!(await mobileTrigger.evaluate(el => el === document.activeElement))) throw new Error('Escape did not restore mobile trigger focus');
 
+    await page.evaluate(() => {{
+      setActiveView('leads', false);
+      document.querySelector('#lead-detail').hidden = true;
+    }});
+    if (!(await noOverflow())) throw new Error('mobile leads overflow');
+    await page.screenshot({{path: path.join(artifacts, 'leads-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.evaluate(() => renderLeadDetail());
+    if (!(await noOverflow())) throw new Error('mobile lead detail overflow');
+    await page.screenshot({{path: path.join(artifacts, 'lead-detail-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.evaluate(() => setActiveView('reservations', false));
+    if (!(await page.locator('#reservation-mobile-list').isVisible()) || !(await noOverflow())) throw new Error('mobile reservations layout');
+    await page.screenshot({{path: path.join(artifacts, 'reservations-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.evaluate(() => setActiveView('payments', false));
+    if (!(await page.locator('#payment-mobile-list').isVisible()) || !(await noOverflow())) throw new Error('mobile payments layout');
+    await page.screenshot({{path: path.join(artifacts, 'payments-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+    await page.evaluate(() => setActiveView('handoffs', false));
+    if (!(await noOverflow())) throw new Error('mobile handoffs layout');
+    await page.screenshot({{path: path.join(artifacts, 'handoffs-mobile-390x844.png'), fullPage: true, animations: 'allow', caret: 'initial'}});
+
     await page.waitForTimeout(100);
     if (errors.length) throw new Error(`page/console errors: ${{errors.join(' | ')}}`);
     if (failedRequests.length) throw new Error(`failed requests: ${{failedRequests.join(' | ')}}`);
@@ -443,12 +526,25 @@ test('desktop and mobile operational dashboard geometry', async ({{browser}}) =>
 
 def main() -> None:
     screenshots = (
-        ARTIFACTS / "desktop-1440x1000.png",
-        ARTIFACTS / "mobile-390x844.png",
+        ARTIFACTS / "overview-desktop-1440x1000.png",
+        ARTIFACTS / "leads-desktop-1440x1000.png",
+        ARTIFACTS / "lead-detail-desktop-1440x1000.png",
+        ARTIFACTS / "executions-desktop-1440x1000.png",
+        ARTIFACTS / "reservations-desktop-1440x1000.png",
+        ARTIFACTS / "payments-desktop-1440x1000.png",
+        ARTIFACTS / "handoffs-desktop-1440x1000.png",
+        ARTIFACTS / "overview-mobile-390x844.png",
+        ARTIFACTS / "leads-mobile-390x844.png",
+        ARTIFACTS / "lead-detail-mobile-390x844.png",
+        ARTIFACTS / "executions-mobile-390x844.png",
+        ARTIFACTS / "reservations-mobile-390x844.png",
+        ARTIFACTS / "payments-mobile-390x844.png",
+        ARTIFACTS / "handoffs-mobile-390x844.png",
         ARTIFACTS / "drawer-desktop-1440x1000.png",
         ARTIFACTS / "drawer-mobile-390x844.png",
     )
     database = ARTIFACTS / "smoke.sqlite3"
+    records_root = ARTIFACTS / "records"
     spec = ARTIFACTS / "smoke.spec.js"
     server_module = ARTIFACTS / "smoke_server.py"
     generated = (
@@ -463,6 +559,7 @@ def main() -> None:
     browser_capability_ready = False
     try:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(records_root, ignore_errors=True)
         for screenshot in screenshots:
             screenshot.unlink(missing_ok=True)
         for path in generated:
@@ -476,6 +573,8 @@ def main() -> None:
         key = b"t" * 32
         now = datetime.now(timezone.utc).replace(microsecond=0)
         execution_id = _write_fixture(database, key, now)
+        write_records_fixture(records_root)
+        records_before = _records_fingerprint(records_root)
         password_hash = hash_password(PASSWORD, salt=b"s" * 16)
         server_module.write_text(
             "from pathlib import Path\n"
@@ -484,11 +583,13 @@ def main() -> None:
             "from v2_ops.store import SQLiteOpsTraceReader\n"
             f"key = {key!r}\n"
             "database = Path('/artifacts/smoke.sqlite3')\n"
+            "records = Path('/artifacts/records')\n"
             "settings = OpsWebSettings(\n"
             f"    username={USERNAME!r}, password_hash={password_hash!r},\n"
             "    session_key=b'k' * 32, trace_path=database, trace_key=key,\n"
             "    secure_cookie=False, release_sha='a' * 40,\n"
             "    image_digest='sha256:' + 'b' * 64, config_fingerprint='c' * 64,\n"
+            "    records_path=records,\n"
             ")\n"
             "app = create_ops_app(settings, reader=SQLiteOpsTraceReader(database, key))\n",
             encoding="utf-8",
@@ -519,6 +620,8 @@ def main() -> None:
             check=False,
         )
         output = completed.stdout + completed.stderr
+        if _records_fingerprint(records_root) != records_before:
+            raise RuntimeError("browser smoke mutated the commercial SQLite fixture")
         required_markers = (
             "browser_contract=PASS",
             "timeline_desktop=PASS",
@@ -544,10 +647,9 @@ def main() -> None:
         print("ops_dashboard_smoke=PASS")
         print("chromium_workers=1")
         print("chromium_skips=0")
-        print(f"desktop_screenshot={screenshots[0]}")
-        print(f"mobile_screenshot={screenshots[1]}")
-        print(f"drawer_desktop_screenshot={screenshots[2]}")
-        print(f"drawer_mobile_screenshot={screenshots[3]}")
+        print("records_sqlite_invariance=PASS")
+        for screenshot in screenshots:
+            print(f"screenshot={screenshot}")
     finally:
         primary_failure = sys.exc_info()[0] is not None
         cleanup_error: OSError | RuntimeError | None = None
@@ -568,6 +670,13 @@ def main() -> None:
             except OSError as exc:
                 if not primary_failure and cleanup_error is None:
                     cleanup_error = exc
+        try:
+            shutil.rmtree(records_root, ignore_errors=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            if not primary_failure and cleanup_error is None:
+                cleanup_error = exc
         residual_bytecode = _smoke_bytecode_paths()
         if residual_bytecode and not primary_failure and cleanup_error is None:
             cleanup_error = RuntimeError(f"smoke server left bytecode: {residual_bytecode}")

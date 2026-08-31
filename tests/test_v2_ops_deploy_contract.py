@@ -51,6 +51,7 @@ def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
         "V2_OPS_IMAGE_DIGEST",
         "V2_OPS_CONFIG_FINGERPRINT",
     }
+    assert environment["V2_OPS_RECORDS_PATH"] == "/data/records"
     for forbidden in ("cloudbeds", "bokun", "stripe", "manychat", "provider"):
         assert forbidden not in " ".join(environment).casefold()
 

@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import inspect
+import json
 import sqlite3
 from urllib.parse import quote
 
@@ -134,6 +135,7 @@ def test_records_and_lead_detail_are_allowlisted_etagged_and_factual(
     assert payload["reservations"][0]["status_code"] == "confirmed"
     assert payload["reservations"][0]["bokun_booking_id"] is None
     assert payload["reservations"][0]["cloudbeds_reservation_id"] is None
+    assert payload["payments"][0]["record_id"] == identity.initiation_id
     assert payload["payments"][0]["status_code"] == "link_ready"
     assert payload["payments"][0]["amount_paid_minor"] is None
     assert payload["handoffs"] == []
@@ -290,7 +292,7 @@ def test_sse_combines_records_change_token_without_second_endpoint() -> None:
     source = inspect.getsource(create_ops_app)
 
     assert source.count('@app.get("/ops/api/events")') == 1
-    assert "snapshot.change_token" in source
+    assert "commercial_reader.change_token()" in source
     assert '"records_change_token"' in source
 
 
@@ -340,3 +342,70 @@ def test_csv_formula_cells_are_neutralized_and_lead_history_requires_exact_id(
     assert response.status_code == 200
     assert b"'=danger" in response.content
     assert b"=danger," not in response.content
+
+
+def test_lead_history_flattens_manifest_without_raw_json(tmp_path: Path) -> None:
+    client, root, identity = _build_records_client(tmp_path)
+    manifest = {
+        "schema": "v2-passenger-manifest-v1",
+        "adults": 1,
+        "children": 0,
+        "passengers": [
+            {
+                "position": 1,
+                "participant_type": "adult",
+                "full_name": "Viajante Fixture",
+                "birth_date": "1990-01-01",
+                "gender": None,
+                "country_code": "BR",
+            }
+        ],
+    }
+    connection = sqlite3.connect(root / "v2-private-customer.sqlite3")
+    connection.execute(
+        "INSERT INTO private_passenger_manifests "
+        "(lead_id, fact_json, fact_hash, source_turn_id, source_event_hash, revision, persisted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            identity.lead_id,
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+            "a" * 64,
+            "turn-manifest-001",
+            "b" * 64,
+            1,
+            NOW.isoformat(),
+        ),
+    )
+    connection.commit()
+    connection.close()
+    _login(client)
+
+    response = client.get(
+        f"/ops/api/exports/lead-history.csv?lead_id={quote(identity.lead_id, safe='')}"
+    )
+
+    assert response.status_code == 200
+    assert b"Viajante Fixture" in response.content
+    assert b"1990-01-01" in response.content
+    assert b"country_code=BR" in response.content
+    assert b"v2-passenger-manifest-v1" not in response.content
+    assert b'manifest_json' not in response.content
+    assert b'\"schema\"' not in response.content
+
+
+def test_export_projection_failure_is_sanitized_as_source_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _root, _identity = _build_records_client(tmp_path)
+    _login(client)
+
+    def fail_projection(*_args: object, **_kwargs: object) -> bytes:
+        raise ValueError("private projection detail")
+
+    monkeypatch.setattr(ops_app, "render_csv", fail_projection)
+    response = client.get("/ops/api/exports/leads.csv")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "records_source_unavailable"}
+    assert "private projection detail" not in response.text

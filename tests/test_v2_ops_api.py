@@ -432,7 +432,7 @@ def test_authenticated_list_detail_nodes_full_and_etag_are_read_only(tmp_path: P
 
     page = client.get("/ops/")
     assert page.status_code == 200
-    assert "Execution Canvas" in page.text
+    assert "Painel operacional" in page.text
 
     executions = client.get("/ops/api/executions?lead_id=manychat%3A123&limit=10")
     assert executions.status_code == 200

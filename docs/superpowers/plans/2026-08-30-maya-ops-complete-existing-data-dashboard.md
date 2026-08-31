@@ -149,7 +149,7 @@ def write_records_fixture(root: Path) -> RecordsFixtureIdentity:
         workflow_id="workflow-records-001",
         payment_id="payment-records-001",
     )
-    # Criar os dez arquivos allowlisted com schemas mínimos que reproduzem
+    # Criar os nove arquivos comerciais allowlisted com schemas mínimos que reproduzem
     # exatamente as colunas autenticadas pelo store ativo. Inserir um lead,
     # diálogo, fatos, reserva confirmada com provider_reference genérica,
     # iniciação Stripe/link aceito e zero settlement/handoff.

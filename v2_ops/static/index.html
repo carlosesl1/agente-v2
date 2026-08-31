@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Maya Ops — Execution Canvas</title>
+  <title>Maya Ops — Painel operacional</title>
   <link rel="stylesheet" href="/ops/static/ops.css">
 </head>
 <body>
@@ -35,10 +35,14 @@
       <p class="nav-label">OPERAÇÃO</p>
       <nav class="main-nav" aria-label="Navegação operacional">
         <button id="nav-overview" class="nav-item active" type="button" aria-current="page"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-house"></use></svg><span>Visão geral</span></button>
-        <button id="nav-execution" class="nav-item" type="button" disabled><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-command"></use></svg><span>Execuções</span></button>
+        <button id="nav-leads" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-users"></use></svg><span>Leads</span></button>
+        <button id="nav-execution" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-command"></use></svg><span>Execuções</span></button>
+        <button id="nav-reservations" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-circle-check"></use></svg><span>Reservas</span></button>
+        <button id="nav-payments" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-percent"></use></svg><span>Pagamentos</span></button>
+        <button id="nav-handoffs" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-user-round-check"></use></svg><span>Handoffs</span></button>
       </nav>
       <div class="sidebar-foot">
-        <div class="source-health"><i class="online-dot" aria-hidden="true"></i><div><strong id="source-health-state">Conectando</strong><small>Fonte operacional</small></div></div>
+        <div class="source-health"><i class="online-dot" aria-hidden="true"></i><div><strong id="source-health-state">Conectando</strong><small>Fontes operacionais</small></div></div>
         <p>Dados existentes · acesso read-only</p>
       </div>
     </aside>
@@ -48,10 +52,10 @@
       <header class="dashboard-header">
         <div class="header-copy">
           <button id="mobile-menu" class="mobile-menu" type="button" aria-label="Abrir navegação"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-menu"></use></svg></button>
-          <div><p class="eyebrow">OPERAÇÃO MAYA V2</p><h1>Painel operacional</h1><p>Execuções e traces já registrados.</p></div>
+          <div><p class="eyebrow">OPERAÇÃO MAYA V2</p><h1 id="header-title">Painel operacional</h1><p id="header-subtitle">Fatos comerciais e execuções já registrados.</p></div>
         </div>
         <div class="header-actions">
-          <label class="range-control"><span>Período</span><select id="range-select"><option value="24h">24 horas</option><option value="7d" selected>7 dias</option><option value="30d">30 dias</option></select></label>
+          <label class="range-control"><span>Período técnico</span><select id="range-select"><option value="24h">24 horas</option><option value="7d" selected>7 dias</option><option value="30d">30 dias</option></select></label>
           <button id="refresh-dashboard" class="icon-button" type="button" aria-label="Atualizar painel"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-refresh-cw"></use></svg><span>Atualizar</span></button>
           <button id="operator-menu" class="operator-button" type="button" aria-expanded="false" aria-controls="operator-popover"><span>OP</span><div><strong>Operador</strong><small>Conta autenticada</small></div></button>
           <div id="operator-popover" class="operator-popover" hidden>
@@ -60,14 +64,20 @@
         </div>
       </header>
 
+      <section id="dashboard-alert" class="alert" hidden aria-live="polite"></section>
+
       <section id="overview-view">
         <div class="welcome-row">
-          <div><p class="eyebrow">VISÃO GERAL</p><h2>Atividade operacional</h2><p>Somente fatos persistidos no trace do V2.</p></div>
+          <div><p class="eyebrow">VISÃO GERAL</p><h2>Atividade operacional</h2><p>Todo o histórico comercial registrado e traces do período técnico selecionado.</p></div>
           <div class="health-pill"><i class="online-dot" aria-hidden="true"></i><strong id="live-state" aria-live="polite">Conectando…</strong><small id="generated-at">Ainda não atualizado</small></div>
         </div>
-        <section id="dashboard-alert" class="alert" hidden aria-live="polite"></section>
-        <section id="kpi-grid" class="kpi-grid" aria-label="Indicadores operacionais" aria-live="polite"></section>
-        <section class="analytics-grid" aria-label="Indicadores analíticos">
+        <section id="record-summary-grid" class="record-summary-grid" aria-label="Resumo comercial registrado" aria-live="polite"></section>
+        <section class="overview-leads-panel records-panel" aria-labelledby="overview-leads-title">
+          <div class="records-head"><div><p class="eyebrow">LEADS</p><h2 id="overview-leads-title">Atividade recente por lead</h2><p>União por Lead ID persistido, sem correlação inferida.</p></div></div>
+          <div id="overview-lead-list" class="overview-lead-list"></div>
+        </section>
+        <section id="kpi-grid" class="kpi-grid" aria-label="Indicadores técnicos" aria-live="polite"></section>
+        <section class="analytics-grid" aria-label="Indicadores analíticos técnicos">
           <article class="analytics-panel panel-volume volume-panel">
             <div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h2>Execuções no período</h2></div><span class="panel-meta">Baldes UTC</span></div>
             <div id="execution-series" class="volume-chart"></div>
@@ -89,12 +99,35 @@
             <div id="top-node-types"></div>
           </article>
         </section>
+      </section>
 
-        <section class="operations-panel" aria-labelledby="operations-title">
-          <div class="operations-head">
-            <div><p class="eyebrow">OPERAÇÕES</p><h2 id="operations-title">Execuções recentes</h2><p>Registros do período selecionado.</p></div>
-            <span class="live-badge"><i class="pulse-dot" aria-hidden="true"></i>Atualização ao vivo</span>
+      <section id="leads-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">LEADS</p><h2>Visão factual por lead</h2><p>Perfil comercial e histórico unidos somente pelo Lead ID persistido.</p></div><button id="export-leads" class="secondary-button" type="button">Exportar leads CSV</button></div>
+        <section class="records-panel" aria-labelledby="leads-table-title">
+          <div class="records-head"><div><h2 id="leads-table-title">Leads registrados</h2><p>Todo o histórico disponível nas fontes ativas.</p></div></div>
+          <div class="table-toolbar"><label class="search-box"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-search"></use></svg><input id="lead-list-search" type="text" autocomplete="off" aria-label="Buscar lead registrado"></label><span id="lead-result-count" class="result-count">0 leads</span></div>
+          <div id="lead-empty-state" class="empty-state" hidden>Nenhum lead registrado.</div>
+          <div class="table-wrap"><table><caption>Leads registrados nas fontes ativas</caption><thead><tr><th scope="col">Lead</th><th scope="col">Estado factual</th><th scope="col">Primeiro registro</th><th scope="col">Último registro</th><th scope="col">Fatos</th><th scope="col">Atendimentos</th><th scope="col">Execuções</th><th scope="col">Reservas</th><th scope="col">Pagamentos</th><th scope="col">Handoffs</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead><tbody id="lead-table-body"></tbody></table></div>
+          <div id="lead-mobile-list" class="records-mobile-list"></div>
+        </section>
+        <article id="lead-detail" class="lead-detail-panel" hidden>
+          <div class="lead-detail-head"><div><p class="eyebrow">DETALHE DO LEAD</p><h2 id="lead-detail-title">Lead</h2><span id="lead-detail-state" class="status-chip neutral">Não registrado</span></div><button id="export-lead-history" class="secondary-button" type="button" disabled>Exportar histórico CSV</button></div>
+          <div id="lead-detail-summary" class="fact-grid"></div>
+          <div class="lead-detail-grid">
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">PERFIL</p><h2>Fatos coletados</h2></div></div><div id="lead-facts" class="detail-list"></div></section>
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">ATENDIMENTO</p><h2>Conversa registrada</h2></div></div><div id="lead-dialogue" class="dialogue-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">RESERVAS</p><h2>Registros do lead</h2></div></div><div id="lead-reservations" class="detail-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">PAGAMENTOS</p><h2>Registros do lead</h2></div></div><div id="lead-payments" class="detail-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">HANDOFFS</p><h2>Registros do lead</h2></div></div><div id="lead-handoffs" class="detail-list"></div></section>
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">EXECUÇÕES</p><h2>Histórico técnico</h2></div></div><div id="lead-executions" class="detail-list"></div></section>
           </div>
+        </article>
+      </section>
+
+      <section id="executions-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">EXECUÇÕES</p><h2>Execuções operacionais</h2><p>Traces do período técnico selecionado com drill-down para Input e Output.</p></div><button id="export-executions" class="secondary-button" type="button">Exportar execuções CSV</button></div>
+        <section class="operations-panel" aria-labelledby="operations-title">
+          <div class="operations-head"><div><p class="eyebrow">OPERAÇÕES</p><h2 id="operations-title">Execuções recentes</h2><p>Registros do período selecionado.</p></div><span class="live-badge"><i class="pulse-dot" aria-hidden="true"></i>Atualização ao vivo</span></div>
           <div class="table-toolbar">
             <label class="search-box"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-search"></use></svg><input id="lead-search" type="text" autocomplete="off" aria-label="Buscar Lead ID"></label>
             <label>Estado<select id="status-filter"><option value="">Todos</option></select></label>
@@ -102,15 +135,24 @@
             <span id="result-count" class="result-count">0 execuções</span>
           </div>
           <div id="empty-state" class="empty-state" hidden>Nenhuma execução registrada neste período.</div>
-          <div class="table-wrap">
-            <table>
-              <caption>Execuções operacionais no período selecionado</caption>
-              <thead><tr><th scope="col">Lead</th><th scope="col">Execução</th><th scope="col">Recebida</th><th scope="col">Duração</th><th scope="col">Estado</th><th scope="col">Trace</th><th scope="col">Nó atual</th><th scope="col">Nós</th><th scope="col">Marcos</th><th scope="col">Motivo terminal</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead>
-              <tbody id="execution-table-body"></tbody>
-            </table>
-          </div>
+          <div class="table-wrap"><table><caption>Execuções operacionais no período selecionado</caption><thead><tr><th scope="col">Lead</th><th scope="col">Execução</th><th scope="col">Recebida</th><th scope="col">Duração</th><th scope="col">Estado</th><th scope="col">Trace</th><th scope="col">Nó atual</th><th scope="col">Nós</th><th scope="col">Marcos</th><th scope="col">Motivo terminal</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead><tbody id="execution-table-body"></tbody></table></div>
           <div id="execution-mobile-list" class="execution-mobile-list"></div>
         </section>
+      </section>
+
+      <section id="reservations-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">RESERVAS</p><h2>Reservas registradas</h2><p>Confirmação somente quando há outcome persistido; IDs finais aparecem separadamente.</p></div><button id="export-reservations" class="secondary-button" type="button">Exportar reservas CSV</button></div>
+        <section class="records-panel" aria-labelledby="reservations-table-title"><div class="records-head"><div><h2 id="reservations-table-title">Registros de reserva</h2><p>Rascunho, workflow, outcome e auditorias de provedor.</p></div><span id="reservation-result-count" class="result-count">0 reservas</span></div><div id="reservation-empty-state" class="empty-state" hidden>Nenhuma reserva registrada.</div><div class="table-wrap"><table><caption>Reservas registradas nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Serviço</th><th scope="col">Período</th><th scope="col">Pessoas</th><th scope="col">Total</th><th scope="col">Método</th><th scope="col">Referências</th><th scope="col">Atualizada</th></tr></thead><tbody id="reservation-table-body"></tbody></table></div><div id="reservation-mobile-list" class="records-mobile-list"></div></section>
+      </section>
+
+      <section id="payments-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">PAGAMENTOS</p><h2>Pagamentos registrados</h2><p>Iniciação e link preparado não significam liquidação nem valor pago.</p></div><button id="export-payments" class="secondary-button" type="button">Exportar pagamentos CSV</button></div>
+        <section class="records-panel" aria-labelledby="payments-table-title"><div class="records-head"><div><h2 id="payments-table-title">Registros de pagamento</h2><p>Fases e efeitos exibidos sem promover estado técnico.</p></div><span id="payment-result-count" class="result-count">0 pagamentos</span></div><div id="payment-empty-state" class="empty-state" hidden>Nenhum pagamento registrado.</div><div class="table-wrap"><table><caption>Pagamentos registrados nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Fase</th><th scope="col">Método</th><th scope="col">Valor previsto</th><th scope="col">Valor pago</th><th scope="col">Etapas</th><th scope="col">Atualizado</th></tr></thead><tbody id="payment-table-body"></tbody></table></div><div id="payment-mobile-list" class="records-mobile-list"></div></section>
+      </section>
+
+      <section id="handoffs-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">HANDOFFS</p><h2>Handoffs registrados</h2><p>Vínculo com lead somente quando um ID persistido comprova a associação.</p></div><button id="export-handoffs" class="secondary-button" type="button">Exportar handoffs CSV</button></div>
+        <section class="records-panel" aria-labelledby="handoffs-table-title"><div class="records-head"><div><h2 id="handoffs-table-title">Registros de handoff</h2><p>Estado vazio é um fato operacional válido.</p></div><span id="handoff-result-count" class="result-count">0 handoffs</span></div><div id="handoff-empty-state" class="empty-state" hidden>Nenhum handoff registrado nas fontes ativas.</div><div class="table-wrap"><table><caption>Handoffs registrados nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Handoff</th><th scope="col">Código de motivo</th><th scope="col">Incidente</th><th scope="col">Eventos</th><th scope="col">Criado</th><th scope="col">Atualizado</th></tr></thead><tbody id="handoff-table-body"></tbody></table></div><div id="handoff-mobile-list" class="records-mobile-list"></div></section>
       </section>
     </main>
 

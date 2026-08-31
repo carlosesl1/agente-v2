@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 from typing import Iterable, Mapping
 
-from v2_ops.records import ExecutionLink, RecordsSnapshot
+from v2_ops.records import (
+    ExecutionLink,
+    LeadDetail,
+    RecordsSnapshot,
+    passenger_manifest_public,
+)
 
 
 DATASETS = frozenset(
@@ -65,6 +69,7 @@ _COLUMNS: dict[str, tuple[str, ...]] = {
         "updated_at",
     ),
     "payments": (
+        "record_id",
         "lead_id",
         "phase",
         "payment_id",
@@ -78,6 +83,10 @@ _COLUMNS: dict[str, tuple[str, ...]] = {
         "due_kind",
         "status_code",
         "status_label",
+        "settled",
+        "workflow_status",
+        "ledger_status",
+        "outcome_certainty",
         "reconciliation_status",
         "payment_link_prepared",
         "steps",
@@ -125,6 +134,7 @@ def _rows(
     snapshot: RecordsSnapshot,
     executions: tuple[ExecutionLink, ...],
     lead_id: str | None,
+    lead_detail: LeadDetail | None,
 ) -> Iterable[Mapping[str, object]]:
     if dataset == "leads":
         for lead in snapshot.leads:
@@ -191,6 +201,7 @@ def _rows(
     if dataset == "payments":
         for payment in snapshot.payments:
             yield {
+                "record_id": payment.record_id,
                 "lead_id": payment.lead_id,
                 "phase": payment.phase,
                 "payment_id": payment.payment_id,
@@ -204,6 +215,10 @@ def _rows(
                 "due_kind": payment.due_kind,
                 "status_code": payment.status_code,
                 "status_label": payment.status_label,
+                "settled": payment.settled,
+                "workflow_status": payment.workflow_status,
+                "ledger_status": payment.ledger_status,
+                "outcome_certainty": payment.outcome_certainty,
                 "reconciliation_status": payment.reconciliation_status,
                 "payment_link_prepared": payment.payment_link_prepared,
                 "steps": ";".join(f"{item.step}:{item.status}" for item in payment.steps),
@@ -226,11 +241,16 @@ def _rows(
                 "updated_at": handoff.updated_at,
             }
         return
-    if dataset != "lead-history" or lead_id is None:
+    if (
+        dataset != "lead-history"
+        or lead_id is None
+        or lead_detail is None
+        or lead_detail.summary.lead_id != lead_id
+    ):
         raise ValueError("lead-history requires an exact lead id")
 
     history: list[dict[str, object]] = []
-    for fact in snapshot.facts:
+    for fact in lead_detail.facts:
         if fact.lead_id == lead_id:
             history.append(
                 {
@@ -242,8 +262,9 @@ def _rows(
                     "content": fact.value,
                 }
             )
-    for manifest in snapshot.passenger_manifests:
-        if manifest.lead_id == lead_id:
+    for manifest in lead_detail.passenger_manifests:
+        if lead_detail.summary.lead_id == lead_id:
+            projected = passenger_manifest_public(manifest)
             history.append(
                 {
                     "event_at": manifest.persisted_at,
@@ -251,10 +272,41 @@ def _rows(
                     "record_id": f"manifest-revision-{manifest.revision}",
                     "status": f"revision:{manifest.revision}",
                     "name": "passenger_manifest",
-                    "content": manifest.manifest_json,
+                    "content": (
+                        f"adults={projected['adults']};children={projected['children']}"
+                    ),
                 }
             )
-    for turn in snapshot.dialogue_turns:
+            passengers = projected["passengers"]
+            if type(passengers) is not list:
+                raise TypeError("invalid passenger projection")
+            for passenger in passengers:
+                if type(passenger) is not dict:
+                    raise TypeError("invalid passenger projection")
+                position = passenger["position"]
+                content = ";".join(
+                    f"{field}={passenger[field]}"
+                    for field in (
+                        "full_name",
+                        "birth_date",
+                        "gender",
+                        "country_code",
+                    )
+                    if passenger[field] is not None
+                )
+                history.append(
+                    {
+                        "event_at": manifest.persisted_at,
+                        "category": "passenger",
+                        "record_id": (
+                            f"manifest-revision-{manifest.revision}:passenger-{position}"
+                        ),
+                        "status": f"revision:{manifest.revision}",
+                        "name": passenger["participant_type"],
+                        "content": content,
+                    }
+                )
+    for turn in lead_detail.dialogue_turns:
         if turn.lead_id != lead_id:
             continue
         history.append(
@@ -278,7 +330,7 @@ def _rows(
                     "content": chunk,
                 }
             )
-    for inbound in snapshot.inbound_events:
+    for inbound in lead_detail.inbound_events:
         if inbound.lead_id == lead_id:
             history.append(
                 {
@@ -290,7 +342,7 @@ def _rows(
                     "content": "",
                 }
             )
-    for reply in snapshot.public_replies:
+    for reply in lead_detail.public_replies:
         if reply.lead_id == lead_id:
             history.append(
                 {
@@ -302,7 +354,7 @@ def _rows(
                     "content": reply.text,
                 }
             )
-    for reservation in snapshot.reservations:
+    for reservation in lead_detail.reservations:
         if reservation.lead_id == lead_id:
             history.append(
                 {
@@ -314,7 +366,7 @@ def _rows(
                     "content": reservation.status_label,
                 }
             )
-    for payment in snapshot.payments:
+    for payment in lead_detail.payments:
         if payment.lead_id == lead_id:
             history.append(
                 {
@@ -328,7 +380,7 @@ def _rows(
                     "content": payment.status_label,
                 }
             )
-    for handoff in snapshot.handoffs:
+    for handoff in lead_detail.handoffs:
         if handoff.lead_id == lead_id:
             history.append(
                 {
@@ -340,7 +392,7 @@ def _rows(
                     "content": handoff.status_label,
                 }
             )
-    for execution in executions:
+    for execution in lead_detail.executions:
         if execution.lead_id == lead_id:
             history.append(
                 {
@@ -370,6 +422,7 @@ def render_csv(
     snapshot: RecordsSnapshot,
     executions: tuple[ExecutionLink, ...],
     lead_id: str | None = None,
+    lead_detail: LeadDetail | None = None,
 ) -> bytes:
     if dataset not in DATASETS:
         raise ValueError("dataset is outside the closed catalog")
@@ -380,10 +433,12 @@ def render_csv(
     ):
         raise TypeError("executions must be an exact tuple of ExecutionLink values")
     if dataset == "lead-history" and (
-        type(lead_id) is not str or not any(item.lead_id == lead_id for item in snapshot.leads)
+        type(lead_id) is not str
+        or type(lead_detail) is not LeadDetail
+        or lead_detail.summary.lead_id != lead_id
     ):
         raise ValueError("lead-history requires an existing exact lead id")
-    if dataset != "lead-history" and lead_id is not None:
+    if dataset != "lead-history" and (lead_id is not None or lead_detail is not None):
         raise ValueError("lead id is not accepted for this dataset")
 
     output = io.StringIO(newline="")
@@ -400,6 +455,7 @@ def render_csv(
         snapshot=snapshot,
         executions=executions,
         lead_id=lead_id,
+        lead_detail=lead_detail,
     ):
         writer.writerow({column: _cell(row.get(column)) for column in columns})
     return b"\xef\xbb\xbf" + output.getvalue().encode("utf-8")
