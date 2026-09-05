@@ -455,6 +455,9 @@ def _heartbeat_document(*, observed_at: str | None = None) -> dict[str, Any]:
         or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "status": "healthy",
         "failed_queues": [],
+        "public_ingress_ready": True,
+        "public_ingress_reason": None,
+        "public_turn_capacity": 1,
         "queues": {queue: {"status": "healthy"} for queue in QUEUE_NAMES},
     }
 
@@ -1211,6 +1214,72 @@ def test_verify_manifest_fails_closed_on_mismatch(
     joined = "\n".join(errors)
     assert "RAW_ROUTING_VALUE_SHOULD_NOT_LEAK" not in joined
     assert "person@example.invalid" not in joined
+
+
+def test_heartbeat_verification_accepts_real_v2_public_ingress_envelope(
+    tmp_path: Path,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    (
+        ("missing_public_field", "ga: heartbeat JSON invalid"),
+        ("extra_public_field", "ga: heartbeat JSON invalid"),
+        ("ready_false", "ga: heartbeat public ingress not ready"),
+        ("ready_non_bool", "ga: heartbeat public ingress not ready"),
+        ("reason_non_null", "ga: heartbeat public ingress reason invalid"),
+        ("reason_invalid", "ga: heartbeat public ingress reason invalid"),
+        ("capacity_bool", "ga: heartbeat public turn capacity invalid"),
+        ("capacity_zero", "ga: heartbeat public turn capacity invalid"),
+        ("capacity_negative", "ga: heartbeat public turn capacity invalid"),
+    ),
+)
+def test_heartbeat_public_ingress_contract_fails_closed_and_sanitized(
+    tmp_path: Path,
+    mutation: str,
+    expected_error: str,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    heartbeat_path = Path(manifest["components"]["ga"]["heartbeat"]["path"])
+    document = _heartbeat_document()
+    leaked_value = "person@example.invalid"
+
+    if mutation == "missing_public_field":
+        del document["public_turn_capacity"]
+    elif mutation == "extra_public_field":
+        document["public_ingress_details"] = leaked_value
+    elif mutation == "ready_false":
+        document["public_ingress_ready"] = False
+    elif mutation == "ready_non_bool":
+        document["public_ingress_ready"] = 1
+    elif mutation == "reason_non_null":
+        document["public_ingress_reason"] = leaked_value
+    elif mutation == "reason_invalid":
+        document["public_ingress_reason"] = {"detail": leaked_value}
+    elif mutation == "capacity_bool":
+        document["public_turn_capacity"] = True
+    elif mutation == "capacity_zero":
+        document["public_turn_capacity"] = 0
+    elif mutation == "capacity_negative":
+        document["public_turn_capacity"] = -1
+    else:  # pragma: no cover - guards the test matrix itself
+        raise AssertionError(mutation)
+    heartbeat_path.write_text(json.dumps(document), encoding="utf-8")
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert expected_error in errors
+    joined = "\n".join(errors)
+    assert leaked_value not in joined
+    assert json.dumps(document) not in joined
 
 
 @pytest.mark.parametrize(

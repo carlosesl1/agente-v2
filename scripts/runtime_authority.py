@@ -1423,7 +1423,16 @@ def _verify_heartbeat(
         return
 
     document = _runtime_json(payload)
-    expected_fields = {"schema", "observed_at", "status", "failed_queues", "queues"}
+    expected_fields = {
+        "schema",
+        "observed_at",
+        "status",
+        "failed_queues",
+        "public_ingress_ready",
+        "public_ingress_reason",
+        "public_turn_capacity",
+        "queues",
+    }
     if not isinstance(document, Mapping) or set(document) != expected_fields:
         errors.append(f"{name}: heartbeat JSON invalid")
         return
@@ -1432,6 +1441,16 @@ def _verify_heartbeat(
         return
     if document.get("status") != "healthy" or document.get("failed_queues") != []:
         errors.append(f"{name}: heartbeat status unhealthy")
+        return
+    if document.get("public_ingress_ready") is not True:
+        errors.append(f"{name}: heartbeat public ingress not ready")
+        return
+    if document.get("public_ingress_reason") is not None:
+        errors.append(f"{name}: heartbeat public ingress reason invalid")
+        return
+    capacity = document.get("public_turn_capacity")
+    if type(capacity) is not int or capacity < 1:
+        errors.append(f"{name}: heartbeat public turn capacity invalid")
         return
 
     observed_at = document.get("observed_at")
