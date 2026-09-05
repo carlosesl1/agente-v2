@@ -197,3 +197,80 @@ A implementação está concluída somente quando:
 - limpar todo o acervo histórico;
 - tornar `main` uma imagem composta artificialmente de GA e Ops;
 - remover branches remotas históricas.
+
+## Addendum pós-implementação e reviews — 2026-09-05
+
+### Preservação do histórico
+
+As seções anteriores registram o desenho inicialmente aprovado e permanecem
+inalteradas como histórico da decisão. Este addendum não finge que a primeira
+implementação já continha o contrato final: onde houver conflito, as conclusões
+abaixo, obtidas durante integração e review, substituem somente a descrição
+técnica correspondente. Valores ativos continuam pertencendo exclusivamente a
+`ACTIVE_RUNTIME.json`; este documento não cria um segundo ponteiro de produção.
+
+### Findings de integração e evolução do schema
+
+A inspeção da topologia real invalidou a primeira modelagem singular. GA e teste
+isolado têm API, worker e router; Ops tem somente o web read-only. Workers não
+possuem necessariamente Docker healthcheck, Ops não possui heartbeat de worker,
+o teste isolado compartilha a fonte de GA e os ponteiros genéricos reais são
+arquivos/symlinks locais, não endpoints HTTP.
+
+O contrato implementado passou então a exigir:
+
+- `repository.path` e `repository.remote`, para todo Git executar no repositório
+  declarado;
+- `components.{ga,test_contact,ops}.source.ref` explícita, permitindo que GA e
+  teste isolado usem `refs/heads/production/ga`;
+- `containers` no plural, com papéis fechados `api/worker/router` para GA e teste
+  e `web` para Ops;
+- health por container como `healthy` ou `null`, sem fabricar health para worker;
+- `heartbeat opcional` por componente: objeto fechado para GA/teste e `null` para
+  Ops, com schema e universo ordenado das filas quando presente;
+- arquivos com caminho Git, caminho no container e papel proprietário distintos;
+- roteamento exclusivo do teste isolado, comprovado somente por hash;
+- `public_endpoints` separados do health de container;
+- `generic_pointers` como **ponteiros locais**, com path, hash e alvo de symlink
+  opcional sob raízes autorizadas.
+
+### Sequência registrada dos reviews
+
+1. O primeiro spec review falhou porque o schema não representava a topologia
+   real e ainda aceitava UID zero, normalização de bytes, filas, Traefik, refs e
+   chaves sensíveis de forma insuficiente.
+2. A correção de topologia/schema e o witness executável de hash de roteamento
+   fecharam os findings funcionais; o spec re-review terminou em PASS.
+3. O code-quality review seguinte encontrou alias de ownership entre
+   componentes, TOCTOU nos ponteiros locais e publicação não atômica da projeção.
+4. A primeira correção fechou ownership e publicação, mas um novo review manteve
+   aberto o race por symlink em diretório intermediário e registrou os riscos de
+   modo do arquivo e `fsync` do diretório.
+5. O review final confirmou travessia ancorada por descritores, hash no mesmo FD,
+   revalidação de identidades, modo novo/preservado e a ordem
+   `file-fsync → replace → directory-fsync`; encerrou os findings sem blocker.
+
+Essa sequência é parte do histórico auditável. Um PASS posterior fecha findings,
+mas não apaga os FAILs que causaram as correções.
+
+### Referências e worktrees canônicas
+
+Os nomes estáveis para escolher uma árvore depois de verificar o manifesto são:
+
+| Componente | Ref | Worktree canônica |
+|---|---|---|
+| GA e teste isolado | `production/ga` | `/home/ubuntu/agente-v2/.worktrees/production-ga` |
+| Ops | `production/ops` | `/home/ubuntu/agente-v2/.worktrees/production-ops` |
+
+As worktrees `production-ga` e `production-ops` são checkouts convenientes das
+refs, não prova autônoma de produção. O manifesto verificado continua sendo a
+fonte dos commits, trees, imagens e digests ativos. `main`, nomes de diretório,
+tags genéricas, Compose solto e repo legado continuam sem autoridade.
+
+GA, teste isolado e Ops permanecem identidades operacionais separadas. Mesmo
+quando GA e teste compartilham código/imagem, seus projetos Compose, containers,
+roteamento e estado gravável não podem colidir. Ops permanece read-only, sem
+heartbeat inventado.
+
+**V3 fora de escopo.** O addendum não autoriza leitura, edição, teste, restart ou
+uso do V3 como referência.

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -39,6 +40,138 @@ _COMPONENT_ROLES = {
     "ops": ("web",),
 }
 _ROUTING_VARIABLE = "TEST_CONTACT_SUBSCRIBER_ID"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_ACTIVE_RUNTIME_MANIFEST = (
+    "/home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json"
+)
+_VERIFY_RUNTIME_COMMAND = (
+    "python3 scripts/runtime_authority.py verify --manifest "
+    + _ACTIVE_RUNTIME_MANIFEST
+)
+_RUNTIME_HEADING = "## Runtime ativo (obrigatório)"
+_COMMON_AUTHORITY_TERMS = (
+    "não inferir",
+    "main",
+    "nome de worktree",
+    "tag genérica",
+    "compose solto",
+    "repo legado",
+    "v3 fora de escopo",
+    "ga",
+    "teste isolado",
+    "ops",
+    "production/ga",
+    "production/ops",
+)
+
+
+def _read_repository_document(relative_path: str) -> str:
+    path = _REPOSITORY_ROOT / relative_path
+    assert path.is_file(), f"missing documentation file: {relative_path}"
+    return path.read_text(encoding="utf-8")
+
+
+def _runtime_section(document: str) -> str:
+    assert _RUNTIME_HEADING in document
+    remainder = document.split(_RUNTIME_HEADING, 1)[1]
+    return remainder.split("\n## ", 1)[0]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "historical_heading"),
+    (
+        ("AGENTS.md", "## Escopo"),
+        ("README.md", "## Objetivo"),
+        ("docs/refactor/README.md", "## Princípio"),
+    ),
+)
+def test_documentation_entry_docs_put_runtime_authority_before_history(
+    relative_path: str,
+    historical_heading: str,
+) -> None:
+    document = _read_repository_document(relative_path)
+
+    assert _RUNTIME_HEADING in document, f"{relative_path} omits the runtime heading"
+    assert historical_heading in document
+    assert document.index(_RUNTIME_HEADING) < document.index(historical_heading)
+    runtime_section = _runtime_section(document)
+    assert _ACTIVE_RUNTIME_MANIFEST in runtime_section
+    assert _VERIFY_RUNTIME_COMMAND in runtime_section
+    normalized = runtime_section.casefold()
+    for term in _COMMON_AUTHORITY_TERMS:
+        assert term in normalized, f"{relative_path} omits {term!r}"
+    assert "sha256:" not in normalized
+    assert re.search(r"\b[0-9a-f]{40}\b", normalized) is None
+
+
+def test_documentation_runbook_is_ordered_fail_closed_and_operational() -> None:
+    document = _read_repository_document("docs/operations/runtime-authority.md")
+    normalized = document.casefold()
+
+    assert _ACTIVE_RUNTIME_MANIFEST in document
+    assert _VERIFY_RUNTIME_COMMAND in document
+    for term in _COMMON_AUTHORITY_TERMS:
+        assert term in normalized, f"runbook omits {term!r}"
+    ordered_steps = (
+        "### 1. read",
+        "### 2. verify",
+        "### 3. branch",
+        "### 4. stop on drift",
+    )
+    positions = [normalized.index(step) for step in ordered_steps]
+    assert positions == sorted(positions)
+    for term in (
+        "production-ga",
+        "production-ops",
+        "/readyz",
+        "read-only",
+        "estado separado",
+        "deploy atômico",
+        "rollback atômico",
+        "atualização atômica",
+        "sem segredos",
+        "containers",
+        "heartbeat opcional",
+        "ponteiros locais",
+    ):
+        assert term in normalized, f"runbook omits {term!r}"
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "historical_heading"),
+    (
+        (
+            "docs/superpowers/specs/2026-09-05-v2-runtime-authority-design.md",
+            "## problema",
+        ),
+        (
+            "docs/superpowers/plans/2026-09-05-v2-runtime-authority.md",
+            "### task 1:",
+        ),
+    ),
+)
+def test_documentation_design_and_plan_record_review_addendum(
+    relative_path: str,
+    historical_heading: str,
+) -> None:
+    document = _read_repository_document(relative_path)
+    normalized = document.casefold()
+
+    assert "## addendum" in normalized, f"{relative_path} omits the review addendum"
+    assert historical_heading in normalized
+    addendum_position = normalized.index("## addendum")
+    assert addendum_position > normalized.index(historical_heading)
+    addendum = normalized[addendum_position:]
+    for term in (
+        "histórico",
+        "review",
+        "production-ga",
+        "production-ops",
+        "containers",
+        "heartbeat opcional",
+        "ponteiros locais",
+    ):
+        assert term in addendum, f"{relative_path} addendum omits {term!r}"
 
 
 def _digest(data: bytes) -> str:

@@ -488,3 +488,92 @@ Entregar ao revisor o design, plano, diff Git, manifesto e saída do verificador
 - [ ] **Step 5: decisão**
 
 Declarar `GO` somente se todos os gates tiverem evidência real. Caso contrário, declarar `NO-GO`, restaurar runtime quando aplicável e listar o blocker exato sem inventar resultados.
+
+## Addendum de execução e reviews — 2026-09-05
+
+### Preservação do plano histórico
+
+O plano acima permanece como registro da intenção inicial e de sua ordem de
+execução. Este addendum registra o que foi aprendido depois dos findings de
+integração e dos reviews; ele não reescreve tarefas anteriores como se tivessem
+nascido corretas. Em qualquer conflito de modelagem ou de escopo da Task 2, este
+addendum é a correção posterior aplicável.
+
+### Findings incorporados após a Task 1
+
+A primeira implementação do verificador recebeu spec review com FAIL: o contrato
+singular não representava API/worker/router, exigia health/heartbeat inexistente
+em alguns papéis, derivava refs, confundia endpoint público com health e tratava
+ponteiros locais como HTTP. O mesmo review fechou também contraexemplos de UID
+zero, bytes CRLF, universo de filas, Traefik/roteamento e chaves sensíveis.
+
+Depois dessa correção, o spec re-review terminou em PASS. O code-quality review
+seguinte ainda encontrou colisão de ownership entre componentes, TOCTOU na
+leitura de ponteiros e render não atômico. Uma correção intermediária fechou
+ownership e publicação, mas um review sucessor preservou FAIL para symlink em
+diretório intermediário e registrou riscos de modo e `fsync`. O review final
+encerrou esses pontos ao confirmar travessia ancorada em descritores, hash no
+mesmo FD, revalidação, modo novo/preservado e `fsync` do diretório.
+
+Esses FAILs e PASSes são evidência histórica, não resultados a apagar. A Task 2
+consome o contrato revisado, sem reeditar `scripts/runtime_authority.py`.
+
+### Contrato de schema que substitui as simplificações iniciais
+
+- Cada componente declara `containers` no plural: GA/teste usam os papéis
+  `api`, `worker` e `router`; Ops usa `web`.
+- Docker health é específico do container e pode ser `null` quando não existe.
+- `heartbeat opcional` é específico do componente: objeto fechado para GA/teste
+  e `null` para Ops; não se copiam campos sintéticos entre componentes.
+- `source.ref` e `repository.path` são declarados; o teste isolado pode
+  compartilhar `production/ga` sem ganhar identidade operacional de GA.
+- Arquivos declaram caminho Git e caminho/container de destino separadamente.
+- Endpoints públicos, routing hash-only e health de container são evidências
+  distintas.
+- `generic_pointers` representa **ponteiros locais** (arquivo ou symlink), com
+  hash e raízes fechadas; não faz GET de um ponteiro fictício.
+- Nomes de containers, projetos Compose e sources de mounts graváveis têm owner
+  por componente; GA, teste e Ops preservam estado separado.
+
+### Branches e worktrees canônicas
+
+Depois de ler e verificar `ACTIVE_RUNTIME.json`, a seleção estável é:
+
+| Escopo | Branch | Worktree canônica |
+|---|---|---|
+| GA e teste isolado | `production/ga` | `/home/ubuntu/agente-v2/.worktrees/production-ga` |
+| Ops | `production/ops` | `/home/ubuntu/agente-v2/.worktrees/production-ops` |
+
+`production-ga` e `production-ops` são nomes canônicos de worktree, não fontes de
+verdade independentes. Nenhum addendum ou documento de entrada fixa os SHAs ou
+digests ativos; esses valores mutáveis vêm do manifesto e precisam concordar com
+o verificador.
+
+### Ajuste autorizado para a Task 2
+
+A execução documental corrente amplia as entradas versionadas para `AGENTS.md`,
+`README.md` e `docs/refactor/README.md`, todas com a seção
+“Runtime ativo (obrigatório)” antes do histórico, e cria
+`docs/operations/runtime-authority.md`. O runbook documenta READ → VERIFY →
+BRANCH → STOP ON DRIFT, deploy/rollback/atualização atômicos, `/readyz`, Ops
+read-only, isolamento de estado e proibição de segredos.
+
+A criação de `/home/ubuntu/AGENTS.md` fica deliberadamente a cargo do
+orquestrador e não é feita por esta Task 2. Essa separação substitui apenas a
+instrução host-local original; o arquivo continua fora do commit versionado.
+
+Os gates da Task 2 são, nesta ordem:
+
+```bash
+python -m pytest -q tests/test_runtime_authority.py -k documentation
+python -m pytest -q tests/test_runtime_authority.py
+ruff check tests/test_runtime_authority.py
+python -m py_compile scripts/runtime_authority.py tests/test_runtime_authority.py
+git diff --check
+```
+
+Nenhum desses gates autoriza acesso a Docker, produção ou remoto. O commit
+continua restrito aos documentos/testes permitidos e usa a mensagem definida na
+Task 2.
+
+**V3 fora de escopo.** O addendum não altera essa fronteira.
