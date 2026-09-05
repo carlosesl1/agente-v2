@@ -1,5 +1,12 @@
 # Agente V2 Runtime Authority Implementation Plan
 
+> **Documento histórico de execução.** A autoridade normativa atual é
+> [`docs/operations/runtime-authority.md`](../../operations/runtime-authority.md)
+> junto com
+> `/home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json`. O addendum deste
+> documento e o código atual prevalecem sobre quaisquer comandos históricos
+> abaixo.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tornar inequívocos e verificáveis o código, a imagem, o deploy, o estado e o rollback ativos de cada componente do Agente V2, corrigindo a identidade divergente do runtime GA sem mudar seu comportamento ou seus dados.
@@ -388,14 +395,18 @@ Antes de mover, verificar que nenhum container em execução monta o arquivo. Ar
 
 Salvar `docker inspect` sanitizado e então remover somente `agente-v2-canary-api`, confirmado como `exited`. Não remover imagem ou estado associado.
 
-- [ ] **Step 6: executar o verificador até PASS**
+- [ ] **Step 6: executar o verificador até exit `0`**
 
 ```bash
 python /home/ubuntu/agente-v2/.worktrees/v2-runtime-authority/scripts/runtime_authority.py verify \
-  --manifest /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+  --manifest /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json \
+  --json
 ```
 
-Expected: uma linha `PASS agente-v2-active-runtime-v1` e exit `0`.
+Expected: exit `0` e o objeto JSON `{"ok": true, "errors": []}`. Para parsing,
+use sempre `--json`. No modo humano, a implementação atual imprime
+`runtime authority: OK`, mas essa frase não é API estável e não deve ser
+comparada por automação.
 
 ---
 
@@ -446,7 +457,9 @@ Atualizar checkout principal após confirmar `origin/main` igual ao baseline e i
 
 - [ ] **Step 5: atualizar manifesto com refs remotas e verificar novamente**
 
-`git ls-remote` deve coincidir; renderizar `CURRENT.md` e exigir PASS.
+`git ls-remote` deve coincidir; renderizar `CURRENT.md` e exigir exit `0` do
+verificador. Qualquer consumidor automatizado usa `--json` e valida
+`{"ok": true, "errors": []}`.
 
 ---
 
@@ -561,6 +574,29 @@ read-only, isolamento de estado e proibição de segredos.
 A criação de `/home/ubuntu/AGENTS.md` fica deliberadamente a cargo do
 orquestrador e não é feita por esta Task 2. Essa separação substitui apenas a
 instrução host-local original; o arquivo continua fora do commit versionado.
+
+### Bootstrap sem circularidade
+
+Não publique nem ative `/home/ubuntu/AGENTS.md` antes de o checkout canônico
+conter `docs/operations/runtime-authority.md` e `scripts/runtime_authority.py` e
+de existir o manifesto
+`/home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json`. Depois desses
+três pré-requisitos, o roteador host-local deve expor literalmente a mesma
+sequência READ → VERIFY e só permitir continuidade com exit `0`.
+
+Durante as tarefas de bootstrap que criam esses próprios pré-requisitos, somente
+um handoff explícito e limitado pode identificar a worktree de construção. Essa
+exceção temporária autoriza apenas materializar e validar os pré-requisitos; ela
+não autoriza inferir runtime, operar produção, acessar V3 ou tratar um checkout
+histórico como ativo. A exceção termina antes da publicação do roteador.
+
+### Contrato atual de sucesso do verificador
+
+O contrato de sucesso que corrige a Step 6 histórica é exit `0`. Para parsing,
+execute `verify --manifest PATH --json` e exija o objeto
+`{"ok": true, "errors": []}`. O stdout humano atual
+`runtime authority: OK` não é API estável; código e automações não devem
+comparar essa frase.
 
 Os gates da Task 2 são, nesta ordem:
 

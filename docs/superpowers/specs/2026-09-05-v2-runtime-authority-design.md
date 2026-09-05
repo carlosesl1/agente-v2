@@ -1,7 +1,14 @@
 # Agente V2 — autoridade única de código e runtime
 
+> **Documento histórico de execução.** A autoridade normativa atual é
+> [`docs/operations/runtime-authority.md`](../../operations/runtime-authority.md)
+> junto com
+> `/home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json`. O addendum deste
+> documento e o código atual prevalecem sobre quaisquer comandos históricos
+> abaixo.
+
 **Data:** 2026-09-05  
-**Estado:** desenho aprovado para implementação  
+**Estado:** registro histórico; consultar a autoridade normativa acima
 **Escopo:** somente Agente V2; Agente V3 permanece isolado e fora de escopo
 
 ## Problema
@@ -146,9 +153,11 @@ No diretório existente de deploy:
 
 Arquivos `.env` permanecem `0600` e nunca são copiados para o diretório público de autoridade.
 
-## Verificador
+## Verificador — contrato histórico retificado
 
-`verify_active_runtime.py` é read-only e retorna exit code diferente de zero para qualquer divergência. Ele verifica:
+O nome `verify_active_runtime.py` pertence ao desenho inicial. A implementação
+corrente é `scripts/runtime_authority.py`, read-only, e retorna exit code
+diferente de zero para qualquer divergência. Ela verifica:
 
 1. schema e campos fechados de `ACTIVE_RUNTIME.json`;
 2. existência do repo e dos SHAs/trees;
@@ -162,7 +171,10 @@ Arquivos `.env` permanecem `0600` e nunca são copiados para o diretório públi
 10. ausência de containers antigos classificados como removidos;
 11. separação V2/V3 e classificação do legado.
 
-A saída padrão é pequena e sanitizada: `PASS` ou uma lista de divergências sem valores secretos.
+Sucesso é definido por exit `0`. Para parsing, execute `verify --manifest PATH
+--json` e exija o objeto `{"ok": true, "errors": []}`. No modo humano, o stdout
+atual é `runtime authority: OK`, mas essa frase não é API estável. Em falha, a
+CLI retorna exit diferente de zero e mantém o diagnóstico sanitizado.
 
 ## Falhas e rollback
 
@@ -185,7 +197,8 @@ A implementação está concluída somente quando:
 - hashes dos bancos ativos são invariantes antes/depois, salvo sidecars que mudem por atividade normal, caso em que a verificação usa backup SQLite consistente e contagem/semântica;
 - roteamento exato e fallback são comprovados com payloads estruturalmente inválidos que não criam eventos;
 - manifests genéricos apontam às releases ativas;
-- o verificador canônico retorna `PASS`;
+- o verificador canônico retorna exit `0` e, com `--json`, o objeto
+  `{"ok": true, "errors": []}`;
 - uma revisão independente read-only não encontra blocker material.
 
 ## Fora de escopo
@@ -202,12 +215,13 @@ A implementação está concluída somente quando:
 
 ### Preservação do histórico
 
-As seções anteriores registram o desenho inicialmente aprovado e permanecem
-inalteradas como histórico da decisão. Este addendum não finge que a primeira
-implementação já continha o contrato final: onde houver conflito, as conclusões
-abaixo, obtidas durante integração e review, substituem somente a descrição
-técnica correspondente. Valores ativos continuam pertencendo exclusivamente a
-`ACTIVE_RUNTIME.json`; este documento não cria um segundo ponteiro de produção.
+As seções anteriores registram o desenho inicialmente aprovado como histórico da
+decisão; somente os avisos e as retificações explícitas de contrato foram
+acrescentados para impedir execução enganosa. Este addendum não finge que a
+primeira implementação já continha o contrato final: onde houver conflito, as
+conclusões abaixo e o código atual substituem a descrição técnica histórica.
+Valores ativos continuam pertencendo exclusivamente a `ACTIVE_RUNTIME.json`;
+este documento não cria um segundo ponteiro de produção.
 
 ### Findings de integração e evolução do schema
 
@@ -274,3 +288,12 @@ heartbeat inventado.
 
 **V3 fora de escopo.** O addendum não autoriza leitura, edição, teste, restart ou
 uso do V3 como referência.
+
+### Bootstrap das entradas operacionais
+
+A cadeia READ → VERIFY descreve o estado publicado, não um pré-requisito
+circular para as tarefas que criam seus próprios artefatos. O roteador
+host-local só deve ser ativado depois de manifesto, runbook e script existirem no
+checkout canônico. Antes disso, apenas um handoff explícito e limitado pode
+selecionar a worktree de bootstrap; ele não confere autoridade de runtime, não
+autoriza produção e não relaxa o isolamento de V3.

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,7 +18,6 @@ import pytest
 
 from scripts import runtime_authority as authority
 from scripts.runtime_authority import AuthorityError, load_manifest, render_markdown
-
 
 COMPONENT_NAMES = ("ga", "test_contact", "ops")
 QUEUE_NAMES = (
@@ -49,6 +48,8 @@ _VERIFY_RUNTIME_COMMAND = (
     + _ACTIVE_RUNTIME_MANIFEST
 )
 _RUNTIME_HEADING = "## Runtime ativo (obrigatório)"
+_FALSE_VERIFY_SUCCESS_LITERAL = "PASS agente-v2-active-runtime-v1"
+_JSON_VERIFY_SUCCESS = '{"ok": true, "errors": []}'
 _COMMON_AUTHORITY_TERMS = (
     "não inferir",
     "main",
@@ -80,7 +81,7 @@ def _runtime_section(document: str) -> str:
 @pytest.mark.parametrize(
     ("relative_path", "historical_heading"),
     (
-        ("AGENTS.md", "## Escopo"),
+        ("AGENTS.md", "## Trilha histórica de refatoração"),
         ("README.md", "## Objetivo"),
         ("docs/refactor/README.md", "## Princípio"),
     ),
@@ -172,6 +173,108 @@ def test_documentation_design_and_plan_record_review_addendum(
         "ponteiros locais",
     ):
         assert term in addendum, f"{relative_path} addendum omits {term!r}"
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "docs/superpowers/specs/2026-09-05-v2-runtime-authority-design.md",
+        "docs/superpowers/plans/2026-09-05-v2-runtime-authority.md",
+    ),
+)
+def test_documentation_historical_plan_and_design_open_with_authority_banner(
+    relative_path: str,
+) -> None:
+    document = _read_repository_document(relative_path)
+    first_block = document.split("\n## ", 1)[0].casefold()
+
+    for term in (
+        "documento histórico de execução",
+        "autoridade normativa",
+        "docs/operations/runtime-authority.md",
+        _ACTIVE_RUNTIME_MANIFEST.casefold(),
+        "addendum",
+        "código atual",
+        "prevalecem",
+        "comandos históricos",
+    ):
+        assert term in first_block, f"{relative_path} first block omits {term!r}"
+
+
+def test_documentation_task6_and_design_use_machine_readable_success_contract() -> None:
+    plan = _read_repository_document(
+        "docs/superpowers/plans/2026-09-05-v2-runtime-authority.md"
+    )
+    design = _read_repository_document(
+        "docs/superpowers/specs/2026-09-05-v2-runtime-authority-design.md"
+    )
+    task6 = plan.split("### Task 6:", 1)[1].split("\n---", 1)[0]
+
+    for relative_path, contract in (
+        ("docs/superpowers/plans/2026-09-05-v2-runtime-authority.md", task6),
+        (
+            "docs/superpowers/specs/2026-09-05-v2-runtime-authority-design.md",
+            design,
+        ),
+    ):
+        normalized = contract.casefold()
+        assert "--json" in contract, f"{relative_path} omits --json"
+        assert "exit `0`" in normalized, f"{relative_path} omits exit 0"
+        assert _JSON_VERIFY_SUCCESS in contract, (
+            f"{relative_path} omits the stable JSON success object"
+        )
+        assert "`runtime authority: ok`" in normalized
+        assert "não é api estável" in normalized
+
+    assert _FALSE_VERIFY_SUCCESS_LITERAL not in plan
+    assert _FALSE_VERIFY_SUCCESS_LITERAL not in design
+
+
+def test_documentation_plan_addendum_closes_host_router_bootstrap_cycle() -> None:
+    plan = _read_repository_document(
+        "docs/superpowers/plans/2026-09-05-v2-runtime-authority.md"
+    )
+    addendum = plan.split("## Addendum", 1)[1].casefold()
+
+    assert "### bootstrap sem circularidade" in addendum
+    assert "não publique nem ative `/home/ubuntu/agents.md` antes" in addendum
+    for prerequisite in (
+        _ACTIVE_RUNTIME_MANIFEST.casefold(),
+        "docs/operations/runtime-authority.md",
+        "scripts/runtime_authority.py",
+    ):
+        assert prerequisite in addendum
+    assert "read → verify" in addendum
+    assert "exceção temporária" in addendum
+    assert "v3" in addendum
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "historical_heading"),
+    (
+        ("AGENTS.md", "## Trilha histórica de refatoração"),
+        ("README.md", "## Snapshot histórico das fases de refatoração"),
+        (
+            "docs/refactor/README.md",
+            "## Snapshot histórico das fases de refatoração",
+        ),
+    ),
+)
+def test_documentation_old_phases_are_unambiguous_historical_snapshots(
+    relative_path: str,
+    historical_heading: str,
+) -> None:
+    document = _read_repository_document(relative_path)
+    normalized = document.casefold()
+
+    assert historical_heading in document
+    assert document.index(_RUNTIME_HEADING) < document.index(historical_heading)
+    assert "somente para tarefas explicitamente de refatoração" in normalized
+    assert (
+        "nunca servem para escolher checkout nem para inferir o runtime ativo"
+        in normalized
+    )
+    assert "fase ativa:" not in normalized
 
 
 def _digest(data: bytes) -> str:
@@ -349,7 +452,7 @@ def _heartbeat_document(*, observed_at: str | None = None) -> dict[str, Any]:
     return {
         "schema": "v2-worker-heartbeat-v2",
         "observed_at": observed_at
-        or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "status": "healthy",
         "failed_queues": [],
         "queues": {queue: {"status": "healthy"} for queue in QUEUE_NAMES},
@@ -1143,7 +1246,7 @@ def test_heartbeat_verification_is_closed_fresh_and_sanitized(
         document["observed_at"] = "2026-09-05T12:00:00+01:00"
     elif mutation == "stale":
         document["observed_at"] = (
-            datetime.now(timezone.utc) - timedelta(hours=2)
+            datetime.now(UTC) - timedelta(hours=2)
         ).isoformat()
     elif mutation == "future":
         document["observed_at"] = leaked_timestamp

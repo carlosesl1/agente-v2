@@ -39,9 +39,13 @@ Contrato central:
 
 > Para cada assunto comercial imutável: **um resumo → uma confirmação natural posterior → no máximo um comando durável → no máximo uma execução no provider**.
 
-## Estado
+## Snapshot histórico das fases de refatoração
 
-- Fase ativa: **Fase 7 — terceiro candidato congelado; revisão terminal e CI
+O bloco abaixo preserva um snapshot da trilha de refatoração e pode ficar
+desatualizado; ele não declara produção nem runtime corrente. As regras de fase
+desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
+
+- Fase registrada neste snapshot: **Fase 7 — terceiro candidato congelado; revisão terminal e CI
   remoto pendentes**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
@@ -104,7 +108,7 @@ Contrato central:
 - [Execução da Fase 6](docs/refactor/phases/phase-06-handoff-and-payments.md)
 - [Execução da Fase 7](docs/refactor/phases/phase-07-boundary-migration.md)
 
-## Regras de execução
+## Regras históricas para tarefas de refatoração
 
 1. Trabalhar em **uma fase por vez**.
 2. Não iniciar a fase seguinte sem fechar critérios de aceite e evidências da fase atual.

@@ -33,7 +33,10 @@ histórica abaixo.
 
 A Maya interpreta a conversa. Um kernel determinístico decide a transição comercial. Um comando durável representa o que foi autorizado. Um worker executa o provider uma vez. Uma outbox comunica o resultado.
 
-## Estado das fases
+## Snapshot histórico das fases de refatoração
+
+Esta tabela é um snapshot da trilha de refatoração, não um ponteiro operacional.
+As regras de fase desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
 
 | Fase | Estado | Objetivo |
 |---|---|---|
@@ -61,7 +64,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 9. `evidence/` — evidência sanitizada e verificável.
 10. `phases/` — execução e encerramento de cada fase.
 
-## Regra de avanço
+## Regra histórica de avanço da refatoração
 
 Uma fase só muda para `concluída` quando:
 

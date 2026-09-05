@@ -29,13 +29,18 @@ somente ao manifesto verificado, nunca a este documento de entrada.
 referência. O procedimento completo está em
 `docs/operations/runtime-authority.md`.
 
-## Escopo
+## Trilha histórica de refatoração
+
+Esta seção registra a trilha de refatoração; não descreve o runtime corrente.
+As regras de fase desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
+
+### Escopo histórico
 
 Este repositório é a trilha limpa e auditável da refatoração Agente v2. O sistema legado/live é uma dependência observada, não um local para patches oportunistas durante o planejamento.
 
-## Disciplina obrigatória
+### Disciplina da refatoração
 
-- Execute somente a fase declarada como ativa em `docs/refactor/README.md`.
+- Em uma tarefa explicitamente de refatoração, execute somente a fase registrada no snapshot histórico de `docs/refactor/README.md` e no handoff atual da tarefa.
 - Antes de editar código funcional, identifique o owner da regra e escreva o teste que falha.
 - Não avance de fase sem atualizar: deliverables, evidências, riscos, decisões e critérios de aceite.
 - Não esconda falhas intermediárias; registre causa, impacto e substituição da evidência.
