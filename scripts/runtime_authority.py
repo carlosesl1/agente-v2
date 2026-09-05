@@ -35,10 +35,30 @@ _TOP_LEVEL_FIELDS: Final = frozenset(
         "repository",
         "components",
         "legacy",
+        "public_endpoints",
         "generic_pointers",
         "verification",
     }
 )
+_COMPONENT_ROLES: Final = {
+    "ga": ("api", "worker", "router"),
+    "test_contact": ("api", "worker", "router"),
+    "ops": ("web",),
+}
+_QUEUE_ORDER: Final = (
+    "boundary_relay",
+    "handoff",
+    "inbox",
+    "outcome_projector",
+    "payment_initiation",
+    "post_payment",
+    "public_delivery",
+    "reconciliation",
+    "reservation",
+    "settlement",
+)
+_HEARTBEAT_SCHEMA: Final = "v2-worker-heartbeat-v2"
+_WORKSPACE_ROOT: Final = PurePosixPath("/home/ubuntu/workspace")
 _SENSITIVE_TERM_RE: Final = re.compile(
     r"(?:^|[^a-z0-9])"
     r"(?:subscriber[_-]?id|api[_-]?key|secret|(?:access[_-]?)?token|email|phone)"
@@ -67,8 +87,8 @@ class AuthorityError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class Completed:
     returncode: int
-    stdout: str
-    stderr: str
+    stdout: bytes
+    stderr: bytes
 
 
 Runner = Callable[[Sequence[str]], Completed]
@@ -82,9 +102,6 @@ def _default_runner(args: Sequence[str]) -> Completed:
         list(args),
         capture_output=True,
         check=False,
-        encoding="utf-8",
-        errors="strict",
-        text=True,
         timeout=_COMMAND_TIMEOUT_SECONDS,
     )
     return Completed(completed.returncode, completed.stdout, completed.stderr)
@@ -94,7 +111,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise AuthorityError(f"duplicate key in manifest: {key}")
+            raise AuthorityError("duplicate key in manifest")
         result[key] = value
     return result
 
@@ -103,40 +120,63 @@ def _path_text(path: tuple[str, ...]) -> str:
     return ".".join(path) if path else "manifest"
 
 
-def _scan_sensitive(
-    value: object,
-    *,
-    path: tuple[str, ...] = (),
-    documented_variable: bool = False,
-) -> None:
+def _contains_sensitive_pattern(value: str) -> bool:
+    return bool(
+        _SENSITIVE_TERM_RE.search(value)
+        or _EMAIL_RE.search(value)
+        or _PHONE_RE.search(value)
+    )
+
+
+def _scan_sensitive_keys(value: object, *, path: tuple[str, ...] = ()) -> None:
+    """Reject unsafe mapping keys without copying those keys into diagnostics."""
+
     if isinstance(value, Mapping):
         for key, nested in value.items():
             if type(key) is not str:
                 raise AuthorityError(f"non-text key at {_path_text(path)}")
-            if _SENSITIVE_TERM_RE.search(key):
-                raise AuthorityError(f"forbidden key at {_path_text(path + (key,))}")
-            child_path = path + (key,)
-            _scan_sensitive(nested, path=child_path)
+            if any(ord(character) < 32 or ord(character) == 127 for character in key):
+                raise AuthorityError(f"forbidden key at {_path_text(path)}")
+            if _contains_sensitive_pattern(key):
+                raise AuthorityError(f"forbidden key at {_path_text(path)}")
+            _scan_sensitive_keys(nested, path=path + (key,))
         return
     if isinstance(value, list):
-        is_documented_list = path == ("verification", "documented_variables")
         for index, nested in enumerate(value):
-            _scan_sensitive(
-                nested,
-                path=path + (str(index),),
-                documented_variable=is_documented_list,
-            )
+            _scan_sensitive_keys(nested, path=path + (str(index),))
+
+
+def _is_declared_variable_location(value: str, path: tuple[str, ...]) -> bool:
+    if not _ENVIRONMENT_NAME_RE.fullmatch(value):
+        return False
+    if path[:-1] == ("verification", "documented_variables"):
+        return True
+    return (
+        len(path) == 4
+        and path[0] == "components"
+        and path[2:] == ("routing", "variable")
+    )
+
+
+def _scan_sensitive(value: object, *, path: tuple[str, ...] = ()) -> None:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if type(key) is not str:
+                raise AuthorityError(f"non-text key at {_path_text(path)}")
+            if _contains_sensitive_pattern(key):
+                raise AuthorityError(f"forbidden key at {_path_text(path)}")
+            _scan_sensitive(nested, path=path + (key,))
+        return
+    if isinstance(value, list):
+        for index, nested in enumerate(value):
+            _scan_sensitive(nested, path=path + (str(index),))
         return
     if type(value) is str:
         if any(ord(character) < 32 or ord(character) == 127 for character in value):
             raise AuthorityError(f"control character at {_path_text(path)}")
-        if documented_variable and _ENVIRONMENT_NAME_RE.fullmatch(value):
+        if _is_declared_variable_location(value, path):
             return
-        if (
-            _SENSITIVE_TERM_RE.search(value)
-            or _EMAIL_RE.search(value)
-            or _PHONE_RE.search(value)
-        ):
+        if _contains_sensitive_pattern(value):
             raise AuthorityError(f"forbidden string at {_path_text(path)}")
         return
     if value is None or type(value) in (bool, int):
@@ -201,8 +241,14 @@ def _true(value: object, path: str) -> None:
 
 
 def _status_code(value: object, path: str) -> int:
-    if type(value) is not int or value != 200:
-        raise AuthorityError(f"{path} must equal 200")
+    if type(value) is not int or not 100 <= value <= 599:
+        raise AuthorityError(f"{path} must be an HTTP status_code integer")
+    return value
+
+
+def _positive_integer(value: object, path: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise AuthorityError(f"{path} must be a positive integer")
     return value
 
 
@@ -240,7 +286,14 @@ def _url(value: object, path: str, *, health: bool = False) -> str:
 def _relative_path(value: object, path: str) -> str:
     text = _text(value, path)
     candidate = PurePosixPath(text)
-    if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
+    if (
+        candidate.is_absolute()
+        or not candidate.parts
+        or ".." in candidate.parts
+        or candidate.as_posix() != text
+        or ":" in text
+        or "\\" in text
+    ):
         raise AuthorityError(f"{path} must be a safe relative path")
     return candidate.as_posix()
 
@@ -248,9 +301,33 @@ def _relative_path(value: object, path: str) -> str:
 def _absolute_path(value: object, path: str) -> str:
     text = _text(value, path)
     candidate = PurePosixPath(text)
-    if not candidate.is_absolute() or ".." in candidate.parts:
+    if (
+        not candidate.is_absolute()
+        or text.startswith("//")
+        or ".." in candidate.parts
+        or candidate.as_posix() != text
+    ):
         raise AuthorityError(f"{path} must be a normalized absolute path")
     return candidate.as_posix()
+
+
+def _path_is_within(candidate: PurePosixPath, root: PurePosixPath) -> bool:
+    return candidate == root or root in candidate.parents
+
+
+def _pointer_path(
+    value: object,
+    path: str,
+    repository_path: PurePosixPath,
+) -> str:
+    normalized = _absolute_path(value, path)
+    candidate = PurePosixPath(normalized)
+    if not any(
+        _path_is_within(candidate, root)
+        for root in (repository_path, _WORKSPACE_ROOT)
+    ):
+        raise AuthorityError(f"{path} must be inside the allowed roots")
+    return normalized
 
 
 def _string_list(
@@ -268,26 +345,126 @@ def _string_list(
     return result
 
 
-def _validate_component(name: str, value: object) -> None:
-    path = f"components.{name}"
-    component = _exact_fields(
+def _validate_mounts(container: Mapping[str, object], path: str) -> None:
+    mounts = _list(container["mounts"], f"{path}.mounts")
+    destinations: set[str] = set()
+    for index, raw_mount in enumerate(mounts):
+        mount_path = f"{path}.mounts[{index}]"
+        mount = _exact_fields(
+            raw_mount,
+            {"source", "destination", "read_only"},
+            mount_path,
+        )
+        _absolute_path(mount["source"], f"{mount_path}.source")
+        destination = _absolute_path(
+            mount["destination"], f"{mount_path}.destination"
+        )
+        if destination in destinations:
+            raise AuthorityError(f"{path}.mounts has duplicate destinations")
+        destinations.add(destination)
+        if type(mount["read_only"]) is not bool:
+            raise AuthorityError(f"{mount_path}.read_only must be boolean")
+
+
+def _validate_traefik_labels(value: object, path: str) -> Mapping[str, object]:
+    labels = _mapping(value, path)
+    for label, raw_expected in labels.items():
+        if not label.startswith("traefik."):
+            raise AuthorityError(f"{path} contains a non-Traefik label")
+        expected = _text(raw_expected, f"{path}.{label}")
+        if not label.endswith(".priority"):
+            continue
+        namespace = label.removesuffix(".priority")
+        if (
+            not namespace.startswith("traefik.http.routers.")
+            or namespace == "traefik.http.routers."
+            or f"{namespace}.rule" not in labels
+            or f"{namespace}.service" not in labels
+            or re.fullmatch(r"[0-9]+", expected) is None
+            or int(expected) <= 0
+        ):
+            raise AuthorityError(
+                f"{path} priority requires a matching router rule and service"
+            )
+    return labels
+
+
+def _validate_container(value: object, path: str) -> tuple[str, str, bool]:
+    container = _exact_fields(
         value,
         {
-            "source",
-            "image",
-            "container",
-            "traefik",
+            "role",
+            "name",
+            "compose_project",
+            "compose_config",
+            "compose_service",
+            "status",
             "health",
-            "heartbeat",
-            "files",
-            "routing",
+            "user",
+            "read_only",
+            "cap_drop",
+            "security_opt",
+            "mounts",
+            "traefik_labels",
         },
         path,
     )
+    role = _text(container["role"], f"{path}.role")
+    if not _SAFE_NAME_RE.fullmatch(role):
+        raise AuthorityError(f"{path}.role is invalid")
+    name = _text(container["name"], f"{path}.name")
+    if not _CONTAINER_NAME_RE.fullmatch(name):
+        raise AuthorityError(f"{path}.name is invalid")
+    _text(container["compose_project"], f"{path}.compose_project")
+    _absolute_path(container["compose_config"], f"{path}.compose_config")
+    _text(container["compose_service"], f"{path}.compose_service")
+    _literal(container["status"], "running", f"{path}.status")
 
-    source = _exact_fields(component["source"], {"commit", "tree"}, f"{path}.source")
+    health = container["health"]
+    if health is not None:
+        _literal(health, "healthy", f"{path}.health")
+
+    user = container["user"]
+    if type(user) is not str:
+        raise AuthorityError(f"{path}.user must identify a non-root user")
+    compact_user = re.sub(r"\s+", "", user).casefold()
+    owner = compact_user.split(":", 1)[0]
+    numeric_root = re.fullmatch(r"[0-9]+", owner) is not None and int(owner) == 0
+    if not compact_user or not owner or owner == "root" or numeric_root:
+        raise AuthorityError(f"{path}.user must identify a non-root user")
+
+    _true(container["read_only"], f"{path}.read_only")
+    if _string_list(container["cap_drop"], f"{path}.cap_drop") != ["ALL"]:
+        raise AuthorityError(f"{path}.cap_drop must be exactly ALL")
+    if _string_list(container["security_opt"], f"{path}.security_opt") != [
+        "no-new-privileges:true"
+    ]:
+        raise AuthorityError(f"{path}.security_opt must enable no-new-privileges")
+    _validate_mounts(container, path)
+    labels = _validate_traefik_labels(
+        container["traefik_labels"], f"{path}.traefik_labels"
+    )
+    return role, name, bool(labels)
+
+
+def _validate_source_and_image(component: Mapping[str, object], path: str) -> None:
+    source = _exact_fields(
+        component["source"], {"commit", "tree", "ref"}, f"{path}.source"
+    )
     commit = _git_object(source["commit"], f"{path}.source.commit")
     _git_object(source["tree"], f"{path}.source.tree")
+    source_ref = _text(source["ref"], f"{path}.source.ref")
+    ref_suffix = source_ref.removeprefix("refs/heads/production/")
+    if (
+        ref_suffix == source_ref
+        or not ref_suffix
+        or source_ref.endswith(("/", ".", ".lock"))
+        or "//" in source_ref
+        or ".." in source_ref
+        or "@{" in source_ref
+        or re.search(r"[~^:?*\[\]\\\s]", source_ref)
+    ):
+        raise AuthorityError(f"{path}.source.ref must be a full local production ref")
 
     image = _exact_fields(
         component["image"], {"ref", "id", "revision"}, f"{path}.image"
@@ -300,124 +477,148 @@ def _validate_component(name: str, value: object) -> None:
     if revision != commit:
         raise AuthorityError(f"{path}.image.revision must equal source commit")
 
-    container = _exact_fields(
-        component["container"],
-        {
-            "name",
-            "compose_project",
-            "compose_config",
-            "compose_service",
-            "status",
-            "health",
-            "user",
-            "read_only",
-            "cap_drop",
-            "security_opt",
-            "mounts",
-        },
-        f"{path}.container",
-    )
-    container_name = _text(container["name"], f"{path}.container.name")
-    if not _CONTAINER_NAME_RE.fullmatch(container_name):
-        raise AuthorityError(f"{path}.container.name is invalid")
-    _text(container["compose_project"], f"{path}.container.compose_project")
-    _absolute_path(container["compose_config"], f"{path}.container.compose_config")
-    _text(container["compose_service"], f"{path}.container.compose_service")
-    _literal(container["status"], "running", f"{path}.container.status")
-    _literal(container["health"], "healthy", f"{path}.container.health")
-    user = _text(container["user"], f"{path}.container.user")
-    if user.casefold() in {"root", "0", "0:0"}:
-        raise AuthorityError(f"{path}.container.user must be non-root")
-    _true(container["read_only"], f"{path}.container.read_only")
-    if _string_list(container["cap_drop"], f"{path}.container.cap_drop") != ["ALL"]:
-        raise AuthorityError(f"{path}.container.cap_drop must be exactly ALL")
-    if _string_list(
-        container["security_opt"], f"{path}.container.security_opt"
-    ) != ["no-new-privileges:true"]:
-        raise AuthorityError(
-            f"{path}.container.security_opt must enable no-new-privileges"
-        )
-    mounts = _list(container["mounts"], f"{path}.container.mounts")
-    destinations: set[str] = set()
-    for index, raw_mount in enumerate(mounts):
-        mount_path = f"{path}.container.mounts[{index}]"
-        mount = _exact_fields(
-            raw_mount,
-            {"source", "destination", "read_only"},
-            mount_path,
-        )
-        _absolute_path(mount["source"], f"{mount_path}.source")
-        destination = _absolute_path(
-            mount["destination"], f"{mount_path}.destination"
-        )
-        if destination in destinations:
-            raise AuthorityError(f"{path}.container.mounts has duplicate destinations")
-        destinations.add(destination)
-        if type(mount["read_only"]) is not bool:
-            raise AuthorityError(f"{mount_path}.read_only must be boolean")
 
-    traefik = _exact_fields(component["traefik"], {"labels"}, f"{path}.traefik")
-    labels = _mapping(traefik["labels"], f"{path}.traefik.labels")
-    if not labels:
-        raise AuthorityError(f"{path}.traefik.labels must not be empty")
-    priorities = 0
-    for label, raw_expected in labels.items():
-        if not label.startswith("traefik."):
-            raise AuthorityError(f"{path}.traefik.labels contains a non-Traefik label")
-        expected = _text(raw_expected, f"{path}.traefik.labels.{label}")
-        if label.endswith(".priority"):
-            priorities += 1
-            if not expected.isdecimal() or int(expected) <= 0:
-                raise AuthorityError(f"{path}.traefik priority must be positive")
-    if priorities == 0:
-        raise AuthorityError(f"{path}.traefik.labels must declare a router priority")
-
-    health = _exact_fields(
-        component["health"], {"url", "status_code"}, f"{path}.health"
-    )
-    _url(health["url"], f"{path}.health.url", health=True)
-    _status_code(health["status_code"], f"{path}.health.status_code")
-
+def _validate_heartbeat(name: str, value: object, path: str) -> None:
+    if name == "ops":
+        if value is not None:
+            raise AuthorityError("ops heartbeat must be null")
+        return
+    if value is None:
+        raise AuthorityError(f"{name} heartbeat must be an object")
     heartbeat = _exact_fields(
-        component["heartbeat"],
-        {"url", "status_code", "queues"},
-        f"{path}.heartbeat",
+        value,
+        {"path", "schema", "max_age_seconds", "queues"},
+        path,
     )
-    _url(heartbeat["url"], f"{path}.heartbeat.url")
-    _status_code(heartbeat["status_code"], f"{path}.heartbeat.status_code")
-    queues = _string_list(
-        heartbeat["queues"], f"{path}.heartbeat.queues", nonempty=True
+    _absolute_path(heartbeat["path"], f"{path}.path")
+    _literal(heartbeat["schema"], _HEARTBEAT_SCHEMA, f"{path}.schema")
+    _positive_integer(heartbeat["max_age_seconds"], f"{path}.max_age_seconds")
+    queues = _string_list(heartbeat["queues"], f"{path}.queues")
+    if queues != list(_QUEUE_ORDER):
+        raise AuthorityError(f"{path}.queues must equal the closed ordered queue set")
+
+
+def _validate_routing(
+    name: str,
+    value: object,
+    path: str,
+    roles: set[str],
+    documented_variables: set[str],
+) -> None:
+    if name != "test_contact":
+        if value is not None:
+            raise AuthorityError(f"{name} routing must be null")
+        return
+    if value is None:
+        raise AuthorityError("test_contact routing must be an object")
+    routing = _exact_fields(
+        value,
+        {"container_role", "variable", "target_hash"},
+        path,
     )
-    if any(not _SAFE_NAME_RE.fullmatch(queue) for queue in queues):
-        raise AuthorityError(f"{path}.heartbeat.queues contains an invalid name")
+    role = _text(routing["container_role"], f"{path}.container_role")
+    if role != "router" or role not in roles:
+        raise AuthorityError(f"{path}.container_role must identify the router")
+    variable = _text(routing["variable"], f"{path}.variable")
+    if (
+        not _ENVIRONMENT_NAME_RE.fullmatch(variable)
+        or variable not in documented_variables
+    ):
+        raise AuthorityError(f"{path} routing variable must be documented")
+    _sha256(routing["target_hash"], f"{path}.target_hash")
+
+
+def _validate_component(
+    name: str,
+    value: object,
+    documented_variables: set[str],
+) -> None:
+    path = f"components.{name}"
+    component = _exact_fields(
+        value,
+        {"source", "image", "containers", "files", "heartbeat", "routing"},
+        path,
+    )
+    _validate_source_and_image(component, path)
+
+    raw_containers = _list(component["containers"], f"{path}.containers")
+    if not raw_containers:
+        raise AuthorityError(f"{path}.containers must not be empty")
+    containers_by_role: dict[str, str] = {}
+    container_names: set[str] = set()
+    has_traefik = False
+    for index, raw_container in enumerate(raw_containers):
+        role, container_name, has_traefik_labels = _validate_container(
+            raw_container, f"{path}.containers[{index}]"
+        )
+        if role in containers_by_role:
+            raise AuthorityError(f"{path} container roles must be unique")
+        if container_name in container_names:
+            raise AuthorityError(f"{path} container names must be unique")
+        containers_by_role[role] = container_name
+        container_names.add(container_name)
+        has_traefik = has_traefik or has_traefik_labels
+
+    expected_roles = _COMPONENT_ROLES[name]
+    if set(containers_by_role) != set(expected_roles):
+        raise AuthorityError(
+            f"{path} container roles must equal {', '.join(expected_roles)}"
+        )
+    if not has_traefik:
+        raise AuthorityError(f"{path} must have a container with Traefik labels")
+    roles = set(containers_by_role)
 
     files = _list(component["files"], f"{path}.files")
     if not files:
         raise AuthorityError(f"{path}.files must not be empty")
     file_paths: set[str] = set()
+    container_paths: set[str] = set()
     for index, raw_file in enumerate(files):
         file_path = f"{path}.files[{index}]"
-        file_entry = _exact_fields(raw_file, {"path", "sha256"}, file_path)
+        file_entry = _exact_fields(
+            raw_file,
+            {"path", "container_path", "container_role", "sha256"},
+            file_path,
+        )
         relative = _relative_path(file_entry["path"], f"{file_path}.path")
         if relative in file_paths:
             raise AuthorityError(f"{path}.files has duplicate paths")
         file_paths.add(relative)
+        container_path = _absolute_path(
+            file_entry["container_path"], f"{file_path}.container_path"
+        )
+        if container_path in container_paths:
+            raise AuthorityError(f"{path}.files has duplicate container paths")
+        container_paths.add(container_path)
+        container_role = _text(
+            file_entry["container_role"], f"{file_path}.container_role"
+        )
+        if container_role not in roles:
+            raise AuthorityError(
+                f"{file_path}.container_role must resolve to a declared container"
+            )
         _sha256(file_entry["sha256"], f"{file_path}.sha256")
 
-    routing = _exact_fields(
-        component["routing"], {"target_hash"}, f"{path}.routing"
+    _validate_heartbeat(name, component["heartbeat"], f"{path}.heartbeat")
+    _validate_routing(
+        name,
+        component["routing"],
+        f"{path}.routing",
+        roles,
+        documented_variables,
     )
-    _sha256(routing["target_hash"], f"{path}.routing.target_hash")
 
 
 def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
-    _scan_sensitive(manifest)
+    _scan_sensitive_keys(manifest)
     root = _exact_fields(
         manifest,
         _TOP_LEVEL_FIELDS,
         "manifest",
         top_level=True,
     )
+    _scan_sensitive(root)
+
     schema = _text(root["schema"], "schema")
     if schema != SCHEMA:
         raise AuthorityError(f"unsupported schema: {schema}")
@@ -430,52 +631,102 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
     if timestamp.tzinfo is None or timestamp.utcoffset() != timezone.utc.utcoffset(timestamp):
         raise AuthorityError("generated_at must include a UTC offset")
 
-    repository = _exact_fields(root["repository"], {"remote"}, "repository")
-    _literal(repository["remote"], "origin", "repository.remote")
-
-    components = _exact_fields(
-        root["components"], set(COMPONENT_ORDER), "components"
+    repository = _exact_fields(root["repository"], {"path", "remote"}, "repository")
+    repository_path = PurePosixPath(
+        _absolute_path(repository["path"], "repository.path")
     )
-    for name in COMPONENT_ORDER:
-        _validate_component(name, components[name])
-
-    legacy = _exact_fields(root["legacy"], {"state"}, "legacy")
-    _literal(legacy["state"], "excluded", "legacy.state")
-
-    pointers = _list(root["generic_pointers"], "generic_pointers")
-    if not pointers:
-        raise AuthorityError("generic_pointers must not be empty")
-    pointer_names: set[str] = set()
-    pointer_urls: set[str] = set()
-    for index, raw_pointer in enumerate(pointers):
-        path = f"generic_pointers[{index}]"
-        pointer = _exact_fields(raw_pointer, {"name", "url", "sha256"}, path)
-        name = _text(pointer["name"], f"{path}.name")
-        if not _SAFE_NAME_RE.fullmatch(name) or name in pointer_names:
-            raise AuthorityError(f"{path}.name must be unique and safe")
-        pointer_names.add(name)
-        url = _url(pointer["url"], f"{path}.url")
-        if url in pointer_urls:
-            raise AuthorityError(f"{path}.url must be unique")
-        pointer_urls.add(url)
-        _sha256(pointer["sha256"], f"{path}.sha256")
+    _literal(repository["remote"], "origin", "repository.remote")
 
     verification = _exact_fields(
         root["verification"], {"documented_variables"}, "verification"
     )
-    documented_variables = _string_list(
+    documented_variable_list = _string_list(
         verification["documented_variables"],
         "verification.documented_variables",
     )
     if any(
         not _ENVIRONMENT_NAME_RE.fullmatch(variable)
-        for variable in documented_variables
+        for variable in documented_variable_list
     ):
         raise AuthorityError(
             "verification.documented_variables must contain variable names only"
         )
-    return root
+    documented_variables = set(documented_variable_list)
 
+    components = _exact_fields(
+        root["components"], set(COMPONENT_ORDER), "components"
+    )
+    for component_name in COMPONENT_ORDER:
+        _validate_component(
+            component_name,
+            components[component_name],
+            documented_variables,
+        )
+
+    legacy = _exact_fields(root["legacy"], {"path", "state"}, "legacy")
+    _absolute_path(legacy["path"], "legacy.path")
+    _literal(legacy["state"], "excluded", "legacy.state")
+
+    endpoints = _list(root["public_endpoints"], "public_endpoints")
+    if not endpoints:
+        raise AuthorityError("public_endpoints must not be empty")
+    endpoint_names: set[str] = set()
+    endpoint_urls: set[str] = set()
+    for index, raw_endpoint in enumerate(endpoints):
+        path = f"public_endpoints[{index}]"
+        endpoint = _exact_fields(
+            raw_endpoint,
+            {"name", "url", "status_code", "body_sha256"},
+            path,
+        )
+        endpoint_name = _text(endpoint["name"], f"{path}.name")
+        if (
+            not _SAFE_NAME_RE.fullmatch(endpoint_name)
+            or endpoint_name in endpoint_names
+        ):
+            raise AuthorityError(f"{path}.name must be unique and safe")
+        endpoint_names.add(endpoint_name)
+        endpoint_url = _url(endpoint["url"], f"{path}.url")
+        if endpoint_url in endpoint_urls:
+            raise AuthorityError(f"{path}.url must be unique")
+        endpoint_urls.add(endpoint_url)
+        _status_code(endpoint["status_code"], f"{path}.status_code")
+        _sha256(endpoint["body_sha256"], f"{path}.body_sha256")
+
+    pointers = _list(root["generic_pointers"], "generic_pointers")
+    if not pointers:
+        raise AuthorityError("generic_pointers must not be empty")
+    pointer_names: set[str] = set()
+    pointer_paths: set[str] = set()
+    for index, raw_pointer in enumerate(pointers):
+        path = f"generic_pointers[{index}]"
+        pointer = _exact_fields(
+            raw_pointer,
+            {"name", "path", "sha256", "symlink_target"},
+            path,
+        )
+        pointer_name = _text(pointer["name"], f"{path}.name")
+        if (
+            not _SAFE_NAME_RE.fullmatch(pointer_name)
+            or pointer_name in pointer_names
+        ):
+            raise AuthorityError(f"{path}.name must be unique and safe")
+        pointer_names.add(pointer_name)
+        pointer_path = _pointer_path(
+            pointer["path"], f"{path}.path", repository_path
+        )
+        if pointer_path in pointer_paths:
+            raise AuthorityError(f"{path}.path must be unique")
+        pointer_paths.add(pointer_path)
+        symlink_target = pointer["symlink_target"]
+        if symlink_target is not None:
+            _pointer_path(
+                symlink_target,
+                f"{path}.symlink_target",
+                repository_path,
+            )
+        _sha256(pointer["sha256"], f"{path}.sha256")
+    return root
 
 def load_manifest(path: Path) -> dict[str, object]:
     """Load and validate a closed V1 authority manifest from ``path``."""
@@ -501,7 +752,7 @@ def _code(value: object) -> str:
 
 
 def render_markdown(manifest: Mapping[str, object]) -> str:
-    """Render a safe summary without exposing routing target identities."""
+    """Render a safe summary without exposing any routing details."""
 
     validated = _validate_manifest(manifest)
     repository = _mapping(validated["repository"], "repository")
@@ -511,16 +762,15 @@ def render_markdown(manifest: Mapping[str, object]) -> str:
         "",
         f"- Schema: {_code(validated['schema'])}",
         f"- Generated at: {_code(validated['generated_at'])}",
+        f"- Repository path: {_code(repository['path'])}",
         f"- Repository remote: {_code(repository['remote'])}",
     ]
     display_names = {"ga": "GA", "test_contact": "Test contact", "ops": "Ops"}
     for name in COMPONENT_ORDER:
-        component = _mapping(components[name], f"components.{name}")
-        source = _mapping(component["source"], f"components.{name}.source")
-        image = _mapping(component["image"], f"components.{name}.image")
-        container = _mapping(component["container"], f"components.{name}.container")
-        health = _mapping(component["health"], f"components.{name}.health")
-        routing = _mapping(component["routing"], f"components.{name}.routing")
+        component_path = f"components.{name}"
+        component = _mapping(components[name], component_path)
+        source = _mapping(component["source"], f"{component_path}.source")
+        image = _mapping(component["image"], f"{component_path}.image")
         lines.extend(
             [
                 "",
@@ -528,21 +778,95 @@ def render_markdown(manifest: Mapping[str, object]) -> str:
                 "",
                 f"- Source commit: {_code(source['commit'])}",
                 f"- Source tree: {_code(source['tree'])}",
+                f"- Source ref: {_code(source['ref'])}",
                 f"- Image: {_code(image['ref'])}",
                 f"- Image ID: {_code(image['id'])}",
-                f"- Container: {_code(container['name'])}",
-                f"- Container state: {_code(container['status'])} / {_code(container['health'])}",
-                f"- Health endpoint: {_code(health['url'])}",
-                f"- Routing target SHA-256: {_code(routing['target_hash'])}",
+                f"- Image revision: {_code(image['revision'])}",
+                "",
+                "### Containers",
             ]
         )
 
+        containers_by_role: dict[str, Mapping[str, object]] = {}
+        for index, raw_container in enumerate(
+            _list(component["containers"], f"{component_path}.containers")
+        ):
+            container = _mapping(
+                raw_container, f"{component_path}.containers[{index}]"
+            )
+            containers_by_role[str(container["role"])] = container
+        for role in _COMPONENT_ROLES[name]:
+            container = containers_by_role[role]
+            health = container["health"] if container["health"] is not None else "null"
+            lines.append(
+                f"- {_code(role)}: {_code(container['name'])} "
+                f"({_code(container['status'])}, health={_code(health)})"
+            )
+
+        lines.extend(["", "### Files"])
+        for index, raw_file in enumerate(
+            _list(component["files"], f"{component_path}.files")
+        ):
+            file_entry = _mapping(raw_file, f"{component_path}.files[{index}]")
+            lines.append(
+                f"- {_code(file_entry['path'])} -> {_code(file_entry['container_path'])} "
+                f"({_code(file_entry['container_role'])}): {_code(file_entry['sha256'])}"
+            )
+
+        heartbeat = component["heartbeat"]
+        if heartbeat is None:
+            lines.extend(["", "### Heartbeat", "", "- Not declared"])
+        else:
+            heartbeat_entry = _mapping(heartbeat, f"{component_path}.heartbeat")
+            queues = ", ".join(
+                _string_list(
+                    heartbeat_entry["queues"],
+                    f"{component_path}.heartbeat.queues",
+                )
+            )
+            lines.extend(
+                [
+                    "",
+                    "### Heartbeat",
+                    "",
+                    f"- Path: {_code(heartbeat_entry['path'])}",
+                    f"- Schema: {_code(heartbeat_entry['schema'])}",
+                    f"- Max age seconds: {_code(heartbeat_entry['max_age_seconds'])}",
+                    f"- Queues: {_code(queues)}",
+                ]
+            )
+
     legacy = _mapping(validated["legacy"], "legacy")
-    lines.extend(["", "## Legacy", "", f"- State: {_code(legacy['state'])}"])
+    lines.extend(
+        [
+            "",
+            "## Legacy",
+            "",
+            f"- Path: {_code(legacy['path'])}",
+            f"- State: {_code(legacy['state'])}",
+        ]
+    )
+
+    lines.extend(["", "## Public endpoints", ""])
+    for index, raw_endpoint in enumerate(
+        _list(validated["public_endpoints"], "public_endpoints")
+    ):
+        endpoint = _mapping(raw_endpoint, f"public_endpoints[{index}]")
+        lines.append(
+            f"- {_code(endpoint['name'])}: {_code(endpoint['url'])}; "
+            f"status={_code(endpoint['status_code'])}; "
+            f"body={_code(endpoint['body_sha256'])}"
+        )
+
     lines.extend(["", "## Generic pointers", ""])
-    for raw_pointer in _list(validated["generic_pointers"], "generic_pointers"):
-        pointer = _mapping(raw_pointer, "generic_pointer")
-        lines.append(f"- {_code(pointer['name'])}: {_code(pointer['sha256'])}")
+    for index, raw_pointer in enumerate(
+        _list(validated["generic_pointers"], "generic_pointers")
+    ):
+        pointer = _mapping(raw_pointer, f"generic_pointers[{index}]")
+        lines.append(
+            f"- {_code(pointer['name'])}: {_code(pointer['path'])}; "
+            f"{_code(pointer['sha256'])}"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -550,7 +874,10 @@ _CONTAINER_HASH_SCRIPT: Final = (
     "import hashlib,pathlib,sys;"
     "print('sha256:'+hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())"
 )
-_HEALTHY_STATES: Final = frozenset({"healthy", "ok", "ready"})
+_ROUTING_HASH_SCRIPT: Final = (
+    "import hashlib,os,sys;"
+    "print('sha256:'+hashlib.sha256(os.environ[sys.argv[1]].encode('utf-8')).hexdigest())"
+)
 
 
 def _default_http_get(url: str) -> tuple[int, bytes]:
@@ -572,13 +899,35 @@ def _run_checked(
     except Exception:
         errors.append(f"{failure} command failed")
         return None
-    if not isinstance(completed, Completed) or completed.returncode != 0:
-        errors.append(f"{failure} failed")
-        return None
-    if type(completed.stdout) is not str or type(completed.stderr) is not str:
+    if (
+        not isinstance(completed, Completed)
+        or type(completed.returncode) is not int
+        or type(completed.stdout) is not bytes
+        or type(completed.stderr) is not bytes
+    ):
         errors.append(f"{failure} returned an invalid result")
         return None
+    if completed.returncode != 0:
+        errors.append(f"{failure} failed")
+        return None
     return completed
+
+
+def _stdout_line(
+    completed: Completed,
+    errors: list[str],
+    failure: str,
+) -> str | None:
+    try:
+        text = completed.stdout.decode("utf-8", errors="strict")
+    except UnicodeError:
+        errors.append(f"{failure} returned invalid UTF-8")
+        return None
+    lines = text.splitlines()
+    if len(lines) != 1:
+        errors.append(f"{failure} returned invalid output")
+        return None
+    return lines[0]
 
 
 def _http_checked(
@@ -603,11 +952,16 @@ def _http_checked(
     return result
 
 
-def _single_inspect_document(completed: Completed) -> Mapping[str, object] | None:
+def _runtime_json(payload: bytes) -> object | None:
     try:
-        payload = json.loads(completed.stdout)
-    except (json.JSONDecodeError, UnicodeError, ValueError):
+        text = payload.decode("utf-8", errors="strict")
+        return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except (AuthorityError, json.JSONDecodeError, UnicodeError, ValueError):
         return None
+
+
+def _single_inspect_document(completed: Completed) -> Mapping[str, object] | None:
+    payload = _runtime_json(completed.stdout)
     if (
         not isinstance(payload, list)
         or len(payload) != 1
@@ -634,39 +988,48 @@ def _digest_bytes(value: bytes) -> str:
 def _verify_git_authority(
     name: str,
     source: Mapping[str, object],
+    repository_path: str,
     runner: Runner,
     errors: list[str],
 ) -> None:
     commit = str(source["commit"])
-    expected_tree = source["tree"]
+    expected_tree = str(source["tree"])
+    ref = str(source["ref"])
     prefix = f"{name}:"
+    git = ["git", "-C", repository_path]
+
     tree = _run_checked(
         runner,
-        ["git", "rev-parse", f"{commit}^{{tree}}"],
+        [*git, "rev-parse", f"{commit}^{{tree}}"],
         errors,
         f"{prefix} git tree",
     )
-    if tree is not None and tree.stdout.strip() != expected_tree:
-        errors.append(f"{prefix} git tree mismatch")
+    if tree is not None:
+        actual_tree = _stdout_line(tree, errors, f"{prefix} git tree")
+        if actual_tree is not None and actual_tree != expected_tree:
+            errors.append(f"{prefix} git tree mismatch")
 
-    ref = f"refs/heads/production/{name}"
     local = _run_checked(
         runner,
-        ["git", "show-ref", "--verify", ref],
+        [*git, "show-ref", "--verify", ref],
         errors,
         f"{prefix} local production ref",
     )
-    if local is not None and local.stdout.splitlines() != [f"{commit} {ref}"]:
-        errors.append(f"{prefix} local production ref mismatch")
+    if local is not None:
+        actual_local = _stdout_line(local, errors, f"{prefix} local production ref")
+        if actual_local is not None and actual_local != f"{commit} {ref}":
+            errors.append(f"{prefix} local production ref mismatch")
 
     remote = _run_checked(
         runner,
-        ["git", "ls-remote", "--heads", "origin", ref],
+        [*git, "ls-remote", "--heads", "origin", ref],
         errors,
         f"{prefix} remote production ref",
     )
-    if remote is not None and remote.stdout.splitlines() != [f"{commit}\t{ref}"]:
-        errors.append(f"{prefix} remote production ref mismatch")
+    if remote is not None:
+        actual_remote = _stdout_line(remote, errors, f"{prefix} remote production ref")
+        if actual_remote is not None and actual_remote != f"{commit}\t{ref}":
+            errors.append(f"{prefix} remote production ref mismatch")
 
 
 def _verify_image(
@@ -733,7 +1096,6 @@ def _verify_container(
     name: str,
     image: Mapping[str, object],
     container: Mapping[str, object],
-    traefik: Mapping[str, object],
     runner: Runner,
     errors: list[str],
 ) -> None:
@@ -755,7 +1117,6 @@ def _verify_container(
     state = _nested_mapping(document, "State")
     host_config = _nested_mapping(document, "HostConfig")
     labels = _nested_mapping(config, "Labels")
-    health = _nested_mapping(state, "Health")
 
     if document.get("Image") != image["id"]:
         errors.append(f"{prefix} container image id mismatch")
@@ -777,8 +1138,16 @@ def _verify_container(
 
     if state is None or state.get("Status") != container["status"]:
         errors.append(f"{prefix} container status mismatch")
-    if health is None or health.get("Status") != container["health"]:
-        errors.append(f"{prefix} container health mismatch")
+
+    expected_health = container["health"]
+    if expected_health is None:
+        if state is None or "Health" in state:
+            errors.append(f"{prefix} container health mismatch")
+    else:
+        health = _nested_mapping(state, "Health")
+        if health is None or health.get("Status") != expected_health:
+            errors.append(f"{prefix} container health mismatch")
+
     if config is None or config.get("User") != container["user"]:
         errors.append(f"{prefix} container user mismatch")
     if host_config is None or host_config.get("ReadonlyRootfs") is not True:
@@ -792,7 +1161,9 @@ def _verify_container(
     if _actual_mounts(document) != _expected_mounts(container):
         errors.append(f"{prefix} mounts mismatch")
 
-    expected_traefik = _mapping(traefik["labels"], f"components.{name}.traefik.labels")
+    expected_traefik = _mapping(
+        container["traefik_labels"], "container.traefik_labels"
+    )
     actual_traefik = (
         {key: value for key, value in labels.items() if key.startswith("traefik.")}
         if labels is not None
@@ -802,90 +1173,101 @@ def _verify_container(
         errors.append(f"{prefix} Traefik labels mismatch")
 
 
-def _queue_healthy(value: object) -> bool:
-    if type(value) is str:
-        return value.casefold() in _HEALTHY_STATES
-    if isinstance(value, Mapping):
-        status = value.get("status")
-        return type(status) is str and status.casefold() in _HEALTHY_STATES
-    return False
-
-
-def _verify_http(
+def _verify_heartbeat(
     name: str,
-    component: Mapping[str, object],
-    http_get: HttpGet,
+    heartbeat_value: object,
     errors: list[str],
 ) -> None:
-    prefix = f"{name}:"
-    health = _mapping(component["health"], f"components.{name}.health")
-    response = _http_checked(
-        http_get,
-        str(health["url"]),
-        errors,
-        f"{prefix} health endpoint",
-    )
-    if response is not None and response[0] != health["status_code"]:
-        errors.append(f"{prefix} health endpoint status mismatch")
-
-    heartbeat = _mapping(component["heartbeat"], f"components.{name}.heartbeat")
-    response = _http_checked(
-        http_get,
-        str(heartbeat["url"]),
-        errors,
-        f"{prefix} heartbeat",
-    )
-    if response is None:
+    if heartbeat_value is None:
         return
-    status, body = response
-    if status != heartbeat["status_code"]:
-        errors.append(f"{prefix} heartbeat status mismatch")
+    heartbeat = _mapping(heartbeat_value, f"components.{name}.heartbeat")
+    path = Path(str(heartbeat["path"]))
+    try:
+        if path.is_symlink() or not path.is_file():
+            errors.append(f"{name}: heartbeat file invalid")
+            return
+        payload = path.read_bytes()
+    except OSError:
+        errors.append(f"{name}: heartbeat file unavailable")
+        return
+
+    document = _runtime_json(payload)
+    expected_fields = {"schema", "observed_at", "status", "failed_queues", "queues"}
+    if not isinstance(document, Mapping) or set(document) != expected_fields:
+        errors.append(f"{name}: heartbeat JSON invalid")
+        return
+    if document.get("schema") != heartbeat["schema"]:
+        errors.append(f"{name}: heartbeat schema mismatch")
+        return
+    if document.get("status") != "healthy" or document.get("failed_queues") != []:
+        errors.append(f"{name}: heartbeat status unhealthy")
+        return
+
+    observed_at = document.get("observed_at")
+    if type(observed_at) is not str:
+        errors.append(f"{name}: heartbeat timestamp invalid")
         return
     try:
-        document = json.loads(body.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError, ValueError):
-        errors.append(f"{prefix} heartbeat JSON invalid")
+        observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError:
+        errors.append(f"{name}: heartbeat timestamp invalid")
         return
-    if not isinstance(document, Mapping):
-        errors.append(f"{prefix} heartbeat JSON invalid")
+    if (
+        observed.tzinfo is None
+        or observed.utcoffset() != timezone.utc.utcoffset(observed)
+    ):
+        errors.append(f"{name}: heartbeat timestamp invalid")
         return
-    overall = document.get("status")
-    if type(overall) is not str or overall.casefold() not in _HEALTHY_STATES:
-        errors.append(f"{prefix} heartbeat status unhealthy")
+    age_seconds = (datetime.now(timezone.utc) - observed).total_seconds()
+    if age_seconds < 0 or age_seconds > int(heartbeat["max_age_seconds"]):
+        errors.append(f"{name}: heartbeat timestamp not fresh")
+        return
+
     queues = document.get("queues")
     expected_queues = set(_string_list(heartbeat["queues"], "heartbeat.queues"))
     if not isinstance(queues, Mapping) or set(queues) != expected_queues:
-        errors.append(f"{prefix} heartbeat queues mismatch")
+        errors.append(f"{name}: heartbeat queues mismatch")
         return
-    for queue in sorted(expected_queues):
-        if not _queue_healthy(queues[queue]):
-            errors.append(f"{prefix} heartbeat queue unhealthy")
+    if any(
+        not isinstance(queues[queue], Mapping)
+        or queues[queue].get("status") != "healthy"
+        for queue in expected_queues
+    ):
+        errors.append(f"{name}: heartbeat queue unhealthy")
 
 
 def _verify_files(
     name: str,
     component: Mapping[str, object],
+    repository_path: str,
     runner: Runner,
     errors: list[str],
 ) -> None:
     prefix = f"{name}:"
     source = _mapping(component["source"], f"components.{name}.source")
-    container = _mapping(component["container"], f"components.{name}.container")
+    containers_by_role = {
+        str(container["role"]): container
+        for container in (
+            _mapping(raw, f"components.{name}.container")
+            for raw in _list(component["containers"], f"components.{name}.containers")
+        )
+    }
+    git = ["git", "-C", repository_path]
     for raw_file in _list(component["files"], f"components.{name}.files"):
         file_entry = _mapping(raw_file, f"components.{name}.file")
-        path = str(file_entry["path"])
-        expected = file_entry["sha256"]
+        source_path = str(file_entry["path"])
+        container_path = str(file_entry["container_path"])
+        expected = str(file_entry["sha256"])
         source_file = _run_checked(
             runner,
-            ["git", "show", f"{source['commit']}:{path}"],
+            [*git, "show", f"{source['commit']}:{source_path}"],
             errors,
             f"{prefix} source file hash",
         )
-        if source_file is not None:
-            actual = _digest_bytes(source_file.stdout.encode("utf-8"))
-            if actual != expected:
-                errors.append(f"{prefix} source file hash mismatch")
+        if source_file is not None and _digest_bytes(source_file.stdout) != expected:
+            errors.append(f"{prefix} source file hash mismatch")
 
+        container = containers_by_role[str(file_entry["container_role"])]
         container_file = _run_checked(
             runner,
             [
@@ -895,36 +1277,130 @@ def _verify_files(
                 "python",
                 "-c",
                 _CONTAINER_HASH_SCRIPT,
-                path,
+                container_path,
             ],
             errors,
             f"{prefix} container file hash",
         )
         if container_file is not None:
-            actual = container_file.stdout.strip()
-            if not _SHA256_RE.fullmatch(actual) or actual != expected:
+            actual = _stdout_line(
+                container_file,
+                errors,
+                f"{prefix} container file hash",
+            )
+            if actual is not None and (
+                not _SHA256_RE.fullmatch(actual) or actual != expected
+            ):
                 errors.append(f"{prefix} container file hash mismatch")
 
 
-def _verify_generic_pointers(
-    pointers: list[object],
+def _verify_routing(
+    name: str,
+    component: Mapping[str, object],
+    runner: Runner,
+    errors: list[str],
+) -> None:
+    routing_value = component["routing"]
+    if routing_value is None:
+        return
+    routing = _mapping(routing_value, f"components.{name}.routing")
+    containers_by_role = {
+        str(container["role"]): container
+        for container in (
+            _mapping(raw, f"components.{name}.container")
+            for raw in _list(component["containers"], f"components.{name}.containers")
+        )
+    }
+    router = containers_by_role[str(routing["container_role"])]
+    completed = _run_checked(
+        runner,
+        [
+            "docker",
+            "exec",
+            str(router["name"]),
+            "python",
+            "-c",
+            _ROUTING_HASH_SCRIPT,
+            str(routing["variable"]),
+        ],
+        errors,
+        f"{name}: routing target",
+    )
+    if completed is None:
+        return
+    actual = _stdout_line(completed, errors, f"{name}: routing target")
+    if actual is not None and (
+        not _SHA256_RE.fullmatch(actual) or actual != routing["target_hash"]
+    ):
+        errors.append(f"{name}: routing target mismatch")
+
+
+def _verify_public_endpoints(
+    endpoints: list[object],
     http_get: HttpGet,
     errors: list[str],
 ) -> None:
-    for raw_pointer in pointers:
-        pointer = _mapping(raw_pointer, "generic_pointer")
+    for raw_endpoint in endpoints:
+        endpoint = _mapping(raw_endpoint, "public_endpoint")
         response = _http_checked(
             http_get,
-            str(pointer["url"]),
+            str(endpoint["url"]),
             errors,
-            "generic pointer",
+            "public endpoint",
         )
         if response is None:
             continue
         status, body = response
-        if status != 200:
-            errors.append("generic pointer status mismatch")
-        elif _digest_bytes(body) != pointer["sha256"]:
+        if status != endpoint["status_code"]:
+            errors.append("public endpoint status mismatch")
+        if _digest_bytes(body) != endpoint["body_sha256"]:
+            errors.append("public endpoint body hash mismatch")
+
+
+def _resolved_path_is_allowed(path: Path, repository_path: str) -> bool:
+    candidate = PurePosixPath(str(path))
+    roots = (
+        PurePosixPath(str(Path(repository_path).resolve(strict=False))),
+        PurePosixPath(str(Path(_WORKSPACE_ROOT.as_posix()).resolve(strict=False))),
+    )
+    return any(_path_is_within(candidate, root) for root in roots)
+
+
+def _verify_generic_pointers(
+    pointers: list[object],
+    repository_path: str,
+    errors: list[str],
+) -> None:
+    for raw_pointer in pointers:
+        pointer = _mapping(raw_pointer, "generic_pointer")
+        path = Path(str(pointer["path"]))
+        declared_target = pointer["symlink_target"]
+        try:
+            if declared_target is None:
+                if path.is_symlink():
+                    errors.append("generic pointer file type mismatch")
+                    continue
+                final_path = path.resolve(strict=True)
+            else:
+                if not path.is_symlink():
+                    errors.append("generic pointer symlink mismatch")
+                    continue
+                final_path = path.resolve(strict=True)
+                expected_target = Path(str(declared_target)).resolve(strict=True)
+                if final_path != expected_target:
+                    errors.append("generic pointer symlink target mismatch")
+                    continue
+            if not _resolved_path_is_allowed(final_path, repository_path):
+                errors.append("generic pointer resolved outside allowed roots")
+                continue
+            if not final_path.is_file():
+                errors.append("generic pointer final file invalid")
+                continue
+            payload = final_path.read_bytes()
+        except (OSError, RuntimeError):
+            errors.append("generic pointer file unavailable")
+            continue
+        if _digest_bytes(payload) != pointer["sha256"]:
             errors.append("generic pointer hash mismatch")
 
 
@@ -936,22 +1412,33 @@ def verify_manifest(
     """Verify every declared authority boundary, returning sanitized failures."""
 
     validated = _validate_manifest(manifest)
+    repository = _mapping(validated["repository"], "repository")
+    repository_path = str(repository["path"])
     components = _mapping(validated["components"], "components")
     errors: list[str] = []
     for name in COMPONENT_ORDER:
         component = _mapping(components[name], f"components.{name}")
         source = _mapping(component["source"], f"components.{name}.source")
         image = _mapping(component["image"], f"components.{name}.image")
-        container = _mapping(component["container"], f"components.{name}.container")
-        traefik = _mapping(component["traefik"], f"components.{name}.traefik")
-        _verify_git_authority(name, source, runner, errors)
+        _verify_git_authority(name, source, repository_path, runner, errors)
         _verify_image(name, image, runner, errors)
-        _verify_container(name, image, container, traefik, runner, errors)
-        _verify_http(name, component, http_get, errors)
-        _verify_files(name, component, runner, errors)
+        for raw_container in _list(
+            component["containers"], f"components.{name}.containers"
+        ):
+            container = _mapping(raw_container, f"components.{name}.container")
+            _verify_container(name, image, container, runner, errors)
+        _verify_files(name, component, repository_path, runner, errors)
+        _verify_heartbeat(name, component["heartbeat"], errors)
+        _verify_routing(name, component, runner, errors)
+
+    _verify_public_endpoints(
+        _list(validated["public_endpoints"], "public_endpoints"),
+        http_get,
+        errors,
+    )
     _verify_generic_pointers(
         _list(validated["generic_pointers"], "generic_pointers"),
-        http_get,
+        repository_path,
         errors,
     )
     return errors
