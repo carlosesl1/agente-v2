@@ -1227,6 +1227,23 @@ def test_heartbeat_verification_accepts_real_v2_public_ingress_envelope(
     assert errors == []
 
 
+@pytest.mark.parametrize("component_name", ("ga", "test_contact"))
+def test_heartbeat_verification_accepts_scaled_public_turn_capacity(
+    tmp_path: Path,
+    component_name: str,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    heartbeat_path = Path(manifest["components"][component_name]["heartbeat"]["path"])
+    document = _heartbeat_document()
+    document["public_turn_capacity"] = 3
+    heartbeat_path.write_text(json.dumps(document), encoding="utf-8")
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert errors == []
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_error"),
     (
