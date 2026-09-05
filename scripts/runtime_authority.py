@@ -86,6 +86,15 @@ _GIT_OBJECT_RE: Final = re.compile(r"[0-9a-f]{40}")
 _SHA256_RE: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _CONTAINER_NAME_RE: Final = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 _SAFE_NAME_RE: Final = re.compile(r"[a-z0-9][a-z0-9_.-]*")
+_FILE_MODE_RE: Final = re.compile(r"0[0-7]{3}")
+_CLEAN_COMPOSE_PREFIX: Final = (
+    "env",
+    "-i",
+    "HOME=/home/ubuntu",
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "docker",
+    "compose",
+)
 
 
 class AuthorityError(RuntimeError):
@@ -549,15 +558,183 @@ def _validate_routing(
     _sha256(routing["target_hash"], f"{path}.target_hash")
 
 
+def _validate_artifact_record(
+    value: object,
+    path: str,
+    repository_path: PurePosixPath,
+    *,
+    env_file: bool = False,
+) -> Mapping[str, object]:
+    record = _exact_fields(value, {"path", "sha256", "mode"}, path)
+    _pointer_path(record["path"], f"{path}.path", repository_path)
+    _sha256(record["sha256"], f"{path}.sha256")
+    mode = record["mode"]
+    if type(mode) is not str or _FILE_MODE_RE.fullmatch(mode) is None:
+        raise AuthorityError(f"{path}.mode must use 0NNN octal text")
+    if env_file and mode != "0600":
+        raise AuthorityError(f"{path}.mode must equal '0600'")
+    return record
+
+
+def _validate_rollback_command(
+    name: str,
+    value: object,
+    path: str,
+    *,
+    compose_project: str,
+    compose_services: tuple[str, ...],
+    compose_path: str,
+    env_path: str,
+) -> list[str]:
+    if not isinstance(value, list) or not value or not all(
+        type(argument) is str and argument for argument in value
+    ):
+        raise AuthorityError(f"{path} must be a JSON argv array")
+    command = list(value)
+    if command[:2] != ["env", "-i"]:
+        raise AuthorityError(f"{path} must start with env -i")
+    if command[2:4] != list(_CLEAN_COMPOSE_PREFIX[2:4]):
+        raise AuthorityError(f"{path} must use the exact clean environment prefix")
+    if command[4:6] != ["docker", "compose"]:
+        raise AuthorityError(f"{path} must invoke docker compose directly")
+    if command.count("--project-name") != 1:
+        raise AuthorityError(f"{path} --project-name must occur exactly once")
+    project_index = command.index("--project-name")
+    if project_index + 1 >= len(command) or command[project_index + 1] != compose_project:
+        raise AuthorityError(f"{path} project must equal the component compose project")
+    if command.count("--env-file") != 1:
+        raise AuthorityError(f"{path} --env-file must occur exactly once")
+    env_index = command.index("--env-file")
+    if env_index + 1 >= len(command) or command[env_index + 1] != env_path:
+        raise AuthorityError(f"{path} --env-file must equal rollback env_file.path")
+    if command.count("-f") != 1:
+        raise AuthorityError(f"{path} -f must occur exactly once")
+    compose_index = command.index("-f")
+    if compose_index + 1 >= len(command) or command[compose_index + 1] != compose_path:
+        raise AuthorityError(f"{path} -f must equal rollback compose_manifest.path")
+    if name == "ops":
+        if (
+            len(compose_services) != 1
+            or _SAFE_NAME_RE.fullmatch(compose_services[0]) is None
+        ):
+            raise AuthorityError(f"{path} rollback service is invalid")
+        tail = [
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+            compose_services[0],
+        ]
+    else:
+        tail = ["up", "-d", "--force-recreate"]
+    expected = [
+        *_CLEAN_COMPOSE_PREFIX,
+        "--project-name",
+        compose_project,
+        "--env-file",
+        env_path,
+        "-f",
+        compose_path,
+        *tail,
+    ]
+    if command != expected:
+        raise AuthorityError(f"{path} must use the closed rollback argv shape")
+    return command
+
+
+def _validate_deployment(
+    name: str,
+    component: Mapping[str, object],
+    path: str,
+    repository_path: PurePosixPath,
+    containers: list[Mapping[str, object]],
+) -> None:
+    deployment = _exact_fields(
+        component["deployment"],
+        {"compose_manifest", "env_file", "rollback"},
+        f"{path}.deployment",
+    )
+    active_compose = _validate_artifact_record(
+        deployment["compose_manifest"],
+        f"{path}.deployment.compose_manifest",
+        repository_path,
+    )
+    _validate_artifact_record(
+        deployment["env_file"],
+        f"{path}.deployment.env_file",
+        repository_path,
+        env_file=True,
+    )
+    projects = {str(container["compose_project"]) for container in containers}
+    if len(projects) != 1:
+        raise AuthorityError(
+            f"{path} containers must use one compose project; "
+            "compose project is shared across components or internally inconsistent"
+        )
+    if any(
+        container["compose_config"] != active_compose["path"]
+        for container in containers
+    ):
+        raise AuthorityError(
+            f"{path} container compose_config must equal the active compose_manifest"
+        )
+    rollback = _exact_fields(
+        deployment["rollback"],
+        {"status", "descriptor", "compose_manifest", "env_file", "command"},
+        f"{path}.deployment.rollback",
+    )
+    _literal(
+        rollback["status"],
+        "prepared",
+        f"{path}.deployment.rollback.status",
+    )
+    _validate_artifact_record(
+        rollback["descriptor"],
+        f"{path}.deployment.rollback.descriptor",
+        repository_path,
+    )
+    rollback_compose = _validate_artifact_record(
+        rollback["compose_manifest"],
+        f"{path}.deployment.rollback.compose_manifest",
+        repository_path,
+    )
+    rollback_env = _validate_artifact_record(
+        rollback["env_file"],
+        f"{path}.deployment.rollback.env_file",
+        repository_path,
+        env_file=True,
+    )
+    _validate_rollback_command(
+        name,
+        rollback["command"],
+        f"{path}.deployment.rollback.command",
+        compose_project=next(iter(projects)),
+        compose_services=tuple(
+            str(container["compose_service"]) for container in containers
+        ),
+        compose_path=str(rollback_compose["path"]),
+        env_path=str(rollback_env["path"]),
+    )
+
+
 def _validate_component(
     name: str,
     value: object,
     documented_variables: set[str],
+    repository_path: PurePosixPath,
 ) -> None:
     path = f"components.{name}"
     component = _exact_fields(
         value,
-        {"source", "image", "containers", "files", "heartbeat", "routing"},
+        {
+            "source",
+            "image",
+            "containers",
+            "deployment",
+            "files",
+            "heartbeat",
+            "routing",
+        },
         path,
     )
     _validate_source_and_image(component, path)
@@ -567,11 +744,14 @@ def _validate_component(
         raise AuthorityError(f"{path}.containers must not be empty")
     containers_by_role: dict[str, str] = {}
     container_names: set[str] = set()
+    validated_containers: list[Mapping[str, object]] = []
     has_traefik = False
     for index, raw_container in enumerate(raw_containers):
+        container = _mapping(raw_container, f"{path}.containers[{index}]")
         role, container_name, has_traefik_labels = _validate_container(
-            raw_container, f"{path}.containers[{index}]"
+            container, f"{path}.containers[{index}]"
         )
+        validated_containers.append(container)
         if role in containers_by_role:
             raise AuthorityError(f"{path} container roles must be unique")
         if container_name in container_names:
@@ -588,6 +768,13 @@ def _validate_component(
     if not has_traefik:
         raise AuthorityError(f"{path} must have a container with Traefik labels")
     roles = set(containers_by_role)
+    _validate_deployment(
+        name,
+        component,
+        path,
+        repository_path,
+        validated_containers,
+    )
 
     files = _list(component["files"], f"{path}.files")
     if not files:
@@ -669,6 +856,60 @@ def _validate_global_component_ownership(
                     )
 
 
+def _deployment_records(
+    component: Mapping[str, object],
+) -> tuple[tuple[str, Mapping[str, object]], ...]:
+    deployment = _mapping(component["deployment"], "component.deployment")
+    rollback = _mapping(deployment["rollback"], "component.deployment.rollback")
+    return (
+        (
+            "active-compose",
+            _mapping(deployment["compose_manifest"], "deployment.compose_manifest"),
+        ),
+        ("active-env", _mapping(deployment["env_file"], "deployment.env_file")),
+        (
+            "rollback-descriptor",
+            _mapping(rollback["descriptor"], "deployment.rollback.descriptor"),
+        ),
+        (
+            "rollback-compose",
+            _mapping(
+                rollback["compose_manifest"],
+                "deployment.rollback.compose_manifest",
+            ),
+        ),
+        (
+            "rollback-env",
+            _mapping(rollback["env_file"], "deployment.rollback.env_file"),
+        ),
+    )
+
+
+def _validate_deployment_pointer_coverage(
+    components: Mapping[str, object],
+    pointers: list[Mapping[str, object]],
+) -> None:
+    represented: set[tuple[str, str]] = set()
+    for pointer in pointers:
+        for candidate in (pointer["path"], pointer["symlink_target"]):
+            if candidate is not None:
+                represented.add((str(candidate), str(pointer["sha256"])))
+
+    for name in COMPONENT_ORDER:
+        component = _mapping(components[name], f"components.{name}")
+        records = dict(_deployment_records(component))
+        for artifact_name, record in records.items():
+            artifact_path = str(record["path"])
+            if artifact_name not in {"active-compose", "active-env"}:
+                continue
+            witness = (artifact_path, str(record["sha256"]))
+            if witness not in represented:
+                short_name = artifact_name.removeprefix("active-")
+                raise AuthorityError(
+                    f"components.{name} active {short_name} pointer is missing"
+                )
+
+
 def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
     _scan_sensitive_keys(manifest)
     root = _exact_fields(
@@ -721,6 +962,7 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
             component_name,
             components[component_name],
             documented_variables,
+            repository_path,
         )
     _validate_global_component_ownership(components)
 
@@ -759,6 +1001,7 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
         raise AuthorityError("generic_pointers must not be empty")
     pointer_names: set[str] = set()
     pointer_paths: set[str] = set()
+    validated_pointers: list[Mapping[str, object]] = []
     for index, raw_pointer in enumerate(pointers):
         path = f"generic_pointers[{index}]"
         pointer = _exact_fields(
@@ -766,6 +1009,7 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
             {"name", "path", "sha256", "symlink_target"},
             path,
         )
+        validated_pointers.append(pointer)
         pointer_name = _text(pointer["name"], f"{path}.name")
         if (
             not _SAFE_NAME_RE.fullmatch(pointer_name)
@@ -787,6 +1031,7 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
                 repository_path,
             )
         _sha256(pointer["sha256"], f"{path}.sha256")
+    _validate_deployment_pointer_coverage(components, validated_pointers)
     return root
 
 def load_manifest(path: Path) -> dict[str, object]:
@@ -863,6 +1108,79 @@ def render_markdown(manifest: Mapping[str, object]) -> str:
                 f"- {_code(role)}: {_code(container['name'])} "
                 f"({_code(container['status'])}, health={_code(health)})"
             )
+
+        mount_access: dict[str, set[str]] = {}
+        mount_destinations: dict[str, list[tuple[str, str]]] = {}
+        for role in _COMPONENT_ROLES[name]:
+            container = containers_by_role[role]
+            for raw_mount in _list(
+                container["mounts"],
+                f"{component_path}.containers.{role}.mounts",
+            ):
+                mount = _mapping(raw_mount, f"{component_path}.mount")
+                source = str(mount["source"])
+                mount_access.setdefault(source, set()).add(
+                    "ro" if mount["read_only"] else "rw"
+                )
+                mount_destinations.setdefault(source, []).append(
+                    (str(mount["destination"]), role)
+                )
+        lines.extend(["", "### Mounts"])
+        for source in sorted(mount_access):
+            access_text = "/".join(sorted(mount_access[source]))
+            destination_text = ", ".join(
+                f"{_code(destination)} ({_code(role)})"
+                for destination, role in mount_destinations[source]
+            )
+            lines.append(
+                f"- {_code(source)}: access={_code(access_text)}; "
+                f"destinations/roles={destination_text}"
+            )
+
+        deployment = _mapping(
+            component["deployment"],
+            f"{component_path}.deployment",
+        )
+        rollback = _mapping(
+            deployment["rollback"],
+            f"{component_path}.deployment.rollback",
+        )
+        lines.extend(["", "### Deployment"])
+        for label, record in (
+            (
+                "Active Compose",
+                _mapping(deployment["compose_manifest"], "deployment.compose_manifest"),
+            ),
+            ("Active env", _mapping(deployment["env_file"], "deployment.env_file")),
+            (
+                "Rollback descriptor",
+                _mapping(rollback["descriptor"], "deployment.rollback.descriptor"),
+            ),
+            (
+                "Rollback Compose",
+                _mapping(
+                    rollback["compose_manifest"],
+                    "deployment.rollback.compose_manifest",
+                ),
+            ),
+            (
+                "Rollback env",
+                _mapping(rollback["env_file"], "deployment.rollback.env_file"),
+            ),
+        ):
+            lines.append(
+                f"- {label}: path={_code(record['path'])}; "
+                f"sha256={_code(record['sha256'])}; mode={_code(record['mode'])}"
+            )
+        lines.append(f"- Rollback status: {_code(rollback['status'])}")
+        rollback_command = _list(
+            rollback["command"],
+            f"{component_path}.deployment.rollback.command",
+        )
+        lines.append(
+            "- Rollback argv: "
+            + " ".join(_code(argument) for argument in rollback_command)
+        )
 
         lines.extend(["", "### Files"])
         for index, raw_file in enumerate(
@@ -1544,6 +1862,93 @@ def _verify_files(
                 errors.append(f"{prefix} container file hash mismatch")
 
 
+def _compose_config_command(
+    compose_project: str,
+    compose_path: str,
+    env_path: str,
+) -> list[str]:
+    return [
+        *_CLEAN_COMPOSE_PREFIX,
+        "--project-name",
+        compose_project,
+        "--env-file",
+        env_path,
+        "-f",
+        compose_path,
+        "config",
+        "--quiet",
+    ]
+
+
+def _verify_deployment(
+    name: str,
+    component: Mapping[str, object],
+    repository_path: str,
+    runner: Runner,
+    errors: list[str],
+) -> None:
+    prefix = f"{name}:"
+    records = dict(_deployment_records(component))
+    for artifact_name, record in records.items():
+        artifact_path = Path(str(record["path"]))
+        try:
+            digested = _digest_regular_file(artifact_path, repository_path)
+        except (OSError, RuntimeError):
+            digested = None
+        if digested is None:
+            errors.append(f"{prefix} {artifact_name} final file invalid")
+            continue
+        actual_digest, witness = digested
+        if not _anchored_regular_file_matches(
+            artifact_path,
+            repository_path,
+            witness,
+        ):
+            errors.append(f"{prefix} {artifact_name} changed during verification")
+            continue
+        try:
+            confirmed = _digest_regular_file(artifact_path, repository_path)
+        except (OSError, RuntimeError):
+            confirmed = None
+        if confirmed is None:
+            errors.append(f"{prefix} {artifact_name} changed during verification")
+            continue
+        confirmed_digest, confirmed_witness = confirmed
+        if confirmed_witness != witness or confirmed_digest != actual_digest:
+            errors.append(f"{prefix} {artifact_name} changed during verification")
+            continue
+        actual_digest = confirmed_digest
+        witness = confirmed_witness
+        if actual_digest != record["sha256"]:
+            errors.append(f"{prefix} {artifact_name} hash mismatch")
+        if stat.S_IMODE(witness.file[2]) != int(str(record["mode"]), 8):
+            errors.append(f"{prefix} {artifact_name} mode mismatch")
+
+    deployment = _mapping(component["deployment"], "component.deployment")
+    rollback = _mapping(deployment["rollback"], "component.deployment.rollback")
+    first_container = _mapping(
+        _list(component["containers"], "component.containers")[0],
+        "component.container",
+    )
+    compose_project = str(first_container["compose_project"])
+    for stage, selected in (
+        ("active", deployment),
+        ("rollback", rollback),
+    ):
+        compose = _mapping(selected["compose_manifest"], f"{stage}.compose_manifest")
+        env_file = _mapping(selected["env_file"], f"{stage}.env_file")
+        _run_checked(
+            runner,
+            _compose_config_command(
+                compose_project,
+                str(compose["path"]),
+                str(env_file["path"]),
+            ),
+            errors,
+            f"{prefix} {stage} compose validation",
+        )
+
+
 def _verify_routing(
     name: str,
     component: Mapping[str, object],
@@ -1697,6 +2102,7 @@ def verify_manifest(
             container = _mapping(raw_container, f"components.{name}.container")
             _verify_container(name, image, container, runner, errors)
         _verify_files(name, component, repository_path, runner, errors)
+        _verify_deployment(name, component, repository_path, runner, errors)
         _verify_heartbeat(name, component["heartbeat"], errors)
         _verify_routing(name, component, runner, errors)
 

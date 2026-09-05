@@ -97,6 +97,27 @@ Os `generic_pointers` são ponteiros locais — arquivos regulares ou symlinks s
 raízes autorizadas — e são verificados por caminho, alvo e hash. Eles não são
 URLs nem evidência autossuficiente.
 
+### Artefatos exatos de deploy e rollback
+
+Cada componente possui um objeto obrigatório `deployment`. Esse objeto é a
+autoridade direta — e não apenas uma referência indireta — para:
+
+- `compose_manifest` e `env_file` ativos, com caminho, SHA-256 e modo;
+- o descriptor, Compose e env do rollback preparado;
+- o `command` de rollback como vetor JSON fechado, sem shell.
+
+O verificador exige arquivos regulares sob as raízes autorizadas, percorre o
+caminho por descritores ancorados sem seguir symlinks, compara bytes e modo e
+revalida identidade contra troca concorrente. Os envs devem manter modo `0600`.
+Ele também executa apenas `docker compose config --quiet`, em ambiente limpo,
+para os pares ativo e rollback. O verificador **nunca** executa `up`, deploy ou
+rollback.
+
+A projeção `CURRENT.md` mostra caminhos, hashes, modos, mounts deduplicados e o
+argv de rollback, mas nunca lê nem renderiza o conteúdo dos envs. Os
+`generic_pointers` do Compose/env ativo devem apontar para os mesmos artefatos e
+hashes declarados em `deployment`; divergência é DRIFT.
+
 ## Prontidão e saúde
 
 - Use requisições `GET` para a prontidão declarada; o endpoint de atendimento é

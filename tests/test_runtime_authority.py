@@ -39,6 +39,21 @@ _COMPONENT_ROLES = {
     "ops": ("web",),
 }
 _ROUTING_VARIABLE = "TEST_CONTACT_SUBSCRIBER_ID"
+_CLEAN_COMPOSE_PREFIX = (
+    "env",
+    "-i",
+    "HOME=/home/ubuntu",
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "docker",
+    "compose",
+)
+_DEPLOYMENT_ARTIFACTS = (
+    "active-compose",
+    "active-env",
+    "rollback-descriptor",
+    "rollback-compose",
+    "rollback-env",
+)
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _ACTIVE_RUNTIME_MANIFEST = (
     "/home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json"
@@ -134,6 +149,12 @@ def test_documentation_runbook_is_ordered_fail_closed_and_operational() -> None:
         "containers",
         "heartbeat opcional",
         "ponteiros locais",
+        "objeto obrigatório `deployment`",
+        "docker compose config --quiet",
+        "nunca** executa `up`",
+        "modo `0600`",
+        "argv de rollback",
+        "mounts deduplicados",
     ):
         assert term in normalized, f"runbook omits {term!r}"
 
@@ -311,6 +332,114 @@ def _pointer_bytes(name: str) -> bytes:
     return f"agente-v2:{name}:synthetic\n".encode()
 
 
+def _deployment_bytes(name: str, artifact: str) -> bytes:
+    slug = name.replace("_", "-")
+    if artifact in {"active-compose", "rollback-compose"}:
+        service = f"{slug}-{artifact}"
+        return f"services:\n  {service}:\n    image: scratch\n".encode()
+    if artifact in {"active-env", "rollback-env"}:
+        return f"SYNTHETIC_COMPONENT={slug}-{artifact}\n".encode()
+    if artifact == "rollback-descriptor":
+        return json.dumps(
+            {"component": slug, "release": "synthetic-previous"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode() + b"\n"
+    raise AssertionError(artifact)
+
+
+def _deployment_path(repository_path: Path, name: str, artifact: str) -> Path:
+    slug = name.replace("_", "-")
+    stage, filename = {
+        "active-compose": ("active", "compose.yml"),
+        "active-env": ("active", "runtime.env"),
+        "rollback-descriptor": ("rollback", "descriptor.json"),
+        "rollback-compose": ("rollback", "compose.yml"),
+        "rollback-env": ("rollback", "runtime.env"),
+    }[artifact]
+    return repository_path / "deployments" / slug / stage / filename
+
+
+def _deployment(name: str, repository_path: Path) -> dict[str, Any]:
+    project = f"agente-v2-{name.replace('_', '-')}"
+
+    def record(artifact: str, mode: str) -> dict[str, str]:
+        return {
+            "path": str(_deployment_path(repository_path, name, artifact)),
+            "sha256": _digest(_deployment_bytes(name, artifact)),
+            "mode": mode,
+        }
+
+    rollback_compose = record("rollback-compose", "0644")
+    rollback_env = record("rollback-env", "0600")
+    command_tail = (
+        ["up", "-d", "--no-deps", "--force-recreate", "ops-web"]
+        if name == "ops"
+        else ["up", "-d", "--force-recreate"]
+    )
+    return {
+        "compose_manifest": record("active-compose", "0644"),
+        "env_file": record("active-env", "0600"),
+        "rollback": {
+            "status": "prepared",
+            "descriptor": record("rollback-descriptor", "0640"),
+            "compose_manifest": rollback_compose,
+            "env_file": rollback_env,
+            "command": [
+                *_CLEAN_COMPOSE_PREFIX,
+                "--project-name",
+                project,
+                "--env-file",
+                rollback_env["path"],
+                "-f",
+                rollback_compose["path"],
+                *command_tail,
+            ],
+        },
+    }
+
+
+def _deployment_artifact(
+    manifest: dict[str, Any],
+    component_name: str,
+    artifact: str,
+) -> dict[str, str]:
+    deployment = manifest["components"][component_name]["deployment"]
+    if artifact == "active-compose":
+        return deployment["compose_manifest"]
+    if artifact == "active-env":
+        return deployment["env_file"]
+    rollback_field = {
+        "rollback-descriptor": "descriptor",
+        "rollback-compose": "compose_manifest",
+        "rollback-env": "env_file",
+    }[artifact]
+    return deployment["rollback"][rollback_field]
+
+
+def _compose_config_command(
+    manifest: dict[str, Any],
+    component_name: str,
+    *,
+    rollback: bool,
+) -> tuple[str, ...]:
+    component = manifest["components"][component_name]
+    project = component["containers"][0]["compose_project"]
+    deployment = component["deployment"]
+    selected = deployment["rollback"] if rollback else deployment
+    return (
+        *_CLEAN_COMPOSE_PREFIX,
+        "--project-name",
+        project,
+        "--env-file",
+        selected["env_file"]["path"],
+        "-f",
+        selected["compose_manifest"]["path"],
+        "config",
+        "--quiet",
+    )
+
+
 def _source_ref(name: str) -> str:
     if name in {"ga", "test_contact"}:
         return "refs/heads/production/ga"
@@ -330,13 +459,20 @@ def _traefik_labels(name: str, role: str) -> dict[str, str]:
     }
 
 
-def _container(name: str, role: str) -> dict[str, Any]:
+def _container(
+    name: str,
+    role: str,
+    repository_path: Path | None = None,
+) -> dict[str, Any]:
+    repository_path = repository_path or Path("/home/ubuntu/workspace/agente-v2")
     slug = name.replace("_", "-")
     return {
         "role": role,
         "name": f"agente-v2-{slug}-{role}",
         "compose_project": f"agente-v2-{slug}",
-        "compose_config": "/srv/agente-v2/compose.yml",
+        "compose_config": str(
+            _deployment_path(repository_path, name, "active-compose")
+        ),
         "compose_service": f"{slug}-{role}",
         "status": "running",
         "health": None if role == "worker" else "healthy",
@@ -390,7 +526,10 @@ def _component(name: str, repository_path: Path) -> dict[str, Any]:
             "id": f"sha256:{marker * 64}",
             "revision": marker * 40,
         },
-        "containers": [_container(name, role) for role in _COMPONENT_ROLES[name]],
+        "containers": [
+            _container(name, role, repository_path) for role in _COMPONENT_ROLES[name]
+        ],
+        "deployment": _deployment(name, repository_path),
         "files": [
             {
                 "path": f"runtime/{name}.py",
@@ -404,16 +543,34 @@ def _component(name: str, repository_path: Path) -> dict[str, Any]:
     }
 
 
-def minimal_manifest(repository_path: Path | None = None) -> dict[str, Any]:
+def minimal_manifest(
+    repository_path: Path | None = None,
+    *,
+    include_deployment: bool = True,
+) -> dict[str, Any]:
     repository_path = repository_path or Path("/home/ubuntu/workspace/agente-v2")
     release_target = repository_path / "releases" / "ACTIVE_RUNTIME.json"
-    return {
+    components = {
+        name: _component(name, repository_path) for name in COMPONENT_NAMES
+    }
+    artifact_pointers = [
+        {
+            "name": f"{name.replace('_', '-')}-{kind}",
+            "path": components[name]["deployment"][field]["path"],
+            "sha256": components[name]["deployment"][field]["sha256"],
+            "symlink_target": None,
+        }
+        for name in COMPONENT_NAMES
+        for kind, field in (
+            ("active-compose", "compose_manifest"),
+            ("active-env", "env_file"),
+        )
+    ]
+    manifest = {
         "schema": "agente-v2-active-runtime-v1",
         "generated_at": "2026-09-05T12:00:00Z",
         "repository": {"path": str(repository_path), "remote": "origin"},
-        "components": {
-            name: _component(name, repository_path) for name in COMPONENT_NAMES
-        },
+        "components": components,
         "legacy": {
             "path": "/home/ubuntu/workspace/agente-v1",
             "state": "excluded",
@@ -439,9 +596,14 @@ def minimal_manifest(repository_path: Path | None = None) -> dict[str, Any]:
                 "sha256": _digest(_pointer_bytes("active-json")),
                 "symlink_target": str(release_target),
             },
+            *artifact_pointers,
         ],
         "verification": {"documented_variables": [_ROUTING_VARIABLE]},
     }
+    if not include_deployment:
+        for component in components.values():
+            del component["deployment"]
+    return manifest
 
 
 def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
@@ -467,19 +629,30 @@ def materialized_manifest(tmp_path: Path) -> dict[str, Any]:
     repository_path.mkdir(parents=True)
     manifest = minimal_manifest(repository_path)
 
+    for name in COMPONENT_NAMES:
+        for artifact in _DEPLOYMENT_ARTIFACTS:
+            record = _deployment_artifact(manifest, name, artifact)
+            artifact_path = Path(record["path"])
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_path.write_bytes(_deployment_bytes(name, artifact))
+            artifact_path.chmod(int(record["mode"], 8))
+
     for name in ("ga", "test_contact"):
         heartbeat_path = Path(manifest["components"][name]["heartbeat"]["path"])
         heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
         heartbeat_path.write_text(json.dumps(_heartbeat_document()), encoding="utf-8")
 
-    regular_pointer = manifest["generic_pointers"][0]
-    Path(regular_pointer["path"]).write_bytes(_pointer_bytes(regular_pointer["name"]))
-
-    symlink_pointer = manifest["generic_pointers"][1]
-    symlink_target = Path(symlink_pointer["symlink_target"])
-    symlink_target.parent.mkdir(parents=True)
-    symlink_target.write_bytes(_pointer_bytes(symlink_pointer["name"]))
-    Path(symlink_pointer["path"]).symlink_to(symlink_target)
+    for pointer in manifest["generic_pointers"]:
+        pointer_path = Path(pointer["path"])
+        declared_target = pointer["symlink_target"]
+        if declared_target is None:
+            if not pointer_path.exists():
+                pointer_path.write_bytes(_pointer_bytes(pointer["name"]))
+            continue
+        symlink_target = Path(declared_target)
+        symlink_target.parent.mkdir(parents=True, exist_ok=True)
+        symlink_target.write_bytes(_pointer_bytes(pointer["name"]))
+        pointer_path.symlink_to(symlink_target)
     return manifest
 
 
@@ -510,6 +683,280 @@ def test_load_manifest_accepts_real_closed_topology(tmp_path: Path) -> None:
         manifest["components"]["test_contact"]["source"]["ref"]
         == manifest["components"]["ga"]["source"]["ref"]
     )
+    for name in COMPONENT_NAMES:
+        deployment = manifest["components"][name]["deployment"]
+        assert deployment["rollback"]["status"] == "prepared"
+        expected_length = 17 if name == "ops" else 15
+        assert len(deployment["rollback"]["command"]) == expected_length
+        assert {
+            _deployment_artifact(manifest, name, artifact)["path"]
+            for artifact in _DEPLOYMENT_ARTIFACTS
+        }
+
+
+def test_manifest_requires_deployment_for_every_component(tmp_path: Path) -> None:
+    manifest = minimal_manifest(include_deployment=False)
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(
+        AuthorityError,
+        match=r"components\.ga fields mismatch \(missing=deployment\)",
+    ):
+        load_manifest(path)
+
+
+def test_manifest_rejects_unknown_deployment_field(tmp_path: Path) -> None:
+    manifest = minimal_manifest()
+    manifest["components"]["ga"]["deployment"]["unexpected"] = "synthetic"
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(
+        AuthorityError,
+        match=(
+            r"components\.ga\.deployment fields mismatch "
+            r"\(unknown field=unexpected\)"
+        ),
+    ):
+        load_manifest(path)
+
+
+def test_manifest_rejects_unknown_rollback_field(tmp_path: Path) -> None:
+    manifest = minimal_manifest()
+    manifest["components"]["ga"]["deployment"]["rollback"]["unexpected"] = False
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(
+        AuthorityError,
+        match=(
+            r"components\.ga\.deployment\.rollback fields mismatch "
+            r"\(unknown field=unexpected\)"
+        ),
+    ):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "unknown"))
+def test_deployment_artifact_records_are_closed(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    manifest = minimal_manifest()
+    record = manifest["components"]["ga"]["deployment"]["compose_manifest"]
+    if mutation == "missing":
+        del record["mode"]
+        expected = r"missing=mode"
+    else:
+        record["owner"] = "synthetic"
+        expected = r"unknown field=owner"
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(
+        AuthorityError,
+        match=r"components\.ga\.deployment\.compose_manifest fields mismatch.*"
+        + expected,
+    ):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("mode", ("644", "00644", "0680", "0o644", 0o644, True))
+def test_deployment_modes_use_exact_0nnn_octal_text(
+    tmp_path: Path,
+    mode: object,
+) -> None:
+    manifest = minimal_manifest()
+    manifest["components"]["ga"]["deployment"]["compose_manifest"]["mode"] = mode
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="mode must use 0NNN octal text"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("artifact", ("active-env", "rollback-env"))
+def test_deployment_env_files_require_mode_0600(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    manifest = minimal_manifest()
+    _deployment_artifact(manifest, "ga", artifact)["mode"] = "0640"
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="env_file.mode must equal '0600'"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("artifact", _DEPLOYMENT_ARTIFACTS)
+def test_deployment_artifact_paths_stay_in_closed_roots(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    manifest = minimal_manifest()
+    _deployment_artifact(manifest, "ga", artifact)["path"] = (
+        f"/tmp/outside-{artifact}"
+    )
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="inside the allowed roots"):
+        load_manifest(path)
+
+
+def test_active_compose_is_the_only_config_for_component_containers(
+    tmp_path: Path,
+) -> None:
+    manifest = minimal_manifest()
+    _container_for(manifest, "ga", "worker")["compose_config"] = str(
+        Path(manifest["repository"]["path"]) / "other-compose.yml"
+    )
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="active compose_manifest"):
+        load_manifest(path)
+
+
+def test_component_containers_have_one_compose_project(tmp_path: Path) -> None:
+    manifest = minimal_manifest()
+    _container_for(manifest, "ga", "worker")["compose_project"] = "other-project"
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="one compose project"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("artifact", ("active-compose", "active-env"))
+def test_active_deployment_artifacts_require_a_generic_pointer_representation(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    manifest = minimal_manifest()
+    active_path = _deployment_artifact(manifest, "ga", artifact)["path"]
+    manifest["generic_pointers"] = [
+        pointer
+        for pointer in manifest["generic_pointers"]
+        if active_path not in {pointer["path"], pointer["symlink_target"]}
+    ]
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match=f"active {artifact.split('-')[1]} pointer"):
+        load_manifest(path)
+
+
+def test_shared_read_only_deployment_metadata_between_ga_and_test_is_allowed(
+    tmp_path: Path,
+) -> None:
+    manifest = minimal_manifest()
+    ga_deployment = manifest["components"]["ga"]["deployment"]
+    test_deployment = manifest["components"]["test_contact"]["deployment"]
+    test_deployment["env_file"] = dict(ga_deployment["env_file"])
+    test_deployment["rollback"]["descriptor"] = dict(
+        ga_deployment["rollback"]["descriptor"]
+    )
+    test_deployment["rollback"]["env_file"] = dict(
+        ga_deployment["rollback"]["env_file"]
+    )
+    command = test_deployment["rollback"]["command"]
+    env_index = command.index("--env-file")
+    command[env_index + 1] = test_deployment["rollback"]["env_file"]["path"]
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    assert load_manifest(path) == manifest
+
+
+def test_rollback_status_is_exactly_prepared(tmp_path: Path) -> None:
+    manifest = minimal_manifest()
+    manifest["components"]["ga"]["deployment"]["rollback"]["status"] = "ready"
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match="status must equal 'prepared'"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    (
+        ("not_argv", "must be a JSON argv array"),
+        ("prefix", "must start with env -i"),
+        ("environment", "must use the exact clean environment prefix"),
+        ("shell", "must invoke docker compose directly"),
+        ("project", "project must equal the component compose project"),
+        ("env_path", "--env-file must equal rollback env_file.path"),
+        ("compose_path", "-f must equal rollback compose_manifest.path"),
+        ("duplicate_env", "--env-file must occur exactly once"),
+        ("duplicate_compose", "-f must occur exactly once"),
+        ("action", "must use the closed rollback argv shape"),
+        ("extra", "must use the closed rollback argv shape"),
+        ("service", "must use the closed rollback argv shape"),
+    ),
+)
+def test_rollback_command_is_closed_shell_free_and_bound_to_artifacts(
+    tmp_path: Path,
+    mutation: str,
+    expected_error: str,
+) -> None:
+    manifest = minimal_manifest()
+    component_name = "ops" if mutation == "service" else "ga"
+    rollback = manifest["components"][component_name]["deployment"]["rollback"]
+    command = rollback["command"]
+    if mutation == "not_argv":
+        rollback["command"] = "env -i docker compose"
+    elif mutation == "prefix":
+        command[0:2] = ["docker", "compose"]
+    elif mutation == "environment":
+        command[2] = "HOME=/tmp"
+    elif mutation == "shell":
+        command[4:6] = ["sh", "-c"]
+    elif mutation == "project":
+        command[7] = "other-project"
+    elif mutation == "env_path":
+        command[9] = str(Path(manifest["repository"]["path"]) / "other.env")
+    elif mutation == "compose_path":
+        command[11] = str(Path(manifest["repository"]["path"]) / "other.yml")
+    elif mutation == "duplicate_env":
+        command[8:8] = ["--env-file", rollback["env_file"]["path"]]
+    elif mutation == "duplicate_compose":
+        command[10:10] = ["-f", rollback["compose_manifest"]["path"]]
+    elif mutation == "action":
+        command[12:] = ["down"]
+    elif mutation == "extra":
+        command.insert(-1, "--remove-orphans")
+    elif mutation == "service":
+        command[-1] = "wrong-service"
+    else:  # pragma: no cover - guards the test matrix itself
+        raise AssertionError(mutation)
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match=re.escape(expected_error)):
+        load_manifest(path)
+
+
+def test_rollback_command_rejects_option_like_service_defensively() -> None:
+    manifest = minimal_manifest()
+    deployment = manifest["components"]["ops"]["deployment"]
+    rollback = deployment["rollback"]
+    command = list(rollback["command"])
+    command[-1] = "--remove-orphans"
+
+    with pytest.raises(AuthorityError, match="rollback service is invalid"):
+        authority._validate_rollback_command(
+            "ops",
+            command,
+            "components.ops.deployment.rollback.command",
+            compose_project="agente-v2-ops",
+            compose_services=("--remove-orphans",),
+            compose_path=rollback["compose_manifest"]["path"],
+            env_path=rollback["env_file"]["path"],
+        )
 
 
 @pytest.mark.parametrize(
@@ -856,6 +1303,78 @@ def test_render_emits_pointer_name_path_and_hash_only() -> None:
             assert pointer["symlink_target"] not in rendered
 
 
+def test_render_emits_exact_deployment_and_rollback_authority() -> None:
+    manifest = minimal_manifest()
+
+    rendered = render_markdown(manifest)
+
+    assert rendered.count("### Deployment") == len(COMPONENT_NAMES)
+    display_names = {"ga": "GA", "test_contact": "Test contact", "ops": "Ops"}
+    for index, name in enumerate(COMPONENT_NAMES):
+        next_heading = (
+            f"## {display_names[COMPONENT_NAMES[index + 1]]}"
+            if index + 1 < len(COMPONENT_NAMES)
+            else "## Legacy"
+        )
+        display = display_names[name]
+        section = rendered.split(f"## {display}", 1)[1].split(next_heading, 1)[0]
+        deployment = manifest["components"][name]["deployment"]
+        rollback = deployment["rollback"]
+        for label, record in (
+            ("Active Compose", deployment["compose_manifest"]),
+            ("Active env", deployment["env_file"]),
+            ("Rollback descriptor", rollback["descriptor"]),
+            ("Rollback Compose", rollback["compose_manifest"]),
+            ("Rollback env", rollback["env_file"]),
+        ):
+            assert f"- {label}:" in section
+            assert record["path"] in section
+            assert record["sha256"] in section
+            assert record["mode"] in section
+        assert "- Rollback status: `prepared`" in section
+        assert "- Rollback argv:" in section
+        for argument in rollback["command"]:
+            assert str(argument).replace("&", "&amp;") in section
+
+
+def test_render_deduplicates_mount_sources_with_access_destinations_and_roles() -> None:
+    manifest = minimal_manifest()
+    api_mount = _container_for(manifest, "ga", "api")["mounts"][0]
+    worker_mount = _container_for(manifest, "ga", "worker")["mounts"][0]
+    worker_mount["source"] = api_mount["source"]
+    worker_mount["destination"] = "/app/worker-config"
+
+    rendered = render_markdown(manifest)
+    ga_section = rendered.split("## GA", 1)[1].split("## Test contact", 1)[0]
+
+    assert ga_section.count(api_mount["source"]) == 1
+    assert "access=`ro`" in ga_section
+    assert "destinations/roles=" in ga_section
+    assert "`/app/config` (`api`)" in ga_section
+    assert "`/app/worker-config` (`worker`)" in ga_section
+
+
+def test_render_never_reads_or_reveals_env_or_routing_values(tmp_path: Path) -> None:
+    manifest = materialized_manifest(tmp_path)
+    leaked = b"person@example.invalid:+55 11 99999-9999"
+    active_env = _deployment_artifact(manifest, "test_contact", "active-env")
+    Path(active_env["path"]).write_bytes(leaked)
+    active_env["sha256"] = _digest(leaked)
+    pointer = next(
+        item
+        for item in manifest["generic_pointers"]
+        if item["path"] == active_env["path"]
+    )
+    pointer["sha256"] = active_env["sha256"]
+    routing = manifest["components"]["test_contact"]["routing"]
+
+    rendered = render_markdown(manifest)
+
+    assert leaked.decode() not in rendered
+    assert routing["target_hash"] not in rendered
+    assert routing["variable"] not in rendered
+
+
 class FakeRuntime:
     """Synthetic command/HTTP boundary for verifier contract tests."""
 
@@ -978,6 +1497,12 @@ class FakeRuntime:
         if args[:4] == (*git_prefix, "show") and len(args) == 5:
             commit, path = args[4].split(":", 1)
             return authority.Completed(0, self.git_files[(commit, path)], b"")
+        if (
+            args[: len(_CLEAN_COMPOSE_PREFIX)] == _CLEAN_COMPOSE_PREFIX
+            and args[-2:] == ("config", "--quiet")
+            and len(args) == len(_CLEAN_COMPOSE_PREFIX) + 8
+        ):
+            return authority.Completed(0, b"", b"")
         if args[:3] == ("docker", "image", "inspect") and len(args) == 4:
             return authority.Completed(0, json.dumps([self.images[args[3]]]).encode(), b"")
         if args[:2] == ("docker", "inspect") and len(args) == 3:
@@ -1044,6 +1569,8 @@ def test_verify_manifest_checks_every_declared_authority_surface(
                 authority._CONTAINER_HASH_SCRIPT,
                 file_entry["container_path"],
             ) in fake.calls
+        assert _compose_config_command(manifest, name, rollback=False) in fake.calls
+        assert _compose_config_command(manifest, name, rollback=True) in fake.calls
     routing = manifest["components"]["test_contact"]["routing"]
     router = _container_for(manifest, "test_contact", "router")
     assert (
@@ -1056,6 +1583,174 @@ def test_verify_manifest_checks_every_declared_authority_surface(
         routing["variable"],
     ) in fake.calls
     assert fake.http_calls == [manifest["public_endpoints"][0]["url"]]
+    assert all("up" not in call for call in fake.calls)
+
+
+def test_verify_deployment_hashes_all_five_artifacts_per_component(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    digested_paths: list[Path] = []
+    real_digest = authority._digest_regular_file
+
+    def recording_digest(
+        path: Path,
+        repository_path: str,
+    ) -> tuple[str, authority._AnchoredFileWitness] | None:
+        digested_paths.append(path)
+        return real_digest(path, repository_path)
+
+    monkeypatch.setattr(authority, "_digest_regular_file", recording_digest)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    expected = {
+        Path(_deployment_artifact(manifest, name, artifact)["path"])
+        for name in COMPONENT_NAMES
+        for artifact in _DEPLOYMENT_ARTIFACTS
+    }
+    assert errors == []
+    assert expected <= set(digested_paths)
+    assert len(expected) == len(COMPONENT_NAMES) * 5
+
+
+@pytest.mark.parametrize("artifact", _DEPLOYMENT_ARTIFACTS)
+def test_verify_deployment_artifact_hash_mismatch_fails_closed(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    Path(_deployment_artifact(manifest, "ga", artifact)["path"]).write_bytes(b"drift")
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert any(f"ga: {artifact} hash mismatch" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("artifact", _DEPLOYMENT_ARTIFACTS)
+def test_verify_deployment_artifact_mode_mismatch_fails_closed(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    artifact_path = Path(_deployment_artifact(manifest, "ga", artifact)["path"])
+    artifact_path.chmod(0o666)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert any(f"ga: {artifact} mode mismatch" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("mutation", ("missing", "directory", "symlink", "intermediate_symlink"))
+def test_verify_deployment_artifact_type_and_path_chain_fail_closed(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    artifact_path = Path(
+        _deployment_artifact(manifest, "ga", "rollback-descriptor")["path"]
+    )
+    if mutation == "missing":
+        artifact_path.unlink()
+    elif mutation == "directory":
+        artifact_path.unlink()
+        artifact_path.mkdir()
+    elif mutation == "symlink":
+        original = artifact_path.with_suffix(".original")
+        artifact_path.rename(original)
+        artifact_path.symlink_to(original)
+    elif mutation == "intermediate_symlink":
+        parent = artifact_path.parent
+        original_parent = parent.with_name(f"{parent.name}-original")
+        parent.rename(original_parent)
+        parent.symlink_to(original_parent, target_is_directory=True)
+    else:  # pragma: no cover - guards the test matrix itself
+        raise AssertionError(mutation)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert any("ga: rollback-descriptor final file invalid" in error for error in errors), errors
+
+
+def test_verify_deployment_artifact_replacement_during_hash_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    target = Path(_deployment_artifact(manifest, "ga", "rollback-descriptor")["path"])
+    real_match = authority._anchored_regular_file_matches
+
+    def mismatch_target(
+        path: Path,
+        repository_path: str,
+        witness: authority._AnchoredFileWitness,
+    ) -> bool:
+        if path == target:
+            return False
+        return real_match(path, repository_path, witness)
+
+    monkeypatch.setattr(authority, "_anchored_regular_file_matches", mismatch_target)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert "ga: rollback-descriptor changed during verification" in errors
+
+
+def test_verify_deployment_in_place_mutation_after_identity_check_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    target = Path(_deployment_artifact(manifest, "ga", "rollback-descriptor")["path"])
+    original = target.read_bytes()
+    drifted = bytes([original[0] ^ 1]) + original[1:]
+    real_match = authority._anchored_regular_file_matches
+    mutated = False
+
+    def mutate_after_match(
+        path: Path,
+        repository_path: str,
+        witness: authority._AnchoredFileWitness,
+    ) -> bool:
+        nonlocal mutated
+        matched = real_match(path, repository_path, witness)
+        if path == target and not mutated:
+            target.write_bytes(drifted)
+            mutated = True
+        return matched
+
+    monkeypatch.setattr(authority, "_anchored_regular_file_matches", mutate_after_match)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert mutated is True
+    assert target.read_bytes() == drifted
+    assert "ga: rollback-descriptor changed during verification" in errors
+
+
+@pytest.mark.parametrize("rollback", (False, True))
+def test_verify_deployment_compose_render_failure_is_sanitized_and_closed(
+    tmp_path: Path,
+    rollback: bool,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    command = _compose_config_command(manifest, "ga", rollback=rollback)
+    leaked = b"person@example.invalid:+55 11 99999-9999"
+    fake.command_failures[command] = authority.Completed(1, leaked, leaked)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    stage = "rollback" if rollback else "active"
+    assert f"ga: {stage} compose validation failed" in errors
+    assert leaked.decode() not in "\n".join(errors)
 
 
 def test_verify_source_hash_preserves_crlf_bytes(tmp_path: Path) -> None:
