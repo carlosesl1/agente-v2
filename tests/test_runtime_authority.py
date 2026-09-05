@@ -43,6 +43,28 @@ def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _assert_routing_hash_script(raw_value: bytes) -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            authority._ROUTING_HASH_SCRIPT,
+            _ROUTING_VARIABLE,
+        ],
+        check=False,
+        capture_output=True,
+        env={_ROUTING_VARIABLE: raw_value.decode("utf-8")},
+        text=False,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, "routing hash script must exit successfully"
+    assert raw_value not in completed.stdout, "routing hash stdout leaked the raw value"
+    assert raw_value not in completed.stderr, "routing hash stderr leaked the raw value"
+    assert completed.stdout == (_digest(raw_value) + "\n").encode("ascii")
+    assert completed.stderr == b""
+
+
 def _file_bytes(name: str) -> bytes:
     return f"print('synthetic {name}')\n".encode()
 
@@ -1075,6 +1097,26 @@ def test_routing_probe_never_exposes_raw_value_or_command_payload(
     script = authority._ROUTING_HASH_SCRIPT
     assert "os.environ" in script
     assert "print(os.environ" not in script
+
+
+def test_routing_hash_script_executes_digest_without_leaking_raw_value() -> None:
+    raw_value = b"person@example.invalid:+55 00 00000-0000"
+
+    _assert_routing_hash_script(raw_value)
+
+
+def test_routing_hash_script_witness_rejects_raw_value_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_value = b"person@example.invalid:+55 00 00000-0000"
+    monkeypatch.setattr(
+        authority,
+        "_ROUTING_HASH_SCRIPT",
+        "import os,sys; value=os.environ[sys.argv[1]]; print(value)",
+    )
+
+    with pytest.raises(AssertionError, match="routing hash stdout leaked the raw value"):
+        _assert_routing_hash_script(raw_value)
 
 
 def test_verify_manifest_converts_boundary_exceptions_to_sanitized_errors(
