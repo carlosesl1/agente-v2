@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -1078,11 +1079,15 @@ def test_generic_pointer_hashing_uses_nofollow_file_descriptors_and_short_reads(
     regular_path = Path(manifest["generic_pointers"][0]["path"])
     symlink_path = Path(manifest["generic_pointers"][1]["path"])
     declared_target = Path(manifest["generic_pointers"][1]["symlink_target"])
-    tracked_paths = {regular_path, declared_target}
-    open_calls: list[tuple[Path, int]] = []
+    open_calls: list[tuple[str, int, int | None, Path | None]] = []
+    lstat_calls: list[tuple[str, int | None]] = []
+    readlink_calls: list[tuple[str, int | None]] = []
     tracked_fds: set[int] = set()
     read_chunks: list[bytes] = []
     real_open = os.open
+    real_close = os.close
+    real_lstat = os.lstat
+    real_readlink = os.readlink
     real_read = os.read
 
     def recording_open(
@@ -1094,13 +1099,42 @@ def test_generic_pointer_hashing_uses_nofollow_file_descriptors_and_short_reads(
     ) -> int:
         if dir_fd is None:
             fd = real_open(raw_path, flags, mode)
+            parent = None
         else:
             fd = real_open(raw_path, flags, mode, dir_fd=dir_fd)
-        candidate = Path(raw_path)
-        if candidate in tracked_paths:
-            open_calls.append((candidate, flags))
+            parent = Path(real_readlink(f"/proc/self/fd/{dir_fd}"))
+        raw_text = os.fspath(raw_path)
+        open_calls.append((raw_text, flags, dir_fd, parent))
+        if not flags & os.O_DIRECTORY and raw_text in {
+            regular_path.name,
+            declared_target.name,
+        }:
             tracked_fds.add(fd)
         return fd
+
+    def recording_close(fd: int) -> None:
+        tracked_fds.discard(fd)
+        real_close(fd)
+
+    def recording_lstat(
+        raw_path: str | os.PathLike[str],
+        *,
+        dir_fd: int | None = None,
+    ) -> os.stat_result:
+        lstat_calls.append((os.fspath(raw_path), dir_fd))
+        if dir_fd is None:
+            return real_lstat(raw_path)
+        return real_lstat(raw_path, dir_fd=dir_fd)
+
+    def recording_readlink(
+        raw_path: str | os.PathLike[str],
+        *,
+        dir_fd: int | None = None,
+    ) -> str:
+        readlink_calls.append((os.fspath(raw_path), dir_fd))
+        if dir_fd is None:
+            return real_readlink(raw_path)
+        return real_readlink(raw_path, dir_fd=dir_fd)
 
     def short_read(fd: int, size: int) -> bytes:
         payload = real_read(fd, min(size, 3))
@@ -1109,15 +1143,45 @@ def test_generic_pointer_hashing_uses_nofollow_file_descriptors_and_short_reads(
         return payload
 
     monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(os, "close", recording_close)
+    monkeypatch.setattr(os, "lstat", recording_lstat)
+    monkeypatch.setattr(os, "readlink", recording_readlink)
     monkeypatch.setattr(os, "read", short_read)
 
     errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
 
     assert errors == []
-    assert [path for path, _flags in open_calls] == [regular_path, declared_target]
-    expected_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
-    assert all(flags == expected_flags for _path, flags in open_calls)
-    assert symlink_path not in {path for path, _flags in open_calls}
+    directory_flags = (
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
+    )
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    assert any(
+        raw_path == "/" and flags == directory_flags and dir_fd is None
+        for raw_path, flags, dir_fd, _parent in open_calls
+    )
+    assert all(
+        dir_fd is not None
+        for raw_path, _flags, dir_fd, _parent in open_calls
+        if raw_path != "/"
+    )
+    assert all(
+        flags in {directory_flags, file_flags}
+        for _raw_path, flags, _dir_fd, _parent in open_calls
+    )
+    opened_files = {
+        (parent, raw_path)
+        for raw_path, flags, _dir_fd, parent in open_calls
+        if flags == file_flags
+    }
+    assert (regular_path.parent, regular_path.name) in opened_files
+    assert (declared_target.parent, declared_target.name) in opened_files
+    assert (symlink_path.parent, symlink_path.name) not in opened_files
+    assert len(lstat_calls) >= 2
+    assert len(readlink_calls) >= 2
+    assert all(
+        raw_path == symlink_path.name and dir_fd is not None
+        for raw_path, dir_fd in [*lstat_calls, *readlink_calls]
+    )
     assert len([chunk for chunk in read_chunks if chunk]) > 2
     assert read_chunks.count(b"") == 2
 
@@ -1133,28 +1197,115 @@ def test_generic_pointer_symlink_replacement_during_hashing_fails_closed(
     declared_target = Path(linked["symlink_target"])
     outside_target = tmp_path / "outside-runtime-authority.json"
     outside_target.write_bytes(_pointer_bytes(linked["name"]))
-    real_resolve = Path.resolve
+    real_open = os.open
+    real_readlink = os.readlink
     replaced = False
 
-    def replace_pointer_after_target_resolution(
-        candidate: Path,
-        strict: bool = False,
-    ) -> Path:
+    def replace_pointer_during_target_open(
+        raw_path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
         nonlocal replaced
-        resolved = real_resolve(candidate, strict=strict)
-        if candidate == declared_target and not replaced:
+        raw_text = os.fspath(raw_path)
+        anchored_parent = (
+            Path(real_readlink(f"/proc/self/fd/{dir_fd}"))
+            if dir_fd is not None
+            else None
+        )
+        opens_declared_target = (
+            dir_fd is None and Path(raw_text) == declared_target
+        ) or (
+            anchored_parent == declared_target.parent
+            and raw_text == declared_target.name
+            and not flags & os.O_DIRECTORY
+        )
+        if opens_declared_target and not replaced:
             pointer_path.unlink()
             pointer_path.symlink_to(outside_target)
             replaced = True
-        return resolved
+        if dir_fd is None:
+            return real_open(raw_path, flags, mode)
+        return real_open(raw_path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(Path, "resolve", replace_pointer_after_target_resolution)
+    monkeypatch.setattr(os, "open", replace_pointer_during_target_open)
 
     errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
 
     assert replaced, "race hook must replace the declared pointer"
-    assert real_resolve(pointer_path, strict=True) == outside_target
+    assert pointer_path.resolve(strict=True) == outside_target
     assert "generic pointer symlink changed during verification" in errors
+
+
+def test_generic_pointer_intermediate_directory_swap_during_open_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    linked = manifest["generic_pointers"][1]
+    pointer_path = Path(linked["path"])
+    declared_target = Path(linked["symlink_target"])
+    target_parent = declared_target.parent
+    displaced_parent = target_parent.with_name(f"{target_parent.name}-original")
+    outside_parent = tmp_path / "outside-releases"
+    outside_parent.mkdir()
+    outside_target = outside_parent / declared_target.name
+    outside_target.write_bytes(declared_target.read_bytes())
+    initial_pointer_stat = os.lstat(pointer_path)
+    initial_pointer_target = os.readlink(pointer_path)
+    real_open = os.open
+    real_readlink = os.readlink
+    swapped = False
+
+    def swap_intermediate_directory_during_target_open(
+        raw_path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        raw_text = os.fspath(raw_path)
+        anchored_parent = (
+            Path(real_readlink(f"/proc/self/fd/{dir_fd}"))
+            if dir_fd is not None
+            else None
+        )
+        opens_declared_target = (
+            dir_fd is None and Path(raw_text) == declared_target
+        ) or (
+            anchored_parent == target_parent
+            and raw_text == declared_target.name
+            and not flags & os.O_DIRECTORY
+        )
+        if opens_declared_target and not swapped:
+            target_parent.rename(displaced_parent)
+            target_parent.symlink_to(outside_parent, target_is_directory=True)
+            swapped = True
+        if dir_fd is None:
+            return real_open(raw_path, flags, mode)
+        return real_open(raw_path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_intermediate_directory_during_target_open)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    final_pointer_stat = os.lstat(pointer_path)
+    assert swapped, "race hook must replace the intermediate target directory"
+    assert target_parent.is_symlink()
+    assert outside_target.read_bytes() == displaced_parent.joinpath(
+        declared_target.name
+    ).read_bytes()
+    assert (final_pointer_stat.st_dev, final_pointer_stat.st_ino) == (
+        initial_pointer_stat.st_dev,
+        initial_pointer_stat.st_ino,
+    )
+    assert os.readlink(pointer_path) == initial_pointer_target
+    assert errors, "verification must never certify an intermediate-directory race"
+    assert any("generic pointer" in error for error in errors), errors
 
 
 def test_routing_probe_never_exposes_raw_value_or_command_payload(
@@ -1270,6 +1421,85 @@ def test_cli_render_and_verify_json(
     assert authority.main(["verify", "--manifest", str(manifest_path), "--json"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output == {"ok": True, "errors": []}
+
+
+@pytest.mark.parametrize(
+    ("existing_mode", "expected_mode"),
+    ((None, 0o644), (0o640, 0o640)),
+    ids=("new-output", "existing-output"),
+)
+def test_atomic_write_uses_default_or_preserved_output_mode(
+    tmp_path: Path,
+    existing_mode: int | None,
+    expected_mode: int,
+) -> None:
+    output_path = tmp_path / "ACTIVE_RUNTIME.rendered.md"
+    if existing_mode is not None:
+        output_path.write_text("previous\n", encoding="utf-8")
+        output_path.chmod(existing_mode)
+
+    authority._write_text_atomic(output_path, "replacement\n")
+
+    assert output_path.read_text(encoding="utf-8") == "replacement\n"
+    assert stat.S_IMODE(output_path.stat().st_mode) == expected_mode
+
+
+@pytest.mark.parametrize("existing_kind", ("symlink", "directory"))
+def test_atomic_write_rejects_existing_symlink_or_non_regular_output(
+    tmp_path: Path,
+    existing_kind: str,
+) -> None:
+    output_path = tmp_path / "ACTIVE_RUNTIME.rendered.md"
+    symlink_target = tmp_path / "outside.md"
+    symlink_target.write_text("outside\n", encoding="utf-8")
+    if existing_kind == "symlink":
+        output_path.symlink_to(symlink_target)
+    else:
+        output_path.mkdir()
+    original_entries = set(tmp_path.iterdir())
+
+    with pytest.raises(OSError):
+        authority._write_text_atomic(output_path, "replacement\n")
+
+    assert set(tmp_path.iterdir()) == original_entries
+    if existing_kind == "symlink":
+        assert output_path.is_symlink()
+        assert symlink_target.read_text(encoding="utf-8") == "outside\n"
+    else:
+        assert output_path.is_dir()
+
+
+def test_atomic_write_fsyncs_file_then_parent_directory_after_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "ACTIVE_RUNTIME.rendered.md"
+    events: list[str] = []
+    real_fsync = os.fsync
+    real_replace = os.replace
+
+    def recording_fsync(descriptor: int) -> None:
+        descriptor_stat = os.fstat(descriptor)
+        events.append(
+            "directory-fsync"
+            if stat.S_ISDIR(descriptor_stat.st_mode)
+            else "file-fsync"
+        )
+        real_fsync(descriptor)
+
+    def recording_replace(
+        source: str | os.PathLike[str],
+        target: str | os.PathLike[str],
+    ) -> None:
+        events.append("replace")
+        real_replace(source, target)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "replace", recording_replace)
+
+    authority._write_text_atomic(output_path, "replacement\n")
+
+    assert events == ["file-fsync", "replace", "directory-fsync"]
 
 
 def test_cli_render_replace_failure_preserves_previous_output_and_cleans_temp(

@@ -18,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import posixpath
 import re
 import stat
 import subprocess
@@ -62,6 +63,10 @@ _QUEUE_ORDER: Final = (
 )
 _HEARTBEAT_SCHEMA: Final = "v2-worker-heartbeat-v2"
 _WORKSPACE_ROOT: Final = PurePosixPath("/home/ubuntu/workspace")
+_DIRECTORY_OPEN_FLAGS: Final = (
+    os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
+)
+_REGULAR_FILE_OPEN_FLAGS: Final = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
 _SENSITIVE_TERM_RE: Final = re.compile(
     r"(?:^|[^a-z0-9])"
     r"(?:subscriber[_-]?id|api[_-]?key|secret|(?:access[_-]?)?token|email|phone)"
@@ -92,6 +97,19 @@ class Completed:
     returncode: int
     stdout: bytes
     stderr: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _AnchoredFileWitness:
+    directories: tuple[tuple[int, int], ...]
+    file: tuple[int, int, int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class _AnchoredSymlinkWitness:
+    directories: tuple[tuple[int, int], ...]
+    link: tuple[int, int, int, int, int, int]
+    target: str
 
 
 Runner = Callable[[Sequence[str]], Completed]
@@ -1028,21 +1046,174 @@ def _digest_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def _digest_regular_file(path: Path) -> str | None:
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
-    descriptor = os.open(path, flags)
+def _path_is_allowed(path: PurePosixPath, repository_path: str) -> bool:
+    roots = (PurePosixPath(repository_path), _WORKSPACE_ROOT)
+    return any(_path_is_within(path, root) for root in roots)
+
+
+def _directory_identity(metadata: os.stat_result) -> tuple[int, int]:
+    return metadata.st_dev, metadata.st_ino
+
+
+def _file_identity(
+    metadata: os.stat_result,
+) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _open_anchored_parent(
+    path: Path,
+    repository_path: str,
+) -> tuple[int, tuple[tuple[int, int], ...]]:
+    candidate = PurePosixPath(str(path))
+    if not candidate.is_absolute() or not _path_is_allowed(candidate, repository_path):
+        raise OSError("path is outside allowed roots")
+
+    descriptors: list[int] = []
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        descriptors.append(os.open("/", _DIRECTORY_OPEN_FLAGS))
+        identities = [_directory_identity(os.fstat(descriptors[-1]))]
+        for component in candidate.parts[1:-1]:
+            descriptors.append(
+                os.open(
+                    component,
+                    _DIRECTORY_OPEN_FLAGS,
+                    dir_fd=descriptors[-1],
+                )
+            )
+            identities.append(_directory_identity(os.fstat(descriptors[-1])))
+        parent_descriptor = descriptors.pop()
+        return parent_descriptor, tuple(identities)
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _open_anchored_regular_file(
+    path: Path,
+    repository_path: str,
+) -> tuple[int, _AnchoredFileWitness] | None:
+    parent_descriptor: int | None = None
+    file_descriptor: int | None = None
+    try:
+        parent_descriptor, directories = _open_anchored_parent(
+            path,
+            repository_path,
+        )
+        file_descriptor = os.open(
+            path.name,
+            _REGULAR_FILE_OPEN_FLAGS,
+            dir_fd=parent_descriptor,
+        )
+        metadata = os.fstat(file_descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
             return None
+        witness = _AnchoredFileWitness(directories, _file_identity(metadata))
+        result_descriptor = file_descriptor
+        file_descriptor = None
+        return result_descriptor, witness
+    finally:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+        if parent_descriptor is not None:
+            os.close(parent_descriptor)
+
+
+def _digest_regular_file(
+    path: Path,
+    repository_path: str,
+) -> tuple[str, _AnchoredFileWitness] | None:
+    opened = _open_anchored_regular_file(path, repository_path)
+    if opened is None:
+        return None
+    descriptor, witness = opened
+    try:
         digest = hashlib.sha256()
         while True:
             chunk = os.read(descriptor, 128 * 1024)
             if not chunk:
                 break
             digest.update(chunk)
-        return "sha256:" + digest.hexdigest()
+        if _file_identity(os.fstat(descriptor)) != witness.file:
+            return None
+        return "sha256:" + digest.hexdigest(), witness
     finally:
         os.close(descriptor)
+
+
+def _anchored_regular_file_matches(
+    path: Path,
+    repository_path: str,
+    expected: _AnchoredFileWitness,
+) -> bool:
+    try:
+        opened = _open_anchored_regular_file(path, repository_path)
+    except OSError:
+        return False
+    if opened is None:
+        return False
+    descriptor, actual = opened
+    try:
+        return actual == expected
+    finally:
+        os.close(descriptor)
+
+
+def _read_anchored_symlink(
+    path: Path,
+    repository_path: str,
+) -> _AnchoredSymlinkWitness | None:
+    parent_descriptor: int | None = None
+    try:
+        parent_descriptor, directories = _open_anchored_parent(
+            path,
+            repository_path,
+        )
+        initial_stat = os.lstat(path.name, dir_fd=parent_descriptor)
+        if not stat.S_ISLNK(initial_stat.st_mode):
+            return None
+        target = os.readlink(path.name, dir_fd=parent_descriptor)
+        final_stat = os.lstat(path.name, dir_fd=parent_descriptor)
+        if (
+            not stat.S_ISLNK(final_stat.st_mode)
+            or _file_identity(final_stat) != _file_identity(initial_stat)
+        ):
+            return None
+        return _AnchoredSymlinkWitness(
+            directories,
+            _file_identity(initial_stat),
+            target,
+        )
+    finally:
+        if parent_descriptor is not None:
+            os.close(parent_descriptor)
+
+
+def _anchored_symlink_matches(
+    path: Path,
+    repository_path: str,
+    expected: _AnchoredSymlinkWitness,
+) -> bool:
+    try:
+        return _read_anchored_symlink(path, repository_path) == expected
+    except OSError:
+        return False
+
+
+def _normalized_symlink_target(path: Path, target: str) -> PurePosixPath:
+    combined = (
+        target
+        if posixpath.isabs(target)
+        else posixpath.join(path.parent.as_posix(), target)
+    )
+    return PurePosixPath(posixpath.normpath(combined))
 
 
 def _verify_git_authority(
@@ -1417,15 +1588,6 @@ def _verify_public_endpoints(
             errors.append("public endpoint body hash mismatch")
 
 
-def _resolved_path_is_allowed(path: Path, repository_path: str) -> bool:
-    candidate = PurePosixPath(str(path))
-    roots = (
-        PurePosixPath(str(Path(repository_path).resolve(strict=False))),
-        PurePosixPath(str(Path(_WORKSPACE_ROOT.as_posix()).resolve(strict=False))),
-    )
-    return any(_path_is_within(candidate, root) for root in roots)
-
-
 def _verify_generic_pointers(
     pointers: list[object],
     repository_path: str,
@@ -1437,43 +1599,51 @@ def _verify_generic_pointers(
         declared_target = pointer["symlink_target"]
         try:
             if declared_target is None:
-                resolved_path = path.resolve(strict=True)
-                if not _resolved_path_is_allowed(resolved_path, repository_path):
-                    errors.append("generic pointer resolved outside allowed roots")
-                    continue
-                actual_digest = _digest_regular_file(path)
-                if actual_digest is None:
+                digested = _digest_regular_file(path, repository_path)
+                if digested is None:
                     errors.append("generic pointer final file invalid")
+                    continue
+                actual_digest, file_witness = digested
+                if not _anchored_regular_file_matches(
+                    path,
+                    repository_path,
+                    file_witness,
+                ):
+                    errors.append("generic pointer changed during verification")
                     continue
             else:
-                initial_stat = os.lstat(path)
-                if not stat.S_ISLNK(initial_stat.st_mode):
+                initial_symlink = _read_anchored_symlink(path, repository_path)
+                if initial_symlink is None:
                     errors.append("generic pointer symlink mismatch")
                     continue
-                initial_target = os.readlink(path)
-                linked_target = Path(initial_target)
-                if not linked_target.is_absolute():
-                    linked_target = path.parent / linked_target
-                resolved_target = linked_target.resolve(strict=True)
                 declared_path = Path(str(declared_target))
-                expected_target = declared_path.resolve(strict=True)
-                if resolved_target != expected_target:
+                expected_target = PurePosixPath(str(declared_path))
+                linked_target = _normalized_symlink_target(
+                    path,
+                    initial_symlink.target,
+                )
+                if linked_target != expected_target:
                     errors.append("generic pointer symlink target mismatch")
                     continue
-                if not _resolved_path_is_allowed(resolved_target, repository_path):
+                if not _path_is_allowed(expected_target, repository_path):
                     errors.append("generic pointer resolved outside allowed roots")
                     continue
-                actual_digest = _digest_regular_file(declared_path)
-                if actual_digest is None:
+                digested = _digest_regular_file(declared_path, repository_path)
+                if digested is None:
                     errors.append("generic pointer final file invalid")
                     continue
-                final_stat = os.lstat(path)
-                final_target = os.readlink(path)
-                if (
-                    not stat.S_ISLNK(final_stat.st_mode)
-                    or (final_stat.st_dev, final_stat.st_ino)
-                    != (initial_stat.st_dev, initial_stat.st_ino)
-                    or final_target != initial_target
+                actual_digest, target_witness = digested
+                if not _anchored_regular_file_matches(
+                    declared_path,
+                    repository_path,
+                    target_witness,
+                ):
+                    errors.append("generic pointer target changed during verification")
+                    continue
+                if not _anchored_symlink_matches(
+                    path,
+                    repository_path,
+                    initial_symlink,
                 ):
                     errors.append("generic pointer symlink changed during verification")
                     continue
@@ -1540,6 +1710,15 @@ def _argument_parser() -> argparse.ArgumentParser:
 
 def _write_text_atomic(path: Path, value: str) -> None:
     temporary_path: Path | None = None
+    directory_descriptor: int | None = None
+    try:
+        existing_stat = os.lstat(path)
+    except FileNotFoundError:
+        output_mode = 0o644
+    else:
+        if not stat.S_ISREG(existing_stat.st_mode):
+            raise OSError("output path must be a regular file")
+        output_mode = stat.S_IMODE(existing_stat.st_mode)
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -1550,12 +1729,24 @@ def _write_text_atomic(path: Path, value: str) -> None:
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
+            os.fchmod(temporary.fileno(), output_mode)
             temporary.write(value)
             temporary.flush()
             os.fsync(temporary.fileno())
+        try:
+            current_stat = os.lstat(path)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(current_stat.st_mode):
+                raise OSError("output path must be a regular file")
         os.replace(temporary_path, path)
         temporary_path = None
+        directory_descriptor = os.open(path.parent, _DIRECTORY_OPEN_FLAGS)
+        os.fsync(directory_descriptor)
     finally:
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
