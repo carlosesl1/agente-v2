@@ -16,10 +16,13 @@ import hashlib
 import html
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 from typing import Any, Final
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -609,6 +612,45 @@ def _validate_component(
     )
 
 
+def _validate_global_component_ownership(
+    components: Mapping[str, object],
+) -> None:
+    container_owners: dict[str, str] = {}
+    compose_project_owners: dict[str, str] = {}
+    writable_mount_owners: dict[str, str] = {}
+    for component_name in COMPONENT_ORDER:
+        component = _mapping(
+            components[component_name], f"components.{component_name}"
+        )
+        containers = _list(
+            component["containers"], f"components.{component_name}.containers"
+        )
+        for raw_container in containers:
+            container = _mapping(
+                raw_container, f"components.{component_name}.container"
+            )
+            container_name = str(container["name"])
+            owner = container_owners.setdefault(container_name, component_name)
+            if owner != component_name:
+                raise AuthorityError("container name is shared across components")
+
+            compose_project = str(container["compose_project"])
+            owner = compose_project_owners.setdefault(compose_project, component_name)
+            if owner != component_name:
+                raise AuthorityError("compose project is shared across components")
+
+            for raw_mount in _list(container["mounts"], "container.mounts"):
+                mount = _mapping(raw_mount, "container.mount")
+                if mount["read_only"] is not False:
+                    continue
+                source = str(mount["source"])
+                owner = writable_mount_owners.setdefault(source, component_name)
+                if owner != component_name:
+                    raise AuthorityError(
+                        "writable mount source is shared across components"
+                    )
+
+
 def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
     _scan_sensitive_keys(manifest)
     root = _exact_fields(
@@ -662,6 +704,7 @@ def _validate_manifest(manifest: Mapping[str, object]) -> Mapping[str, object]:
             components[component_name],
             documented_variables,
         )
+    _validate_global_component_ownership(components)
 
     legacy = _exact_fields(root["legacy"], {"path", "state"}, "legacy")
     _absolute_path(legacy["path"], "legacy.path")
@@ -983,6 +1026,23 @@ def _nested_mapping(value: object, key: str) -> Mapping[str, object] | None:
 
 def _digest_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _digest_regular_file(path: Path) -> str | None:
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 128 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return "sha256:" + digest.hexdigest()
+    finally:
+        os.close(descriptor)
 
 
 def _verify_git_authority(
@@ -1377,30 +1437,50 @@ def _verify_generic_pointers(
         declared_target = pointer["symlink_target"]
         try:
             if declared_target is None:
-                if path.is_symlink():
-                    errors.append("generic pointer file type mismatch")
+                resolved_path = path.resolve(strict=True)
+                if not _resolved_path_is_allowed(resolved_path, repository_path):
+                    errors.append("generic pointer resolved outside allowed roots")
                     continue
-                final_path = path.resolve(strict=True)
+                actual_digest = _digest_regular_file(path)
+                if actual_digest is None:
+                    errors.append("generic pointer final file invalid")
+                    continue
             else:
-                if not path.is_symlink():
+                initial_stat = os.lstat(path)
+                if not stat.S_ISLNK(initial_stat.st_mode):
                     errors.append("generic pointer symlink mismatch")
                     continue
-                final_path = path.resolve(strict=True)
-                expected_target = Path(str(declared_target)).resolve(strict=True)
-                if final_path != expected_target:
+                initial_target = os.readlink(path)
+                linked_target = Path(initial_target)
+                if not linked_target.is_absolute():
+                    linked_target = path.parent / linked_target
+                resolved_target = linked_target.resolve(strict=True)
+                declared_path = Path(str(declared_target))
+                expected_target = declared_path.resolve(strict=True)
+                if resolved_target != expected_target:
                     errors.append("generic pointer symlink target mismatch")
                     continue
-            if not _resolved_path_is_allowed(final_path, repository_path):
-                errors.append("generic pointer resolved outside allowed roots")
-                continue
-            if not final_path.is_file():
-                errors.append("generic pointer final file invalid")
-                continue
-            payload = final_path.read_bytes()
+                if not _resolved_path_is_allowed(resolved_target, repository_path):
+                    errors.append("generic pointer resolved outside allowed roots")
+                    continue
+                actual_digest = _digest_regular_file(declared_path)
+                if actual_digest is None:
+                    errors.append("generic pointer final file invalid")
+                    continue
+                final_stat = os.lstat(path)
+                final_target = os.readlink(path)
+                if (
+                    not stat.S_ISLNK(final_stat.st_mode)
+                    or (final_stat.st_dev, final_stat.st_ino)
+                    != (initial_stat.st_dev, initial_stat.st_ino)
+                    or final_target != initial_target
+                ):
+                    errors.append("generic pointer symlink changed during verification")
+                    continue
         except (OSError, RuntimeError):
             errors.append("generic pointer file unavailable")
             continue
-        if _digest_bytes(payload) != pointer["sha256"]:
+        if actual_digest != pointer["sha256"]:
             errors.append("generic pointer hash mismatch")
 
 
@@ -1458,6 +1538,31 @@ def _argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _write_text_atomic(path: Path, value: str) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(value)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the render or verify command without exposing boundary payloads."""
 
@@ -1465,7 +1570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         manifest = load_manifest(arguments.manifest)
         if arguments.command == "render":
-            arguments.output.write_text(render_markdown(manifest), encoding="utf-8")
+            _write_text_atomic(arguments.output, render_markdown(manifest))
             return 0
 
         errors = verify_manifest(manifest, _default_runner, _default_http_get)

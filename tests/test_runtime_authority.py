@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -97,7 +98,7 @@ def _container(name: str, role: str) -> dict[str, Any]:
     return {
         "role": role,
         "name": f"agente-v2-{slug}-{role}",
-        "compose_project": "agente-v2",
+        "compose_project": f"agente-v2-{slug}",
         "compose_config": "/srv/agente-v2/compose.yml",
         "compose_service": f"{slug}-{role}",
         "status": "running",
@@ -1068,6 +1069,94 @@ def test_generic_pointer_files_fail_closed(
     assert any("generic pointer" in error for error in errors), errors
 
 
+def test_generic_pointer_hashing_uses_nofollow_file_descriptors_and_short_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    regular_path = Path(manifest["generic_pointers"][0]["path"])
+    symlink_path = Path(manifest["generic_pointers"][1]["path"])
+    declared_target = Path(manifest["generic_pointers"][1]["symlink_target"])
+    tracked_paths = {regular_path, declared_target}
+    open_calls: list[tuple[Path, int]] = []
+    tracked_fds: set[int] = set()
+    read_chunks: list[bytes] = []
+    real_open = os.open
+    real_read = os.read
+
+    def recording_open(
+        raw_path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if dir_fd is None:
+            fd = real_open(raw_path, flags, mode)
+        else:
+            fd = real_open(raw_path, flags, mode, dir_fd=dir_fd)
+        candidate = Path(raw_path)
+        if candidate in tracked_paths:
+            open_calls.append((candidate, flags))
+            tracked_fds.add(fd)
+        return fd
+
+    def short_read(fd: int, size: int) -> bytes:
+        payload = real_read(fd, min(size, 3))
+        if fd in tracked_fds:
+            read_chunks.append(payload)
+        return payload
+
+    monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(os, "read", short_read)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert errors == []
+    assert [path for path, _flags in open_calls] == [regular_path, declared_target]
+    expected_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    assert all(flags == expected_flags for _path, flags in open_calls)
+    assert symlink_path not in {path for path, _flags in open_calls}
+    assert len([chunk for chunk in read_chunks if chunk]) > 2
+    assert read_chunks.count(b"") == 2
+
+
+def test_generic_pointer_symlink_replacement_during_hashing_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = materialized_manifest(tmp_path)
+    fake = FakeRuntime(manifest)
+    linked = manifest["generic_pointers"][1]
+    pointer_path = Path(linked["path"])
+    declared_target = Path(linked["symlink_target"])
+    outside_target = tmp_path / "outside-runtime-authority.json"
+    outside_target.write_bytes(_pointer_bytes(linked["name"]))
+    real_resolve = Path.resolve
+    replaced = False
+
+    def replace_pointer_after_target_resolution(
+        candidate: Path,
+        strict: bool = False,
+    ) -> Path:
+        nonlocal replaced
+        resolved = real_resolve(candidate, strict=strict)
+        if candidate == declared_target and not replaced:
+            pointer_path.unlink()
+            pointer_path.symlink_to(outside_target)
+            replaced = True
+        return resolved
+
+    monkeypatch.setattr(Path, "resolve", replace_pointer_after_target_resolution)
+
+    errors = authority.verify_manifest(manifest, fake.runner, fake.http_get)
+
+    assert replaced, "race hook must replace the declared pointer"
+    assert real_resolve(pointer_path, strict=True) == outside_target
+    assert "generic pointer symlink changed during verification" in errors
+
+
 def test_routing_probe_never_exposes_raw_value_or_command_payload(
     tmp_path: Path,
 ) -> None:
@@ -1183,6 +1272,55 @@ def test_cli_render_and_verify_json(
     assert output == {"ok": True, "errors": []}
 
 
+def test_cli_render_replace_failure_preserves_previous_output_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = minimal_manifest()
+    manifest_path = tmp_path / "ACTIVE_RUNTIME.manifest.json"
+    markdown_path = tmp_path / "ACTIVE_RUNTIME.rendered.md"
+    previous_bytes = b"previous verified authority\n"
+    expected_bytes = render_markdown(manifest).encode("utf-8")
+    _write_manifest(manifest_path, manifest)
+    markdown_path.write_bytes(previous_bytes)
+    original_entries = set(tmp_path.iterdir())
+    real_fsync = os.fsync
+    fsynced_sizes: list[int] = []
+    replace_calls: list[tuple[Path, Path]] = []
+    leaked_error = "person@example.invalid"
+
+    def recording_fsync(descriptor: int) -> None:
+        fsynced_sizes.append(os.fstat(descriptor).st_size)
+        real_fsync(descriptor)
+
+    def fail_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        replace_calls.append((source_path, target_path))
+        assert source_path.parent == markdown_path.parent
+        assert source_path.read_bytes() == expected_bytes
+        raise OSError(leaked_error)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    result = authority.main(
+        ["render", "--manifest", str(manifest_path), "--output", str(markdown_path)]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert fsynced_sizes == [len(expected_bytes)]
+    assert len(replace_calls) == 1
+    assert replace_calls[0][1] == markdown_path
+    assert markdown_path.read_bytes() == previous_bytes
+    assert set(tmp_path.iterdir()) == original_entries
+    assert captured.out == ""
+    assert captured.err == "authority error: output could not be written\n"
+    assert leaked_error not in captured.err
+
+
 def test_cli_verify_failure_returns_one_and_sanitizes_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1264,6 +1402,58 @@ def test_container_roles_and_names_must_be_unique(tmp_path: Path) -> None:
 
     with pytest.raises(AuthorityError, match="container names"):
         load_manifest(path)
+
+
+@pytest.mark.parametrize(
+    ("collision", "expected_error"),
+    (
+        ("container_name", "container name is shared across components"),
+        ("compose_project", "compose project is shared across components"),
+        ("writable_mount_source", "writable mount source is shared across components"),
+    ),
+)
+def test_manifest_rejects_cross_component_runtime_ownership_collisions(
+    tmp_path: Path,
+    collision: str,
+    expected_error: str,
+) -> None:
+    manifest = minimal_manifest()
+    ga = _container_for(manifest, "ga", "api")
+    test_contact = _container_for(manifest, "test_contact", "api")
+    if collision == "container_name":
+        test_contact["name"] = ga["name"]
+    elif collision == "compose_project":
+        test_contact["compose_project"] = ga["compose_project"]
+    elif collision == "writable_mount_source":
+        shared_source = "/srv/agente-v2/shared-runtime-state"
+        ga["mounts"][0] = {
+            "source": shared_source,
+            "destination": "/app/ga-state",
+            "read_only": False,
+        }
+        test_contact["mounts"][0] = {
+            "source": shared_source,
+            "destination": "/app/test-contact-state",
+            "read_only": False,
+        }
+    else:  # pragma: no cover - guards the test matrix itself
+        raise AssertionError(collision)
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    with pytest.raises(AuthorityError, match=expected_error):
+        load_manifest(path)
+
+
+def test_manifest_allows_read_only_mount_source_shared_with_ops(tmp_path: Path) -> None:
+    manifest = minimal_manifest()
+    ga_mount = _container_for(manifest, "ga", "api")["mounts"][0]
+    ops_mount = _container_for(manifest, "ops", "web")["mounts"][0]
+    ops_mount["source"] = ga_mount["source"]
+    path = tmp_path / "ACTIVE_RUNTIME.json"
+    _write_manifest(path, manifest)
+
+    assert load_manifest(path) == manifest
 
 
 def test_file_role_must_resolve_to_declared_container(tmp_path: Path) -> None:
