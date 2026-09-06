@@ -218,7 +218,7 @@ class FinancialEvidenceAcceptor:
     def accept(self, webhook: VerifiedFinancialWebhook) -> EvidenceAcceptance:
         if type(webhook) is not VerifiedFinancialWebhook:
             raise TypeError("webhook must be exact VerifiedFinancialWebhook")
-        store = SQLiteFollowupUnitOfWork.open(self.path)
+        store = SQLiteFollowupUnitOfWork.open_v2(self.path, migrate_v1=True)
         try:
             return V2PaymentEvidenceGateway(store).accept(
                 payment_id=webhook.payment_id,

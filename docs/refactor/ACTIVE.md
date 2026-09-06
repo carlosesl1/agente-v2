@@ -1,3 +1,14 @@
+# Active correction — V2 service reliability
+
+- Authorized by Carlos in the current chat: correct audited loose ends with no regex, keywords, substring intent detection or fragile case catalogs. Pix/Wise validation is distinct from Stripe.
+- Runtime authority verified before work; immutable GA base `b3173693d6d852ba8bcf8df5f7aa8e7a6d4c10f3`.
+- Branch `fix/v2-service-reliability`; required worktree `/home/ubuntu/agente-v2/.worktrees/service-reliability`.
+- Active plan: `docs/superpowers/plans/2026-09-05-v2-service-reliability.md`.
+- NEXT: implement Tasks A–D with disjoint ownership, causal tests, then controller integration/review/full gate. This section supersedes historical NEXT/branch claims below for this correction only.
+- No deployment, production ref/state mutation, external writes/messages, financial activation or V3 work. Maya remains semantic/textual owner; runtime validates structured state, facts and effects.
+
+## Historical context (not the active implementation authority)
+
 # Refactor control — Maya V2 agent process and read enrichment
 
 ## Authority

@@ -82,7 +82,8 @@ selected_choice_refs, selection_requested, pending_action_disposition, and passe
 Return no commentary or extra field. Each reply_chunks item is exactly
 {"text":"...","expects_reply":false}; write one or two customer-facing messages.
 
-The only supported intents are confirm, adjust, and inform. facts, read_requests,
+The only supported intents are confirm, adjust, and inform. facts may contain only
+language to update conversational locale, never commercial terms. read_requests,
 selected_choice_refs, and passengers must be empty; selection_requested must be false;
 no reply chunk may expect a customer reply.
 
@@ -419,6 +420,10 @@ def _request_wire(
         "lead_id": request.lead_id,
         "source_event_id": request.source_event_id,
         "message": request.message,
+        "attachments": [
+            {"media_type": item.media_type, "content_status": item.content_status.value}
+            for item in request.attachments
+        ],
         "locale": request.locale,
         "state_version": request.state_version,
         "critical_outcome": request.critical_outcome,
@@ -522,6 +527,10 @@ def _confirmation_review_wire(request: ModelRequest, system_prompt: str) -> byte
         "request_id": request.request_id,
         "source_event_id": request.source_event_id,
         "message": request.message,
+        "attachments": [
+            {"media_type": item.media_type, "content_status": item.content_status.value}
+            for item in request.attachments
+        ],
         "locale": request.locale,
         "pending_action": {
             "summary_version": pending.summary_version,
@@ -980,7 +989,7 @@ def _confirmation_proposal(payload: bytes, request: ModelRequest) -> ModelPropos
             "confirmation reply_chunks must contain one or two exact strings"
         )
     if (
-        proposal.facts
+        any(fact.name != "language" for fact in proposal.facts)
         or proposal.read_requests
         or proposal.effect_proposals
         or proposal.target_offer_id is not None
@@ -1174,6 +1183,7 @@ class HermesModelAdapter:
     ) -> AuditedModelTurn:
         if (
             request.progress_review_required
+            or request.attachments
             or request.observations
             or request.pending_action is not None
             or request.handoff_status is not None

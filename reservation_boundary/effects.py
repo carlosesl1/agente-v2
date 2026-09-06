@@ -916,3 +916,26 @@ __all__ = (
     "TargetOperationReceipt",
     "target_operation_id",
 )
+
+def validate_reservation_relay_group(source_receipt, bundles) -> None:
+    """Authenticate complete command/relay membership before any target mutation."""
+    from reservation_boundary.sqlite_store import TurnReceipt
+    from reservation_domain import loads_command
+
+    if type(source_receipt) is not TurnReceipt:
+        raise TypeError("reservation group requires an exact turn receipt")
+    if type(bundles) is not tuple or not bundles or any(
+        type(bundle) is not ReservationRelayBundle for bundle in bundles
+    ):
+        raise TypeError("reservation group requires exact relay bundles")
+    if sorted(bundle.artifact_hash for bundle in bundles) != sorted(
+        digest for _, digest in source_receipt.relay_rows
+    ):
+        raise ValueError("reservation relay group is incomplete or diverged")
+    commands = tuple(
+        (loads_command(bundle.command_ledger_seed.decode()).command_id,
+         hashlib.sha256(bundle.command_ledger_seed).hexdigest())
+        for bundle in bundles
+    )
+    if sorted(commands) != sorted(source_receipt.command_rows):
+        raise ValueError("reservation group does not cover committed commands")

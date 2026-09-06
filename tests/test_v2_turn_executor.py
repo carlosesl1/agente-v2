@@ -2120,7 +2120,7 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         store.close()
 
 
-def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> None:
+def test_model_owned_no_read_recap_uses_history_without_extra_round() -> None:
     first_read = ReadRequest(
         request_id="read:history-reuse-first",
         kind=ReadKind.LODGING,
@@ -2148,7 +2148,6 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
         allocation_ids=("allocation:history-reuse-followup",),
         allocation_manifest_hash="c" * 64,
     )
-    repeated_read = replace(first_read, request_id="read:history-reuse-repeated")
     first = ModelProposal(
         source_event_id=BATCH.batch_id,
         intent="inform",
@@ -2158,22 +2157,6 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
         effect_proposals=(),
     )
     first_final = _proposal("A suíte está disponível por BRL 480.00.")
-    repeated = ModelProposal(
-        source_event_id=followup_batch.batch_id,
-        intent="inform",
-        reply_chunks=("Vou consultar a mesma disponibilidade novamente.",),
-        facts=(),
-        read_requests=(repeated_read,),
-        effect_proposals=(),
-    )
-    invalid_reused_reply = ModelProposal(
-        source_event_id=followup_batch.batch_id,
-        intent="inform",
-        reply_chunks=("Vou alterar o pagamento durante a recapitulação.",),
-        facts=(ModelFact("payment_method", "pix"),),
-        read_requests=(),
-        effect_proposals=(),
-    )
     corrected_text = "Maya corrigiu: a consulta anterior continua fresca e nada foi reservado."
     corrected_reuse = ModelProposal(
         source_event_id=followup_batch.batch_id,
@@ -2186,7 +2169,7 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(
         store,
-        [first, first_final, repeated, invalid_reused_reply, corrected_reuse],
+        [first, first_final, corrected_reuse],
     )
     port = FakeLodgingReadPort(store)
     _install_public_authority(store)
@@ -2208,11 +2191,10 @@ def test_fresh_equivalent_history_suppresses_redundant_informational_read() -> N
         followup = executor.execute(followup_batch)
 
         assert port.calls == [first_read]
-        assert len(model.calls) == 5
+        assert len(model.calls) == 3
         assert model.calls[-1].observations == ()
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.STALE_CONSULTATION_REUSE,
-        )
+        assert model.calls[-1].consultation_history
+        assert model.calls[-1].public_reply_correction_reasons == ()
         assert followup.reply_chunks == (corrected_text,)
         assert followup.receipt.command_rows == ()
         assert followup.receipt.relay_rows == ()
@@ -2364,15 +2346,14 @@ def test_consultation_expiry_during_model_is_refreshed_or_fails_closed(
             assert result.receipt.command_rows == ()
             assert result.receipt.relay_rows == ()
         else:
-            with pytest.raises(
-                TurnExecutionError,
-                match="consultation expired before recap decision",
-            ):
+            from v2_application.reads import StaleObservation
+
+            with pytest.raises(StaleObservation, match="read observation expired"):
                 executor.execute(followup_batch)
 
-            assert current_port.calls == []
-            assert model.calls[-1].recap_reuse_required is True
-            assert model.calls[-1].observations == ()
+            assert current_port.calls == [repeated_read]
+            assert model.calls[-1].recap_reuse_required is False
+            assert len(model.calls[-1].observations) == 1
             assert store.turn_receipt_count(followup_batch.batch_id) == 0
         assert initial_port.calls == [first_read]
     finally:

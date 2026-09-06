@@ -202,10 +202,10 @@ class ConversationExchange:
     assistant_reply_chunks: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        customer_message = _text(
-            self.customer_message,
-            "conversation customer_message",
-        )
+        # A committed media-only exchange has no extracted customer text.
+        customer_message = self.customer_message
+        if customer_message != "":
+            _text(customer_message, "conversation customer_message")
         if len(customer_message.encode("utf-8")) > _MAX_DIALOGUE_MESSAGE_BYTES:
             raise InvalidModelProposal("conversation customer_message exceeds the bound")
         if (
@@ -291,6 +291,24 @@ class EffectProposal:
         )
 
 
+class AttachmentContentStatus(str, Enum):
+    NOT_EXTRACTED = "not_extracted"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAttachment:
+    """Presence metadata only; never extracted content or payment evidence."""
+
+    media_type: str | None
+    content_status: AttachmentContentStatus = AttachmentContentStatus.NOT_EXTRACTED
+
+    def __post_init__(self) -> None:
+        if self.media_type is not None:
+            _text(self.media_type, "attachment media_type")
+        if type(self.content_status) is not AttachmentContentStatus:
+            raise InvalidModelProposal("attachment content_status must be exact")
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ModelRequest:
     request_id: str
@@ -315,12 +333,18 @@ class ModelRequest:
     active_execution_status: str | None = None
     recap_reuse_required: bool = False
     public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
+    attachments: tuple[ModelAttachment, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
         _text(self.lead_id, "lead_id", identifier=True)
         _text(self.source_event_id, "source_event_id", identifier=True)
-        _text(self.message, "message")
+        if type(self.attachments) is not tuple or any(
+            type(item) is not ModelAttachment for item in self.attachments
+        ):
+            raise InvalidModelProposal("attachments must contain exact ModelAttachment values")
+        if self.message != "" or not self.attachments:
+            _text(self.message, "message")
         _text(self.locale, "locale")
         if type(self.state_version) is not int or self.state_version < 0:
             raise InvalidModelProposal(
@@ -571,7 +595,9 @@ class ModelProposal:
             raise InvalidModelProposal("confirm intent cannot carry passenger updates")
         if self.intent == "request_handoff" and self.passengers:
             raise InvalidModelProposal("handoff intent cannot carry passenger updates")
-        if self.intent == "confirm" and self.facts:
+        if self.intent == "confirm" and any(
+            fact.name != "language" for fact in self.facts
+        ):
             raise InvalidModelProposal("confirm intent cannot carry material facts")
         if type(self.read_requests) is not tuple or any(
             type(item) is not ReadRequest for item in self.read_requests

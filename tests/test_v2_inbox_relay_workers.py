@@ -247,11 +247,41 @@ def _reservation_command():
     return commands[0]
 
 
+def _source_receipt(bundles, relay_ids):
+    """Synthetic but canonical proof; group membership is not a mock boolean."""
+    from dataclasses import replace
+    from reservation_domain import loads_command
+    from tests.test_phase8_boundary_atomic_commit import Phase8BoundaryAtomicCommitTests
+
+    fixture = Phase8BoundaryAtomicCommitTests()
+    fixture.setUp()
+    try:
+        receipt = fixture._case()[3]
+        return replace(
+            receipt,
+            command_rows=tuple(
+                (loads_command(bundle.command_ledger_seed.decode()).command_id,
+                 hashlib.sha256(bundle.command_ledger_seed).hexdigest())
+                for bundle in bundles
+            ),
+            relay_rows=tuple((key, bundle.artifact_hash) for key, bundle in zip(relay_ids, bundles, strict=True)),
+            artifact_hash="",
+        )
+    finally:
+        fixture.doCleanups()
+
+
 class OneRelaySource:
-    def __init__(self, claim: CommandRelayClaim) -> None:
+    def __init__(self, claim: CommandRelayClaim, source_receipt=None) -> None:
+        self.source_receipt = source_receipt
         self.claim = claim
         self.acks = []
         self.claim_calls = 0
+
+    def load_command_relay_group(self, claim):
+        from reservation_boundary.effects import ReservationRelayBundle
+
+        return self.source_receipt, (ReservationRelayBundle.from_canonical_bytes(claim.bundle_bytes),)
 
     def claim_command_relay(
         self, *, worker_id: str, now: datetime, lease_ttl: timedelta
@@ -274,6 +304,12 @@ class ReservationTarget:
         self.store = store
         self.calls = 0
 
+    def accept_boundary_reservation_group(self, *, source_receipt, bundles):
+        self.calls += 1
+        return self.store.accept_boundary_reservation_group(
+            source_receipt=source_receipt, bundles=bundles,
+        )
+
     def accept_boundary_reservation(
         self,
         *,
@@ -294,22 +330,23 @@ def test_boundary_command_relay_uses_real_phase5_bundle_and_target_receipt(
 ) -> None:
     command = _reservation_command()
     bundle = build_reservation_relay_bundle(command)
+    source_receipt = _source_receipt((bundle,), ("relay:task4-reservation",))
     operation_id = reservation_target_operation_id(
         bundle_hash=bundle.artifact_hash,
-        source_turn_receipt_hash=SOURCE_RECEIPT_HASH,
+        source_turn_receipt_hash=source_receipt.artifact_hash,
     )
     claim = CommandRelayClaim(
         relay_id="relay:task4-reservation",
         command_id=command.command_id,
         bundle_bytes=bundle.to_canonical_bytes(),
         bundle_hash=bundle.artifact_hash,
-        source_turn_receipt_hash=SOURCE_RECEIPT_HASH,
+        source_turn_receipt_hash=source_receipt.artifact_hash,
         target_operation_id=operation_id,
         worker_id="worker:boundary-relay",
         fencing_token=1,
         lease_expires_at=NOW + timedelta(seconds=30),
     )
-    source = OneRelaySource(claim)
+    source = OneRelaySource(claim, source_receipt)
     target_store = SQLiteUnitOfWork.open_v6(tmp_path / "reservation.sqlite3")
     target = ReservationTarget(target_store)
     worker = BoundaryRelayWorker(

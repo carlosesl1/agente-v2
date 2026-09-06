@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -753,6 +753,37 @@ class SQLiteUnitOfWork:
                 return
             raise DataCorruption("installed reservation generation requires dependency close")
 
+    def accept_boundary_reservation_group(
+        self, *, source_receipt, bundles: tuple,
+    ):
+        """Materialize a complete authenticated relay group in one target commit.
+
+        Individual ingress receipts remain the replay keys. A lost source ACK
+        replays the same complete transaction, never exposing a partial package.
+        """
+        from reservation_boundary.effects import InternalJobKind, target_operation_id
+
+        from reservation_boundary.effects import validate_reservation_relay_group
+
+        validate_reservation_relay_group(source_receipt, bundles)
+        source_turn_receipt_hash = source_receipt.artifact_hash
+        instant = datetime.now(timezone.utc)
+        with self._transaction("accept_boundary_reservation_group"):
+            return tuple(
+                self._accept_boundary_reservation(
+                    operation_id=target_operation_id(
+                        InternalJobKind.HANDOFF, bundle.artifact_hash,
+                        source_turn_receipt_hash,
+                    ),
+                    source_turn_receipt_hash=source_turn_receipt_hash,
+                    bundle=bundle,
+                    committed_at=instant,
+                    fault_hook=self._phase8_reservation_fault_hook,
+                    group_transaction=True,
+                )
+                for bundle in bundles
+            )
+
     def accept_boundary_reservation(
         self,
         *,
@@ -776,6 +807,7 @@ class SQLiteUnitOfWork:
         bundle: object,
         committed_at: datetime,
         fault_hook: Callable[[str], None] | None,
+        group_transaction: bool = False,
     ):
         from reservation_boundary.effects import (
             InternalJobKind,
@@ -904,7 +936,7 @@ class SQLiteUnitOfWork:
                 fault_hook(stage)
 
         authority_receipt = (None, None, None, None, None, None)
-        with self._transaction("accept_boundary_reservation"):
+        with (nullcontext() if group_transaction else self._transaction("accept_boundary_reservation")):
             existing = self._connection.execute(
                 "SELECT source_turn_receipt_hash, artifact_hash, bundle_json, "
                 "target_commit_hash, target_result_hash, receipt_json, receipt_hash, "

@@ -61,6 +61,8 @@ class RelayWorkerResult:
 
 
 class CommandRelaySource(Protocol):
+    def load_command_relay_group(self, claim: CommandRelayClaim): ...
+
     def claim_command_relay(
         self,
         *,
@@ -86,6 +88,8 @@ class CommandRelaySource(Protocol):
 
 
 class ReservationRelayTarget(Protocol):
+    def accept_boundary_reservation_group(self, *, source_receipt, bundles): ...
+
     def accept_boundary_reservation(
         self,
         *,
@@ -212,6 +216,19 @@ def build_handoff_relay_bundle(request: HandoffRequested) -> HandoffRelayBundle:
     )
 
 
+def _complete_relay_group(source: CommandRelaySource, claim: CommandRelayClaim):
+    """Every source must prove completeness against the same immutable receipt."""
+    from reservation_boundary.effects import validate_reservation_relay_group
+
+    receipt, bundles = source.load_command_relay_group(claim)
+    validate_reservation_relay_group(receipt, bundles)
+    if receipt.artifact_hash != claim.source_turn_receipt_hash:
+        raise ValueError("relay source receipt diverged")
+    if (claim.relay_id, claim.bundle_hash) not in receipt.relay_rows:
+        raise ValueError("claimed relay is not a member of its receipt")
+    return receipt, bundles
+
+
 class BoundaryRelayWorker:
     def __init__(
         self,
@@ -254,11 +271,13 @@ class BoundaryRelayWorker:
         if type(claim) is not CommandRelayClaim:
             raise TypeError("boundary returned a non-canonical command relay claim")
         try:
-            bundle = ReservationRelayBundle.from_canonical_bytes(claim.bundle_bytes)
-            receipt = self._reservation_target.accept_boundary_reservation(
-                operation_id=claim.target_operation_id,
-                source_turn_receipt_hash=claim.source_turn_receipt_hash,
-                bundle=bundle,
+            source_receipt, bundles = _complete_relay_group(self._boundary, claim)
+            receipts = self._reservation_target.accept_boundary_reservation_group(
+                source_receipt=source_receipt, bundles=bundles,
+            )
+            receipt = next(
+                item for item in receipts
+                if item.operation_id == claim.target_operation_id
             )
             if type(receipt) is not TargetOperationReceipt:
                 raise TypeError("reservation target returned a non-canonical receipt")

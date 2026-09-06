@@ -101,7 +101,6 @@ from v2_application.turn_plan import (
     normalize_initial_commercial_plan,
     preserve_initial_adjustment,
     preserve_initial_facts,
-    reuses_fresh_consultation,
 )
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch, PublicMessageAuthor
@@ -111,6 +110,7 @@ from v2_contracts.model import (
     AuditedModelTurn,
     ConsultationHistoryEntry,
     InvalidModelProposal,
+    ModelAttachment,
     ModelFact,
     ModelProposal,
     ModelRequest,
@@ -1670,7 +1670,7 @@ class V2TurnExecutor:
         )
         pending_action = (
             None
-            if current.state.handoff is not None
+            if current.state.handoff is not None and current.state.handoff.queue_active
             else self._reducer.pending_action(
                 current.state.workflow,
                 locale=projection.locale,
@@ -1681,6 +1681,10 @@ class V2TurnExecutor:
             lead_id=batch.lead_id,
             source_event_id=batch.batch_id,
             message=batch.combined_text,
+            attachments=tuple(
+                ModelAttachment(event.media_type)
+                for event in batch.events if event.media_url is not None
+            ),
             locale=projection.locale,
             state_version=current.version,
             recent_dialogue=recent_dialogue,
@@ -2070,46 +2074,6 @@ class V2TurnExecutor:
                 ephemeral_session_id=first_audited.closure.ephemeral_session_id,
             )
         pre_read_floor = now
-        reused_consultation = False
-        consultation_reuse_proposal: ModelProposal | None = None
-        if (
-            pending_action is None
-            and not private_update_turn
-            and bool(read_requests)
-            and read_requests == first_proposal.read_requests
-        ):
-            reuse_now = self._clock.now()
-            if (
-                type(reuse_now) is not datetime
-                or reuse_now.tzinfo is None
-                or reuse_now.utcoffset() != timedelta(0)
-                or reuse_now < pre_read_floor
-            ):
-                raise TurnExecutionError("consultation reuse clock is not monotonic UTC")
-            if reuse_now > now + self._turn_timeout:
-                raise TurnExecutionError("turn deadline expired before consultation reuse")
-            pre_read_floor = reuse_now
-            reused_consultation = reuses_fresh_consultation(
-                first_proposal,
-                consultation_history,
-                now=reuse_now,
-            )
-        if reused_consultation:
-            consultation_reuse_proposal = first_proposal
-            read_requests = ()
-            derived_confirmation_reads = False
-            first_proposal = replace(
-                first_proposal,
-                read_requests=(),
-                target_offer_id=None,
-                target_offer_ids=(),
-                selection_requested=False,
-            )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
             raise TurnExecutionError("model proposed duplicate reads")
@@ -2186,12 +2150,16 @@ class V2TurnExecutor:
             v2_observations = tuple(accepted_observations)
         if not read_requests and first_proposal.read_requests:
             first_proposal = replace(first_proposal, read_requests=())
-        if read_requests or reused_consultation:
+        if read_requests:
             followup = ModelRequest(
                 request_id=_opaque("model-request", batch.batch_id, current.version, 2),
                 lead_id=batch.lead_id,
                 source_event_id=batch.batch_id,
                 message=batch.combined_text,
+                attachments=tuple(
+                    ModelAttachment(event.media_type)
+                    for event in batch.events if event.media_url is not None
+                ),
                 locale=projection.locale,
                 state_version=current.version,
                 recent_dialogue=recent_dialogue,
@@ -2220,7 +2188,6 @@ class V2TurnExecutor:
                     else None
                 ),
                 active_execution_status=active_execution_status(current.state),
-                recap_reuse_required=reused_consultation,
             )
             second_audited = trace.call(
                 NodeType.MAYA_REQUEST,
@@ -2239,21 +2206,6 @@ class V2TurnExecutor:
             )
             if proposal.source_event_id != batch.batch_id:
                 raise TurnExecutionError("model proposal source event diverged")
-            if reused_consultation and (
-                proposal.intent != "inform"
-                or proposal.facts
-                or proposal.read_requests
-                or proposal.effect_proposals
-                or proposal.target_offer_id is not None
-                or proposal.target_offer_ids
-                or proposal.selection_requested
-                or proposal.passengers
-            ):
-                proposal, second_audited = request_public_reply_correction(
-                    first_proposal,
-                    second_audited,
-                    PublicReplyCorrectionReason.STALE_CONSULTATION_REUSE,
-                )
             (
                 second_private_facts,
                 second_public_facts,
@@ -2496,15 +2448,6 @@ class V2TurnExecutor:
             raise TurnExecutionError("decision clock is not monotonic UTC")
         if decision_now > now + self._turn_timeout:
             raise TurnExecutionError("turn deadline expired before decision")
-        if reused_consultation and (
-            consultation_reuse_proposal is None
-            or not reuses_fresh_consultation(
-                consultation_reuse_proposal,
-                consultation_history,
-                now=decision_now,
-            )
-        ):
-            raise TurnExecutionError("consultation expired before recap decision")
         decision_private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(decision_private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")

@@ -1025,6 +1025,7 @@ def build_worker_set(
             ),
             worker_id="worker:manychat-handoff",
             lease_ttl=timedelta(seconds=30),
+            clock=UTCClock().now,
             effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
         )
     else:

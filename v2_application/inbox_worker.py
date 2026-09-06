@@ -207,7 +207,8 @@ class InboxTurnWorker:
                 now=instant,
             )
         except BaseException:
-            self._inbox.release_claim(claim)
+            # Retry ordering is durable and lead-local, not only queue backoff.
+            self._inbox.release_claim(claim, retry_at=instant + timedelta(seconds=5))
             raise
         disposition = (
             InboxWorkerDisposition.REPLAYED

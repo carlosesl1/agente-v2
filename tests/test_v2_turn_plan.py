@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta, timezone
 
 from v2_application.turn_plan import (
     normalize_initial_commercial_plan,
-    reuses_fresh_consultation,
 )
 from v2_contracts.model import ConsultationHistoryEntry, ModelFact, ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
@@ -154,35 +153,8 @@ def test_incomplete_selection_clears_unbound_structure_without_rewriting_maya_te
     assert normalized.clarification_question == proposal.clarification_question
 
 
-def test_consultation_reuse_requires_exact_fresh_scope_and_recap_only_plan() -> None:
+def test_explicit_reads_remain_model_owned() -> None:
     request = _lodging_read()
     proposal = _proposal(facts=(), reads=(request,))
-
-    assert reuses_fresh_consultation(proposal, (_history(),), now=NOW) is True
-    assert (
-        reuses_fresh_consultation(proposal, (_history(fresh=False),), now=NOW)
-        is False
-    )
-    assert (
-        reuses_fresh_consultation(
-            proposal,
-            (replace(_history(), expires_at=NOW + timedelta(minutes=1)),),
-            now=NOW + timedelta(minutes=1),
-        )
-        is False
-    )
-    assert reuses_fresh_consultation(
-        proposal,
-        (_history(check_out="2026-09-13"),),
-        now=NOW,
-    ) is False
-    assert reuses_fresh_consultation(
-        replace(proposal, facts=(ModelFact("payment_method", "pix"),)),
-        (_history(),),
-        now=NOW,
-    ) is False
-    assert reuses_fresh_consultation(
-        replace(proposal, selection_requested=True),
-        (_history(),),
-        now=NOW,
-    ) is False
+    assert normalize_initial_commercial_plan(proposal) is proposal
+    assert normalize_initial_commercial_plan(_proposal(facts=())).read_requests == ()

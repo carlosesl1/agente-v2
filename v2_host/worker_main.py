@@ -11,8 +11,10 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 from pathlib import Path
+from threading import Event, Lock, Thread
 import time
 from typing import Protocol
 
@@ -223,6 +225,17 @@ class WorkerCycle:
         self._max_backoff_seconds = max_backoff.total_seconds()
         self._jitter = jitter or self._default_jitter
         self._health = {queue: _QueueHealthState() for queue in WorkerQueue}
+        # "healthy" means no observed queue failure, not a fabricated success:
+        # unattempted queues explicitly have no last_success_at.
+        self._latest = {
+            queue: WorkerCycleItem(
+                queue=queue, status=QueueRunStatus.HEALTHY, result=None,
+                reason_code=None, failure_fingerprint=None, consecutive_failures=0,
+                last_success_at=None, last_failure_at=None,
+                backoff_seconds=0.0, next_attempt_at=None,
+            )
+            for queue in WorkerQueue
+        }
 
     @property
     def workers(self) -> Mapping[WorkerQueue, OneShotWorker]:
@@ -330,76 +343,73 @@ class WorkerCycle:
             backoff_seconds=delay,
         )
 
-    def run_once(self, *, now: datetime) -> WorkerCycleReport:
+    def run_once(
+        self,
+        *,
+        now: datetime,
+        clock: Callable[[], datetime] | None = None,
+        on_progress: Callable[[WorkerCycleReport], None] | None = None,
+    ) -> WorkerCycleReport:
         if (
             type(now) is not datetime
             or now.tzinfo is None
             or now.utcoffset() != timedelta(0)
         ):
             raise ValueError("now must be an exact UTC datetime")
-        items: list[WorkerCycleItem] = []
+        # The injected clock is used only by the live loop. Existing deterministic
+        # one-shot callers keep their explicit timestamp semantics.
+        completion_clock = clock or (lambda: now)
         for queue in WorkerQueue:
-            state = self._health[queue]
-            if state.next_attempt_at is not None and now < state.next_attempt_at:
-                items.append(
-                    self._failure_item(
-                        queue,
-                        state,
-                        status=QueueRunStatus.BACKOFF,
-                        backoff_seconds=(state.next_attempt_at - now).total_seconds(),
-                    )
+            attempted_at = completion_clock()
+            self._latest[queue] = self._run_queue(
+                queue, now=attempted_at, clock=completion_clock,
+            )
+            if on_progress is not None:
+                on_progress(self.report)
+        return self.report
+
+    @property
+    def report(self) -> WorkerCycleReport:
+        """Last observed outcomes; a pulse never invents a completed claim."""
+        return WorkerCycleReport(tuple(self._latest[queue] for queue in WorkerQueue))
+
+    def _run_queue(
+        self, queue: WorkerQueue, *, now: datetime, clock: Callable[[], datetime],
+    ) -> WorkerCycleItem:
+        state = self._health[queue]
+        if state.next_attempt_at is not None and now < state.next_attempt_at:
+            return self._failure_item(
+                queue, state, status=QueueRunStatus.BACKOFF,
+                backoff_seconds=(state.next_attempt_at - now).total_seconds(),
+            )
+        try:
+            result = self._workers[queue].run_once(now=now)
+        except Exception as exc:
+            return self._schedule_failure(
+                queue, state, now=clock(),
+                reason=WorkerFailureReason.WORKER_EXCEPTION,
+                fingerprint=self._failure_fingerprint(queue, exc),
+            )
+        if type(result) is WorkerHealthResult:
+            if result.disposition is WorkerHealthDisposition.DEGRADED:
+                assert result.reason is not None
+                return self._schedule_failure(
+                    queue, state, now=clock(), reason=result.reason,
+                    fingerprint=self._degradation_fingerprint(queue, result.reason),
                 )
-                continue
-            try:
-                result = self._workers[queue].run_once(now=now)
-            except Exception as exc:
-                items.append(
-                    self._schedule_failure(
-                        queue,
-                        state,
-                        now=now,
-                        reason=WorkerFailureReason.WORKER_EXCEPTION,
-                        fingerprint=self._failure_fingerprint(queue, exc),
-                    )
-                )
-            else:
-                if type(result) is WorkerHealthResult:
-                    if result.disposition is WorkerHealthDisposition.DEGRADED:
-                        assert result.reason is not None
-                        items.append(
-                            self._schedule_failure(
-                                queue,
-                                state,
-                                now=now,
-                                reason=result.reason,
-                                fingerprint=self._degradation_fingerprint(
-                                    queue,
-                                    result.reason,
-                                ),
-                            )
-                        )
-                        continue
-                    result = result.result
-                state.consecutive_failures = 0
-                state.last_success_at = now
-                state.reason_code = None
-                state.failure_fingerprint = None
-                state.next_attempt_at = None
-                items.append(
-                    WorkerCycleItem(
-                        queue=queue,
-                        status=QueueRunStatus.HEALTHY,
-                        result=result,
-                        reason_code=None,
-                        failure_fingerprint=None,
-                        consecutive_failures=0,
-                        last_success_at=state.last_success_at,
-                        last_failure_at=state.last_failure_at,
-                        backoff_seconds=0.0,
-                        next_attempt_at=None,
-                    )
-                )
-        return WorkerCycleReport(tuple(items))
+            result = result.result
+        state.consecutive_failures = 0
+        state.last_success_at = clock()
+        state.reason_code = None
+        state.failure_fingerprint = None
+        state.next_attempt_at = None
+        return WorkerCycleItem(
+            queue=queue, status=QueueRunStatus.HEALTHY, result=result,
+            reason_code=None, failure_fingerprint=None, consecutive_failures=0,
+            last_success_at=state.last_success_at,
+            last_failure_at=state.last_failure_at,
+            backoff_seconds=0.0, next_attempt_at=None,
+        )
 
 
 def build_worker_cycle(
@@ -565,6 +575,70 @@ class SQLiteWorkerOwnershipLease:
             os.close(descriptor)
 
 
+class _WorkerHeartbeat:
+    """Bounded pulse over snapshots, never over SQLite/worker capabilities.
+
+    Only the owner thread grants a new deadline after observed queue progress.
+    A stuck owner cannot look alive forever; process exit or deadline expiry
+    leaves the file to age naturally under the existing readiness contract.
+    """
+
+    def __init__(self, path: Path, *, interval: float, progress_timeout: float) -> None:
+        if not (math.isfinite(interval) and 0 < interval < progress_timeout):
+            raise ValueError("heartbeat interval must be below its progress timeout")
+        if not math.isfinite(progress_timeout):
+            raise ValueError("heartbeat progress timeout must be finite")
+        self._path = path
+        self._interval = interval
+        self._progress_timeout = progress_timeout
+        self._lock = Lock()
+        self._stop = Event()
+        self._snapshot: tuple[WorkerCycleReport, str | None, int] | None = None
+        self._deadline = 0.0
+        self._broken = False
+        self._thread = Thread(target=self._run, name="v2-worker-heartbeat", daemon=True)
+
+    def update(
+        self, report: WorkerCycleReport, *, public_ingress_reason: str | None,
+        public_turn_capacity: int, publish: bool = False,
+    ) -> None:
+        with self._lock:
+            if self._broken:
+                raise RuntimeError("worker heartbeat publisher failed")
+            self._snapshot = (report, public_ingress_reason, public_turn_capacity)
+            self._deadline = time.monotonic() + self._progress_timeout
+            if publish:
+                self._write()
+
+    def _write(self) -> None:
+        if self._snapshot is None:
+            return
+        report, reason, capacity = self._snapshot
+        _write_heartbeat(
+            self._path, report, now=datetime.now(timezone.utc),
+            public_ingress_reason=reason, public_turn_capacity=capacity,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            with self._lock:
+                if time.monotonic() >= self._deadline:
+                    continue
+                try:
+                    self._write()
+                except Exception:
+                    self._broken = True
+                    logging.getLogger("v2.worker").error("worker_heartbeat_publish_failed")
+                    return
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join()
+
+
 def main() -> None:
     from v2_host.composition import V2Container, V2Role
     from v2_host.settings import V2ProcessRole, V2Settings
@@ -585,22 +659,48 @@ def main() -> None:
                 interval = float(raw_interval)
             except ValueError as exc:
                 raise ValueError("V2_WORKER_INTERVAL_SECONDS must be numeric") from exc
-            if interval <= 0 or interval > 60:
+            if not math.isfinite(interval) or interval <= 0 or interval > 60:
                 raise ValueError("V2_WORKER_INTERVAL_SECONDS must be in (0, 60]")
-            while True:
-                now = datetime.now(timezone.utc)
-                report = cycle.run_once(now=now)
-                _log_cycle_failures(report)
-                _write_heartbeat(
-                    settings.worker_heartbeat_path,
+            heartbeat = _WorkerHeartbeat(
+                settings.worker_heartbeat_path,
+                interval=min(1.0, settings.worker_heartbeat_max_age_seconds / 3.0),
+                # Match the complete inbox turn budget (six model rounds), not
+                # just one model request. This is a progress deadline, not an
+                # extension of the API's heartbeat freshness window.
+                progress_timeout=max(
+                    float(settings.hermes_timeout_seconds * 6 + 30),
+                    interval + settings.worker_heartbeat_max_age_seconds,
+                ),
+            )
+
+            def publish_progress(report: WorkerCycleReport, *, publish: bool = False) -> None:
+                observed = datetime.now(timezone.utc)
+                # These calls may touch owner-thread SQLite. The pulse receives
+                # values only, never the container, resolver or connection.
+                heartbeat.update(
                     report,
-                    now=now,
                     public_ingress_reason=container.controlled_public_ingress_reason(
-                        now=now,
+                        now=observed,
                     ),
-                    public_turn_capacity=container.public_turn_capacity(now=now),
+                    public_turn_capacity=container.public_turn_capacity(now=observed),
+                    publish=publish,
                 )
-                time.sleep(interval)
+
+            publish_progress(cycle.report, publish=True)
+            heartbeat.start()
+            try:
+                while True:
+                    report = cycle.run_once(
+                        now=datetime.now(timezone.utc),
+                        clock=lambda: datetime.now(timezone.utc),
+                        on_progress=publish_progress,
+                    )
+                    _log_cycle_failures(report)
+                    publish_progress(report, publish=True)
+                    time.sleep(interval)
+            finally:
+                # No publisher from this process may survive SQLite ownership.
+                heartbeat.close()
         finally:
             container.close()
     finally:

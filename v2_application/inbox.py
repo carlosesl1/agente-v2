@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS inbound_events (
   claim_token TEXT,
   claim_expires_at TEXT,
   turn_receipt_hash TEXT,
-  completed_at TEXT
+  completed_at TEXT,
+  batch_id TEXT,
+  retry_at TEXT
 ) STRICT;
 CREATE INDEX IF NOT EXISTS inbound_events_lead_status
 ON inbound_events(lead_id,status,occurred_at,event_id);
@@ -172,6 +174,7 @@ class SQLiteInbox:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            connection.execute("BEGIN IMMEDIATE")
             columns = {
                 row[1]
                 for row in connection.execute("PRAGMA table_info(inbound_events)")
@@ -184,6 +187,30 @@ class SQLiteInbox:
                 connection.execute(
                     "ALTER TABLE inbound_events ADD COLUMN completed_at TEXT"
                 )
+            for column in ("batch_id", "retry_at"):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE inbound_events ADD COLUMN {column} TEXT"
+                    )
+            # A pre-upgrade live claim still carries exact membership in its token.
+            # Freeze that membership before any expiry can erase the legacy token.
+            tokens = connection.execute(
+                "SELECT DISTINCT claim_token FROM inbound_events "
+                "WHERE status='claimed' AND batch_id IS NULL"
+            ).fetchall()
+            for row in tokens:
+                members = connection.execute(
+                    "SELECT payload FROM inbound_events WHERE status='claimed' "
+                    "AND claim_token=? ORDER BY occurred_at,event_id",
+                    (row["claim_token"],),
+                ).fetchall()
+                events = tuple(_event_from_bytes(item["payload"]) for item in members)
+                connection.execute(
+                    "UPDATE inbound_events SET batch_id=? "
+                    "WHERE status='claimed' AND claim_token=?",
+                    (_batch_id(events), row["claim_token"]),
+                )
+            connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -285,15 +312,26 @@ class SQLiteInbox:
             )
             candidate = connection.execute(
                 """
-                SELECT lead_id, MIN(occurred_at) AS first_at
-                FROM inbound_events
-                WHERE status = 'pending'
-                GROUP BY lead_id
-                HAVING MAX(occurred_at) <= ?
-                ORDER BY first_at, lead_id
+                SELECT e.lead_id, e.batch_id, MIN(e.occurred_at) AS first_at,
+                       COALESCE(MAX(e.retry_at), MIN(e.occurred_at)) AS ready_at
+                FROM inbound_events AS e
+                WHERE e.status = 'pending'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM inbound_events AS active
+                    WHERE active.lead_id=e.lead_id AND active.status='claimed'
+                  )
+                  AND (e.batch_id IS NOT NULL OR NOT EXISTS (
+                    SELECT 1 FROM inbound_events AS prior
+                    WHERE prior.lead_id=e.lead_id AND prior.status='pending'
+                      AND prior.batch_id IS NOT NULL
+                  ))
+                GROUP BY e.lead_id, e.batch_id
+                HAVING (MAX(e.retry_at) IS NULL OR MAX(e.retry_at) <= ?)
+                  AND (e.batch_id IS NOT NULL OR MAX(e.occurred_at) <= ?)
+                ORDER BY ready_at, first_at, e.lead_id
                 LIMIT 1
                 """,
-                (cutoff_text,),
+                (now_text, cutoff_text),
             ).fetchone()
             if candidate is None:
                 connection.commit()
@@ -302,27 +340,31 @@ class SQLiteInbox:
                 """
                 SELECT event_id, payload
                 FROM inbound_events
-                WHERE lead_id = ? AND status = 'pending'
+                WHERE lead_id = ? AND status = 'pending' AND batch_id IS ?
                 ORDER BY occurred_at, event_id
                 """,
-                (candidate["lead_id"],),
+                (candidate["lead_id"], candidate["batch_id"]),
             ).fetchall()
             events = tuple(_event_from_bytes(row["payload"]) for row in rows)
+            batch_id = _batch_id(events)
+            if candidate["batch_id"] not in (None, batch_id):
+                raise RuntimeError("persisted inbox batch membership diverged")
             claim_token = uuid.uuid4().hex
             event_ids = tuple(row["event_id"] for row in rows)
             placeholders = ",".join("?" for _ in event_ids)
             cursor = connection.execute(
                 f"""
                 UPDATE inbound_events
-                SET status = 'claimed', claim_token = ?, claim_expires_at = ?
+                SET status = 'claimed', claim_token = ?, claim_expires_at = ?,
+                    batch_id = ?
                 WHERE status = 'pending' AND event_id IN ({placeholders})
                 """,
-                (claim_token, expires_text, *event_ids),
+                (claim_token, expires_text, batch_id, *event_ids),
             )
             if cursor.rowcount != len(event_ids):
                 raise RuntimeError("claim cardinality changed inside write transaction")
             batch = InboundBatch(
-                batch_id=_batch_id(events),
+                batch_id=batch_id,
                 lead_id=events[0].lead_id,
                 subscriber_id=events[0].subscriber_id,
                 events=events,
@@ -394,10 +436,13 @@ class SQLiteInbox:
         finally:
             connection.close()
 
-    def release_claim(self, claim: InboxClaim) -> None:
-        """Return one exact failed claim to pending for worker-level backoff retry."""
+    def release_claim(
+        self, claim: InboxClaim, *, retry_at: datetime | None = None
+    ) -> None:
+        """Release a lease without losing its batch or lead-local retry schedule."""
         if type(claim) is not InboxClaim:
             raise TypeError("claim must be an exact InboxClaim")
+        retry_text = None if retry_at is None else _utc_text(retry_at, "retry_at")
         event_ids = tuple(event.event_id for event in claim.events)
         placeholders = ",".join("?" for _ in event_ids)
         connection = self._connect()
@@ -405,9 +450,10 @@ class SQLiteInbox:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 f"UPDATE inbound_events SET status='pending',claim_token=NULL,"
-                f"claim_expires_at=NULL WHERE status='claimed' AND claim_token=? "
+                f"claim_expires_at=NULL,retry_at=COALESCE(?,retry_at) "
+                f"WHERE status='claimed' AND claim_token=? "
                 f"AND event_id IN ({placeholders})",
-                (claim.claim_token, *event_ids),
+                (retry_text, claim.claim_token, *event_ids),
             )
             if cursor.rowcount != len(event_ids):
                 raise RuntimeError("inbox claim release is stale or divergent")

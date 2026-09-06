@@ -136,9 +136,10 @@ def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
     assert "`active_execution_status`" in PROMPT
     assert "uma reserva já está em processamento" in PROMPT
     assert "nunca nova escolha, read, seleção, confirmação ou promessa de reenvio" in PROMPT
-    assert "`recap_reuse_required: bool`" in PROMPT
-    assert "read_requests=[]" in PROMPT
-    assert "sem seleção, confirmação, facts privados, passengers ou efeitos" in PROMPT
+    assert "Você decide quando uma consulta nova é necessária" in PROMPT
+    assert "emita read_requests mesmo que os parâmetros sejam iguais ao histórico" in PROMPT
+    assert "Para apenas recapitular, use consultation_history e read_requests=[]" in PROMPT
+    assert "histórico não autoriza reservas" in PROMPT
 
 
 def test_explicit_service_dates_and_party_counts_are_committed_as_facts() -> None:
@@ -263,7 +264,9 @@ def test_luna_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
     assert "“Yes, please book it”" in PROMPT
     assert "“Please book exactly that summary”" in PROMPT
     assert "sem `pending_action` nunca autoriza" in PROMPT
-    assert "facts=[]" in PROMPT
+    assert "`intent=confirm` e facts vazios ou somente language (idioma da conversa)" in PROMPT
+    assert "use intent=confirm, facts vazios ou somente language, selected_choice_refs=[]" in PROMPT
+    assert "Uma confirmação nunca carrega ou corrige dados pessoais" in PROMPT
     assert "Incerteza real como “Talvez” usa intent=inform" in PROMPT
     assert "“Sim” isolado, emoji" not in PROMPT
     assert "sim, mas" in PROMPT.casefold()

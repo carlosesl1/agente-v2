@@ -1258,9 +1258,11 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_v8() -> No
         "request_id",
         "source_event_id",
         "message",
+        "attachments",
         "locale",
         "pending_action",
     }
+    assert user["attachments"] == []
     assert user["pending_action"] == {
         "summary_version": 1,
         "action_kinds": ["book_activity", "initiate_payment"],

@@ -337,6 +337,42 @@ class SQLiteBoundaryWorkerStore:
             if updated != 1:
                 raise ConcurrencyConflict("internal relay release CAS lost")
 
+    def load_command_relay_group(self, claim: CommandRelayClaim):
+        """Return the authenticated complete turn membership, including its receipt."""
+        import hashlib
+        from reservation_domain import loads_command
+
+        boundary = self._boundary
+        row = self._connection.execute(
+            "SELECT aggregate_turn_id FROM boundary_command_relays WHERE relay_id=?",
+            (claim.relay_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("relay source identity is absent")
+        receipt = boundary.load_turn_receipt(row[0])
+        if receipt is None or receipt.artifact_hash != claim.source_turn_receipt_hash:
+            raise RuntimeError("relay source receipt diverged")
+        bundles = []
+        commands = []
+        for relay_id, bundle_hash in receipt.relay_rows:
+            stored = self._connection.execute(
+                "SELECT bundle_json,bundle_hash,source_turn_receipt_hash,aggregate_turn_id "
+                "FROM boundary_command_relays WHERE relay_id=?", (relay_id,),
+            ).fetchone()
+            if stored is None or stored[1:] != (bundle_hash, claim.source_turn_receipt_hash, row[0]):
+                raise RuntimeError("complete relay membership diverged")
+            bundle = ReservationRelayBundle.from_canonical_bytes(stored[0].encode())
+            if bundle.artifact_hash != bundle_hash:
+                raise RuntimeError("relay group bundle diverged")
+            command = loads_command(bundle.command_ledger_seed.decode())
+            commands.append((command.command_id, hashlib.sha256(bundle.command_ledger_seed).hexdigest()))
+            bundles.append(bundle)
+        if sorted(commands) != sorted(receipt.command_rows):
+            raise RuntimeError("relay group does not cover the committed command set")
+        if (claim.relay_id, claim.bundle_hash) not in receipt.relay_rows:
+            raise RuntimeError("claimed relay is not a member of its receipt")
+        return receipt, tuple(bundles)
+
     def claim_public_delivery(
         self,
         *,
@@ -358,11 +394,18 @@ class SQLiteBoundaryWorkerStore:
                 "p.scope_subject_id,p.authorization_id,p.allocation_id,"
                 "p.immutable_generation,p.source_turn_receipt_hash,p.deadline_at,"
                 "p.fencing_token FROM boundary_public_outbox p "
+                "JOIN boundary_events e ON e.lead_key=p.lead_key "
+                "AND e.aggregate_turn_id=p.aggregate_turn_id "
                 "WHERE p.status='pending' AND p.deadline_at>? "
+                "AND NOT EXISTS (SELECT 1 FROM boundary_public_outbox earlier "
+                "JOIN boundary_events prior ON prior.lead_key=earlier.lead_key "
+                "AND prior.aggregate_turn_id=earlier.aggregate_turn_id "
+                "WHERE earlier.lead_key=p.lead_key AND prior.state_version<e.state_version "
+                "AND earlier.status IN ('pending','leased','dispatch_fenced')) "
                 "AND (p.chunk_index=0 OR EXISTS (SELECT 1 FROM boundary_public_outbox q "
                 "WHERE q.lead_key=p.lead_key AND q.aggregate_turn_id=p.aggregate_turn_id "
                 "AND q.chunk_hash=p.predecessor_chunk_hash AND q.status='delivered')) "
-                "ORDER BY p.lead_key,p.aggregate_turn_id,p.chunk_index LIMIT 1",
+                "ORDER BY e.occurred_at,p.lead_key,e.state_version,p.chunk_index LIMIT 1",
                 (now_text,),
             ).fetchone()
             if row is None:

@@ -85,6 +85,7 @@ from v2_application.private_customer_facts import (
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.critical_actions import PendingCriticalActionContext
+from v2_contracts.localization import CustomerLanguage
 from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
@@ -1310,14 +1311,21 @@ class V2ConversationReducer:
     ) -> PendingCriticalActionContext | None:
         if type(workflow) is not AwaitingConfirmationState:
             return None
-        return pending_action_context(
-            workflow,
-            locale=locale,
-            approval_ttl=self._approval_ttl,
-            agency_payment_percentage=self._agency_payment_percentage,
-            hostel_payment_percentage=self._hostel_payment_percentage,
-            policy=self._critical_action_policy,
-        )
+        # Authenticate the exact originally presented summary, not a translation
+        # made from today's conversational locale. The durable digest remains
+        # unchanged; only a supported renderer whose bytes match can supply consent.
+        for summary_locale in dict.fromkeys((locale, *(item.value for item in CustomerLanguage))):
+            context = pending_action_context(
+                workflow,
+                locale=summary_locale,
+                approval_ttl=self._approval_ttl,
+                agency_payment_percentage=self._agency_payment_percentage,
+                hostel_payment_percentage=self._hostel_payment_percentage,
+                policy=self._critical_action_policy,
+            )
+            if context is not None:
+                return context
+        return None
 
     @staticmethod
     def confirmation_projection_matches(
@@ -1432,7 +1440,7 @@ class V2ConversationReducer:
         if proposal.intent == "select":
             merged = _without_critical_outcome(merged)
         if proposal.intent == "request_handoff":
-            if state.handoff is None:
+            if state.handoff is None or not state.handoff.queue_active:
                 handoff_request = HandoffRequested(
                     handoff_id=_identity(
                         state.lead_key,
@@ -1478,7 +1486,11 @@ class V2ConversationReducer:
             )
         # An active human handoff suppresses identity-dependent effects even when the
         # private profile is incomplete.  Informational turns remain conversational.
-        if state.handoff is not None and proposal.intent in {"select", "confirm"}:
+        if (
+            state.handoff is not None
+            and state.handoff.queue_active
+            and proposal.intent in {"select", "confirm"}
+        ):
             return V2ConversationDecision(
                 next_state=_consume_without_workflow_transition(
                     state,

@@ -465,7 +465,7 @@ def _cloudbeds_daily_total(
         day = _text(row.get("date"))
         amount = _cloudbeds_consistent_positive_amount(
             row,
-            ("rate", "roomRate", "amount"),
+            ("rate", "roomRate", "price", "amount", "total"),
             error=error,
         )
         if day not in expected_dates or day in rates or amount is None:
@@ -484,6 +484,17 @@ def _cloudbeds_daily_total(
     if set(rates) != set(expected_dates):
         return None
     return sum((rates[day] for day in expected_dates), Decimal("0"))
+
+
+def _cloudbeds_price_total(
+    item: Mapping[str, object], daily_total: Decimal | None, *, error: str,
+) -> Decimal | None:
+    # An explicit stay total is authoritative, not an alias of the nightly sum.
+    total = _cloudbeds_consistent_positive_amount(
+        item, ("totalRate", "total", "roomTypeTotal", "grandTotal", "price"),
+        error=error,
+    )
+    return total if total is not None else daily_total
 
 
 def _validate_cloudbeds_rate_revalidation(
@@ -555,7 +566,8 @@ def _validate_cloudbeds_rate_revalidation(
         units is None
         or units < 1
         or selected_currency != currency
-        or daily_total != amount
+        or daily_total is None
+        or _cloudbeds_price_total(selected, daily_total, error=error) != amount
     ):
         raise ProviderHTTPError(error)
 
@@ -1036,22 +1048,25 @@ class CloudbedsHTTPTransport:
                 ),
                 error="Cloudbeds offer response is ambiguous",
             )
-            total = _first_amount(item, "totalRate", "total", "roomTypeTotal", "grandTotal", "price", "rate", "roomRate")
-            daily = item.get("roomRateDetailed") or item.get("rateDetailed") or item.get("dailyRates")
-            if isinstance(daily, list):
-                amounts = [
-                    _first_amount(row, "rate", "roomRate", "price", "amount", "total")
-                    for row in daily
-                    if isinstance(row, Mapping)
-                ]
-                present = [amount for amount in amounts if amount is not None]
-                if present:
-                    total = sum(present, Decimal("0"))
-            if not room_type_id or not room_rate_id or not public_name or total is None:
-                continue
-            if available_units is None:
-                available_units = 1
-            if available_units < 1:
+            daily_total = _cloudbeds_daily_total(
+                item.get("roomRateDetailed") or item.get("rateDetailed") or item.get("dailyRates"),
+                expected_dates=_cloudbeds_stay_dates(request.check_in, request.check_out),
+                require_availability=True,
+                error="Cloudbeds offer response is ambiguous",
+            )
+            total = _cloudbeds_price_total(
+                item, daily_total, error="Cloudbeds offer response is ambiguous",
+            )
+            currency = _consistent_text_alias(
+                item, ("currency", "currencyCode"),
+                error="Cloudbeds offer response is ambiguous",
+            )
+            if (
+                not room_type_id or not room_rate_id or not public_name
+                or total is None or available_units is None or available_units < 1
+                or currency is None or len(currency) != 3
+                or not currency.isascii() or not currency.isalpha() or not currency.isupper()
+            ):
                 continue
             private = {"room_type_id": room_type_id, "room_rate_id": room_rate_id}
             offer_id = "offer:" + binding_hash(
@@ -1064,7 +1079,7 @@ class CloudbedsHTTPTransport:
                     **private,
                     "room_public_name": public_name,
                     "total_amount": f"{total:.2f}",
-                    "currency": _currency(item.get("currency") or item.get("currencyCode")),
+                    "currency": currency,
                     "available_units": available_units,
                 }
             )

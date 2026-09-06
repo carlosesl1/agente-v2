@@ -292,7 +292,7 @@ class V2Container:
             opened.append(private_customer)
             execution = SQLiteUnitOfWork.open_v6(paths["execution"])
             opened.append(execution)
-            followup = SQLiteFollowupUnitOfWork.open(paths["followup"])
+            followup = SQLiteFollowupUnitOfWork.open_v2(paths["followup"], migrate_v1=True)
             opened.append(followup)
             payment_initiation = None
             if settings.enabled_payment_methods:

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import date
 
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.types import BoundaryState
 from reservation_domain import AwaitingConfirmationState, ServiceKind
-from v2_contracts.model import ConsultationHistoryEntry, ModelProposal
+from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -157,75 +157,6 @@ def normalize_initial_commercial_plan(
         target_offer_id=None,
         target_offer_ids=(),
         selection_requested=False,
-    )
-
-
-def _request_matches_history(
-    request: ReadRequest,
-    entry: ConsultationHistoryEntry,
-    *,
-    now: datetime,
-) -> bool:
-    if not (
-        entry.fresh_at_turn_start
-        and entry.observed_at <= now < entry.expires_at
-    ):
-        return False
-    context = entry.public_context
-    query = context["query"]
-    if request.kind is ReadKind.LODGING:
-        expected = {
-            "check_in": request.check_in.isoformat(),
-            "check_out": request.check_out.isoformat(),
-            "adults": request.adults,
-            "children": request.children,
-        }
-        return context["service"] == "lodging" and query == expected
-    if request.kind is ReadKind.ACTIVITY:
-        adults, children = request.activity_party()
-        expected = {
-            "product_id": request.product_id,
-            "activity_date": request.activity_date.isoformat(),
-            "adults": adults,
-            "children": children,
-        }
-        return context["service"] == "activity" and query == expected
-    return False
-
-
-def reuses_fresh_consultation(
-    proposal: ModelProposal,
-    history: tuple[ConsultationHistoryEntry, ...],
-    *,
-    now: datetime,
-) -> bool:
-    """Return true only for a recap-only exact repeat of fresh read scopes."""
-
-    if type(proposal) is not ModelProposal or type(history) is not tuple:
-        raise TypeError("consultation reuse requires exact V2 contracts")
-    if (
-        type(now) is not datetime
-        or now.tzinfo is None
-        or now.utcoffset() != timedelta(0)
-    ):
-        raise ValueError("consultation reuse time must be exact UTC")
-    if any(type(item) is not ConsultationHistoryEntry for item in history):
-        raise TypeError("consultation history contains an invalid entry")
-    if (
-        proposal.intent != "inform"
-        or not proposal.read_requests
-        or proposal.facts
-        or proposal.passengers
-        or proposal.selection_requested
-        or proposal.effect_proposals
-    ):
-        return False
-    return all(
-        any(
-            _request_matches_history(request, entry, now=now)
-            for entry in history
-        )
-        for request in proposal.read_requests
     )
 
 
