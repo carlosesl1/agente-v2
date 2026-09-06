@@ -371,29 +371,40 @@ def test_upgrade_does_not_replay_legacy_inflight_effect(tmp_path):
         current.close()
 
 
-def test_upgrade_rejection_rolls_back_original_schema_and_payloads(tmp_path):
+@pytest.mark.parametrize(
+    "unknown_object_sql",
+    [
+        "CREATE VIEW foreign_view AS SELECT 1 AS value",
+        "CREATE UNIQUE INDEX external_unique_incident ON handoff_workflows(incident_key)",
+    ],
+    ids=["view", "unique-index"],
+)
+def test_upgrade_rejection_rolls_back_original_schema_and_payloads(tmp_path, unknown_object_sql):
+    from reservation_followup.sqlite_store import DataCorruption
+
     path = tmp_path / "reject-unknown.sqlite3"
     legacy = SQLiteFollowupUnitOfWork.open(path)
     legacy.open_handoff(
         handoff_requested(), HandoffEffectPolicy.default_email_disabled()
     )
+    legacy._connection.execute(unknown_object_sql)
     before_schema = legacy._connection.execute(
         "SELECT type,name,sql FROM sqlite_master ORDER BY name"
     ).fetchall()
-    before_rows = legacy._connection.execute("SELECT * FROM handoff_outbox").fetchall()
-    legacy._connection.execute("CREATE VIEW foreign_view AS SELECT 1 AS value")
+    before_rows = {
+        name: legacy._connection.execute(f"SELECT * FROM {name}").fetchall()
+        for name, _ in legacy._table_rows()
+    }
     legacy.close()
-    with pytest.raises(Exception, match="unexpected objects"):
+    with pytest.raises(DataCorruption, match="unexpected objects"):
         SQLiteFollowupUnitOfWork.open_v2(path, migrate_v1=True)
     reopened = SQLiteFollowupUnitOfWork.open(path)
     try:
         after_schema = reopened._connection.execute(
-            "SELECT type,name,sql FROM sqlite_master WHERE name != 'foreign_view' ORDER BY name"
+            "SELECT type,name,sql FROM sqlite_master ORDER BY name"
         ).fetchall()
         assert after_schema == before_schema
-        assert (
-            reopened._connection.execute("SELECT * FROM handoff_outbox").fetchall()
-            == before_rows
-        )
+        for name, rows in before_rows.items():
+            assert reopened._connection.execute(f"SELECT * FROM {name}").fetchall() == rows
     finally:
         reopened.close()

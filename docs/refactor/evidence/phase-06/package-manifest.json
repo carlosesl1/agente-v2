@@ -41,9 +41,9 @@
       "sha256": "fe3fae5d69a140b6795e9a6609d2709d8ac2154051e45f6477f50190009f4a9e"
     },
     {
-      "bytes": 210168,
+      "bytes": 210695,
       "path": "reservation_followup/sqlite_store.py",
-      "sha256": "23f10bb72963510a0a2a8a903352b03ca07dbc6eeabb26d0bc80ac6aa0a08c1e"
+      "sha256": "b8b54c56de4825ccbc52149047a422bcec6d529b34ce695116c905e40218136e"
     },
     {
       "bytes": 32971,

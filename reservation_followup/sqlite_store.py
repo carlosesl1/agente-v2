@@ -546,6 +546,14 @@ class SQLiteFollowupUnitOfWork:
         }
         try:
             with self._transaction("migrate_v1_to_v2"):
+                # DROP TABLE would erase explicit indexes before target validation.
+                # Authenticate predecessor objects while holding the write lock.
+                explicit_objects = tuple(connection.execute(
+                    "SELECT type, name FROM main.sqlite_master "
+                    "WHERE type != 'table' AND sql IS NOT NULL ORDER BY type, name"
+                ))
+                if explicit_objects:
+                    raise DataCorruption("SQLite migration source contains unexpected objects")
                 connection.execute("PRAGMA defer_foreign_keys=ON")
                 # TEMP copies participate in the same SQLite transaction and leave
                 # no external migration files or partially replaced database.
