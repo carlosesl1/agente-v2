@@ -4,7 +4,9 @@
 - Runtime authority verified before work; immutable GA base `b3173693d6d852ba8bcf8df5f7aa8e7a6d4c10f3`.
 - Branch `fix/v2-service-reliability`; required worktree `/home/ubuntu/agente-v2/.worktrees/service-reliability`.
 - Active plan: `docs/superpowers/plans/2026-09-05-v2-service-reliability.md`.
-- NEXT: implement Tasks A–D with disjoint ownership, causal tests, then controller integration/review/full gate. This section supersedes historical NEXT/branch claims below for this correction only.
+- Tasks A–D implemented in `97bb095d3231f055fbb0022c77f818feb1dd9850`. Final compatibility correction switches only the host-test reopen from V1 to V2; legacy V1 setup and authentication/replay/evidence assertions are preserved.
+- Ops authority restored by explicitly authorized pull of the exact existing digest, with matching registry manifest/config and no container restart or authority edit. READ → VERIFY is OK again.
+- NEXT: run canonical gate and independent final review on the frozen successor; close this correction only after both pass. This section supersedes historical NEXT/branch claims below for this correction only.
 - No deployment, production ref/state mutation, external writes/messages, financial activation or V3 work. Maya remains semantic/textual owner; runtime validates structured state, facts and effects.
 
 ## Historical context (not the active implementation authority)

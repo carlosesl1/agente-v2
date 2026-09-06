@@ -97,7 +97,7 @@ def test_financial_webhook_verifies_before_persist_and_replays(tmp_path: Path) -
     assert first.json()["status"] == "accepted"
     assert replay.status_code == 200
     assert replay.json()["status"] == "duplicate"
-    reopened = SQLiteFollowupUnitOfWork.open(settings.sqlite_paths["followup"])
+    reopened = SQLiteFollowupUnitOfWork.open_v2(settings.sqlite_paths["followup"])
     try:
         assert reopened._connection.execute(
             "SELECT count(*) FROM payment_evidence_claims"
