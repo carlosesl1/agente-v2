@@ -6,7 +6,7 @@ import hashlib
 
 from reservation_followup.handoff import HandoffEffectJob, HandoffEffectKind
 from reservation_followup.types import HandoffReceipt
-from reservation_followup.workers import HandoffDeliveryUnknown
+from reservation_followup.workers import HandoffDeliveryNotCalled, HandoffDeliveryUnknown
 from v2_adapters.manychat import ManyChatTransportNotCalled, ManyChatTransportResponse
 
 
@@ -86,7 +86,7 @@ class ManyChatHandoffDeliveryAdapter:
                 raise RuntimeError("ManyChat handoff flow receipt is invalid")
         except ManyChatTransportNotCalled as exc:
             if not tagged:
-                raise RuntimeError("ManyChat handoff tag was not called") from exc
+                raise HandoffDeliveryNotCalled("ManyChat handoff tag was not called") from exc
             raise HandoffDeliveryUnknown(
                 "ManyChat handoff flow is unknown after tag mutation"
             ) from exc

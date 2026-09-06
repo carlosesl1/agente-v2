@@ -48,10 +48,16 @@ class Phase8FollowupOutboxV2Tests(unittest.TestCase):
                 for state in ("dispatch_fenced", "cancelled", "manual_review"):
                     self.assertIn(state, sql)
 
-    def test_first_claim_seals_deadline_and_reclaim_never_extends_it(self) -> None:
+    def test_explicit_deadline_survives_first_claim_and_reclaim_never_extends_it(self) -> None:
         with SQLiteFollowupUnitOfWork.open_v2(self.path) as store:
             store.open_handoff(handoff_requested(), optional_email_policy())
             first_now = T0 + timedelta(seconds=1)
+            deadline = first_now + timedelta(seconds=10)
+            # Qualification supplies its deadline; an ordinary claim only leases.
+            store._connection.execute(
+                "UPDATE handoff_outbox SET dispatch_deadline_at=?",
+                (deadline.isoformat(),),
+            )
             first = store.claim_handoff_outbox(
                 worker_id="worker:phase8:v2:1",
                 delivery_id="delivery:phase8:v2:1",
@@ -61,7 +67,6 @@ class Phase8FollowupOutboxV2Tests(unittest.TestCase):
             )
             self.assertIsNotNone(first)
             assert first is not None
-            deadline = first_now + timedelta(seconds=10)
             self.assertEqual(
                 store._connection.execute(
                     "SELECT dispatch_deadline_at, dispatch_slots_consumed, cas_revision "

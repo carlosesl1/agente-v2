@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
+from collections.abc import Callable
+import time
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
@@ -27,6 +29,10 @@ class HandoffDeliveryPort(Protocol):
     delivery_version: int
 
     def deliver(self, message: HandoffEffectJob) -> HandoffReceipt: ...
+
+
+class HandoffDeliveryNotCalled(RuntimeError):
+    """The transport proves no remote handoff effect was attempted."""
 
 
 class HandoffDeliveryUnknown(RuntimeError):
@@ -87,6 +93,7 @@ class HandoffOutboxWorker:
         worker_id: str,
         lease_ttl: timedelta,
         effect_guard: object | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(store) is not SQLiteFollowupUnitOfWork:
             raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
@@ -108,6 +115,9 @@ class HandoffOutboxWorker:
         ):
             raise TypeError("effect_guard must expose allows_workflow or be None")
         self._effect_guard = effect_guard
+        if clock is not None and not callable(clock):
+            raise TypeError("clock must be callable")
+        self._clock = clock
 
     def run_once(self, *, now: datetime) -> HandoffWorkerResult:
         if self._effect_guard is not None and not self._effect_guard.allows_workflow(
@@ -123,20 +133,29 @@ class HandoffOutboxWorker:
         )
         if claim is None:
             return HandoffWorkerResult.idle()
+        self._store.begin_handoff_delivery(claim, now=now)
+        started = time.monotonic()
+        def completed_at() -> datetime:
+            return (self._clock() if self._clock is not None else
+                    now + timedelta(seconds=time.monotonic() - started))
         try:
             receipt = self._delivery.deliver(claim.message)
         except HandoffDeliveryUnknown:
-            self._store.mark_handoff_outbox_unknown(claim, now=now)
+            self._store.mark_handoff_outbox_unknown(claim, now=completed_at())
             return HandoffWorkerResult.manual_review(claim.message.effect_id)
-        except Exception:
+        except HandoffDeliveryNotCalled:
             pass
+        except Exception:
+            if self._store._schema_version == 2:
+                self._store.mark_handoff_outbox_unknown(claim, now=completed_at())
+                return HandoffWorkerResult.manual_review(claim.message.effect_id)
         else:
             if type(receipt) is not HandoffReceipt:
                 raise TypeError("delivery must return exact HandoffReceipt")
-            self._store.complete_handoff_outbox(claim, receipt, now=now)
+            self._store.complete_handoff_outbox(claim, receipt, now=completed_at())
             return HandoffWorkerResult.delivered(claim.message.effect_id)
         try:
-            self._store.release_handoff_outbox(claim, now=now)
+            self._store.release_handoff_outbox(claim, now=completed_at())
         except Exception as release_error:
             raise release_error from None
         return HandoffWorkerResult.retryable_failure(claim.message.effect_id)

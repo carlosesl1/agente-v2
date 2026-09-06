@@ -435,6 +435,7 @@ class SQLiteFollowupUnitOfWork:
         path_or_connection: Path | str | sqlite3.Connection,
         *,
         _schema_version: int = SCHEMA_VERSION,
+        _migrate_v1: bool = False,
     ) -> "SQLiteFollowupUnitOfWork":
         connection: sqlite3.Connection | None = None
         caller_supplied = type(path_or_connection) is sqlite3.Connection
@@ -504,6 +505,10 @@ class SQLiteFollowupUnitOfWork:
                 _schema_version=_schema_version,
             )
             if _schema_version == SCHEMA_VERSION_V2:
+                if _migrate_v1 and store._table_rows() and tuple(
+                    name for name, _ in store._table_rows()
+                ) == _EXPECTED_TABLES:
+                    store._migrate_v1_to_v2()
                 store._initialize_or_validate_schema_v2()
             else:
                 store._initialize_or_validate_schema()
@@ -519,8 +524,68 @@ class SQLiteFollowupUnitOfWork:
     def open_v2(
         cls,
         path_or_connection: Path | str | sqlite3.Connection,
+        *,
+        migrate_v1: bool = False,
     ) -> "SQLiteFollowupUnitOfWork":
-        return cls.open(path_or_connection, _schema_version=SCHEMA_VERSION_V2)
+        if type(migrate_v1) is not bool:
+            raise TypeError("migrate_v1 must be an exact bool")
+        return cls.open(path_or_connection, _schema_version=SCHEMA_VERSION_V2,
+                        _migrate_v1=migrate_v1)
+
+    def _migrate_v1_to_v2(self) -> None:
+        """Atomic, exact-v1-only upgrade; retain payloads, hashes and receipts.
+
+        Caller must hold the process ownership lock and preserve an offline backup
+        before promoting a deployment. No unknown schema is repaired or guessed.
+        """
+        self._initialize_or_validate_schema()
+        connection = self._connection
+        columns = {
+            name: tuple(row[1] for row in connection.execute(f"PRAGMA table_info({name})"))
+            for name in _EXPECTED_TABLES
+        }
+        try:
+            with self._transaction("migrate_v1_to_v2"):
+                # DROP TABLE would erase explicit indexes before target validation.
+                # Authenticate predecessor objects while holding the write lock.
+                explicit_objects = tuple(connection.execute(
+                    "SELECT type, name FROM main.sqlite_master "
+                    "WHERE type != 'table' AND sql IS NOT NULL ORDER BY type, name"
+                ))
+                if explicit_objects:
+                    raise DataCorruption("SQLite migration source contains unexpected objects")
+                connection.execute("PRAGMA defer_foreign_keys=ON")
+                # TEMP copies participate in the same SQLite transaction and leave
+                # no external migration files or partially replaced database.
+                for name in _EXPECTED_TABLES:
+                    connection.execute(f"CREATE TEMP TABLE upgrade_{name} AS SELECT * FROM main.{name}")
+                for name in reversed(_EXPECTED_TABLES):
+                    connection.execute(f"DROP TABLE main.{name}")
+                for statement in _schema_statements_v2()[1:]:
+                    connection.execute(statement.replace("CREATE TABLE ", "CREATE TABLE main.", 1))
+                for name, source_columns in columns.items():
+                    destinations = list(source_columns)
+                    projections = list(source_columns)
+                    if name in ("handoff_outbox", "payment_outbox"):
+                        destinations += ["dispatch_slots_consumed", "cas_revision"]
+                        projections += ["CASE WHEN status='delivered' THEN 1 ELSE 0 END", "0"]
+                    connection.execute(
+                        f"INSERT INTO main.{name} ({','.join(destinations)}) "
+                        f"SELECT {','.join(projections)} FROM temp.upgrade_{name}"
+                    )
+                    if connection.execute(f"SELECT count(*) FROM main.{name}").fetchone() != connection.execute(f"SELECT count(*) FROM temp.upgrade_{name}").fetchone():
+                        raise DataCorruption("followup migration lost rows")
+                    connection.execute(f"DROP TABLE temp.upgrade_{name}")
+                # V1 leases cannot prove whether an external effect already happened.
+                connection.execute(
+                    "UPDATE handoff_outbox SET dispatch_slots_consumed=1 WHERE status='leased'"
+                )
+                # Reject unknown objects before COMMIT so the predecessor stays usable.
+                self._initialize_or_validate_schema_v2()
+                if connection.execute("PRAGMA foreign_key_check").fetchall():
+                    raise DataCorruption("followup migration violates foreign keys")
+        finally:
+            connection.execute("PRAGMA foreign_keys=ON")
 
     def __enter__(self) -> "SQLiteFollowupUnitOfWork":
         self._ensure_open()
@@ -2217,7 +2282,15 @@ class SQLiteFollowupUnitOfWork:
         claim: HandoffOutboxClaim,
         *,
         now: datetime,
+        allow_dispatched_completion: bool = False,
     ) -> tuple[HandoffEffectJob, object]:
+        dispatched = False
+        if allow_dispatched_completion and self._schema_version == SCHEMA_VERSION_V2:
+            marker = self._connection.execute(
+                "SELECT dispatch_slots_consumed FROM handoff_outbox WHERE message_id=?",
+                (claim.message.effect_id,),
+            ).fetchone()
+            dispatched = marker == (1,)
         row = self._handoff_outbox_row(self._claim_job(claim).effect_id)
         message = self._assert_claim_message_binding(claim, row)
         owner = _handoff_claim_owner(
@@ -2236,12 +2309,49 @@ class SQLiteFollowupUnitOfWork:
             or row[13] != claim.delivery_attempts
             or claim.fencing_token != claim.delivery_attempts
             or now < claim.lease_acquired_at
-            or now >= claim.lease_expires_at
+            or (now >= claim.lease_expires_at and not dispatched)
             or row[14] is not None
             or row[15] is not None
         ):
             raise StaleLease("handoff outbox lease is stale, expired, or divergent")
         return message, row
+
+    def begin_handoff_delivery(self, claim: HandoffOutboxClaim, *, now: datetime) -> None:
+        """Fence the possible remote effect before crossing the transport boundary."""
+        if self._schema_version != SCHEMA_VERSION_V2:
+            return  # Legacy standalone store API retains its original lease contract.
+        with self._transaction("begin_handoff_delivery"):
+            self._assert_live_handoff_claim(claim, now=now)
+            changed = self._connection.execute(
+                "UPDATE handoff_outbox SET dispatch_slots_consumed=1,cas_revision=cas_revision+1 "
+                "WHERE message_id=? AND dispatch_slots_consumed=0",
+                (claim.message.effect_id,),
+            ).rowcount
+            if changed != 1:
+                raise StaleLease("handoff already crossed its dispatch boundary")
+
+    def _recover_uncertain_handoffs(self, now: datetime) -> None:
+        """Called inside claim transaction: an expired possible effect is not retried."""
+        if self._schema_version != SCHEMA_VERSION_V2:
+            return
+        rows = self._connection.execute(
+            "SELECT message_id,handoff_id FROM handoff_outbox WHERE status='leased' "
+            "AND dispatch_slots_consumed=1 AND lease_expires_at<=?", (now.isoformat(),),
+        ).fetchall()
+        for message_id, handoff_id in rows:
+            current, revision = self._load_handoff(handoff_id)
+            row = self._handoff_outbox_row(message_id)
+            message = self._decode_canonical(row[6],row[7],HandoffEffectJob,"handoff outbox payload")
+            self._connection.execute(
+                "UPDATE handoff_outbox SET status='manual_review',claim_owner=NULL,"
+                "lease_acquired_at=NULL,lease_expires_at=NULL,cas_revision=cas_revision+1,"
+                "updated_at=? WHERE message_id=?", (now.isoformat(),message_id),
+            )
+            if not any(f.effect_id==message_id for f in current.effect_failures):
+                event=HandoffEffectFailed(handoff_id=handoff_id,incident_key=message.incident_key,
+                    effect_id=message_id,kind=message.kind,
+                    failure_code=HandoffEffectFailureCode.EFFECT_UNKNOWN,failed_at=now)
+                self._persist_operational_handoff_transition(current,revision,event,reduce_handoff(current,event))
 
     def _persist_operational_handoff_transition(
         self,
@@ -2300,6 +2410,7 @@ class SQLiteFollowupUnitOfWork:
             raise ValueError("lease_ttl overflows datetime range") from exc
         owner = _handoff_claim_owner(worker_id, delivery_id, delivery_version)
         with self._transaction("claim_handoff_outbox"):
+            self._recover_uncertain_handoffs(now)
             candidate = self._connection.execute(
                 "SELECT message_id, handoff_id FROM main.handoff_outbox "
                 "WHERE (status='pending' AND claim_owner IS NULL) "
@@ -2341,7 +2452,7 @@ class SQLiteFollowupUnitOfWork:
                     "UPDATE main.handoff_outbox SET status='leased', claim_owner=?, "
                     "fencing_token=fencing_token+1, lease_acquired_at=?, "
                     "lease_expires_at=?, delivery_attempts=delivery_attempts+1, "
-                    "dispatch_deadline_at=COALESCE(dispatch_deadline_at, ?), "
+                    "dispatch_deadline_at=?, "
                     "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
                     "AND fencing_token=? AND delivery_attempts=? AND cas_revision=? AND "
                     "((status='pending' AND claim_owner IS NULL AND lease_acquired_at IS NULL "
@@ -2351,7 +2462,7 @@ class SQLiteFollowupUnitOfWork:
                         owner,
                         now.isoformat(),
                         expires_at.isoformat(),
-                        deadline.isoformat(),
+                        v2_meta[0],
                         now.isoformat(),
                         message.effect_id,
                         row[10],
@@ -2414,7 +2525,7 @@ class SQLiteFollowupUnitOfWork:
         target_status = "manual_review" if _terminal_unknown else "pending"
         with self._transaction("release_handoff_outbox"):
             current, revision = self._load_handoff(claim.message.handoff_id)
-            message, row = self._assert_live_handoff_claim(claim, now=now)
+            message, row = self._assert_live_handoff_claim(claim, now=now, allow_dispatched_completion=True)
             if self._schema_version == SCHEMA_VERSION_V2:
                 v2_meta = self._connection.execute(
                     "SELECT cas_revision FROM main.handoff_outbox WHERE message_id=?",
@@ -2425,11 +2536,13 @@ class SQLiteFollowupUnitOfWork:
                 cursor = self._connection.execute(
                     "UPDATE main.handoff_outbox SET status=?, claim_owner=NULL, "
                     "lease_acquired_at=NULL, lease_expires_at=NULL, "
+                    "dispatch_slots_consumed=CASE WHEN ?='pending' THEN 0 ELSE dispatch_slots_consumed END, "
                     "cas_revision=cas_revision+1, updated_at=? WHERE message_id=? "
                     "AND status='leased' AND claim_owner=? AND fencing_token=? "
                     "AND lease_acquired_at=? AND lease_expires_at=? "
                     "AND delivery_attempts=? AND cas_revision=?",
                     (
+                        target_status,
                         target_status,
                         now.isoformat(),
                         message.effect_id,
@@ -2541,7 +2654,7 @@ class SQLiteFollowupUnitOfWork:
                 ):
                     return _handoff_noop(current)
                 raise IdentityConflict("handoff receipt identity has divergent data")
-            message, row = self._assert_live_handoff_claim(claim, now=now)
+            message, row = self._assert_live_handoff_claim(claim, now=now, allow_dispatched_completion=True)
             if (
                 receipt.message_id != message.effect_id
                 or receipt.idempotency_key != message.effect_id
