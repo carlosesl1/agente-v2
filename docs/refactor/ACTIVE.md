@@ -6,7 +6,9 @@
 - Active plan: `docs/superpowers/plans/2026-09-05-v2-service-reliability.md`.
 - Tasks A–D implemented in `97bb095d3231f055fbb0022c77f818feb1dd9850`. Final compatibility correction switches only the host-test reopen from V1 to V2; legacy V1 setup and authentication/replay/evidence assertions are preserved.
 - Ops authority restored by explicitly authorized pull of the exact existing digest, with matching registry manifest/config and no container restart or authority edit. READ → VERIFY is OK again.
-- NEXT: run canonical gate and independent final review on the frozen successor; close this correction only after both pass. This section supersedes historical NEXT/branch claims below for this correction only.
+- Corrections CLOSED locally on tested runtime commit `42bfdfa9f2f6d72faf53abfd4de9c8a0224b70ee`: canonical exit 0, 2167 passed, 7 historical deselections, 2958 subtests passed. Final narrow migration-index residual reproduced RED and closed by pre-DROP object validation; independent re-review GO LOCAL.
+- Evidence: `/home/ubuntu/workspace/v2-service-fixes-43d84d54/FECHAMENTO.md`, `closeout-final-canonical.log/xml`, `closeout-index-review.md`.
+- NEXT: none for this correction batch. No deployment authorized or performed; live/model qualification and promotion are separate work. This section supersedes historical NEXT/branch claims below for this correction only.
 - No deployment, production ref/state mutation, external writes/messages, financial activation or V3 work. Maya remains semantic/textual owner; runtime validates structured state, facts and effects.
 
 ## Historical context (not the active implementation authority)
