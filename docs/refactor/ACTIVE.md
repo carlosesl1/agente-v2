@@ -11,11 +11,12 @@
 - Baseline: 59 affected tests passed on the exact base with clean environment before edits.
 - Causal RED: three cases failed on the exact expected mismatch, emitting static `2020-01-01` instead of the derived Bahia dates. The earlier test-shape KeyError was preserved separately and superseded.
 - First functional candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`; tree `b852dbecd5cd6dd02af69e818f6e350451c25e39`. Its date regressions and canonical suite passed, but GET-only image qualification correctly rejected it: the adapter stamped an observation after the cycle clock and `accept(now=cycle_start)` raised `ReadBindingMismatch("observation is from the future")`. Local image `sha256:05e472c153e3e7b79520a59f9c3c36dc51aac8fe58988fc07058a63d606957ff` was never pushed or deployed and is superseded.
-- Successor causal RED proves acceptance needs a post-read UTC sample; successor GREEN: 5 causal tests passed. The prior date RED and invalid runner-shape attempts remain preserved separately in evidence.
+- Successor functional commit `203a41d256d920294db83b56dd85fc3fbc4dedb5`; tree `ec9c0581ea3a412c085842a3180207d7db2a9251`. Successor causal GREEN: 5 passed; affected gate: 63 passed with 1 historical dependency warning; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
+- The prior date RED, acceptance-clock RED, invalid test/runner-shape attempts and first rejected image are preserved separately in evidence.
 - Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
-- Remaining gates: commit and rebind the successor, affected/canonical/static gates, independent exact-SHA review, new immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
+- Remaining gates: canonical/static successor suite, independent exact-SHA review, new immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: commit the acceptance-clock successor, bind its exact SHA/tree, rerun affected/canonical/static gates and obtain a new independent exact-SHA review before rebuilding.
+- NEXT: commit this evidence-only binding, authenticate that final docs descendant, then rerun canonical/static gates and obtain a new independent exact-SHA review before rebuilding.
 
 ## Preserved closed correction — V2 service reliability
 
