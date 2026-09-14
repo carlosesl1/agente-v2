@@ -9,9 +9,12 @@
 - Fixed contract: convert explicit UTC worker `now` to `America/Bahia`; check-in is business date + 30 days; check-out is check-in + 3 days; activity date equals check-in. Use one calculated window and one explicit acceptance clock per fresh probe.
 - Safety: probe remains GET-only. No provider write, booking, reservation, payment, handoff, active SQLite edit, V3 work, legacy reuse or Ops mutation. Channel smoke is separately bounded and effects-closed.
 - Baseline: 59 affected tests passed on the exact base with clean environment before edits.
-- Gates: causal RED, focal GREEN, affected tests, static/boundary checks, canonical clean-environment suite, independent exact-SHA review, immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
+- Causal RED: three cases failed on the exact expected mismatch, emitting static `2020-01-01` instead of the derived Bahia dates. The earlier test-shape KeyError was preserved separately and superseded.
+- Functional candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`; tree `b852dbecd5cd6dd02af69e818f6e350451c25e39`. Causal gate: 4 passed. Affected gate: 62 passed, 1 historical dependency warning. Compileall, diff check and fast-track boundary guard passed. Changed-file Ruff improved from 27 historical findings on base to 25 on candidate, with no new rule count.
+- Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
+- Remaining gates: canonical clean-environment suite, independent exact-SHA review, immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: Task 2 from the active plan — add the stale-date/Bahia-boundary causal tests and prove they fail on the immutable base before changing production code.
+- NEXT: Task 4 from the active plan — run canonical/static gates on exact candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`, perform independent read-only exact-SHA review, and resolve only material causal findings before building an image.
 
 ## Preserved closed correction — V2 service reliability
 
