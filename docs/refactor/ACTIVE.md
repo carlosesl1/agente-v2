@@ -14,11 +14,12 @@
 - Successor functional commit `203a41d256d920294db83b56dd85fc3fbc4dedb5`; tree `ec9c0581ea3a412c085842a3180207d7db2a9251`. Successor causal GREEN: 5 passed; affected gate: 63 passed with 1 historical dependency warning; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
 - Frozen descendant `50803ba58e00242a5f207073e9625c00538bbce1` passed 2,171 tests plus 2,958 subtests and dark provider reads, but independent review rejected it before rollout: an ordinary Bókun activity probe could transitively reach quote checkout when GA write capability was enabled. Local image `sha256:be456adca036f17193a5adeac3bf441cf166a0a5b7d6862ea5821b05a54e7d8c` was never pushed or deployed and is superseded.
 - GET-only causal RED: three probe cases lacked an explicit safety contract and the matched-group/two-participant request could not express it. GREEN: the activity-only exact boolean is bound into probe identity; group enrichment routes it only through Bókun availability reads; the existing transport witness proves GET/GET with quote checkout enabled. Affected gate: 88 passed; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
+- GET-only functional successor `126476a9a091b7ec8ce13c22ae6a5d5714ddf77e`; tree `b05d7737a50e38765b366366c3e15ee23be4068a`.
 - The prior date RED, acceptance-clock RED, invalid test/runner-shape attempts and first rejected image are preserved separately in evidence.
 - Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
-- Remaining gates: commit and bind the GET-only successor; canonical/static suite; independent exact-SHA re-review; new immutable image identity; GET-only proof with write-enabled Bókun transport; isolated-test rollout; GA rollout; final READ → VERIFY.
+- Remaining gates: canonical/static suite; independent exact-SHA re-review; new immutable image identity; GET-only proof with write-enabled Bókun transport; isolated-test rollout; GA rollout; final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: commit the typed availability-only successor, bind its exact SHA/tree, rerun canonical/static gates and obtain a new independent exact-SHA re-review before rebuilding.
+- NEXT: commit this evidence-only binding, authenticate the final docs descendant, rerun canonical/static gates and obtain independent exact-SHA re-review before rebuilding.
 
 ## Preserved closed correction — V2 service reliability
 
