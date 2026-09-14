@@ -1,15 +1,25 @@
-# Active correction — V2 service reliability
+# Active correction — V2 rolling provider-read probe dates
 
-- Authorized by Carlos in the current chat: correct audited loose ends with no regex, keywords, substring intent detection or fragile case catalogs. Pix/Wise validation is distinct from Stripe.
-- Runtime authority verified before work; immutable GA base `b3173693d6d852ba8bcf8df5f7aa8e7a6d4c10f3`.
+- Authorized by Carlos in the current chat on 2026-09-14: permanently replace static provider-read probe dates with future dates derived from the Bahia business clock, qualify the exact candidate, deploy first to the isolated test runtime and then to GA only after green gates.
+- Runtime authority verified `OK` before work at 2026-09-14T20:09:52Z; authenticated GA base `0d790e7c8ce842a37abd5baab1035c1b65f774fd`.
 - Branch `fix/v2-service-reliability`; required worktree `/home/ubuntu/agente-v2/.worktrees/service-reliability`.
-- Active plan: `docs/superpowers/plans/2026-09-05-v2-service-reliability.md`.
+- Design: `docs/superpowers/specs/2026-09-14-v2-rolling-read-probe-dates-design.md`.
+- Active plan: `docs/superpowers/plans/2026-09-14-v2-rolling-read-probe-dates.md`.
+- Owner: `v2_host/production.py`; causal tests: `tests/test_v2_production_composition.py`. Existing date settings remain load-compatible but become non-authoritative.
+- Fixed contract: convert explicit UTC worker `now` to `America/Bahia`; check-in is business date + 30 days; check-out is check-in + 3 days; activity date equals check-in. Use one calculated window and one explicit acceptance clock per fresh probe.
+- Safety: probe remains GET-only. No provider write, booking, reservation, payment, handoff, active SQLite edit, V3 work, legacy reuse or Ops mutation. Channel smoke is separately bounded and effects-closed.
+- Baseline: 59 affected tests passed on the exact base with clean environment before edits.
+- Gates: causal RED, focal GREEN, affected tests, static/boundary checks, canonical clean-environment suite, independent exact-SHA review, immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
+- Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
+- NEXT: Task 2 from the active plan — add the stale-date/Bahia-boundary causal tests and prove they fail on the immutable base before changing production code.
+
+## Preserved closed correction — V2 service reliability
+
+- Authorized by Carlos in the prior current-chat batch: correct audited loose ends with no regex, keywords, substring intent detection or fragile case catalogs. Pix/Wise validation is distinct from Stripe.
+- Prior immutable GA base `b3173693d6d852ba8bcf8df5f7aa8e7a6d4c10f3`; prior plan `docs/superpowers/plans/2026-09-05-v2-service-reliability.md`.
 - Tasks A–D implemented in `97bb095d3231f055fbb0022c77f818feb1dd9850`. Final compatibility correction switches only the host-test reopen from V1 to V2; legacy V1 setup and authentication/replay/evidence assertions are preserved.
-- Ops authority restored by explicitly authorized pull of the exact existing digest, with matching registry manifest/config and no container restart or authority edit. READ → VERIFY is OK again.
-- Corrections CLOSED locally on tested runtime commit `42bfdfa9f2f6d72faf53abfd4de9c8a0224b70ee`: canonical exit 0, 2167 passed, 7 historical deselections, 2958 subtests passed. Final narrow migration-index residual reproduced RED and closed by pre-DROP object validation; independent re-review GO LOCAL.
-- Evidence: `/home/ubuntu/workspace/v2-service-fixes-43d84d54/FECHAMENTO.md`, `closeout-final-canonical.log/xml`, `closeout-index-review.md`.
-- NEXT: none for this correction batch. No deployment authorized or performed; live/model qualification and promotion are separate work. This section supersedes historical NEXT/branch claims below for this correction only.
-- No deployment, production ref/state mutation, external writes/messages, financial activation or V3 work. Maya remains semantic/textual owner; runtime validates structured state, facts and effects.
+- Corrections closed locally on tested runtime commit `42bfdfa9f2f6d72faf53abfd4de9c8a0224b70ee`: canonical exit 0, 2167 passed, 7 historical deselections, 2958 subtests passed. Evidence: `/home/ubuntu/workspace/v2-service-fixes-43d84d54/FECHAMENTO.md`.
+- The prior batch's `NEXT: none` and no-deploy boundary remain historical and are superseded only by the new rolling-probe authority above.
 
 ## Historical context (not the active implementation authority)
 
