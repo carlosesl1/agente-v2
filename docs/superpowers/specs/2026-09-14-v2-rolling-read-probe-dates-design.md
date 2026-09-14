@@ -25,7 +25,7 @@ A fresh probe computes exactly one business-local base date:
 - lodging check-out = `check-in + 3 days`;
 - activity date = lodging check-in.
 
-The same computed values are used in the request IDs and typed `ReadRequest` fields. Both accepted observations use the same explicit UTC `now` passed to the worker cycle; the probe must not call a second wall clock while composing the two reads.
+The same computed values are used in the request IDs and typed `ReadRequest` fields. Dates use the worker cycle's explicit UTC `now`. Each returned observation is accepted against a fresh UTC sample taken after its corresponding GET, because productive adapters stamp observations during the call and an earlier cycle time would falsely classify them as coming from the future.
 
 The existing `V2_READ_PROBE_CHECK_IN`, `V2_READ_PROBE_CHECK_OUT`, and `V2_READ_PROBE_ACTIVITY_DATE` settings remain temporarily loadable and validated for deployment compatibility, but they no longer select provider query dates. This makes the currently deployed environment forward-compatible while ensuring stale configured dates cannot reintroduce the failure. Product ID and probe interval remain configuration-owned.
 
@@ -48,7 +48,7 @@ Required witnesses:
 3. Month/year and leap-calendar arithmetic remain valid through `timedelta` date arithmetic.
 4. Check-out is always three days after check-in, and all selected dates are future relative to the Bahia business date.
 5. Stale legacy environment dates never appear in request IDs or typed requests.
-6. The explicit worker `now` is used for both `accept()` calls.
+6. Each `accept()` receives a post-read exact UTC sample later than the cycle start.
 7. Existing degraded-cache behavior remains unchanged.
 
 ## Qualification and rollout

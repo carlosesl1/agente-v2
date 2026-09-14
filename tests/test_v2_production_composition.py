@@ -745,9 +745,27 @@ def test_read_probe_uses_rolling_bahia_dates_not_legacy_static_dates(
         assert activity.kind is ReadKind.ACTIVITY
         assert activity.request_id == f"probe:bokun:{expected_check_in.isoformat()}"
         assert activity.activity_date == expected_check_in
-        assert reads.accepted_at == [now, now]
         assert "2020-01-01" not in lodging.request_id
         assert "2020-01-01" not in activity.request_id
+    finally:
+        container.close()
+
+
+def test_read_probe_accepts_each_observation_with_post_read_utc_sample(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        reads = _ProbeReads()
+        stage = ReconciliationStage(container=container, reads=reads, settings=settings)
+        cycle_started_at = datetime(2000, 1, 1, tzinfo=UTC)
+
+        stage.run_once(now=cycle_started_at)
+
+        assert len(reads.accepted_at) == 2
+        assert all(observed_at > cycle_started_at for observed_at in reads.accepted_at)
+        assert all(observed_at.utcoffset() == timedelta(0) for observed_at in reads.accepted_at)
     finally:
         container.close()
 

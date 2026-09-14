@@ -284,12 +284,12 @@ class ReconciliationStage:
             lodging_observation = self._reads.read(lodging)
             self._reads.accept(
                 lodging_observation,
-                now=now,
+                now=datetime.now(timezone.utc),
             )
             activity_observation = self._reads.read(activity)
             self._reads.accept(
                 activity_observation,
-                now=now,
+                now=datetime.now(timezone.utc),
             )
         except Exception:
             self._probe_healthy = False

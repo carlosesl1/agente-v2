@@ -6,15 +6,16 @@
 - Design: `docs/superpowers/specs/2026-09-14-v2-rolling-read-probe-dates-design.md`.
 - Active plan: `docs/superpowers/plans/2026-09-14-v2-rolling-read-probe-dates.md`.
 - Owner: `v2_host/production.py`; causal tests: `tests/test_v2_production_composition.py`. Existing date settings remain load-compatible but become non-authoritative.
-- Fixed contract: convert explicit UTC worker `now` to `America/Bahia`; check-in is business date + 30 days; check-out is check-in + 3 days; activity date equals check-in. Use one calculated window and one explicit acceptance clock per fresh probe.
+- Fixed contract: convert explicit UTC worker `now` to `America/Bahia`; check-in is business date + 30 days; check-out is check-in + 3 days; activity date equals check-in. Use one calculated window; accept each returned observation against a fresh exact UTC sample taken after its GET.
 - Safety: probe remains GET-only. No provider write, booking, reservation, payment, handoff, active SQLite edit, V3 work, legacy reuse or Ops mutation. Channel smoke is separately bounded and effects-closed.
 - Baseline: 59 affected tests passed on the exact base with clean environment before edits.
 - Causal RED: three cases failed on the exact expected mismatch, emitting static `2020-01-01` instead of the derived Bahia dates. The earlier test-shape KeyError was preserved separately and superseded.
-- Functional candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`; tree `b852dbecd5cd6dd02af69e818f6e350451c25e39`. Causal gate: 4 passed. Affected gate: 62 passed, 1 historical dependency warning. Compileall, diff check and fast-track boundary guard passed. Changed-file Ruff improved from 27 historical findings on base to 25 on candidate, with no new rule count.
+- First functional candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`; tree `b852dbecd5cd6dd02af69e818f6e350451c25e39`. Its date regressions and canonical suite passed, but GET-only image qualification correctly rejected it: the adapter stamped an observation after the cycle clock and `accept(now=cycle_start)` raised `ReadBindingMismatch("observation is from the future")`. Local image `sha256:05e472c153e3e7b79520a59f9c3c36dc51aac8fe58988fc07058a63d606957ff` was never pushed or deployed and is superseded.
+- Successor causal RED proves acceptance needs a post-read UTC sample; successor GREEN: 5 causal tests passed. The prior date RED and invalid runner-shape attempts remain preserved separately in evidence.
 - Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
-- Remaining gates: canonical clean-environment suite, independent exact-SHA review, immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
+- Remaining gates: commit and rebind the successor, affected/canonical/static gates, independent exact-SHA review, new immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: Task 4 from the active plan — run canonical/static gates on exact candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`, perform independent read-only exact-SHA review, and resolve only material causal findings before building an image.
+- NEXT: commit the acceptance-clock successor, bind its exact SHA/tree, rerun affected/canonical/static gates and obtain a new independent exact-SHA review before rebuilding.
 
 ## Preserved closed correction — V2 service reliability
 

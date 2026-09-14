@@ -57,8 +57,9 @@ def test_read_probe_uses_rolling_bahia_dates_not_legacy_static_dates(...):
     ...
 ```
 
-- [ ] Assert the first request is lodging, its check-out is `check_in + timedelta(days=3)`, the second is activity on the same `check_in`, both request IDs contain only the derived dates, and both acceptance timestamps equal the explicit `now`.
-- [ ] Run the single new test with the canonical clean-environment command and preserve the output as RED. Expected failure on the base: requests still contain the stale configured date or acceptance timestamps use the wall clock.
+- [ ] Assert the first request is lodging, its check-out is `check_in + timedelta(days=3)`, the second is activity on the same `check_in`, and both request IDs contain only the derived dates.
+- [ ] Add a separate acceptance-clock witness requiring a fresh exact UTC sample after each provider read; an observation stamped during HTTP dispatch must never be compared with the earlier cycle-start time.
+- [ ] Run the new tests with the canonical clean-environment command and preserve the outputs as RED. Expected failures: the base requests contain stale configured dates; the first candidate used the earlier cycle clock and caused a productive `ReadBindingMismatch("observation is from the future")`.
 
 ### Task 3: Implement the rolling window
 
@@ -81,7 +82,7 @@ def _read_probe_dates(*, now: datetime) -> tuple[date, date, date]:
 ```
 
 - [ ] In `_probe_reads`, calculate the tuple once per fresh probe and use it in request IDs and typed fields.
-- [ ] Pass the explicit `now` to both `self._reads.accept()` calls.
+- [ ] Preserve post-read `datetime.now(timezone.utc)` sampling for both `self._reads.accept()` calls. The cycle `now` owns only deterministic date selection.
 - [ ] Run the new regression and existing degraded-cache test; expected GREEN.
 - [ ] Run the complete directly affected files:
 
