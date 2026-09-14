@@ -15,11 +15,13 @@
 - Frozen descendant `50803ba58e00242a5f207073e9625c00538bbce1` passed 2,171 tests plus 2,958 subtests and dark provider reads, but independent review rejected it before rollout: an ordinary Bókun activity probe could transitively reach quote checkout when GA write capability was enabled. Local image `sha256:be456adca036f17193a5adeac3bf441cf166a0a5b7d6862ea5821b05a54e7d8c` was never pushed or deployed and is superseded.
 - GET-only causal RED: three probe cases lacked an explicit safety contract and the matched-group/two-participant request could not express it. GREEN: the activity-only exact boolean is bound into probe identity; group enrichment routes it only through Bókun availability reads; the existing transport witness proves GET/GET with quote checkout enabled. Affected gate: 88 passed; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
 - GET-only functional successor `126476a9a091b7ec8ce13c22ae6a5d5714ddf77e`; tree `b05d7737a50e38765b366366c3e15ee23be4068a`.
+- Frozen descendant `42140dbfb408bf4ad5f3a9853a17d5d0a6fd4894` passed 2,173 tests plus 2,958 subtests and a real write-enabled/GET-guarded provider probe, but re-review timed out after proving two test-adequacy survivors: a pre-GET shared acceptance sample and a `V2ReadService` availability-flag drop. Local image `sha256:b9b314d3fd04533dbb8d7440b88557e088feccfb985b7dc4e3e4e5e15d540463` was never pushed or deployed and is superseded.
+- Strong witnesses now enforce exact `read → clock → accept` ordering twice and traverse `ReconciliationStage → V2ReadService → group enrichment → Bókun adapter → real HTTP transport`. Both in-memory mutants are killed. Strong focal gate: 2 passed; affected gate: 89 passed; pinned Ruff 0.15.10, compileall, diff check and fast-track guard passed.
 - The prior date RED, acceptance-clock RED, invalid test/runner-shape attempts and first rejected image are preserved separately in evidence.
 - Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
-- Remaining gates: canonical/static suite; independent exact-SHA re-review; new immutable image identity; GET-only proof with write-enabled Bókun transport; isolated-test rollout; GA rollout; final READ → VERIFY.
+- Remaining gates: commit and bind the strong-test successor; canonical/static suite; independent exact-SHA re-review; new immutable image identity; GET-only proof with write-enabled Bókun transport; isolated-test rollout; GA rollout; final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: commit this evidence-only binding, authenticate the final docs descendant, rerun canonical/static gates and obtain independent exact-SHA re-review before rebuilding.
+- NEXT: commit the strong causal witnesses, bind their exact SHA/tree, rerun canonical/static gates and obtain independent exact-SHA re-review before rebuilding.
 
 ## Preserved closed correction — V2 service reliability
 

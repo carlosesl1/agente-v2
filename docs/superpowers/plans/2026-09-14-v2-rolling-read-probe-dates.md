@@ -103,6 +103,8 @@ Before freezing, close the independent review's GET-only finding:
 - [ ] Set the flag only on the reconciliation activity probe.
 - [ ] Preserve causal RED evidence for the absent contract and matched-group/two-participant path.
 - [ ] Require the existing transport witness to record GET/GET with quote checkout enabled.
+- [ ] Add one complete graph witness from `ReconciliationStage` through `V2ReadService`, group enrichment, Bókun adapter and the real HTTP transport.
+- [ ] Prove test adequacy by killing a pre-GET shared-clock mutant and a `V2ReadService` flag-drop mutant in memory.
 - [ ] Run the affected production, group, Bókun transport, and read-contract suites.
 
 **Files:**

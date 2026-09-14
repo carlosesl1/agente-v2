@@ -754,19 +754,54 @@ def test_read_probe_uses_rolling_bahia_dates_not_legacy_static_dates(
 
 def test_read_probe_accepts_each_observation_with_post_read_utc_sample(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _settings(tmp_path)
     container = V2Container.open(settings=settings, role=V2Role.WORKER)
     try:
-        reads = _ProbeReads()
+        cycle_started_at = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
+        acceptance_samples = iter(
+            (
+                cycle_started_at + timedelta(seconds=1),
+                cycle_started_at + timedelta(seconds=2),
+            )
+        )
+        events: list[str] = []
+
+        class ScriptedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                assert tz is timezone.utc
+                events.append("clock")
+                return next(acceptance_samples)
+
+        class OrderedProbeReads(_ProbeReads):
+            def read(self, request):
+                events.append(f"read:{request.kind.value}")
+                return super().read(request)
+
+            def accept(self, observation, *, now):
+                events.append("accept")
+                return super().accept(observation, now=now)
+
+        monkeypatch.setattr(production, "datetime", ScriptedDateTime)
+        reads = OrderedProbeReads()
         stage = ReconciliationStage(container=container, reads=reads, settings=settings)
-        cycle_started_at = datetime(2000, 1, 1, tzinfo=UTC)
 
         stage.run_once(now=cycle_started_at)
 
-        assert len(reads.accepted_at) == 2
-        assert all(observed_at > cycle_started_at for observed_at in reads.accepted_at)
-        assert all(observed_at.utcoffset() == timedelta(0) for observed_at in reads.accepted_at)
+        assert events == [
+            "read:lodging",
+            "clock",
+            "accept",
+            "read:activity",
+            "clock",
+            "accept",
+        ]
+        assert reads.accepted_at == [
+            cycle_started_at + timedelta(seconds=1),
+            cycle_started_at + timedelta(seconds=2),
+        ]
     finally:
         container.close()
 

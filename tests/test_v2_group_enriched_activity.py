@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from v2_adapters._provider_common import ProviderReadError
@@ -13,8 +14,11 @@ from v2_adapters.bokun_groups import (
     load_activity_group_policy,
 )
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
+from v2_adapters.provider_http import BokunHTTPTransport
+from v2_application.reads import V2ReadService
 from v2_contracts.private_offers import PrivateOfferQuery
-from v2_contracts.providers import ReadKind, ReadRequest
+from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
+from v2_host.production import ReconciliationStage, _read_probe_dates
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -261,6 +265,120 @@ def test_explicit_availability_only_bypasses_quote_selection_for_two_plus() -> N
     assert observation.public_payload["group_status"] == "matched"
     assert "offer_id" not in observation.public_payload
     assert "start_time" not in observation.public_payload
+
+
+def test_reconciliation_probe_is_get_only_through_complete_bokun_read_graph() -> None:
+    now = datetime.now(timezone.utc)
+    activity_date = _read_probe_dates(now=now)[2]
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method != "GET":
+            raise AssertionError("reconciliation probe reached a non-GET request")
+        if request.url.path.endswith("/activity.json/913372"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": 913372,
+                    "title": "Buracão",
+                    "pricingCategories": [
+                        {
+                            "id": "1160099",
+                            "ticketCategory": "ADULT",
+                            "ageQualified": True,
+                        }
+                    ],
+                },
+            )
+        if request.url.path.endswith("/availabilities"):
+            return httpx.Response(
+                200,
+                request=request,
+                json=[
+                    {
+                        "date": activity_date.isoformat(),
+                        "startTimeId": "start-buracao",
+                        "startTime": "07:30",
+                        "available": True,
+                        "soldOut": False,
+                        "unavailable": False,
+                        "availabilityCount": 4,
+                        "minParticipantsToBookNow": 2,
+                        "pricesByRate": [
+                            {
+                                "activityRateId": "2375672",
+                                "pricePerCategoryUnit": [
+                                    {
+                                        "id": "1160099",
+                                        "amount": {
+                                            "amount": 300,
+                                            "currency": "BRL",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+        raise AssertionError("reconciliation probe reached a quote endpoint")
+
+    class LodgingProbePort:
+        def read(self, request: ReadRequest) -> ReadObservation:
+            return ReadObservation(
+                request_hash=request.canonical_hash(),
+                provider="cloudbeds",
+                observed_at=now,
+                expires_at=now + timedelta(minutes=5),
+                public_payload={"options": []},
+                private_binding_hash="0" * 64,
+            )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        bokun = BokunReadAdapter(
+            transport=BokunHTTPTransport(
+                access_key="access",
+                secret_key="secret",
+                product_map={"product:buracao": "913372"},
+                base_url="https://api.bokun.invalid",
+                client=client,
+                timestamp=lambda: "2026-09-14 12:00:00",
+                quote_checkout_enabled=True,
+            ),
+            clock=SimpleNamespace(now=lambda: now),
+            ttl=timedelta(minutes=5),
+        )
+        activity = _composite(
+            bokun=bokun,
+            groups_source=RecordingGroups("matched", participants=4),
+            policy=_policy(),
+        )
+        reads = V2ReadService(
+            {
+                ReadKind.LODGING: LodgingProbePort(),
+                ReadKind.ACTIVITY: activity,
+            }
+        )
+        stage = object.__new__(ReconciliationStage)
+        stage._reads = reads
+        stage._settings = SimpleNamespace(
+            read_probe_interval_seconds=60,
+            read_probe_product_id="product:buracao",
+        )
+        stage._next_probe_at = None
+        stage._probe_healthy = False
+
+        result = stage._probe_reads(now=now)
+    finally:
+        client.close()
+
+    assert result == {"status": "fresh_healthy"}
+    assert stage._probe_healthy is True
+    assert [request.method for request in seen] == ["GET", "GET"]
+    assert not any("shopping-cart" in request.url.path for request in seen)
 
 
 def test_group_exception_degrades_but_bokun_exception_remains_a_read_failure() -> None:

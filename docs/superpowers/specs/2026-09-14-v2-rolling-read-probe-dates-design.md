@@ -58,10 +58,11 @@ Required witnesses:
 3. Month/year and leap-calendar arithmetic remain valid through `timedelta` date arithmetic.
 4. Check-out is always three days after check-in, and all selected dates are future relative to the Bahia business date.
 5. Stale legacy environment dates never appear in request IDs or typed requests.
-6. Each `accept()` receives a post-read exact UTC sample later than the cycle start.
+6. Each `accept()` receives its own post-read exact UTC sample; the event order is `read → clock → accept` for lodging and then activity.
 7. Existing degraded-cache behavior remains unchanged.
-8. A matched-group/two-participant activity probe reaches the availability-only Bókun path and exposes no offer/selection.
+8. A complete `ReconciliationStage → V2ReadService → group enrichment → BokunReadAdapter → BokunHTTPTransport` witness proves that a matched-group/two-participant probe performs only the two expected GETs and exposes no offer/selection.
 9. Default commercial activity canonical bytes omit the new flag, while probe bytes bind `true`.
+10. Mutation witnesses must kill both a pre-GET shared acceptance sample and a `V2ReadService` availability-flag drop.
 
 ## Qualification and rollout
 
