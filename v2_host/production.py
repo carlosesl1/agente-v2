@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import ServiceKind
@@ -97,9 +98,21 @@ from v2_host.worker_main import (
 )
 
 
+_READ_PROBE_TIME_ZONE = ZoneInfo("America/Bahia")
+_READ_PROBE_LEAD_DAYS = 30
+_READ_PROBE_STAY_NIGHTS = 3
+
+
 class UTCClock:
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
+
+
+def _read_probe_dates(*, now: datetime) -> tuple[date, date, date]:
+    business_today = now.astimezone(_READ_PROBE_TIME_ZONE).date()
+    check_in = business_today + timedelta(days=_READ_PROBE_LEAD_DAYS)
+    check_out = check_in + timedelta(days=_READ_PROBE_STAY_NIGHTS)
+    return check_in, check_out, check_in
 
 
 def _critical_action_policy(settings: V2Settings) -> CriticalActionPolicy:
@@ -252,32 +265,31 @@ class ReconciliationStage:
             seconds=self._settings.read_probe_interval_seconds
         )
         try:
+            check_in, check_out, activity_date = _read_probe_dates(now=now)
             lodging = ReadRequest(
-                request_id=f"probe:cloudbeds:{self._settings.read_probe_check_in}",
+                request_id=f"probe:cloudbeds:{check_in.isoformat()}",
                 kind=ReadKind.LODGING,
-                check_in=date.fromisoformat(self._settings.read_probe_check_in),
-                check_out=date.fromisoformat(self._settings.read_probe_check_out),
+                check_in=check_in,
+                check_out=check_out,
                 adults=2,
                 children=0,
             )
             activity = ReadRequest(
-                request_id=f"probe:bokun:{self._settings.read_probe_activity_date}",
+                request_id=f"probe:bokun:{activity_date.isoformat()}",
                 kind=ReadKind.ACTIVITY,
                 product_id=self._settings.read_probe_product_id,
-                activity_date=date.fromisoformat(
-                    self._settings.read_probe_activity_date
-                ),
+                activity_date=activity_date,
                 participants=2,
             )
             lodging_observation = self._reads.read(lodging)
             self._reads.accept(
                 lodging_observation,
-                now=datetime.now(timezone.utc),
+                now=now,
             )
             activity_observation = self._reads.read(activity)
             self._reads.accept(
                 activity_observation,
-                now=datetime.now(timezone.utc),
+                now=now,
             )
         except Exception:
             self._probe_healthy = False

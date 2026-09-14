@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -688,6 +688,7 @@ class _ProbeReads:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.requests = []
+        self.accepted_at = []
 
     def read(self, request):
         self.requests.append(request)
@@ -696,7 +697,59 @@ class _ProbeReads:
         return object()
 
     def accept(self, observation, *, now):
+        self.accepted_at.append(now)
         return observation
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_check_in"),
+    (
+        (
+            datetime(2026, 12, 31, 2, 59, tzinfo=UTC),
+            date(2027, 1, 29),
+        ),
+        (
+            datetime(2026, 12, 31, 3, 0, tzinfo=UTC),
+            date(2027, 1, 30),
+        ),
+        (
+            datetime(2028, 1, 31, 12, 0, tzinfo=UTC),
+            date(2028, 3, 1),
+        ),
+    ),
+)
+def test_read_probe_uses_rolling_bahia_dates_not_legacy_static_dates(
+    tmp_path: Path,
+    now: datetime,
+    expected_check_in: date,
+) -> None:
+    settings = _settings(
+        tmp_path,
+        read_probe_check_in="2020-01-01",
+        read_probe_check_out="2020-01-04",
+        read_probe_activity_date="2020-01-01",
+    )
+    container = V2Container.open(settings=settings, role=V2Role.WORKER)
+    try:
+        reads = _ProbeReads()
+        stage = ReconciliationStage(container=container, reads=reads, settings=settings)
+
+        stage.run_once(now=now)
+
+        expected_check_out = expected_check_in + timedelta(days=3)
+        lodging, activity = reads.requests
+        assert lodging.kind is ReadKind.LODGING
+        assert lodging.request_id == f"probe:cloudbeds:{expected_check_in.isoformat()}"
+        assert lodging.check_in == expected_check_in
+        assert lodging.check_out == expected_check_out
+        assert activity.kind is ReadKind.ACTIVITY
+        assert activity.request_id == f"probe:bokun:{expected_check_in.isoformat()}"
+        assert activity.activity_date == expected_check_in
+        assert reads.accepted_at == [now, now]
+        assert "2020-01-01" not in lodging.request_id
+        assert "2020-01-01" not in activity.request_id
+    finally:
+        container.close()
 
 
 def test_read_probe_failure_remains_degraded_until_next_real_probe(tmp_path: Path) -> None:
