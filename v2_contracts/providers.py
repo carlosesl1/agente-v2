@@ -96,11 +96,18 @@ class ReadRequest:
     activity_date: date | None = None
     participants: int | None = None
     offer_id: str | None = None
+    availability_only: bool = False
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id", identifier=True)
         if type(self.kind) is not ReadKind:
             raise InvalidReadRequest("kind must be an exact ReadKind")
+        if type(self.availability_only) is not bool:
+            raise InvalidReadRequest("availability_only must be an exact bool")
+        if self.kind is not ReadKind.ACTIVITY and self.availability_only:
+            raise InvalidReadRequest(
+                "availability_only is valid only for activity reads"
+            )
         if self.kind is ReadKind.KNOWLEDGE:
             _text(self.query, "query")
             locale = _text(self.locale, "locale")
@@ -242,6 +249,8 @@ class ReadRequest:
             value = getattr(self, name)
             if value is not None:
                 values[name] = value.isoformat() if type(value) is date else value
+        if self.availability_only:
+            values["availability_only"] = True
         return json.dumps(
             values,
             ensure_ascii=False,

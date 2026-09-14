@@ -12,11 +12,13 @@
 - Causal RED: three cases failed on the exact expected mismatch, emitting static `2020-01-01` instead of the derived Bahia dates. The earlier test-shape KeyError was preserved separately and superseded.
 - First functional candidate `50ff0642d70cb2f856d9fc995921464d1681bfcf`; tree `b852dbecd5cd6dd02af69e818f6e350451c25e39`. Its date regressions and canonical suite passed, but GET-only image qualification correctly rejected it: the adapter stamped an observation after the cycle clock and `accept(now=cycle_start)` raised `ReadBindingMismatch("observation is from the future")`. Local image `sha256:05e472c153e3e7b79520a59f9c3c36dc51aac8fe58988fc07058a63d606957ff` was never pushed or deployed and is superseded.
 - Successor functional commit `203a41d256d920294db83b56dd85fc3fbc4dedb5`; tree `ec9c0581ea3a412c085842a3180207d7db2a9251`. Successor causal GREEN: 5 passed; affected gate: 63 passed with 1 historical dependency warning; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
+- Frozen descendant `50803ba58e00242a5f207073e9625c00538bbce1` passed 2,171 tests plus 2,958 subtests and dark provider reads, but independent review rejected it before rollout: an ordinary Bókun activity probe could transitively reach quote checkout when GA write capability was enabled. Local image `sha256:be456adca036f17193a5adeac3bf441cf166a0a5b7d6862ea5821b05a54e7d8c` was never pushed or deployed and is superseded.
+- GET-only causal RED: three probe cases lacked an explicit safety contract and the matched-group/two-participant request could not express it. GREEN: the activity-only exact boolean is bound into probe identity; group enrichment routes it only through Bókun availability reads; the existing transport witness proves GET/GET with quote checkout enabled. Affected gate: 88 passed; pinned Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
 - The prior date RED, acceptance-clock RED, invalid test/runner-shape attempts and first rejected image are preserved separately in evidence.
 - Evidence root: `/home/ubuntu/workspace/v2-rolling-probe-727d3625/`.
-- Remaining gates: canonical/static successor suite, independent exact-SHA review, new immutable image identity, GET-only dark proof, isolated-test rollout, GA rollout, final READ → VERIFY.
+- Remaining gates: commit and bind the GET-only successor; canonical/static suite; independent exact-SHA re-review; new immutable image identity; GET-only proof with write-enabled Bókun transport; isolated-test rollout; GA rollout; final READ → VERIFY.
 - Rollback: preserve exact predecessor image/config/state bindings before each runtime mutation; restore and verify predecessor on any failed gate.
-- NEXT: commit this evidence-only binding, authenticate that final docs descendant, then rerun canonical/static gates and obtain a new independent exact-SHA review before rebuilding.
+- NEXT: commit the typed availability-only successor, bind its exact SHA/tree, rerun canonical/static gates and obtain a new independent exact-SHA re-review before rebuilding.
 
 ## Preserved closed correction — V2 service reliability
 

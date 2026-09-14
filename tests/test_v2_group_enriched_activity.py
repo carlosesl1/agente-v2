@@ -120,7 +120,12 @@ def _bokun(transport: RecordingBokunTransport) -> BokunReadAdapter:
     )
 
 
-def _request(*, participants: int, product_id: str = "product:buracao") -> ReadRequest:
+def _request(
+    *,
+    participants: int,
+    product_id: str = "product:buracao",
+    availability_only: bool = False,
+) -> ReadRequest:
     return ReadRequest(
         request_id=f"read:{product_id.removeprefix('product:')}:{participants}",
         kind=ReadKind.ACTIVITY,
@@ -128,6 +133,7 @@ def _request(*, participants: int, product_id: str = "product:buracao") -> ReadR
         activity_date=ACTIVITY_DATE,
         participants=participants,
         locale="pt-BR",
+        availability_only=availability_only,
     )
 
 
@@ -151,10 +157,6 @@ def _query(request: ReadRequest, observation) -> PrivateOfferQuery:
 
 
 def _composite(*, bokun, groups_source, policy):
-    from v2_adapters.group_enriched_activity import (
-        GroupEnrichedActivityReadAdapter,
-    )
-
     return GroupEnrichedActivityReadAdapter(
         bokun=bokun,
         groups_source=groups_source,
@@ -225,6 +227,40 @@ def test_two_plus_composes_group_first_and_preserves_bokun_offer(
         "group_participants": group_participants,
         "solo_group_booking": False,
     }
+
+
+def test_explicit_availability_only_bypasses_quote_selection_for_two_plus() -> None:
+    events: list[str] = []
+    groups = RecordingGroups("matched", participants=4, events=events)
+    transport = RecordingBokunTransport(events=events)
+    request = _request(participants=2, availability_only=True)
+
+    observation = _composite(
+        bokun=_bokun(transport),
+        groups_source=groups,
+        policy=_policy(),
+    ).read(request)
+
+    assert events == ["groups", "bokun"]
+    assert groups.calls == [("product:buracao", ACTIVITY_DATE)]
+    assert transport.calls == [
+        (
+            "activity",
+            {
+                "product_id": "product:buracao",
+                "activity_date": ACTIVITY_DATE.isoformat(),
+                "adults": 2,
+                "children": 0,
+                "quote_scope": request.query_hash(),
+                "locale": "pt-BR",
+                "availability_only": True,
+            },
+        )
+    ]
+    assert observation.public_payload["available"] is False
+    assert observation.public_payload["group_status"] == "matched"
+    assert "offer_id" not in observation.public_payload
+    assert "start_time" not in observation.public_payload
 
 
 def test_group_exception_degrades_but_bokun_exception_remains_a_read_failure() -> None:

@@ -92,6 +92,9 @@ class GroupEnrichedActivityReadAdapter:
             canonical_product_id=request.product_id,
             activity_date=request.activity_date,
         )
+        if request.availability_only:
+            observation = self._bokun.read(request)
+            return self._enrich(observation, groups, solo_group_booking=False)
         adults, children = request.activity_party()
         solo_policy = self._policy.solo_policy(request.product_id)
         restricted_solo = adults + children == 1 and solo_policy is not None

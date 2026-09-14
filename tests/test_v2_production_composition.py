@@ -745,6 +745,7 @@ def test_read_probe_uses_rolling_bahia_dates_not_legacy_static_dates(
         assert activity.kind is ReadKind.ACTIVITY
         assert activity.request_id == f"probe:bokun:{expected_check_in.isoformat()}"
         assert activity.activity_date == expected_check_in
+        assert activity.availability_only is True
         assert "2020-01-01" not in lodging.request_id
         assert "2020-01-01" not in activity.request_id
     finally:

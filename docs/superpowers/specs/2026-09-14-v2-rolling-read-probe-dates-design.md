@@ -29,9 +29,19 @@ The same computed values are used in the request IDs and typed `ReadRequest` fie
 
 The existing `V2_READ_PROBE_CHECK_IN`, `V2_READ_PROBE_CHECK_OUT`, and `V2_READ_PROBE_ACTIVITY_DATE` settings remain temporarily loadable and validated for deployment compatibility, but they no longer select provider query dates. This makes the currently deployed environment forward-compatible while ensuring stale configured dates cannot reintroduce the failure. Product ID and probe interval remain configuration-owned.
 
+### Explicit GET-only activity probe
+
+The activity probe sets `ReadRequest.availability_only=True`. This is an exact boolean contract accepted only for `ReadKind.ACTIVITY`.
+
+- The default remains `False` and is omitted from canonical bytes, preserving existing commercial read identities.
+- `True` is included in canonical bytes, so a health probe cannot share identity with a quote-bearing commercial read.
+- `BokunReadAdapter.read()` routes the explicit flag to `read_availability_only()`.
+- `GroupEnrichedActivityReadAdapter` may still perform its read-only group lookup, but it short-circuits all selection paths and delegates to the Bókun availability-only route.
+- The Bókun HTTP transport contract proves that `availability_only=True` performs only GET requests even when quote checkout is enabled.
+
 ## Boundaries and failure behavior
 
-- The probe remains physically read-only: Cloudbeds and Bókun GET paths only.
+- The probe remains physically read-only: Cloudbeds and Bókun GET paths only, including when GA write capabilities are enabled.
 - No reservation, cart, payment, ManyChat delivery, handoff, or provider write is added or enabled.
 - A real provider or contract failure still degrades `reconciliation`; this change removes only calendar-expiry as a false failure source.
 - The existing cache interval and fail-until-next-real-probe semantics are unchanged.
@@ -50,6 +60,8 @@ Required witnesses:
 5. Stale legacy environment dates never appear in request IDs or typed requests.
 6. Each `accept()` receives a post-read exact UTC sample later than the cycle start.
 7. Existing degraded-cache behavior remains unchanged.
+8. A matched-group/two-participant activity probe reaches the availability-only Bókun path and exposes no offer/selection.
+9. Default commercial activity canonical bytes omit the new flag, while probe bytes bind `true`.
 
 ## Qualification and rollout
 

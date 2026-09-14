@@ -280,6 +280,7 @@ class ReconciliationStage:
                 product_id=self._settings.read_probe_product_id,
                 activity_date=activity_date,
                 participants=2,
+                availability_only=True,
             )
             lodging_observation = self._reads.read(lodging)
             self._reads.accept(

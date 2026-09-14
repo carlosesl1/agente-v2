@@ -167,6 +167,24 @@ def test_activity_commercial_query_hash_excludes_presentation_locale() -> None:
     assert portuguese_knowledge.query_hash() != english_knowledge.query_hash()
 
 
+def test_availability_only_is_explicit_activity_only_and_preserves_default_wire() -> None:
+    default_wire = json.loads(ACTIVITY_REQUEST.to_canonical_bytes())
+    probe = replace(
+        ACTIVITY_REQUEST,
+        request_id="read-activity-probe",
+        availability_only=True,
+    )
+    probe_wire = json.loads(probe.to_canonical_bytes())
+
+    assert "availability_only" not in default_wire
+    assert probe_wire["availability_only"] is True
+    assert probe.query_hash() != ACTIVITY_REQUEST.query_hash()
+    with pytest.raises(InvalidReadRequest, match="only for activity"):
+        replace(KNOWLEDGE_REQUEST, availability_only=True)
+    with pytest.raises(InvalidReadRequest, match="exact bool"):
+        replace(ACTIVITY_REQUEST, availability_only=1)
+
+
 def test_localized_bokun_offer_survives_fresh_worker_composition() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     provider_state = {"rate_id": "rate-private-001"}

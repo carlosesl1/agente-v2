@@ -108,6 +108,8 @@ class BokunReadAdapter:
         if type(request) is not ReadRequest:
             raise TypeError("request must be an exact ReadRequest")
         if request.kind is ReadKind.ACTIVITY:
+            if request.availability_only:
+                return self.read_availability_only(request)
             return self._activity(request)
         if request.kind is ReadKind.ACTIVITY_DESCRIPTION:
             return self._description(request)

@@ -4,7 +4,7 @@
 
 **Goal:** Make Cloudbeds and Bókun health probes use deterministic future dates derived from the Bahia business day so static date expiry can never block Maya V2 ingress again.
 
-**Architecture:** `v2_host.production` owns a pure rolling-window calculation and `ReconciliationStage` uses it once per fresh probe. Existing date environment fields remain compatible but become non-authoritative; product identity, cache interval, provider validation, and all effect boundaries remain unchanged.
+**Architecture:** `v2_host.production` owns a pure rolling-window calculation and `ReconciliationStage` uses it once per fresh probe. The typed activity request carries an explicit availability-only bit through group enrichment into Bókun's GET-only path. Existing date environment fields remain compatible but become non-authoritative; product identity, cache interval, provider validation, and all effect boundaries remain unchanged.
 
 **Tech Stack:** Python 3.12, stdlib `zoneinfo`, typed V2 contracts, pytest, Docker/OCI deployment.
 
@@ -95,6 +95,15 @@ env -i HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 \
 ```
 
 ### Task 4: Freeze and qualify the exact code candidate
+
+Before freezing, close the independent review's GET-only finding:
+
+- [ ] Add `ReadRequest.availability_only` as an exact activity-only boolean. Omit the default `False` from canonical bytes; bind `True` explicitly.
+- [ ] Make direct and group-enriched Bókun reads honor the flag before any selection path.
+- [ ] Set the flag only on the reconciliation activity probe.
+- [ ] Preserve causal RED evidence for the absent contract and matched-group/two-participant path.
+- [ ] Require the existing transport witness to record GET/GET with quote checkout enabled.
+- [ ] Run the affected production, group, Bókun transport, and read-contract suites.
 
 **Files:**
 - Modify: `docs/refactor/ACTIVE.md`
