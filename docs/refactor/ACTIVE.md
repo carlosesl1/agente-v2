@@ -14,8 +14,10 @@
 - Baseline: exact focused adapter suite passed `72` tests in a clean environment before functional edits.
 - Causal RED: `test_current_observation_completion_authority_is_post_read_only` failed after proving the exact `600.00 BRL` payload was present; the only missing witness was the conditional post-read authority marker.
 - Focused GREEN: causal witness `1` passed; complete model-adapter suite `73` passed; turn-executor suite `86` passed.
-- Static gate: the first `.venv/bin/python -m ruff` runner attempt lacked the Ruff module and did not test product code; the required pinned `ruff==0.15.10` run superseded it and passed, followed by compileall, diff check and `fasttrack-boundaries: OK`.
-- NEXT: commit the causal implementation, then run directly affected and canonical clean-environment gates before building a new immutable image.
+- Static gate: the first `.venv/bin/python -m ruff` runner attempt lacked the Ruff module and did not test product code; the required pinned `ruff==0.15.10` focal run superseded it and passed, followed by compileall, diff check and `fasttrack-boundaries: OK`. A diagnostic whole-tree Ruff run reproduced `96` pre-existing historical findings outside this diff; no unrelated cleanup was made.
+- Directly affected gate: `203` passed across model adapter, turn executor, conversation context, Terra prompt and Hermes child.
+- Canonical diagnostic without exclusions: `2,175` passed plus `2,958` subtests and exactly the known `7` Phase 7/Phase 8 historical incompatibilities failed. Canonical gate with those seven explicit historical deselections passed: `2,175 passed, 7 deselected, 2,958 subtests`.
+- NEXT: commit this evidence binding, rerun focused/static/canonical gates on the exact docs descendant, then build a new immutable image.
 
 ## Preserved deployed correction — Maya V2 GPT 5.6 Terra at high effort
 
