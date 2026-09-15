@@ -12,7 +12,10 @@
 - Rollout: immutable image; isolated authorized contact first; exact Terra/high identity plus causal price-answer evidence before GA; preserve the current Terra/high runtime as immediate rollback.
 - Disk precondition closed: 38 clean branch-backed worktrees and recreate-only caches were removed; dirty/detached worktrees, active images/state, rollback and final evidence were preserved. Root free space increased from 569 MiB to 4,658 MiB.
 - Baseline: exact focused adapter suite passed `72` tests in a clean environment before functional edits.
-- NEXT: commit this task binding, write and run the conditional-wire RED, then implement only the dynamic post-observation suffix.
+- Causal RED: `test_current_observation_completion_authority_is_post_read_only` failed after proving the exact `600.00 BRL` payload was present; the only missing witness was the conditional post-read authority marker.
+- Focused GREEN: causal witness `1` passed; complete model-adapter suite `73` passed; turn-executor suite `86` passed.
+- Static gate: the first `.venv/bin/python -m ruff` runner attempt lacked the Ruff module and did not test product code; the required pinned `ruff==0.15.10` run superseded it and passed, followed by compileall, diff check and `fasttrack-boundaries: OK`.
+- NEXT: commit the causal implementation, then run directly affected and canonical clean-environment gates before building a new immutable image.
 
 ## Preserved deployed correction — Maya V2 GPT 5.6 Terra at high effort
 

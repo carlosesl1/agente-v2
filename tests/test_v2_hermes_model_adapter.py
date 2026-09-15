@@ -364,6 +364,63 @@ def test_v8_room_description_read_projects_choice_ref_to_offer_id() -> None:
     )
 
 
+def test_current_observation_completion_authority_is_post_read_only() -> None:
+    observed_at = datetime(2026, 9, 15, 3, 56, tzinfo=timezone.utc)
+    observed_request = ModelRequest(
+        request_id="request:current-lodging-total",
+        lead_id="manychat:current-lodging-total",
+        source_event_id="batch:current-lodging-total",
+        message=(
+            "Mude a saída para 24 de outubro. A Suíte Casal está disponível "
+            "e qual é o valor total?"
+        ),
+        locale="pt-BR",
+        state_version=7,
+        observations=(
+            ReadObservation(
+                request_hash="c" * 64,
+                provider="cloudbeds",
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=5),
+                public_payload={
+                    "service": "lodging",
+                    "status": "positive",
+                    "options": [
+                        {
+                            "offer_id": "offer:current-suite",
+                            "room_public_name": "Suíte Casal",
+                            "available": True,
+                            "total_amount": "600.00",
+                            "currency": "BRL",
+                        }
+                    ],
+                },
+                private_binding_hash="d" * 64,
+            ),
+        ),
+    )
+    initial_request = ModelRequest(
+        request_id="request:initial-lodging-total",
+        lead_id=observed_request.lead_id,
+        source_event_id=observed_request.source_event_id,
+        message=observed_request.message,
+        locale=observed_request.locale,
+        state_version=observed_request.state_version,
+    )
+
+    post_read_envelope = json.loads(_request_wire(observed_request, "Closed prompt."))
+    initial_envelope = json.loads(_request_wire(initial_request, "Closed prompt."))
+    post_read_payload = json.loads(post_read_envelope["messages"][-1][1])
+    offer = post_read_payload["observations"][0]["public_payload"]["options"][0]
+
+    assert offer["total_amount"] == "600.00"
+    assert offer["currency"] == "BRL"
+    assert "CURRENT PROVIDER RESULT COMPLETION" in post_read_envelope["system_prompt"]
+    assert "exact final total and currency" in post_read_envelope["system_prompt"]
+    assert "Do not request another provider read" in post_read_envelope["system_prompt"]
+    assert "CURRENT PROVIDER RESULT COMPLETION" not in initial_envelope["system_prompt"]
+
+
 def _grounding_request() -> ModelRequest:
     observed_at = datetime(2026, 8, 11, 5, 30, tzinfo=timezone.utc)
     return ModelRequest(

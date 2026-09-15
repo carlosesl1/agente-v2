@@ -233,6 +233,18 @@ FINAL TURN COMPLETION RULES (highest salience):
   fact, effect, delivery or human acknowledgement.
 """.strip()
 
+_CURRENT_OBSERVATION_COMPLETION_SUFFIX: Final = """
+CURRENT PROVIDER RESULT COMPLETION (highest salience):
+- observations is non-empty, so this is the post-read answer frame. Answer the complete
+  current customer request now from every relevant current public observation.
+- For each relevant positive offer, state its availability and the exact final total and currency
+  when those fields are present. Never describe an exact current observed value as unconfirmed.
+- Preserve useful public labels, dates, start time and formed-group status when present and
+  relevant. Report negative or unknown results faithfully and never invent a missing field.
+- Do not request another provider read after observations. Do not broaden selection,
+  confirmation, reservation, payment, handoff or any effect authority.
+""".strip()
+
 
 _CONSULTATION_HISTORY_SYSTEM_SUFFIX: Final = """
 COMMITTED CONSULTATION HISTORY PROTOCOL:
@@ -506,6 +518,11 @@ def _request_wire(
                 + "\n\n"
                 + _TURN_COMPLETION_SYSTEM_SUFFIX
                 + "\n\nUse business_clock as the authoritative Bahia date and time for hoje, amanhã, agora, horários and all relative dates. Never expose the internal clock object."
+                + (
+                    "\n\n" + _CURRENT_OBSERVATION_COMPLETION_SUFFIX
+                    if request.observations
+                    else ""
+                )
                 + (
                     "\n\n" + _PUBLIC_REPLY_CORRECTION_SUFFIX
                     if request.public_reply_correction_reasons
