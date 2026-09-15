@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 
 _REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
-_CONTROLLED_MODEL = "openai-codex/gpt-5.6-luna"
+_CONTROLLED_MODEL = "openai-codex/gpt-5.6-terra"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -397,7 +397,7 @@ class V2Settings:
             RuntimeMode.GENERAL_AVAILABILITY,
         }:
             if owns_worker and self.hermes_model != _CONTROLLED_MODEL:
-                raise ValueError("write runtime requires openai-codex/gpt-5.6-luna")
+                raise ValueError("write runtime requires openai-codex/gpt-5.6-terra")
             if not _GIT_SHA_RE.fullmatch(self.candidate_git_sha):
                 raise ValueError("candidate git sha must be an immutable 40-character lowercase hex sha")
             if not _IMAGE_DIGEST_RE.fullmatch(self.candidate_image_digest):

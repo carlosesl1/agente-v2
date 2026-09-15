@@ -41,7 +41,7 @@ def _base(tmp_path: Path) -> dict[str, str]:
         "V2_PUBLIC_AUTHORITY_MANIFEST_PATH": str(tmp_path / "authority.json"),
         "V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX": "22" * 32,
         "V2_ALLOWED_SUBSCRIBER_IDS": "1873018537",
-        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-luna",
+        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-terra",
         "V2_CANDIDATE_GIT_SHA": "a" * 40,
         "V2_CANDIDATE_IMAGE_DIGEST": "sha256:" + "b" * 64,
         "V2_GLOBAL_KILL_SWITCH": "false",

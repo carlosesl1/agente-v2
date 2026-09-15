@@ -25,7 +25,7 @@ def test_commercial_catalog_and_private_bokun_map_are_closed_and_consistent() ->
         (ROOT / "config/v2_public_commercial_catalog.json").read_text()
     )
     private_map = json.loads((ROOT / "config/v2_bokun_product_map.json").read_text())
-    prompt = (ROOT / "config/v2_luna_system_prompt.txt").read_text()
+    prompt = (ROOT / "config/v2_terra_system_prompt.txt").read_text()
 
     assert catalog["schema"] == "v2-public-commercial-catalog-v1"
     canonical_ids = [item["canonical_id"] for item in catalog["products"]]
@@ -40,7 +40,7 @@ def test_commercial_catalog_and_private_bokun_map_are_closed_and_consistent() ->
 
 
 def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> None:
-    prompt = (ROOT / "config/v2_luna_system_prompt.txt").read_text()
+    prompt = (ROOT / "config/v2_terra_system_prompt.txt").read_text()
 
     assert len(prompt.encode()) < 65_536
     assert "`reply_chunks` contém uma ou duas mensagens" in prompt
@@ -59,7 +59,7 @@ def test_live_prompt_requires_reply_and_exposes_all_safe_read_contracts() -> Non
 
 
 def test_live_prompt_preserves_whatsapp_identity_installment_and_channel_rules() -> None:
-    prompt = (ROOT / "config/v2_luna_system_prompt.txt").read_text()
+    prompt = (ROOT / "config/v2_terra_system_prompt.txt").read_text()
 
     assert "assistente de IA da Chapada Backpackers" in prompt
     assert "adiantamento" in prompt
@@ -116,7 +116,7 @@ def test_hermes_adapter_parses_closed_knowledge_request_from_live_contract() -> 
 
     adapter = HermesModelAdapter(
         command=("hermes-child",),
-        system_prompt=(ROOT / "config/v2_luna_system_prompt.txt").read_text(),
+        system_prompt=(ROOT / "config/v2_terra_system_prompt.txt").read_text(),
         timeout=30,
         transcript_key=b"commercial-contract-transcript-key",
         run=run,

@@ -31,7 +31,7 @@ _PRIVATE_PUBLIC_SHAPE_RE: Final = re.compile(
     r"(?i)(?:\b(?:product|room|rate|offer|reservation|booking):[a-z0-9._-]+\b|"
     r"\b[0-9a-f]{64}\b|\b[0-9]{5,}\b)"
 )
-DEFAULT_SANDBOX_MODEL: Final = "gpt-5.6-luna"
+DEFAULT_SANDBOX_MODEL: Final = "gpt-5.6-terra"
 
 
 class SandboxProtocolError(ValueError):

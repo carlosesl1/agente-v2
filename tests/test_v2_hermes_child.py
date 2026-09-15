@@ -72,9 +72,11 @@ def test_structured_child_uses_profile_model_provider_and_closed_schema(
                 "--profile",
                 "leads",
                 "-m",
-                "gpt-5.6-luna",
+                "gpt-5.6-terra",
                 "--provider",
                 "openai-codex",
+                "--reasoning-effort",
+                "high",
                 "--safe-mode",
             ),
             _wire(),
@@ -88,8 +90,9 @@ def test_structured_child_uses_profile_model_provider_and_closed_schema(
     assert json.loads(output.split(b"\x00", 1)[1]) == _v8_result()
     kwargs = captured["kwargs"]
     assert kwargs["api_key"] is None
-    assert kwargs["model"] == "gpt-5.6-luna"
+    assert kwargs["model"] == "gpt-5.6-terra"
     assert kwargs["provider"] == "openai-codex"
+    assert kwargs["reasoning_config"] == {"enabled": True, "effort": "high"}
     assert captured["system_message"] == (
         "Return V2 JSON.\n\nYou are running as a tool-free child. "
         "Do not call tools or perform effects. Return exactly one JSON object "
@@ -134,9 +137,11 @@ def test_structured_child_supports_installed_sync_agent_api() -> None:
                 "--profile",
                 "leads",
                 "-m",
-                "gpt-5.6-luna",
+                "gpt-5.6-terra",
                 "--provider",
                 "openai-codex",
+                "--reasoning-effort",
+                "high",
             ),
             _wire(),
             agent_factory=SyncAgent,
@@ -162,9 +167,11 @@ def test_structured_child_rejects_grounding_contract() -> None:
                     "--profile",
                     "leads",
                     "-m",
-                    "gpt-5.6-luna",
+                    "gpt-5.6-terra",
                     "--provider",
                     "openai-codex",
+                    "--reasoning-effort",
+                    "high",
                     "--contract",
                     "grounding-v1",
                 ),

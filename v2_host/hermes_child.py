@@ -192,6 +192,11 @@ async def run_structured(
     profile = _required_option(argv, ("--profile", "-p"), "Hermes profile")
     model = _required_option(argv, ("--model", "-m"), "model")
     provider = _required_option(argv, ("--provider",), "provider")
+    reasoning_effort = _required_option(
+        argv, ("--reasoning-effort",), "reasoning effort"
+    )
+    if reasoning_effort != "high":
+        raise ValueError("reasoning effort must be high")
     _response_contract(argv)
     request_overrides = maya_v8_request_overrides()
     hermes_home = profile_resolver(profile)
@@ -209,6 +214,7 @@ async def run_structured(
             provider=provider,
             max_iterations=1,
             enabled_toolsets=[],
+            reasoning_config={"enabled": True, "effort": reasoning_effort},
             request_overrides=request_overrides,
             quiet_mode=True,
             skip_context_files=True,

@@ -8,7 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.v2.yaml"
-PROMPT = ROOT / "config/v2_luna_system_prompt.txt"
+PROMPT = ROOT / "config/v2_terra_system_prompt.txt"
 WORKFLOW = ROOT / ".github/workflows/phase8.yml"
 
 
@@ -107,13 +107,13 @@ def test_ci_contract_covers_hermetic_operational_gates() -> None:
     assert "agente-v2-deploy" not in workflow
 
 
-def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
+def test_compose_pins_terra_high_tool_free_child_and_signed_authority() -> None:
     env = _environment()
     assert env["HERMES_HOME"] == "/hermes"
     assert env["HOME"] == "/hermes/home"
-    assert env["V2_HERMES_MODEL"] == "openai-codex/gpt-5.6-luna"
+    assert env["V2_HERMES_MODEL"] == "openai-codex/gpt-5.6-terra"
     assert env["V2_HERMES_SYSTEM_PROMPT_PATH"] == (
-        "/app/config/v2_luna_system_prompt.txt"
+        "/app/config/v2_terra_system_prompt.txt"
     )
     command = json.loads(env["V2_HERMES_COMMAND_JSON"])
     assert command == [
@@ -124,9 +124,11 @@ def test_compose_pins_luna_tool_free_child_and_signed_authority() -> None:
         "--profile",
         "leads",
         "-m",
-        "gpt-5.6-luna",
+        "gpt-5.6-terra",
         "--provider",
         "openai-codex",
+        "--reasoning-effort",
+        "high",
         "--safe-mode",
     ]
     assert "chat" not in command
@@ -146,7 +148,7 @@ def test_phase8_child_bootstraps_candidate_root_before_structured_contract_impor
     )
 
 
-def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> None:
+def test_versioned_terra_prompt_closes_model_grammar_and_business_effects() -> None:
     prompt = PROMPT.read_text(encoding="utf-8")
     for literal in (
         "oito campos conversacionais",
@@ -187,7 +189,7 @@ def test_versioned_luna_prompt_closes_model_grammar_and_business_effects() -> No
     assert "v2-model-proposal-v3" not in prompt
     assert "v2-model-proposal-v2" not in prompt
     dockerfile = (ROOT / "Dockerfile.v2").read_text(encoding="utf-8")
-    assert "COPY config/v2_luna_system_prompt.txt" in dockerfile
+    assert "COPY config/v2_terra_system_prompt.txt" in dockerfile
 
 
 def test_compose_has_all_independent_effect_gates_closed_by_default() -> None:

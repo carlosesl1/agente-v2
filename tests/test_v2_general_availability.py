@@ -82,7 +82,7 @@ def test_general_availability_reports_on_demand_turn_capacity(tmp_path: Path) ->
         sqlite_path=(tmp_path / "inbox.sqlite3").resolve(),
         process_role=V2ProcessRole.WORKER,
         runtime_mode=RuntimeMode.GENERAL_AVAILABILITY,
-        hermes_model="openai-codex/gpt-5.6-luna",
+        hermes_model="openai-codex/gpt-5.6-terra",
         candidate_git_sha="a" * 40,
         candidate_image_digest="sha256:" + "b" * 64,
         cloudbeds_api_key="cloudbeds-secret",

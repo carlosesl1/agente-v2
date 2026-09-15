@@ -1,4 +1,19 @@
-# Active correction — V2 rolling provider-read probe dates
+# Active correction — Maya V2 GPT 5.6 Terra at high effort
+
+- Authorized by Carlos in the current chat on 2026-09-15: change the agent that responds on WhatsApp to GPT 5.6 Terra with reasoning effort `high` and execute a real controlled test.
+- Runtime authority verified `OK` before work; authenticated GA/test base `63bf7b9e09609d8d04e45491d5ae07978c85986d`.
+- Branch `fix/v2-terra-high-727d3625`; required worktree `/home/ubuntu/agente-v2/.worktrees/terra-high-727d3625`.
+- Design: `docs/superpowers/specs/2026-09-15-v2-terra-high-runtime.md`.
+- Active plan: `docs/superpowers/plans/2026-09-15-v2-terra-high-runtime.md`.
+- Owners: `v2_host/settings.py`, `v2_host/hermes_child.py`, `compose.v2.yaml`, `Dockerfile.v2` and the versioned Maya system prompt.
+- Fixed contract: provider `openai-codex`; model `gpt-5.6-terra`; `reasoning_config={"enabled":true,"effort":"high"}`; one-turn tool-free child; unchanged business semantics and effect gates.
+- Safety: no reservation, payment, provider POST, handoff, V3, legacy or Ops mutation. The WhatsApp smoke is neutral, starts with `>>>`, uses one operation ID and forbids blind retry after an ambiguous result.
+- Rollout: immutable image; isolated authorized contact first; exact-model/high evidence before GA; rollback to `63bf7b9e09609d8d04e45491d5ae07978c85986d` on any failed gate.
+- Causal RED: 4 expected failures proved missing reasoning config, the Luna settings lock, Luna Compose projection and absent Terra prompt.
+- Focused GREEN: 83 passed. Directly affected gate: 151 passed plus 20 subtests. Canonical clean-environment gate: 2,174 passed, 7 historical deselections and 2,958 subtests; Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
+- NEXT: commit the exact successor, build its immutable OCI image and run the image-level Terra/high smoke before any runtime mutation.
+
+## Preserved closed correction — V2 rolling provider-read probe dates
 
 - Authorized by Carlos in the current chat on 2026-09-14: permanently replace static provider-read probe dates with future dates derived from the Bahia business clock, qualify the exact candidate, deploy first to the isolated test runtime and then to GA only after green gates.
 - Runtime authority verified `OK` before work at 2026-09-14T20:09:52Z; authenticated GA base `0d790e7c8ce842a37abd5baab1035c1b65f774fd`.

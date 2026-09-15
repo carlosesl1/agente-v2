@@ -1296,7 +1296,7 @@ class FastTrackSandboxTests(unittest.TestCase):
         )
         self.assertEqual(
             calls[1][0][-4:],
-            ("--provider", "openai-codex", "--model", "gpt-5.6-luna"),
+            ("--provider", "openai-codex", "--model", "gpt-5.6-terra"),
         )
 
         failing = HermesDockerModel(

@@ -44,7 +44,7 @@ def _controlled_env(tmp_path: Path) -> dict[str, str]:
         "V2_PUBLIC_AUTHORITY_MANIFEST_PATH": str(tmp_path / "authority.json"),
         "V2_PUBLIC_AUTHORITY_HMAC_KEY_HEX": AUTHORITY_KEY,
         "V2_ALLOWED_SUBSCRIBER_IDS": "1873018537",
-        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-luna",
+        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-terra",
         "V2_CANDIDATE_GIT_SHA": CANDIDATE_SHA,
         "V2_CANDIDATE_IMAGE_DIGEST": CANDIDATE_DIGEST,
         "V2_GLOBAL_KILL_SWITCH": "true",
@@ -61,7 +61,7 @@ def test_idle_controlled_canary_loads_with_all_effects_closed(tmp_path: Path) ->
 
     assert settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
     assert settings.allowed_subscriber_ids == ("1873018537",)
-    assert settings.hermes_model == "openai-codex/gpt-5.6-luna"
+    assert settings.hermes_model == "openai-codex/gpt-5.6-terra"
     assert settings.candidate_git_sha == CANDIDATE_SHA
     assert settings.candidate_image_digest == CANDIDATE_DIGEST
     assert settings.global_kill_switch_engaged is True
@@ -234,10 +234,10 @@ def test_controlled_canary_requires_exactly_one_allowed_subscriber(tmp_path: Pat
         V2Settings.from_env(env)
 
 
-def test_controlled_canary_requires_luna_and_immutable_candidate(tmp_path: Path) -> None:
+def test_controlled_canary_requires_terra_and_immutable_candidate(tmp_path: Path) -> None:
     env = _controlled_env(tmp_path)
     env["V2_HERMES_MODEL"] = "openai-codex/gpt-5.6-sol"
-    with pytest.raises(ValueError, match="gpt-5.6-luna"):
+    with pytest.raises(ValueError, match="gpt-5.6-terra"):
         V2Settings.from_env(env)
 
     env = _controlled_env(tmp_path)

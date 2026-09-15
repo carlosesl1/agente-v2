@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 PROMPT = (
-    Path(__file__).resolve().parents[1] / "config" / "v2_luna_system_prompt.txt"
+    Path(__file__).resolve().parents[1] / "config" / "v2_terra_system_prompt.txt"
 ).read_text(encoding="utf-8")
 
 
@@ -232,7 +232,7 @@ def test_activity_availability_semantics_are_not_duplicated_in_the_prompt() -> N
     assert "Nunca deduza disponibilidade por total_amount" not in PROMPT
 
 
-def test_luna_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
+def test_terra_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
     assert "oito campos conversacionais" in PROMPT
     assert (
         "intent,reply_chunks,facts,read_requests,selected_choice_refs,"

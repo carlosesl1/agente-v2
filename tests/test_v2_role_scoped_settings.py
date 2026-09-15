@@ -46,7 +46,7 @@ def _worker_env(tmp_path: Path) -> dict[str, str]:
         "V2_HERMES_SYSTEM_PROMPT": "closed prompt",
         "V2_HERMES_TRANSCRIPT_KEY_HEX": "11" * 32,
         "V2_KNOWLEDGE_BASE_PATH": str((tmp_path / "knowledge.sqlite3").resolve()),
-        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-luna",
+        "V2_HERMES_MODEL": "openai-codex/gpt-5.6-terra",
     }
 
 
@@ -110,7 +110,7 @@ def test_worker_role_ignores_ingress_secrets_and_retains_worker_capabilities(
     assert settings.pix_receiver_profile_id == ""
     assert settings.financial_webhooks_configured is False
     assert settings.read_providers_configured is True
-    assert settings.hermes_model == "openai-codex/gpt-5.6-luna"
+    assert settings.hermes_model == "openai-codex/gpt-5.6-terra"
     assert settings.manychat_api_key == "manychat-key"
 
 
