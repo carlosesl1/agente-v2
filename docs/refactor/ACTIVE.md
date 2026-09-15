@@ -1,17 +1,28 @@
-# Active correction — Maya V2 GPT 5.6 Terra at high effort
+# Active correction — Maya V2 current-observation completion
+
+- Authorized by Carlos in the current chat on 2026-09-15: free disk space, correct the authenticated-price omission found in the real WhatsApp conversation, retest the isolated contact and proceed through the established immutable rollout gates.
+- Runtime authority verified `OK` before work; authenticated GA/test base `2ba6735d063e2232d8539d5e1ef85841b31f0525`, tree `53e19d67a6d48cc6b902a09290bc7c57f3d118ec`, image ID `sha256:13d07f45390110e505def42d098fa33ea1119ff55a887dd624200f62875d093a`.
+- Branch `fix/v2-observation-completeness-727d3625`; required worktree `/home/ubuntu/agente-v2/.worktrees/observation-completeness-727d3625`.
+- Design: `docs/superpowers/specs/2026-09-15-v2-current-observation-completion.md`.
+- Active plan: `docs/superpowers/plans/2026-09-15-v2-current-observation-completion.md`.
+- Owner: `v2_adapters/hermes_model.py`; causal tests: `tests/test_v2_hermes_model_adapter.py`.
+- Root cause: the accepted second frame contained a positive public-safe Cloudbeds observation with exact `600.00 BRL`, but current completion guidance was generic and not conditionally salient at the post-read boundary; the model omitted the total while the controller correctly preserved Maya-owned prose and created no effect.
+- Fixed architecture: append one concise current-observation completion suffix only when `ModelRequest.observations` is non-empty. Maya remains the sole semantic/prose owner; no text parser, regex, keyword gate, deterministic rewrite or secondary semantic model is allowed.
+- Safety: no reservation, payment, provider POST, handoff, V3, legacy or Ops mutation. The isolated WhatsApp retest starts with `>>>`, uses one fresh operation ID once, reconciles all outbox chunks and forbids blind retry after ambiguity.
+- Rollout: immutable image; isolated authorized contact first; exact Terra/high identity plus causal price-answer evidence before GA; preserve the current Terra/high runtime as immediate rollback.
+- Disk precondition closed: 38 clean branch-backed worktrees and recreate-only caches were removed; dirty/detached worktrees, active images/state, rollback and final evidence were preserved. Root free space increased from 569 MiB to 4,658 MiB.
+- Baseline: exact focused adapter suite passed `72` tests in a clean environment before functional edits.
+- NEXT: commit this task binding, write and run the conditional-wire RED, then implement only the dynamic post-observation suffix.
+
+## Preserved deployed correction — Maya V2 GPT 5.6 Terra at high effort
 
 - Authorized by Carlos in the current chat on 2026-09-15: change the agent that responds on WhatsApp to GPT 5.6 Terra with reasoning effort `high` and execute a real controlled test.
-- Runtime authority verified `OK` before work; authenticated GA/test base `63bf7b9e09609d8d04e45491d5ae07978c85986d`.
+- Runtime authority verified `OK` before work; original authenticated GA/test base `63bf7b9e09609d8d04e45491d5ae07978c85986d`.
 - Branch `fix/v2-terra-high-727d3625`; required worktree `/home/ubuntu/agente-v2/.worktrees/terra-high-727d3625`.
 - Design: `docs/superpowers/specs/2026-09-15-v2-terra-high-runtime.md`.
-- Active plan: `docs/superpowers/plans/2026-09-15-v2-terra-high-runtime.md`.
-- Owners: `v2_host/settings.py`, `v2_host/hermes_child.py`, `compose.v2.yaml`, `Dockerfile.v2` and the versioned Maya system prompt.
-- Fixed contract: provider `openai-codex`; model `gpt-5.6-terra`; `reasoning_config={"enabled":true,"effort":"high"}`; one-turn tool-free child; unchanged business semantics and effect gates.
-- Safety: no reservation, payment, provider POST, handoff, V3, legacy or Ops mutation. The WhatsApp smoke is neutral, starts with `>>>`, uses one operation ID and forbids blind retry after an ambiguous result.
-- Rollout: immutable image; isolated authorized contact first; exact-model/high evidence before GA; rollback to `63bf7b9e09609d8d04e45491d5ae07978c85986d` on any failed gate.
-- Causal RED: 4 expected failures proved missing reasoning config, the Luna settings lock, Luna Compose projection and absent Terra prompt.
-- Focused GREEN: 83 passed. Directly affected gate: 151 passed plus 20 subtests. Canonical clean-environment gate: 2,174 passed, 7 historical deselections and 2,958 subtests; Ruff 0.15.10, compileall, diff check and fast-track boundary guard passed.
-- NEXT: commit the exact successor, build its immutable OCI image and run the image-level Terra/high smoke before any runtime mutation.
+- Plan: `docs/superpowers/plans/2026-09-15-v2-terra-high-runtime.md`.
+- Deployed successor: `2ba6735d063e2232d8539d5e1ef85841b31f0525`, tree `53e19d67a6d48cc6b902a09290bc7c57f3d118ec`, provider `openai-codex`, model `gpt-5.6-terra`, reasoning effort `high`.
+- Qualification: focused, affected, canonical, image-level, isolated WhatsApp and GA rollout gates passed; current correction above supersedes only its historical NEXT.
 
 ## Preserved closed correction — V2 rolling provider-read probe dates
 
