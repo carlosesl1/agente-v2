@@ -709,10 +709,57 @@ def test_package_children_bind_only_the_authoritative_parent_workflow() -> None:
     )
 
 
+def test_package_children_sign_component_specific_customer_subjects() -> None:
+    package = _package_command(booking_profile=True)
+    components = tuple(
+        replace(component, party=Party(2, 0))
+        for component in package.payload.components
+    )
+    customer = replace(
+        package.payload.customer,
+        passengers=_group_passengers()[:2],
+    )
+    payload = CommandPayload(components, customer, package.payload.terms)
+    signature = subject_signature(
+        components=components,
+        customer=customer,
+        terms=payload.terms,
+    )
+    command_id, idempotency_key = command_identity(
+        workflow_id=package.workflow_id,
+        draft_id=package.draft_id,
+        draft_version=package.draft_version,
+        signature=signature,
+        operation=package.operation,
+    )
+    package = replace(
+        package,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
+        subject_signature=signature,
+        payload=payload,
+    )
+
+    lodging, activity = split_package_command(package)
+
+    assert lodging.operation is ReservationOperation.RESERVE_LODGING
+    assert lodging.payload.customer.customer_ref == package.payload.customer.customer_ref
+    assert lodging.payload.customer.birth_date is None
+    assert lodging.payload.customer.gender is None
+    assert lodging.payload.customer.passengers == ()
+    assert activity.operation is ReservationOperation.BOOK_ACTIVITY
+    assert activity.payload.customer == package.payload.customer
+    assert lodging.subject_signature != activity.subject_signature
+    assert lodging.command_id != activity.command_id
+    assert lodging.idempotency_key != activity.idempotency_key
+
+
 def _group_activity_command(
     passengers: tuple[PassengerFacts, ...],
     *,
     party: Party = Party(2, 1),
+    holder_birth_date: date | None = None,
+    holder_gender: str | None = None,
 ) -> ReservationCommand:
     component = replace(
         _lookup("bokun").offers[0],
@@ -724,6 +771,8 @@ def _group_activity_command(
         email="group@example.invalid",
         phone_e164="+1" + "202" + "555" + "0456",
         country_code="BR",
+        birth_date=holder_birth_date,
+        gender=holder_gender,
         passengers=passengers,
     )
     terms = EconomicTerms(payment_method="wise")
@@ -839,6 +888,36 @@ def test_group_activity_dispatch_v2_binds_each_passenger_in_party_order() -> Non
     ]
     assert "birth_date" not in payload["customer"]
     assert "gender" not in payload["customer"]
+
+
+def test_group_activity_dispatch_carries_distinct_holder_details() -> None:
+    command = _group_activity_command(
+        _group_passengers(),
+        holder_birth_date=date(1985, 7, 8),
+        holder_gender="m",
+    )
+
+    payload = json.loads(
+        _provider_payload(
+            command,
+            "bokun",
+            {
+                "bokun_product_id": "912303",
+                "start_time_id": "start-1",
+                "rate_id": "rate-1",
+                "adult_pricing_category_id": "adult-1",
+                "child_pricing_category_id": "child-1",
+            },
+        )
+    )
+
+    assert payload["customer"]["birth_date"] == "1985-07-08"
+    assert payload["customer"]["gender"] == "m"
+    assert [item["full_name"] for item in payload["customer"]["passengers"]] == [
+        "Pessoa Um",
+        "Pessoa Dois",
+        "Pessoa Três",
+    ]
 
 
 @pytest.mark.parametrize(

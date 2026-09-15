@@ -70,6 +70,17 @@ _HANDOFF_STATUSES: Final = frozenset(
         "cancelled",
     }
 )
+_EXECUTION_STATUSES: Final = frozenset(
+    {
+        "queued",
+        "executing",
+        "confirmed",
+        "failed_before_provider",
+        "failed_no_effect",
+        "partial_failure",
+        "uncertain",
+    }
+)
 
 
 class InvalidModelProposal(ValueError):
@@ -508,7 +519,9 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "progress review must be initial and mutually exclusive"
             )
-        if self.active_execution_status not in (None, "queued", "executing"):
+        if self.active_execution_status is not None and (
+            self.active_execution_status not in _EXECUTION_STATUSES
+        ):
             raise InvalidModelProposal(
                 "active_execution_status is outside the closed request catalog"
             )

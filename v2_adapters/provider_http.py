@@ -1814,20 +1814,24 @@ class BokunHTTPTransport:
             or (children and not child_category)
         ):
             raise ProviderHTTPError("Bókun private binding v2 is incomplete")
-        customer = _exact_object(
-            dispatch["customer"],
-            fields=frozenset(
-                (
-                    "customer_ref",
-                    "full_name",
-                    "email",
-                    "phone_e164",
-                    "country_code",
-                    "passengers",
-                )
-            ),
-            name="Bókun customer v2",
+        customer_value = dispatch["customer"]
+        customer_fields = frozenset(
+            (
+                "customer_ref",
+                "full_name",
+                "email",
+                "phone_e164",
+                "country_code",
+                "passengers",
+            )
         )
+        customer_fields_with_holder = customer_fields | {"birth_date", "gender"}
+        if not isinstance(customer_value, Mapping) or frozenset(customer_value) not in {
+            customer_fields,
+            customer_fields_with_holder,
+        }:
+            raise ProviderHTTPError("Bókun customer v2 fields mismatch")
+        customer = dict(customer_value)
         terms = _exact_object(
             dispatch["terms"],
             fields=frozenset(("payment_method", "add_ons")),
@@ -1841,7 +1845,15 @@ class BokunHTTPTransport:
         email = _text(customer["email"])
         phone = _text(customer["phone_e164"])
         country = _text(customer["country_code"])
+        main_birth_date = _text(customer.get("birth_date"))
+        main_gender = _text(customer.get("gender"))
         main_name_parts = main_name.split() if main_name else []
+        try:
+            parsed_main_birth = (
+                date.fromisoformat(main_birth_date) if main_birth_date is not None else None
+            )
+        except ValueError as exc:
+            raise ProviderHTTPError("Bókun main contact birth date is invalid") from exc
         if (
             len(main_name_parts) < 2
             or email is None
@@ -1850,8 +1862,18 @@ class BokunHTTPTransport:
             or re.fullmatch(r"\+[1-9][0-9]{7,14}", phone) is None
             or country is None
             or re.fullmatch(r"[A-Z]{2}", country) is None
+            or (main_birth_date is None) != (main_gender is None)
+            or (
+                main_birth_date is not None
+                and (
+                    parsed_main_birth is None
+                    or parsed_main_birth.isoformat() != main_birth_date
+                    or main_gender not in ("m", "f")
+                )
+            )
         ):
             raise ProviderHTTPError("Bókun customer v2 fields are invalid")
+        assert main_name is not None
         assert phone is not None
         customer_language = customer_language_from_phone(phone)
         provider_locale, contact_language = _bokun_languages(
@@ -1995,21 +2017,37 @@ class BokunHTTPTransport:
             "language": contact_language,
         }
         sole_passenger_contact = len(passengers) == 1 and adults + children == 1
-        if sole_passenger_contact or passengers[0]["full_name"] == main_name:
-            primary_passenger = passengers[0]
+        matching_passenger = (
+            passengers[0]
+            if sole_passenger_contact
+            else next(
+                (
+                    passenger
+                    for passenger in passengers
+                    if " ".join(passenger["full_name"].split()).casefold()
+                    == " ".join(main_name.split()).casefold()
+                ),
+                None,
+            )
+        )
+        if matching_passenger is not None:
             main_contact.update(
                 {
-                    "dateOfBirth": primary_passenger["dateOfBirth"],
-                    "gender": primary_passenger["gender"],
+                    "dateOfBirth": matching_passenger["dateOfBirth"],
+                    "gender": matching_passenger["gender"],
                 }
             )
             if sole_passenger_contact:
                 main_contact.update(
                     {
-                        "firstName": primary_passenger["firstName"],
-                        "lastName": primary_passenger["lastName"],
+                        "firstName": matching_passenger["firstName"],
+                        "lastName": matching_passenger["lastName"],
                     }
                 )
+        elif main_birth_date is not None and main_gender is not None:
+            main_contact.update(
+                {"dateOfBirth": main_birth_date, "gender": main_gender}
+            )
         try:
             submit_body = self._submit_body_v2(
                 checkout_payload,
@@ -2126,11 +2164,10 @@ class BokunHTTPTransport:
         checkout = payload[0] if isinstance(payload, list) and payload else payload
         if not isinstance(checkout, Mapping):
             raise ProviderHTTPError("Bókun checkout fields mismatch")
-        options = checkout.get("options")
-        option = options[0] if isinstance(options, list) and options else None
-        if not isinstance(option, Mapping):
-            raise ProviderHTTPError("Bókun checkout lacks an option")
-        checkout_amount = BokunHTTPTransport._checkout_amount(checkout)
+        option = BokunHTTPTransport._external_checkout_option(checkout)
+        if option is None:
+            raise ProviderHTTPError("Bókun checkout lacks an external-payment option")
+        checkout_amount = BokunHTTPTransport._checkout_amount({"options": [option]})
         if (
             checkout_amount is None
             or checkout_amount.quantize(Decimal("0.01")) != expected_amount
@@ -2245,7 +2282,6 @@ class BokunHTTPTransport:
             passenger_answers.append(
                 {
                     "bookingId": booking_id,
-                    "pricingCategoryId": passenger["category_id"],
                     "passengerDetails": answers(answer_ids, values),
                 }
             )
@@ -2264,7 +2300,6 @@ class BokunHTTPTransport:
                     "activityBookings": [
                         {
                             "bookingId": activity_booking,
-                            "activityId": product_id,
                             "passengers": passenger_answers,
                         }
                     ],
@@ -2868,6 +2903,25 @@ class BokunHTTPTransport:
         return activity_booking, passenger_booking
 
     @staticmethod
+    def _external_checkout_option(payload: object) -> Mapping[str, object] | None:
+        checkout = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(checkout, Mapping):
+            return None
+        options = checkout.get("options")
+        if not isinstance(options, list):
+            return None
+        return next(
+            (
+                option
+                for option in options
+                if isinstance(option, Mapping)
+                and isinstance(option.get("allowedMethods"), list)
+                and "RESERVE_FOR_EXTERNAL_PAYMENT" in option["allowedMethods"]
+            ),
+            None,
+        )
+
+    @staticmethod
     def _checkout_amount(payload: object) -> Decimal | None:
         checkout = payload[0] if isinstance(payload, list) and payload else payload
         if not isinstance(checkout, Mapping):
@@ -2900,12 +2954,8 @@ class BokunHTTPTransport:
 
     @staticmethod
     def _checkout_base_amount(payload: object) -> Decimal | None:
-        checkout = payload[0] if isinstance(payload, list) and payload else payload
-        if not isinstance(checkout, Mapping):
-            return None
-        options = checkout.get("options")
-        option = options[0] if isinstance(options, list) and options else None
-        if not isinstance(option, Mapping):
+        option = BokunHTTPTransport._external_checkout_option(payload)
+        if option is None:
             return None
         return _first_amount(option, "amount", "totalPrice", "formattedAmount")
 

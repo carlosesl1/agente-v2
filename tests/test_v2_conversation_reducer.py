@@ -240,6 +240,8 @@ def test_complete_mixed_group_creates_signed_summary_without_handoff() -> None:
             ModelFact("adults", 2),
             ModelFact("children", 1),
             ModelFact("payment_method", "wise"),
+            ModelFact("birth_date", date(1985, 7, 8)),
+            ModelFact("gender", "m"),
         ),
         passengers=(
             _passenger(
@@ -336,6 +338,8 @@ def test_post_summary_passenger_correction_revokes_old_authority_without_command
                 ModelFact("adults", 2),
                 ModelFact("children", 0),
                 ModelFact("payment_method", "wise"),
+                ModelFact("birth_date", date(1985, 7, 8)),
+                ModelFact("gender", "m"),
             ),
             passengers=(
                 _passenger(

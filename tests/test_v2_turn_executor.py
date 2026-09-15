@@ -4543,6 +4543,154 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
         store.close()
 
 
+def test_complete_group_manifest_still_marks_distinct_holder_profile_incomplete() -> None:
+    store = SQLiteBoundaryStore.open_memory_v8()
+    private = SQLitePrivateCustomerFactStore.open_memory()
+    second_event = replace(
+        EVENT,
+        event_id="evt:" + "c" * 64,
+        text="Pode preparar o resumo?",
+        occurred_at=NOW + timedelta(seconds=1),
+        payload_hash="c" * 64,
+    )
+    second_batch = replace(
+        BATCH,
+        batch_id="agg:" + "c" * 64,
+        events=(second_event,),
+        combined_text=second_event.text,
+    )
+    first = ModelProposal(
+        source_event_id=BATCH.batch_id,
+        intent="inform",
+        reply_chunks=("Registrei os dados dos passageiros.",),
+        facts=(
+            ModelFact("language", "pt-BR"),
+            ModelFact("service", "agency"),
+            ModelFact("product_id", "product:buracao"),
+            ModelFact("activity_date", date(2026, 8, 12)),
+            ModelFact("adults", 2),
+            ModelFact("children", 0),
+            ModelFact("payment_method", "stripe"),
+        ),
+        passengers=(
+            PassengerInput(1, "adult", "Pessoa Um", date(1990, 1, 2), "f", "BR"),
+            PassengerInput(2, "adult", "Pessoa Dois", date(1992, 3, 4), "m", "BR"),
+        ),
+        read_requests=(),
+        effect_proposals=(),
+    )
+    second = ModelProposal(
+        source_event_id=second_batch.batch_id,
+        intent="inform",
+        reply_chunks=("Qual é a data de nascimento do contato principal?",),
+        facts=(),
+        read_requests=(),
+        effect_proposals=(),
+        clarification_question="Qual é a data de nascimento do contato principal?",
+    )
+    model = FakeAuditedModel(store, [first, second])
+    second_authority = replace(
+        AUTHORITY,
+        authorization_id="auth:distinct-holder-profile",
+        allocation_ids=("allocation:distinct-holder-profile",),
+        allocation_manifest_hash="c" * 64,
+    )
+    _install_public_authority(store, AUTHORITY)
+    _install_public_authority(store, second_authority)
+    executor = _executor(
+        store=store,
+        model=model,
+        profile=FakeProfile(store),
+        private_customer_facts=private,
+        public_authority=MappingAuthority(
+            {
+                BATCH.batch_id: AUTHORITY,
+                second_batch.batch_id: second_authority,
+            }
+        ),
+    )
+    try:
+        executor.execute(BATCH)
+        executor.execute(second_batch)
+
+        request = model.calls[-1]
+        assert request.passenger_manifest_status is not None
+        assert request.passenger_manifest_status.complete_positions == (1, 2)
+        assert request.private_profile_complete is False
+        assert "birth_date" not in request.private_customer_fact_names
+    finally:
+        private.close()
+        store.close()
+
+
+def test_terminal_execution_status_reaches_maya_without_processing_correction() -> None:
+    store, model, read_port, second_batch, executor = _approval_expiry_fixture(
+        approval_ttl=timedelta(minutes=30),
+        confirmation_clock=SequenceClock(),
+    )
+
+    class TerminalStatusResolver:
+        def resolve(self, state):
+            return "failed_no_effect"
+
+    try:
+        executor.execute(second_batch)
+        reads_after_confirmation = len(read_port.calls)
+        followup_event = replace(
+            EVENT,
+            event_id="evt:" + "d" * 64,
+            text="Maya, deu certo?",
+            occurred_at=NOW + timedelta(seconds=6),
+            payload_hash="d" * 64,
+        )
+        followup_batch = replace(
+            BATCH,
+            batch_id="agg:" + "d" * 64,
+            events=(followup_event,),
+            combined_text=followup_event.text,
+        )
+        terminal_reply = (
+            "Não deu certo: nenhuma reserva foi confirmada e nenhum pagamento foi criado."
+        )
+        model.proposals.append(
+            ModelProposal(
+                source_event_id=followup_batch.batch_id,
+                intent="inform",
+                reply_chunks=(terminal_reply,),
+                facts=(),
+                read_requests=(),
+                effect_proposals=(),
+            )
+        )
+        followup_authority = replace(
+            AUTHORITY,
+            authorization_id="auth:terminal-followup",
+            allocation_ids=("allocation:terminal-followup",),
+            allocation_manifest_hash="d" * 64,
+        )
+        _install_public_authority(store, followup_authority)
+        executor._public_authority = MappingAuthority(
+            {
+                BATCH.batch_id: AUTHORITY,
+                second_batch.batch_id: AUTHORITY,
+                followup_batch.batch_id: followup_authority,
+            }
+        )
+        executor._execution_status_resolver = TerminalStatusResolver()
+
+        result = executor.execute(followup_batch)
+
+        assert result.reply_chunks == (terminal_reply,)
+        assert model.calls[-1].active_execution_status == "failed_no_effect"
+        assert model.calls[-1].public_reply_correction_reasons == ()
+        assert len(read_port.calls) == reads_after_confirmation
+        assert "process" not in result.reply_chunks[0].casefold()
+        assert result.receipt.command_rows == ()
+        assert result.receipt.relay_rows == ()
+    finally:
+        store.close()
+
+
 def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(minutes=30),

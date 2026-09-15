@@ -89,6 +89,7 @@ def _checkout(
             {
                 "formattedAmount": amount,
                 "invoice": {"remainingAmount": amount},
+                "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
             }
         ],
         "questions": {
@@ -260,6 +261,53 @@ def test_submit_answers_supported_checkout_fields_even_when_provider_marks_them_
     assert main_answers["gender"] == "m"
     assert passenger_answers["dateOfBirth"] == "1990-01-02"
     assert passenger_answers["gender"] == "m"
+
+
+def test_submit_selects_option_that_explicitly_allows_external_payment() -> None:
+    checkout = _checkout()
+    checkout["options"] = [
+        {
+            "formattedAmount": "999.00",
+            "invoice": {"remainingAmount": "999.00"},
+            "allowedMethods": ["CUSTOMER_FULL_PAYMENT"],
+        },
+        {
+            "formattedAmount": "300.00",
+            "invoice": {"remainingAmount": "300.00"},
+            "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
+        },
+    ]
+
+    body = BokunHTTPTransport._submit_body_v2(
+        checkout,
+        session_id="session:external-option",
+        activity_booking="activity-booking-1",
+        product_id="913372",
+        main_contact={
+            "firstName": "Carlos",
+            "lastName": "Eduardo",
+            "email": "carlos@example.invalid",
+            "phoneNumber": "+55" + "759" + "999" + "9999",
+            "nationality": "BR",
+            "language": "pt",
+            "dateOfBirth": "1990-01-02",
+            "gender": "m",
+        },
+        passengers=(
+            {
+                "booking_id": "passenger-booking-1",
+                "category_id": "857489",
+                "firstName": "Carlos",
+                "lastName": "Eduardo",
+                "nationality": "BR",
+                "dateOfBirth": "1990-01-02",
+                "gender": "m",
+            },
+        ),
+        expected_amount=Decimal("300.00"),
+    )
+
+    assert body["paymentMethod"] == "RESERVE_FOR_EXTERNAL_PAYMENT"
 
 
 def test_bokun_v2_submit_booking_id_confirms_without_readback() -> None:
@@ -823,15 +871,18 @@ def test_bokun_multi_passenger_cart_checkout_submit_by_booking_id() -> None:
             )
         if call == 3:
             body = json.loads(request.content)
-            submitted = body["shoppingCart"]["bookingAnswers"][
+            activity_answers = body["shoppingCart"]["bookingAnswers"][
                 "activityBookings"
-            ][0]["passengers"]
+            ][0]
+            assert set(activity_answers) == {"bookingId", "passengers"}
+            submitted = activity_answers["passengers"]
             assert [item["bookingId"] for item in submitted] == [
                 item[0] for item in category_rows
             ]
-            assert [item["pricingCategoryId"] for item in submitted] == [
-                item[1] for item in category_rows
-            ]
+            assert all(
+                set(item) == {"bookingId", "passengerDetails"}
+                for item in submitted
+            )
             return httpx.Response(
                 200,
                 request=request,
@@ -846,6 +897,167 @@ def test_bokun_multi_passenger_cart_checkout_submit_by_booking_id() -> None:
     )
 
     assert result == {"status": "confirmed", "booking_id": "booking-group-123"}
+    assert len(seen) == 3
+
+
+def test_bokun_group_matches_main_contact_in_any_passenger_position() -> None:
+    seen: list[httpx.Request] = []
+    payload = _group_dispatch_payload()
+    customer = payload["customer"]
+    assert isinstance(customer, dict)
+    customer["full_name"] = "Pessoa Grupo Dois"
+    rows = (
+        ("adult-booking-1", "adult-1"),
+        ("adult-booking-2", "adult-1"),
+        ("child-booking-1", "child-1"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-group-1",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": booking_id,
+                                    "pricingCategoryId": category_id,
+                                }
+                                for booking_id, category_id in rows
+                            ],
+                        }
+                    ],
+                },
+            )
+        if len(seen) == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=_checkout(
+                    rows,
+                    amount="750.00",
+                    activity_booking="activity-group-1",
+                ),
+            )
+        body = json.loads(request.content)
+        main_answers = {
+            item["questionId"]: item["values"][0]
+            for item in body["shoppingCart"]["bookingAnswers"][
+                "mainContactDetails"
+            ]
+        }
+        assert main_answers["dateOfBirth"] == "1992-03-04"
+        assert main_answers["gender"] == "m"
+        return httpx.Response(
+            200,
+            request=request,
+            json={"booking": {"bookingId": "booking-main-position-2"}},
+        )
+
+    result = _transport(handler)(
+        "book_activity",
+        payload,
+        idempotency_key="idem:bokun-main-position-2",
+    )
+
+    assert result == {
+        "status": "confirmed",
+        "booking_id": "booking-main-position-2",
+    }
+    assert len(seen) == 3
+
+
+def test_bokun_group_uses_distinct_main_contact_details_without_copying_passenger() -> None:
+    seen: list[httpx.Request] = []
+    payload = _group_dispatch_payload()
+    customer = payload["customer"]
+    assert isinstance(customer, dict)
+    customer["full_name"] = "Contato Principal"
+    customer["birth_date"] = "1985-07-08"
+    customer["gender"] = "m"
+    rows = (
+        ("adult-booking-1", "adult-1"),
+        ("adult-booking-2", "adult-1"),
+        ("child-booking-1", "child-1"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            session = request.url.path.split("/session/", 1)[1].split("/", 1)[0]
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "uuid": session,
+                    "activityBookings": [
+                        {
+                            "bookingId": "activity-group-1",
+                            "activityId": "913372",
+                            "pricingCategoryBookings": [
+                                {
+                                    "bookingId": booking_id,
+                                    "pricingCategoryId": category_id,
+                                }
+                                for booking_id, category_id in rows
+                            ],
+                        }
+                    ],
+                },
+            )
+        if len(seen) == 2:
+            return httpx.Response(
+                200,
+                request=request,
+                json=_checkout(
+                    rows,
+                    amount="750.00",
+                    activity_booking="activity-group-1",
+                ),
+            )
+        body = json.loads(request.content)
+        main_answers = {
+            item["questionId"]: item["values"][0]
+            for item in body["shoppingCart"]["bookingAnswers"][
+                "mainContactDetails"
+            ]
+        }
+        assert main_answers["dateOfBirth"] == "1985-07-08"
+        assert main_answers["gender"] == "m"
+        passenger_birth_dates = [
+            next(
+                answer["values"][0]
+                for answer in passenger["passengerDetails"]
+                if answer["questionId"] == "dateOfBirth"
+            )
+            for passenger in body["shoppingCart"]["bookingAnswers"][
+                "activityBookings"
+            ][0]["passengers"]
+        ]
+        assert "1985-07-08" not in passenger_birth_dates
+        return httpx.Response(
+            200,
+            request=request,
+            json={"booking": {"bookingId": "booking-distinct-holder"}},
+        )
+
+    result = _transport(handler)(
+        "book_activity",
+        payload,
+        idempotency_key="idem:bokun-distinct-holder",
+    )
+
+    assert result == {
+        "status": "confirmed",
+        "booking_id": "booking-distinct-holder",
+    }
     assert len(seen) == 3
 
 

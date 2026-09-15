@@ -57,7 +57,14 @@ def test_package_relay_registers_complete_group_before_projection_and_restart(tm
         projector._execution = completion._execution = execution
         _finish_next(execution, now=NOW + timedelta(seconds=3), certainty=ExecutionCertainty.EFFECT_CONFIRMED if success else ExecutionCertainty.CALLED_NO_EFFECT)
         assert projector.run_once(now=NOW + timedelta(seconds=4)).inserted == (2 if success else 0)
-        assert completion.run_once(now=NOW + timedelta(seconds=4)).inserted == (1 if success else 0)
+        assert completion.run_once(now=NOW + timedelta(seconds=4)).inserted == 1
+        if not success:
+            text = public._connection.execute(
+                'SELECT text FROM public_outbox'
+            ).fetchone()[0]
+            assert 'foi confirmad' in text
+            assert 'não foi possível concluir' in text
+            assert 'Nenhum pagamento foi criado' in text
         _relay(execution, commands).run_once(now=NOW + timedelta(seconds=5))
         assert projector.run_once(now=NOW + timedelta(seconds=6)).inserted == 0
         assert completion.run_once(now=NOW + timedelta(seconds=6)).inserted == 0

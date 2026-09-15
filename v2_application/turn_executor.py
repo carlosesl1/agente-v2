@@ -61,6 +61,7 @@ from reservation_domain import (
 )
 from reservation_followup import HandoffRequested
 from v2_application.active_execution import (
+    ExecutionStatusResolver,
     active_execution_status,
     blocks_active_commercial_progression,
     is_regressive_post_command_reply,
@@ -1393,6 +1394,7 @@ class V2TurnExecutor:
         locale: str,
         turn_timeout: timedelta,
         max_commit_attempts: int,
+        execution_status_resolver: ExecutionStatusResolver | None = None,
         ops_recorder: OpsRecorder | None = None,
         ops_full_content: bool = False,
     ) -> None:
@@ -1427,6 +1429,10 @@ class V2TurnExecutor:
             raise ValueError("turn_timeout must be a positive exact timedelta")
         if type(max_commit_attempts) is not int or not 1 <= max_commit_attempts <= 3:
             raise ValueError("max_commit_attempts must be an exact integer from 1 to 3")
+        if execution_status_resolver is not None and not callable(
+            getattr(execution_status_resolver, "resolve", None)
+        ):
+            raise TypeError("execution_status_resolver must expose resolve")
         if type(ops_full_content) is not bool:
             raise TypeError("ops_full_content must be an exact bool")
         self._store = store
@@ -1440,6 +1446,7 @@ class V2TurnExecutor:
         self._locale = locale
         self._turn_timeout = turn_timeout
         self._max_commit_attempts = max_commit_attempts
+        self._execution_status_resolver = execution_status_resolver
         self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
         self._ops_full_content = ops_full_content
 
@@ -1621,9 +1628,15 @@ class V2TurnExecutor:
         except StateNotFound:
             self._store.create_genesis(batch.lead_id, claimed_at=now)
         current, fencing_token = self._store.acquire_fence(batch.lead_id)
+        execution_status = (
+            active_execution_status(current.state)
+            if self._execution_status_resolver is None
+            else self._execution_status_resolver.resolve(current.state)
+        )
         projection = self._store.load_latest_conversation_projection(batch.lead_id)
         if projection is None:
             projection = _genesis_projection(self._locale)
+        assert type(projection) is ConversationProjection
         projection = attach_projection_manifest(
             projection,
             self._private_customer_facts.load_passenger_manifest(batch.lead_id),
@@ -1652,6 +1665,15 @@ class V2TurnExecutor:
         private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")
+
+        def profile_ready() -> bool:
+            return reservation_profile_ready(
+                profile,
+                projection,
+                now,
+                private_facts=private_facts,
+                activity_party=projection_manifest_party(projection),
+            )
         journal_fact_names = (
             self._private_customer_facts.turn_supplied_fact_names(
                 batch.lead_id,
@@ -1662,12 +1684,7 @@ class V2TurnExecutor:
             set(journal_fact_names) & _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
         )
         collection_only = False
-        effective_profile_complete = reservation_profile_ready(
-            profile,
-            projection,
-            now,
-            private_facts=private_facts,
-        )
+        effective_profile_complete = profile_ready()
         pending_action = (
             None
             if current.state.handoff is not None and current.state.handoff.queue_active
@@ -1708,7 +1725,7 @@ class V2TurnExecutor:
                 if current.state.handoff is not None
                 else None
             ),
-            active_execution_status=active_execution_status(current.state),
+            active_execution_status=execution_status,
         )
 
         def request_public_reply_correction(
@@ -1729,12 +1746,7 @@ class V2TurnExecutor:
                         profile=profile,
                         now=now,
                     ),
-                    private_profile_complete=reservation_profile_ready(
-                        profile,
-                        projection,
-                        now,
-                        private_facts=private_facts,
-                    ),
+                    private_profile_complete=profile_ready(),
                 ),
                 audited=audited,
                 expected=expected,
@@ -1791,12 +1803,7 @@ class V2TurnExecutor:
                 item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
                 for item in first_private_facts
             )
-            effective_profile_complete = reservation_profile_ready(
-                profile,
-                projection,
-                now,
-                private_facts=private_facts,
-            )
+            effective_profile_complete = profile_ready()
         collection_only = bool(first_invalid_private_facts)
         first_proposal = replace(first_proposal, facts=first_public_facts)
         correction_reason: PublicReplyCorrectionReason | None = None
@@ -1819,7 +1826,11 @@ class V2TurnExecutor:
                     PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY
                 )
             first_proposal = normalized
-        if blocks_active_commercial_progression(current.state, first_proposal):
+        if blocks_active_commercial_progression(
+            current.state,
+            first_proposal,
+            execution_status=execution_status,
+        ):
             first_proposal = _active_execution_guard_proposal(
                 first_proposal,
                 locale=projection.locale,
@@ -1842,10 +1853,11 @@ class V2TurnExecutor:
             first_proposal,
             frame_commitment_hash=first_frame_hash,
         )
+        effective_profile_complete = profile_ready()
         selection_review = (
             not collection_only
             and current.state.handoff is None
-            and active_execution_status(current.state) is None
+            and execution_status is None
             and pending_action is None
             and first_proposal.intent == "inform"
             and not first_proposal.read_requests
@@ -1934,12 +1946,7 @@ class V2TurnExecutor:
                     item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
                     for item in review_private_facts
                 )
-                effective_profile_complete = reservation_profile_ready(
-                    profile,
-                    projection,
-                    now,
-                    private_facts=private_facts,
-                )
+                effective_profile_complete = profile_ready()
             review_proposal = replace(review_proposal, facts=review_public_facts)
             if review_invalid_private_facts:
                 collection_only = True
@@ -1964,6 +1971,7 @@ class V2TurnExecutor:
                     review_proposal,
                     frame_commitment_hash=review_frame_hash,
                 )
+                effective_profile_complete = profile_ready()
             review_audited = AuditedModelTurn.from_frames(
                 proposal=review_proposal,
                 frames=review_audited.frames,
@@ -2056,7 +2064,11 @@ class V2TurnExecutor:
                 item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
             )
             derived_confirmation_reads = False
-        if blocks_active_commercial_progression(current.state, first_proposal):
+        if blocks_active_commercial_progression(
+            current.state,
+            first_proposal,
+            execution_status=execution_status,
+        ):
             read_requests = ()
             derived_confirmation_reads = False
             first_proposal = _active_execution_guard_proposal(
@@ -2187,7 +2199,7 @@ class V2TurnExecutor:
                     if current.state.handoff is not None
                     else None
                 ),
-                active_execution_status=active_execution_status(current.state),
+                active_execution_status=execution_status,
             )
             second_audited = trace.call(
                 NodeType.MAYA_REQUEST,
@@ -2229,12 +2241,7 @@ class V2TurnExecutor:
                     item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
                     for item in second_private_facts
                 )
-                effective_profile_complete = reservation_profile_ready(
-                    profile,
-                    projection,
-                    now,
-                    private_facts=private_facts,
-                )
+                effective_profile_complete = profile_ready()
             proposal = replace(proposal, facts=second_public_facts)
             if second_invalid_private_facts:
                 collection_only = True
@@ -2245,7 +2252,11 @@ class V2TurnExecutor:
                     invalid_fact_names=second_invalid_private_facts,
                     revoke_pending=pending_action is not None,
                 )
-            if blocks_active_commercial_progression(current.state, proposal):
+            if blocks_active_commercial_progression(
+                current.state,
+                proposal,
+                execution_status=execution_status,
+            ):
                 proposal = _active_execution_guard_proposal(
                     proposal,
                     locale=projection.locale,
@@ -2266,6 +2277,7 @@ class V2TurnExecutor:
                 proposal,
                 frame_commitment_hash=second_frame_hash,
             )
+            effective_profile_complete = profile_ready()
             proposal = preserve_initial_facts(first_proposal, proposal)
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
@@ -2343,12 +2355,7 @@ class V2TurnExecutor:
                             item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
                             for item in selection_review_private_facts
                         )
-                        effective_profile_complete = reservation_profile_ready(
-                            profile,
-                            projection,
-                            now,
-                            private_facts=private_facts,
-                        )
+                        effective_profile_complete = profile_ready()
                     proposal = preserve_initial_facts(
                         proposal,
                         replace(
@@ -2407,7 +2414,11 @@ class V2TurnExecutor:
                 pending_action=pending_action,
                 locale=projection.locale,
             )
-        if blocks_active_commercial_progression(current.state, proposal):
+        if blocks_active_commercial_progression(
+            current.state,
+            proposal,
+            execution_status=execution_status,
+        ):
             proposal = _active_execution_guard_proposal(
                 proposal,
                 locale=projection.locale,
@@ -2420,6 +2431,7 @@ class V2TurnExecutor:
         elif is_regressive_post_command_reply(
             current.state,
             proposal,
+            execution_status=execution_status,
         ):
             proposal, audited = request_public_reply_correction(
                 proposal,

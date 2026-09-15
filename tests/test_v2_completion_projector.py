@@ -14,6 +14,7 @@ from tests.test_v2_outcome_projector import (
     _stores,
 )
 from reservation_domain import ExecutionCertainty
+from reservation_execution import PreparationFailure
 from v2_adapters.stripe import StripeLinkAdapter
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.completion import PublicOutboxStore
@@ -87,6 +88,25 @@ def _completion(execution, payments, public: PublicOutboxStore) -> CompletionPro
             BusinessUnit.AGENCY: "stripe-account:agency:test",
         },
     )
+
+
+def _fail_next_before_provider(execution, *, now) -> None:
+    claim = execution.claim_command(
+        worker_id="worker:completion-preflight-fixture",
+        now=now,
+        lease_ttl=timedelta(seconds=30),
+    )
+    assert claim is not None
+    disposition = execution.release_preparation_failure(
+        claim,
+        PreparationFailure(
+            reason="booking_profile_incomplete",
+            retryable=False,
+            evidence=("f" * 64,),
+        ),
+        now=now,
+    )
+    assert disposition.value == "terminal_not_called"
 
 
 def test_payment_link_text_uses_the_natural_article_for_each_business_unit() -> None:
@@ -333,6 +353,123 @@ def test_unknown_stripe_link_never_enters_public_outbox(tmp_path: Path) -> None:
         assert len(texts) == 1
         assert "confirmad" in texts[0].casefold()
         assert "http" not in texts[0]
+    finally:
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_package_no_effect_failure_enters_public_outbox_once_without_payment(
+    tmp_path: Path,
+) -> None:
+    execution, payments, outcome = _stores(tmp_path)
+    public = PublicOutboxStore((tmp_path / "public-package-failed.sqlite3").resolve())
+    try:
+        commands = ReservationAllocator().allocate(_package_command()).commands
+        _persist(execution, commands)
+        _fail_next_before_provider(
+            execution,
+            now=NOW + timedelta(seconds=1),
+        )
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=2),
+            certainty=ExecutionCertainty.CALLED_NO_EFFECT,
+        )
+        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 0
+
+        projector = _completion(execution, payments, public)
+        first = projector.run_once(now=NOW + timedelta(seconds=4))
+        replay = projector.run_once(now=NOW + timedelta(seconds=5))
+
+        assert first.inserted == 1
+        assert replay.inserted == 0
+        assert payments.completed_offers() == ()
+        text = public._connection.execute(
+            "SELECT text FROM public_outbox"
+        ).fetchone()[0]
+        assert text == (
+            "Não foi possível concluir a hospedagem nem o passeio. "
+            "Nenhuma reserva foi confirmada e nenhum pagamento foi criado."
+        )
+        assert "process" not in text.casefold()
+    finally:
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_unknown_package_result_requires_verification_and_never_invites_retry(
+    tmp_path: Path,
+) -> None:
+    execution, payments, _ = _stores(tmp_path)
+    public = PublicOutboxStore((tmp_path / "public-package-unknown.sqlite3").resolve())
+    try:
+        commands = ReservationAllocator().allocate(_package_command()).commands
+        _persist(execution, commands)
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.CALLED_UNKNOWN,
+        )
+        _fail_next_before_provider(
+            execution,
+            now=NOW + timedelta(seconds=2),
+        )
+
+        projected = _completion(execution, payments, public).run_once(
+            now=NOW + timedelta(seconds=3)
+        )
+
+        assert projected.inserted == 1
+        assert payments.completed_offers() == ()
+        text = public._connection.execute(
+            "SELECT text FROM public_outbox"
+        ).fetchone()[0]
+        assert text == (
+            "O resultado da solicitação ficou incerto e precisa ser verificado antes de "
+            "qualquer nova tentativa. Nenhum novo pagamento foi criado automaticamente."
+        )
+        assert "tente novamente" not in text.casefold()
+    finally:
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_partial_package_confirmation_reports_partial_effect_without_payment(
+    tmp_path: Path,
+) -> None:
+    execution, payments, outcome = _stores(tmp_path)
+    public = PublicOutboxStore((tmp_path / "public-package-partial.sqlite3").resolve())
+    try:
+        commands = ReservationAllocator().allocate(_package_command()).commands
+        _persist(execution, commands)
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=1),
+            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
+        )
+        _finish_next(
+            execution,
+            now=NOW + timedelta(seconds=2),
+            certainty=ExecutionCertainty.CALLED_NO_EFFECT,
+        )
+        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 0
+
+        projected = _completion(execution, payments, public).run_once(
+            now=NOW + timedelta(seconds=4)
+        )
+
+        assert projected.inserted == 1
+        assert payments.completed_offers() == ()
+        text = public._connection.execute(
+            "SELECT text FROM public_outbox"
+        ).fetchone()[0]
+        assert "foi confirmad" in text
+        assert "não foi possível concluir" in text
+        assert "Nenhum pagamento foi criado" in text
+        assert "antes de uma nova tentativa" in text
     finally:
         public.close()
         payments.close()

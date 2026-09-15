@@ -134,7 +134,12 @@ def test_prompt_has_no_privacy_rewrite_pass() -> None:
 
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
     assert "`active_execution_status`" in PROMPT
-    assert "uma reserva já está em processamento" in PROMPT
+    assert '`"queued"` ou `"executing"`' in PROMPT
+    assert '"failed_before_provider"' in PROMPT
+    assert '"failed_no_effect"' in PROMPT
+    assert '"partial_failure"' in PROMPT
+    assert '"uncertain"' in PROMPT
+    assert "nunca diga que continua em processamento" in PROMPT
     assert "nunca nova escolha, read, seleção, confirmação ou promessa de reenvio" in PROMPT
     assert "Você decide quando uma consulta nova é necessária" in PROMPT
     assert "emita read_requests mesmo que os parâmetros sejam iguais ao histórico" in PROMPT
@@ -180,6 +185,10 @@ def test_multiple_activity_passengers_use_complete_private_manifest() -> None:
     assert "qualquer composição positiva aceita pela oferta" in PROMPT
     assert "manifesto individual estiver completo" in PROMPT
     assert "Tamanho do grupo não abre handoff por si só" in PROMPT
+    assert "Para grupo, siga o manifesto de passageiros abaixo" in PROMPT
+    assert "o contato principal não coincidir com uma posição do manifesto" in PROMPT
+    assert "nascimento e gênero próprios do contato principal" in PROMPT
+    assert "nunca copie esses valores de um passageiro diferente" in PROMPT
     assert "passenger_manifest_status" in PROMPT
     assert "posição" in PROMPT
     assert "campos ainda não fornecidos são null" in PROMPT

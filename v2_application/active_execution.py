@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from typing import Protocol, cast
+
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.types import BoundaryState, StringSlot
-from reservation_domain import ExecutingState, ExecutionQueuedState, ServiceKind
+from reservation_domain import (
+    ExecutingState,
+    ExecutionCertainty,
+    ExecutionQueuedState,
+    ReservationOperation,
+    ServiceKind,
+    loads_outcome,
+)
+from reservation_execution import LedgerStatus
+from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
@@ -17,15 +28,94 @@ def active_execution_status(state: BoundaryState) -> str | None:
     return None
 
 
+class ExecutionStatusResolver(Protocol):
+    def resolve(self, state: BoundaryState) -> str | None: ...
+
+
+class ReservationExecutionStatusResolver:
+    """Resolve one boundary command against its durable expanded execution group."""
+
+    def __init__(self, execution: SQLiteUnitOfWork) -> None:
+        if type(execution) is not SQLiteUnitOfWork:
+            raise TypeError("execution must be exact SQLiteUnitOfWork")
+        self._execution = execution
+
+    def resolve(self, state: BoundaryState) -> str | None:
+        baseline = active_execution_status(state)
+        if baseline is None:
+            return None
+        workflow = cast(ExecutionQueuedState | ExecutingState, state.workflow)
+        parent = workflow.command
+        members = tuple(
+            (command, ledger)
+            for command, ledger in self._execution.list_outcome_projection_inputs()
+            if command.payload.customer.customer_ref
+            == parent.payload.customer.customer_ref
+            and command.draft_id == parent.draft_id
+            and command.draft_version == parent.draft_version
+        )
+        expected_operations = {
+            ReservationOperation.RESERVE_PACKAGE: frozenset(
+                (
+                    ReservationOperation.RESERVE_LODGING,
+                    ReservationOperation.BOOK_ACTIVITY,
+                )
+            ),
+            ReservationOperation.RESERVE_LODGING: frozenset(
+                (ReservationOperation.RESERVE_LODGING,)
+            ),
+            ReservationOperation.BOOK_ACTIVITY: frozenset(
+                (ReservationOperation.BOOK_ACTIVITY,)
+            ),
+        }[parent.operation]
+        if len(members) != len(expected_operations) or frozenset(
+            command.operation for command, _ in members
+        ) != expected_operations:
+            return baseline
+        statuses = frozenset(ledger.status for _, ledger in members)
+        if LedgerStatus.DISPATCH_FENCED in statuses or LedgerStatus.PREPARING in statuses:
+            return "executing"
+        if LedgerStatus.QUEUED in statuses:
+            return "queued"
+        outcomes = tuple(
+            loads_outcome(ledger.outcome_json)
+            for _, ledger in members
+            if ledger.outcome_json is not None
+        )
+        if len(outcomes) != len(members):
+            return baseline
+        if any(
+            outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN
+            for outcome in outcomes
+        ):
+            return "uncertain"
+        confirmed = sum(
+            outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+            for outcome in outcomes
+        )
+        if confirmed == len(outcomes):
+            return "confirmed"
+        if confirmed:
+            return "partial_failure"
+        if all(
+            outcome.certainty is ExecutionCertainty.NOT_CALLED for outcome in outcomes
+        ):
+            return "failed_before_provider"
+        return "failed_no_effect"
+
+
 def blocks_active_commercial_progression(
     state: BoundaryState,
     proposal: ModelProposal,
+    *,
+    execution_status: str | None = None,
 ) -> bool:
     """Keep an enqueued/executing draft authoritative over new commercial progress."""
 
     if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
         raise TypeError("active progression guard requires exact V2 contracts")
-    if active_execution_status(state) is None:
+    status = execution_status or active_execution_status(state)
+    if status is None:
         return False
     if (
         proposal.intent in {"select", "confirm", "adjust"}
@@ -46,6 +136,8 @@ def blocks_active_commercial_progression(
 def is_regressive_post_command_reply(
     state: BoundaryState,
     proposal: ModelProposal,
+    *,
+    execution_status: str | None = None,
 ) -> bool:
     """Ground a regressive model output while the same command is active.
 
@@ -55,7 +147,8 @@ def is_regressive_post_command_reply(
 
     if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
         raise TypeError("post-command reply guard requires exact V2 contracts")
-    if active_execution_status(state) is None:
+    status = execution_status or active_execution_status(state)
+    if status not in {"queued", "executing"}:
         return False
     if (
         proposal.intent != "inform"
@@ -114,8 +207,11 @@ def is_redundant_post_command_read(
     projection: ConversationProjection,
     proposal: ModelProposal,
     requests: tuple[ReadRequest, ...],
+    *,
+    execution_status: str | None = None,
 ) -> bool:
-    if not requests or type(state.workflow) not in {ExecutionQueuedState, ExecutingState}:
+    status = execution_status or active_execution_status(state)
+    if not requests or status is None:
         return False
     material_names = {
         "service",

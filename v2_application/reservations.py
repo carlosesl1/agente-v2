@@ -143,6 +143,15 @@ def _provider_payload(
             "country_code": customer.country_code,
             **(
                 {
+                    **(
+                        {
+                            "birth_date": customer.birth_date.isoformat(),
+                            "gender": customer.gender,
+                        }
+                        if customer.birth_date is not None
+                        and customer.gender is not None
+                        else {}
+                    ),
                     "passengers": [
                         {
                             "position": item.position,
@@ -153,7 +162,7 @@ def _provider_payload(
                             "country_code": item.country_code,
                         }
                         for item in passengers
-                    ]
+                    ],
                 }
                 if provider == "bokun"
                 else {}

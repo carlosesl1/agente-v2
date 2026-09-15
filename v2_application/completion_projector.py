@@ -113,14 +113,16 @@ class CompletionProjector:
                 (command, ledger)
             )
         for (customer_ref, draft_id, draft_version), members in grouped.items():
-            if not _confirmed_group(members):
+            if not _terminal_group(members):
                 continue
+            confirmed = _confirmed_group(members)
             attempted += 1
             release_id = _opaque(
                 "release:00-reservation",
                 customer_ref,
                 draft_id,
                 str(draft_version),
+                *((_terminal_outcome_key(members),) if not confirmed else ()),
             )
             lead_ids = {
                 self._lead_resolver.lead_id_for_command(command.command_id)
@@ -129,20 +131,28 @@ class CompletionProjector:
                 for command, _ in members
             }
             if len(lead_ids) != 1 or None in lead_ids:
-                raise RuntimeError("confirmed group does not have one durable lead owner")
+                raise RuntimeError("terminal group does not have one durable lead owner")
             lead_id = next(iter(lead_ids))
             inserted += self._public_store.enqueue(
                 PublicReply(
                     release_id=release_id,
                     lead_id=lead_id,
                     message_id=_opaque(
-                        "message:reservation-confirmed",
+                        (
+                            "message:reservation-confirmed"
+                            if confirmed
+                            else "message:reservation-terminal-failure"
+                        ),
                         customer_ref,
                         draft_id,
                         str(draft_version),
                     ),
                     channel="manychat",
-                    chunks=(_confirmation_text(tuple(item[0] for item in members)),),
+                    chunks=(
+                        _confirmation_text(tuple(item[0] for item in members))
+                        if confirmed
+                        else _terminal_failure_text(members)
+                    ,),
                     author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
                 ),
                 now=instant,
@@ -199,6 +209,17 @@ class CompletionProjector:
 def _confirmed_group(
     members: list[tuple[ReservationCommand, LedgerSnapshot]],
 ) -> bool:
+    return _terminal_group(members) and all(
+        loads_outcome(ledger.outcome_json).certainty
+        is ExecutionCertainty.EFFECT_CONFIRMED
+        for _, ledger in members
+        if ledger.outcome_json is not None
+    )
+
+
+def _terminal_group(
+    members: list[tuple[ReservationCommand, LedgerSnapshot]],
+) -> bool:
     commands = tuple(command for command, _ in members)
     if len(commands) == 1:
         shape = commands[0].operation in (
@@ -215,14 +236,151 @@ def _confirmed_group(
     if not shape:
         return False
     for _, ledger in members:
-        if (
-            ledger.status is not LedgerStatus.OUTCOME_RECORDED
-            or ledger.outcome_json is None
-            or loads_outcome(ledger.outcome_json).certainty
-            is not ExecutionCertainty.EFFECT_CONFIRMED
-        ):
+        if ledger.outcome_json is None:
+            return False
+        certainty = loads_outcome(ledger.outcome_json).certainty
+        expected_status = (
+            LedgerStatus.MANUAL_REVIEW
+            if certainty is ExecutionCertainty.CALLED_UNKNOWN
+            else LedgerStatus.OUTCOME_RECORDED
+        )
+        if ledger.status is not expected_status:
             return False
     return True
+
+
+def _terminal_failure_text(
+    members: list[tuple[ReservationCommand, LedgerSnapshot]],
+) -> str:
+    if not _terminal_group(members) or _confirmed_group(members):
+        raise RuntimeError("terminal failure text requires a failed terminal group")
+    commands = tuple(command for command, _ in members)
+    languages = {
+        customer_language_from_phone(command.payload.customer.phone_e164)
+        for command in commands
+    }
+    if len(languages) != 1:
+        raise RuntimeError("terminal public group has mixed customer language")
+    language = languages.pop()
+    outcomes = tuple(
+        (command.payload.components[0].service, loads_outcome(ledger.outcome_json))
+        for command, ledger in members
+        if ledger.outcome_json is not None
+    )
+    if any(
+        outcome.certainty is ExecutionCertainty.CALLED_UNKNOWN
+        for _, outcome in outcomes
+    ):
+        return {
+            CustomerLanguage.PT_BR: (
+                "O resultado da solicitação ficou incerto e precisa ser verificado antes "
+                "de qualquer nova tentativa. Nenhum novo pagamento foi criado "
+                "automaticamente."
+            ),
+            CustomerLanguage.EN: (
+                "The request result is uncertain and must be verified before any new "
+                "attempt. No new payment was created automatically."
+            ),
+        }[language]
+    confirmed = frozenset(
+        service
+        for service, outcome in outcomes
+        if outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+    )
+    failed = frozenset(service for service, _ in outcomes) - confirmed
+    if not confirmed:
+        failed_copy = {
+            CustomerLanguage.PT_BR: {
+                frozenset((ServiceKind.LODGING, ServiceKind.ACTIVITY)): (
+                    "Não foi possível concluir a hospedagem nem o passeio. "
+                    "Nenhuma reserva foi confirmada e nenhum pagamento foi criado."
+                ),
+                frozenset((ServiceKind.LODGING,)): (
+                    "Não foi possível concluir a hospedagem. Nenhuma reserva foi "
+                    "confirmada e nenhum pagamento foi criado."
+                ),
+                frozenset((ServiceKind.ACTIVITY,)): (
+                    "Não foi possível concluir o passeio. Nenhuma reserva foi confirmada "
+                    "e nenhum pagamento foi criado."
+                ),
+            },
+            CustomerLanguage.EN: {
+                frozenset((ServiceKind.LODGING, ServiceKind.ACTIVITY)): (
+                    "The accommodation and tour could not be completed. No reservation "
+                    "was confirmed and no payment was created."
+                ),
+                frozenset((ServiceKind.LODGING,)): (
+                    "The accommodation could not be completed. No reservation was "
+                    "confirmed and no payment was created."
+                ),
+                frozenset((ServiceKind.ACTIVITY,)): (
+                    "The tour could not be completed. No reservation was confirmed and "
+                    "no payment was created."
+                ),
+            },
+        }
+        try:
+            return failed_copy[language][failed]
+        except KeyError as exc:
+            raise RuntimeError(
+                "terminal public group has an unsupported failure shape"
+            ) from exc
+    partial_copy = {
+        CustomerLanguage.PT_BR: {
+            (
+                frozenset((ServiceKind.LODGING,)),
+                frozenset((ServiceKind.ACTIVITY,)),
+            ): (
+                "A hospedagem foi confirmada, mas não foi possível concluir o passeio. "
+                "Nenhum pagamento foi criado. Verifique a reserva confirmada antes de "
+                "uma nova tentativa."
+            ),
+            (
+                frozenset((ServiceKind.ACTIVITY,)),
+                frozenset((ServiceKind.LODGING,)),
+            ): (
+                "O passeio foi confirmado, mas não foi possível concluir a hospedagem. "
+                "Nenhum pagamento foi criado. Verifique a reserva confirmada antes de "
+                "uma nova tentativa."
+            ),
+        },
+        CustomerLanguage.EN: {
+            (
+                frozenset((ServiceKind.LODGING,)),
+                frozenset((ServiceKind.ACTIVITY,)),
+            ): (
+                "The accommodation was confirmed, but the tour could not be completed. "
+                "No payment was created. Verify the confirmed reservation before a new "
+                "attempt."
+            ),
+            (
+                frozenset((ServiceKind.ACTIVITY,)),
+                frozenset((ServiceKind.LODGING,)),
+            ): (
+                "The tour was confirmed, but the accommodation could not be completed. "
+                "No payment was created. Verify the confirmed reservation before a new "
+                "attempt."
+            ),
+        },
+    }
+    try:
+        return partial_copy[language][(confirmed, failed)]
+    except KeyError as exc:
+        raise RuntimeError("terminal public group has an unsupported partial shape") from exc
+
+
+def _terminal_outcome_key(
+    members: list[tuple[ReservationCommand, LedgerSnapshot]],
+) -> str:
+    if not _terminal_group(members):
+        raise RuntimeError("terminal outcome key requires a terminal group")
+    return "|".join(
+        sorted(
+            f"{command.operation.value}:{loads_outcome(ledger.outcome_json).certainty.value}"
+            for command, ledger in members
+            if ledger.outcome_json is not None
+        )
+    )
 
 
 def _confirmation_text(commands: tuple[ReservationCommand, ...]) -> str:

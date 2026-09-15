@@ -199,6 +199,17 @@ def split_package_command(
     for service in (ServiceKind.LODGING, ServiceKind.ACTIVITY):
         component = by_service[service]
         components = (component,)
+        customer = (
+            command.payload.customer
+            if service is ServiceKind.ACTIVITY
+            else CustomerFacts(
+                customer_ref=command.payload.customer.customer_ref,
+                full_name=command.payload.customer.full_name,
+                email=command.payload.customer.email,
+                phone_e164=command.payload.customer.phone_e164,
+                country_code=command.payload.customer.country_code,
+            )
+        )
         child_workflow_id = (
             "workflow:component:"
             + hashlib.sha256(
@@ -210,7 +221,7 @@ def split_package_command(
         )
         signature = subject_signature(
             components=components,
-            customer=command.payload.customer,
+            customer=customer,
             terms=command.payload.terms,
         )
         operation = operation_for_components(components)
@@ -232,7 +243,7 @@ def split_package_command(
                 operation=operation,
                 payload=CommandPayload(
                     components,
-                    command.payload.customer,
+                    customer,
                     command.payload.terms,
                 ),
                 created_at=command.created_at,

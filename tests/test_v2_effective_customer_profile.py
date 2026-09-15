@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from reservation_boundary import (
@@ -10,13 +10,16 @@ from reservation_boundary import (
     StringSlot,
     TypedFact,
 )
+from reservation_domain import Party
 from v2_application import conversation as conversation_module
 from v2_application.conversation import (
     EffectiveCustomerResolution,
     resolve_effective_customer,
 )
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
+from v2_application.passengers import merge_manifest
 from v2_contracts.model import ModelFact
+from v2_contracts.passengers import PassengerInput
 from v2_contracts.profile import PrivateCustomerBinding
 
 
@@ -77,6 +80,27 @@ def _private_snapshot(tmp_path: Path, *facts: ModelFact):
         store.close()
 
 
+def _group_projection(*, second_is_contact: bool = False) -> ConversationProjection:
+    manifest = merge_manifest(
+        None,
+        (
+            PassengerInput(1, "adult", "Pessoa Um", date(1990, 1, 2), "f", "BR"),
+            PassengerInput(
+                2,
+                "adult",
+                NAME if second_is_contact else "Pessoa Dois",
+                date(1992, 3, 4),
+                "m",
+                "BR",
+            ),
+        ),
+        Party(2, 0),
+    )
+    return _projection(
+        TypedFact("passenger_manifest", StringSlot(manifest), FRAME_HASH)
+    )
+
+
 def test_phone_only_manychat_plus_private_fallback_resolves_exact_customer(
     tmp_path: Path,
 ) -> None:
@@ -129,6 +153,35 @@ def test_profile_gender_completes_single_activity_passenger_without_question(
     assert resolution.ready is True
     assert resolution.customer is not None
     assert resolution.customer.gender == "m"
+
+
+def test_group_activity_requires_distinct_main_contact_birth_and_gender() -> None:
+    resolution = resolve_effective_customer(
+        _profile(full_name=NAME, email=EMAIL, country=COUNTRY),
+        _group_projection(),
+        NOW,
+        activity_party=Party(2, 0),
+    )
+
+    assert resolution.ready is False
+    assert resolution.customer is None
+    assert resolution.missing_fields == ("birth_date", "gender")
+    assert resolution.conflicting_fields == ()
+
+
+def test_group_activity_derives_main_contact_only_from_matching_passenger() -> None:
+    resolution = resolve_effective_customer(
+        _profile(full_name=NAME, email=EMAIL, country=COUNTRY),
+        _group_projection(second_is_contact=True),
+        NOW,
+        activity_party=Party(2, 0),
+    )
+
+    assert resolution.ready is True
+    assert resolution.customer is not None
+    assert resolution.customer.birth_date == date(1992, 3, 4)
+    assert resolution.customer.gender == "m"
+    assert resolution.customer.passengers[1].full_name == NAME
 
 
 def test_one_word_manychat_name_uses_private_full_name_fallback(tmp_path: Path) -> None:

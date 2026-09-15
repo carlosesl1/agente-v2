@@ -49,6 +49,7 @@ from v2_adapters.stripe import (
 )
 from v2_adapters.wise import WiseInstructionAdapter
 from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.active_execution import ReservationExecutionStatusResolver
 from v2_application.lead_identity import DurableLeadResolver
 from v2_application.bokun_audit import (
     BokunAuditProjector,
@@ -602,7 +603,11 @@ def _build_inbox_worker(
     settings: V2Settings,
     reads: V2ReadService,
 ) -> InboxTurnWorker:
-    if container.boundary is None or container.inbox is None:
+    if (
+        container.boundary is None
+        or container.inbox is None
+        or container.execution is None
+    ):
         raise ValueError("shadow inbox durable owners are unavailable")
     clock = UTCClock()
     if settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY:
@@ -653,6 +658,9 @@ def _build_inbox_worker(
         locale="pt-BR",
         turn_timeout=turn_budget,
         max_commit_attempts=2,
+        execution_status_resolver=ReservationExecutionStatusResolver(
+            container.execution
+        ),
         ops_recorder=container.ops_recorder,
         ops_full_content=settings.ops_trace_full_content,
     )

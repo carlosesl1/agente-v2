@@ -312,7 +312,15 @@ def _projection_values(projection: ConversationProjection) -> dict[str, object]:
     return {item.name: item.value.value for item in projection.facts}
 
 
-_EFFECTIVE_FIELD_ORDER = ("full_name", "email", "phone_e164", "country_code")
+_EFFECTIVE_FIELD_ORDER = (
+    "full_name",
+    "email",
+    "phone_e164",
+    "country_code",
+    "birth_date",
+    "gender",
+    "passenger_manifest",
+)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -497,6 +505,27 @@ def resolve_effective_customer(
     )
     phone = profile.phone_e164 if profile_fresh else None
 
+    passengers = ()
+    if activity_party is not None:
+        try:
+            passengers = projection_passengers(projection, activity_party) or ()
+        except (TypeError, ValueError):
+            return EffectiveCustomerResolution(None, (), ("passenger_manifest",))
+        matching_passenger = next(
+            (
+                passenger
+                for passenger in passengers
+                if full_name is not None
+                and canonical_full_name(passenger.full_name) == full_name
+            ),
+            None,
+        )
+        if matching_passenger is not None:
+            if birth_date_value is None:
+                birth_date_value = matching_passenger.birth_date
+            if gender_value is None:
+                gender_value = matching_passenger.gender
+
     conflicts = tuple(
         name
         for name, conflict in (
@@ -508,14 +537,22 @@ def resolve_effective_customer(
         )
         if conflict
     )
+    required_customer_values: tuple[tuple[str, object | None], ...] = (
+        ("full_name", full_name),
+        ("email", email),
+        ("phone_e164", phone),
+        ("country_code", country),
+    )
+    if activity_party is not None:
+        required_customer_values += (
+            ("birth_date", birth_date_value),
+            ("gender", gender_value),
+        )
+        if activity_party.adults + activity_party.children > 1:
+            required_customer_values += (("passenger_manifest", passengers or None),)
     missing = tuple(
         name
-        for name, value in (
-            ("full_name", full_name),
-            ("email", email),
-            ("phone_e164", phone),
-            ("country_code", country),
-        )
+        for name, value in required_customer_values
         if value is None and name not in conflicts
     )
     if conflicts or missing:
@@ -556,9 +593,6 @@ def resolve_effective_customer(
         customer_ref = "effective-customer:" + material_hash
     else:
         customer_ref = profile.binding_id
-    passengers = ()
-    if activity_party is not None:
-        passengers = projection_passengers(projection, activity_party) or ()
     try:
         customer = CustomerFacts(
             customer_ref=customer_ref,
