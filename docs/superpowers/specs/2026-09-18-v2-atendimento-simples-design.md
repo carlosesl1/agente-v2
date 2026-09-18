@@ -2,7 +2,7 @@
 
 ## Decisão e estado
 
-Carlos aprovou nesta conversa a **simplificação incremental: contexto completo, resultados por componente e remoção dos protocolos redundantes**. A aprovação exclui produção e operações reais. Este documento formaliza esse desenho; a implementação aguarda a revisão desta especificação.
+Carlos aprovou nesta conversa a **simplificação incremental: contexto completo, resultados por componente e remoção dos protocolos redundantes**. A aprovação exclui produção e operações reais. Este documento formaliza esse desenho; Carlos aprovou a especificação com “Siga” nesta conversa, autorizando também o Graphify como apoio.
 
 - Base: `8980646d5615db9ecb32c97f4579ba09080dc02a`, candidato confirmado pela autoridade do runtime para o contato isolado.
 - Branch: `refactor/v2-atendimento-simples-727d3625`.
@@ -197,11 +197,11 @@ Conversas com modelo real exigem harness isolado e efeitos de negócio fechados,
 
 ## Revisão e baseline
 
-- Desenho: aprovado por Carlos via escolha explícita de simplificação incremental; documento formal aguarda revisão.
+- Desenho: aprovado por Carlos via escolha explícita de simplificação incremental; documento formal aprovado com “Siga” nesta conversa.
 - Fonte inicial: worktree limpa no commit base verificado.
 - Baseline focal: `tests/test_v2_bokun_write_transport.py` e `tests/test_v2_active_execution.py`, executados com ambiente limpo e plugins pytest automáticos desabilitados: **60 passed in 1.33s**.
 - A tentativa inicial de runner contendo `uvicorn` foi bloqueada pelo detector de processo longo da ferramenta antes da execução. O runner sem essa dependência não necessária executou e substitui a tentativa; não houve teste de produto reprovado nessa etapa.
 - Não foram implementadas correções nem executados testes E2E novos. Os testes existentes ainda incluem o fixture Bókun incorreto identificado pela investigação.
 - Revisão interna: contexto não é outro banco; pessoa não é inferida pelo controlador; resultado não autoriza retry; falha de mensagem não repete reserva; compatibilidade histórica não mantém uma segunda implementação ativa.
 
-Próxima decisão: revisão deste documento por Carlos. Após aprovação, escrever o plano com testes causais e remoções por incremento antes de editar código funcional.
+Execução autorizada em incrementos, com plano causal antes de cada conjunto de alterações. Primeiro plano: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-01-bokun.md`. Produção e operações reais permanecem fora da autorização.
