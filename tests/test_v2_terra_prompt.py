@@ -127,13 +127,11 @@ def test_prompt_has_no_privacy_rewrite_pass() -> None:
 
 def test_runtime_markers_keep_execution_and_recap_read_only() -> None:
     assert "`active_execution_status`" in PROMPT
-    assert '`"queued"` ou `"executing"`' in PROMPT
-    assert '"failed_before_provider"' in PROMPT
-    assert '"failed_no_effect"' in PROMPT
-    assert '"partial_failure"' in PROMPT
-    assert '"uncertain"' in PROMPT
-    assert "nunca diga que continua em processamento" in PROMPT
-    assert "nunca nova escolha, read, seleção, confirmação ou promessa de reenvio" in PROMPT
+    assert "`execution_components`" in PROMPT
+    assert "`operational_messages`" in PROMPT
+    assert "consultas independentes continuam possíveis" in PROMPT
+    assert "Não repita nem substitua o workflow já comandado" in PROMPT
+    assert "Link/instrução criada não prova liquidação" in PROMPT
     assert "Você decide quando uma consulta nova é necessária" in PROMPT
     assert "emita read_requests mesmo que os parâmetros sejam iguais ao histórico" in PROMPT
     assert "Para apenas recapitular, use consultation_history e read_requests=[]" in PROMPT

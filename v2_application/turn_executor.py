@@ -109,6 +109,7 @@ from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch, PublicMessageAuthor
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
 from v2_contracts.localization import customer_language_from_phone
+from v2_contracts.execution_context import ExecutionContext
 from v2_contracts.model import (
     AuditedModelTurn,
     ConsultationHistoryEntry,
@@ -1409,9 +1410,9 @@ class V2TurnExecutor:
         if type(max_commit_attempts) is not int or not 1 <= max_commit_attempts <= 3:
             raise ValueError("max_commit_attempts must be an exact integer from 1 to 3")
         if execution_status_resolver is not None and not callable(
-            getattr(execution_status_resolver, "resolve", None)
+            getattr(execution_status_resolver, "context", None)
         ):
-            raise TypeError("execution_status_resolver must expose resolve")
+            raise TypeError("execution_status_resolver must expose context")
         if type(ops_full_content) is not bool:
             raise TypeError("ops_full_content must be an exact bool")
         self._store = store
@@ -1607,11 +1608,14 @@ class V2TurnExecutor:
         except StateNotFound:
             self._store.create_genesis(batch.lead_id, claimed_at=now)
         current, fencing_token = self._store.acquire_fence(batch.lead_id)
-        execution_status = (
-            active_execution_status(current.state)
+        execution_context = (
+            ExecutionContext(status=active_execution_status(current.state))
             if self._execution_status_resolver is None
-            else self._execution_status_resolver.resolve(current.state)
+            else self._execution_status_resolver.context(current.state)
         )
+        if type(execution_context) is not ExecutionContext:
+            raise TypeError("execution resolver must return exact context")
+        execution_status = execution_context.status
         projection = self._store.load_latest_conversation_projection(batch.lead_id)
         if projection is None:
             projection = _genesis_projection(self._locale)
@@ -1702,6 +1706,8 @@ class V2TurnExecutor:
                 else None
             ),
             active_execution_status=execution_status,
+            execution_components=execution_context.components,
+            operational_messages=execution_context.messages,
         )
 
         def request_public_reply_correction(
@@ -2166,6 +2172,8 @@ class V2TurnExecutor:
                     else None
                 ),
                 active_execution_status=execution_status,
+                execution_components=execution_context.components,
+                operational_messages=execution_context.messages,
             )
             second_audited = trace.call(
                 NodeType.MAYA_REQUEST,

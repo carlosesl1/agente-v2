@@ -988,7 +988,7 @@ def test_active_execution_and_recap_reuse_are_closed_public_markers() -> None:
     assert user["active_execution_status"] == "queued"
     assert user["recap_reuse_required"] is True
     assert user["observations"] == []
-    assert "ACTIVE EXECUTION STATUS" in prompt
+    assert "OPERATION RESULTS AND COMMUNICATION" in prompt
     assert "FRESH CONSULTATION REUSE" in prompt
     with pytest.raises(InvalidModelProposal, match="closed request catalog"):
         ModelRequest(

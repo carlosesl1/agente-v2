@@ -4636,8 +4636,9 @@ def test_terminal_execution_status_reaches_maya_without_processing_correction() 
     )
 
     class TerminalStatusResolver:
-        def resolve(self, state):
-            return "failed_no_effect"
+        def context(self, state):
+            from v2_contracts.execution_context import ExecutionContext
+            return ExecutionContext(status="failed_no_effect")
 
     try:
         executor.execute(second_batch)
@@ -4697,7 +4698,7 @@ def test_terminal_execution_status_reaches_maya_without_processing_correction() 
         store.close()
 
 
-def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow() -> None:
+def test_active_execution_allows_independent_read_without_replacing_workflow() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(minutes=30),
         confirmation_clock=SequenceClock(),
@@ -4778,14 +4779,12 @@ def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow
         after = store.load_state(BATCH.lead_id).state.workflow
 
         assert after == before
-        assert len(read_port.calls) == read_count
+        assert len(read_port.calls) == read_count + 1
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
         assert result.reply_chunks == (corrected_status,)
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-        )
+        assert model.calls[-1].public_reply_correction_reasons == ()
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []
@@ -4793,7 +4792,7 @@ def test_active_execution_blocks_new_commercial_scope_without_replacing_workflow
         store.close()
 
 
-def test_active_execution_blocks_material_facts_without_read_or_projection_drift() -> None:
+def test_active_execution_accepts_new_facts_without_changing_commanded_workflow() -> None:
     store, model, read_port, second_batch, executor = _approval_expiry_fixture(
         approval_ttl=timedelta(minutes=30),
         confirmation_clock=SequenceClock(),
@@ -4821,7 +4820,6 @@ def test_active_execution_blocks_material_facts_without_read_or_projection_drift
             events=(material_event,),
             combined_text=material_event.text,
         )
-        corrected_status = "Maya: a reserva existente continua em processamento."
         model.proposals.extend(
             (
                 ModelProposal(
@@ -4835,24 +4833,6 @@ def test_active_execution_blocks_material_facts_without_read_or_projection_drift
                         ModelFact("adults", 3),
                         ModelFact("children", 0),
                     ),
-                    read_requests=(),
-                    effect_proposals=(),
-                    passengers=(
-                        PassengerInput(
-                            position=1,
-                            participant_type="adult",
-                            full_name="Pessoa Passageira Fictícia",
-                            birth_date=None,
-                            gender=None,
-                            country_code=None,
-                        ),
-                    ),
-                ),
-                ModelProposal(
-                    source_event_id=material_batch.batch_id,
-                    intent="inform",
-                    reply_chunks=(corrected_status,),
-                    facts=(),
                     read_requests=(),
                     effect_proposals=(),
                 ),
@@ -4879,16 +4859,15 @@ def test_active_execution_blocks_material_facts_without_read_or_projection_drift
 
         assert after_state == before_state
         assert after_projection is not None
-        assert after_projection.facts == before_projection.facts
+        assert after_projection.facts != before_projection.facts
+        assert next(f.value.value for f in after_projection.facts if f.name == "adults") == 3
         assert after_projection.desired_services == before_projection.desired_services
         assert len(read_port.calls) == read_count
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
-        assert result.reply_chunks == (corrected_status,)
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-        )
+        assert result.reply_chunks == ("Atualizei as datas e a ocupação.",)
+        assert model.calls[-1].public_reply_correction_reasons == ()
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []

@@ -1030,33 +1030,62 @@ class SQLitePaymentInitiationStore:
                 self._connection.execute("ROLLBACK")
             raise
 
+    def _completed_offer(self, initiation_id, result_blob, result_hash):
+        if type(result_blob) is not bytes or not result_blob.startswith(
+            _RESULT_CIPHERTEXT_PREFIX
+        ):
+            raise RuntimeError("completed payment result is not private ciphertext")
+        if hashlib.sha256(result_blob).hexdigest() != result_hash:
+            raise RuntimeError("completed payment ciphertext hash diverged")
+        encrypted = result_blob[len(_RESULT_CIPHERTEXT_PREFIX) :]
+        if len(encrypted) <= 12:
+            raise RuntimeError("completed payment ciphertext is truncated")
+        nonce, ciphertext = encrypted[:12], encrypted[12:]
+        try:
+            raw = self._result_cipher.decrypt(
+                nonce,
+                ciphertext,
+                initiation_id.encode("utf-8"),
+            )
+        except Exception as exc:
+            raise RuntimeError("completed payment ciphertext is invalid") from exc
+        return _offer_from_bytes(raw)
+
     def completed_offers(self) -> tuple[PaymentMethodOffer, ...]:
         rows = self._connection.execute(
             "SELECT initiation_id,result_json,result_hash FROM payment_initiations "
             "WHERE status='completed' ORDER BY initiation_id"
         ).fetchall()
-        offers = []
-        for initiation_id, result_blob, result_hash in rows:
-            if type(result_blob) is not bytes or not result_blob.startswith(
-                _RESULT_CIPHERTEXT_PREFIX
-            ):
-                raise RuntimeError("completed payment result is not private ciphertext")
-            if hashlib.sha256(result_blob).hexdigest() != result_hash:
-                raise RuntimeError("completed payment ciphertext hash diverged")
-            encrypted = result_blob[len(_RESULT_CIPHERTEXT_PREFIX) :]
-            if len(encrypted) <= 12:
-                raise RuntimeError("completed payment ciphertext is truncated")
-            nonce, ciphertext = encrypted[:12], encrypted[12:]
-            try:
-                raw = self._result_cipher.decrypt(
-                    nonce,
-                    ciphertext,
-                    initiation_id.encode("utf-8"),
+        return tuple(self._completed_offer(*row) for row in rows)
+
+    def context_for_payment(self, payment_id: str) -> tuple:
+        """Authenticated initiation facts; completion is not financial settlement."""
+        from v2_contracts.execution_context import PaymentInitiationContext
+
+        rows = self._connection.execute(
+            "SELECT initiation_id,selection_json,selection_hash,status,dispatch_slots,"
+            "result_json,result_hash FROM payment_initiations ORDER BY initiation_id"
+        ).fetchall()
+        records = []
+        for identity, raw, digest, status, slots, result, result_hash in rows:
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise RuntimeError("payment selection hash diverged")
+            selection = _selection_from_bytes(raw)
+            if selection.obligation.payment_id != payment_id:
+                continue
+            if _initiation_id(selection) != identity:
+                raise RuntimeError("payment initiation identity diverged")
+            offer = (
+                self._completed_offer(identity, result, result_hash)
+                if status == "completed"
+                else None
+            )
+            records.append(
+                PaymentInitiationContext(
+                    identity, selection, status, bool(slots), offer
                 )
-            except Exception as exc:
-                raise RuntimeError("completed payment ciphertext is invalid") from exc
-            offers.append(_offer_from_bytes(raw))
-        return tuple(offers)
+            )
+        return tuple(records)
 
     def enqueue(self, selection: PaymentSelection, *, now: datetime) -> bool:
         raw = _selection_bytes(selection)

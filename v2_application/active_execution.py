@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import Protocol
 
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.types import BoundaryState, StringSlot
@@ -15,6 +15,14 @@ from reservation_domain import (
 from reservation_execution import LedgerStatus
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from v2_contracts.model import ModelProposal
+from v2_contracts.execution_context import (
+    ExecutionContext,
+    ExecutionComponentContext,
+    ExecutedOffer,
+    ComponentOutcome,
+    PaymentSettlementContext,
+)
+from v2_application.lead_identity import payment_id_for_command
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -29,31 +37,162 @@ def active_execution_status(state: BoundaryState) -> str | None:
 
 
 class ExecutionStatusResolver(Protocol):
-    def resolve(self, state: BoundaryState) -> str | None: ...
+    def context(self, state: BoundaryState) -> ExecutionContext: ...
 
 
 class ReservationExecutionStatusResolver:
     """Resolve one boundary command against its durable expanded execution group."""
 
-    def __init__(self, execution: SQLiteUnitOfWork) -> None:
+    def __init__(
+        self,
+        execution: SQLiteUnitOfWork,
+        *,
+        payment_store=None,
+        public_store=None,
+        followup=None,
+        lead_resolver=None,
+    ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
         self._execution = execution
+        self._payments = payment_store
+        self._public = public_store
+        self._followup = followup
+        self._lead_resolver = lead_resolver
 
     def resolve(self, state: BoundaryState) -> str | None:
+        return self.context(state).status
+
+    def context(self, state: BoundaryState) -> ExecutionContext:
         baseline = active_execution_status(state)
-        if baseline is None:
-            return None
-        workflow = cast(ExecutionQueuedState | ExecutingState, state.workflow)
-        parent = workflow.command
-        members = tuple(
+        parent = state.workflow.command if baseline is not None else None
+        snapshot = self._execution.list_outcome_projection_inputs()
+        current = tuple(
             (command, ledger)
-            for command, ledger in self._execution.list_outcome_projection_inputs()
-            if command.payload.customer.customer_ref
+            for command, ledger in snapshot
+            if parent is not None
+            and command.payload.customer.customer_ref
             == parent.payload.customer.customer_ref
             and command.draft_id == parent.draft_id
             and command.draft_version == parent.draft_version
         )
+        # Productive composition supplies the durable owner, so old operations
+        # remain visible even after the current workflow changes.
+        owned = (
+            tuple(
+                (command, ledger)
+                for command, ledger in snapshot
+                if self._lead_resolver.lead_id_for_command(command.command_id)
+                == state.lead_key
+            )
+            if self._lead_resolver is not None
+            else current
+        )
+        components = [self._component(command, ledger) for command, ledger in owned]
+        if parent is not None:
+            present = {command.payload.components[0].offer_id for command, _ in current}
+            for offer in parent.payload.components:
+                if offer.offer_id not in present:
+                    components.append(
+                        ExecutionComponentContext(
+                            None,
+                            parent.draft_id,
+                            parent.draft_version,
+                            self._offer(offer),
+                            baseline,
+                            None,
+                        )
+                    )
+        messages = (
+            self._public.conversation_messages(state.lead_key) if self._public else ()
+        )
+        return ExecutionContext(
+            self._status(parent, baseline, current) if parent is not None else None,
+            tuple(components),
+            messages,
+        )
+
+    @staticmethod
+    def _offer(offer) -> ExecutedOffer:
+        return ExecutedOffer(
+            offer.offer_id,
+            offer.service.value,
+            offer.provider_ref,
+            offer.public_label,
+            offer.start_date,
+            offer.end_date,
+            offer.start_time,
+            offer.party.adults,
+            offer.party.children,
+            format(offer.total.amount, "f"),
+            offer.total.currency,
+        )
+
+    def _component(self, command, ledger) -> ExecutionComponentContext:
+        payment_id = payment_id_for_command(command)
+        payments = (
+            self._payments.context_for_payment(payment_id) if self._payments else ()
+        )
+        workflows = (
+            self._followup.payments_for_reservation(command.command_id)
+            if self._followup
+            else ()
+        )
+        settlements = tuple(
+            PaymentSettlementContext(
+                workflow.subject.payment_id,
+                workflow.subject.payment_version,
+                workflow.subject.amount_minor,
+                workflow.subject.currency,
+                workflow.subject.method.value if workflow.subject.method else None,
+                workflow.status.value,
+                workflow.settlement_finish.outcome.certainty.value
+                if workflow.settlement_finish
+                else None,
+            )
+            for workflow in workflows
+        )
+        settlement_status = (
+            "unavailable"
+            if self._followup is None
+            else "recorded"
+            if settlements
+            else "not_recorded"
+        )
+        outcome = (
+            loads_outcome(ledger.outcome_json)
+            if ledger.outcome_json is not None
+            else None
+        )
+        return ExecutionComponentContext(
+            command.command_id,
+            command.draft_id,
+            command.draft_version,
+            self._offer(command.payload.components[0]),
+            ledger.status.value,
+            ComponentOutcome(
+                outcome.command_id,
+                outcome.certainty.value,
+                outcome.normalized_status,
+                outcome.provider_reference,
+            )
+            if outcome
+            else None,
+            payment_id,
+            (
+                "unavailable"
+                if self._payments is None
+                else "recorded"
+                if payments
+                else "not_recorded"
+            ),
+            payments,
+            settlement_status,
+            settlements,
+        )
+
+    @staticmethod
+    def _status(parent, baseline, members) -> str | None:
         expected_operations = {
             ReservationOperation.RESERVE_PACKAGE: frozenset(
                 (
@@ -68,12 +207,17 @@ class ReservationExecutionStatusResolver:
                 (ReservationOperation.BOOK_ACTIVITY,)
             ),
         }[parent.operation]
-        if len(members) != len(expected_operations) or frozenset(
-            command.operation for command, _ in members
-        ) != expected_operations:
+        if (
+            len(members) != len(expected_operations)
+            or frozenset(command.operation for command, _ in members)
+            != expected_operations
+        ):
             return baseline
         statuses = frozenset(ledger.status for _, ledger in members)
-        if LedgerStatus.DISPATCH_FENCED in statuses or LedgerStatus.PREPARING in statuses:
+        if (
+            LedgerStatus.DISPATCH_FENCED in statuses
+            or LedgerStatus.PREPARING in statuses
+        ):
             return "executing"
         if LedgerStatus.QUEUED in statuses:
             return "queued"
@@ -117,19 +261,12 @@ def blocks_active_commercial_progression(
     status = execution_status or active_execution_status(state)
     if status is None:
         return False
-    if (
+    return bool(
         proposal.intent in {"select", "confirm", "adjust"}
         or proposal.target_offer_id is not None
         or proposal.target_offer_ids
         or proposal.selection_requested
-        or proposal.passengers
         or proposal.effect_proposals
-        or any(fact.name != "language" for fact in proposal.facts)
-    ):
-        return True
-    return any(
-        request.kind in {ReadKind.LODGING, ReadKind.ACTIVITY}
-        for request in proposal.read_requests
     )
 
 
@@ -182,7 +319,10 @@ def _request_matches_active_draft(
         None,
     )
     for component in workflow.draft.components:
-        if request.kind is ReadKind.LODGING and component.service is ServiceKind.LODGING:
+        if (
+            request.kind is ReadKind.LODGING
+            and component.service is ServiceKind.LODGING
+        ):
             if (
                 component.end_date is not None
                 and request.check_in == component.start_date
@@ -191,7 +331,10 @@ def _request_matches_active_draft(
                 and request.children == component.party.children
             ):
                 return True
-        if request.kind is ReadKind.ACTIVITY and component.service is ServiceKind.ACTIVITY:
+        if (
+            request.kind is ReadKind.ACTIVITY
+            and component.service is ServiceKind.ACTIVITY
+        ):
             if (
                 request.product_id == product_id
                 and request.activity_date == component.start_date

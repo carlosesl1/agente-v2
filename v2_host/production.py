@@ -659,7 +659,14 @@ def _build_inbox_worker(
         turn_timeout=turn_budget,
         max_commit_attempts=2,
         execution_status_resolver=ReservationExecutionStatusResolver(
-            container.execution
+            container.execution,
+            payment_store=container.payment_initiation,
+            public_store=container.public_outbox,
+            followup=container.followup,
+            lead_resolver=DurableLeadResolver(
+                boundary=container.boundary, execution=container.execution,
+                followup=container.followup,
+            ),
         ),
         ops_recorder=container.ops_recorder,
         ops_full_content=settings.ops_trace_full_content,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from v2_contracts.execution_context import ExecutionComponentContext, OperationalMessage
+
 import hashlib
 import hmac
 import json
@@ -340,11 +342,17 @@ class ModelRequest:
     selection_review_required: bool = False
     progress_review_required: bool = False
     active_execution_status: str | None = None
+    execution_components: tuple[ExecutionComponentContext, ...] = ()
+    operational_messages: tuple[OperationalMessage, ...] = ()
     recap_reuse_required: bool = False
     public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
     attachments: tuple[ModelAttachment, ...] = ()
 
     def __post_init__(self) -> None:
+        for values, expected in ((self.execution_components, ExecutionComponentContext),
+                                 (self.operational_messages, OperationalMessage)):
+            if type(values) is not tuple or any(type(item) is not expected for item in values):
+                raise InvalidModelProposal("operational context must contain exact contracts")
         _text(self.request_id, "request_id", identifier=True)
         _text(self.lead_id, "lead_id", identifier=True)
         _text(self.source_event_id, "source_event_id", identifier=True)

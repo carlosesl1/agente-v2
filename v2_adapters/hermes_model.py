@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from v2_adapters.execution_context import component_wire
+
 import hashlib
 import json
 import os
@@ -258,15 +260,21 @@ COMMITTED CONSULTATION HISTORY PROTOCOL:
 """.strip()
 
 _ACTIVE_EXECUTION_SYSTEM_SUFFIX: Final = """
-ACTIVE EXECUTION STATUS:
-- active_execution_status is null unless a reservation command is already queued or
-  executing. When present, never submit, select, refresh, or promise that command again.
-- For a short reaffirmation or progress follow-up, state naturally that the existing
-  reservation is already being processed. Do not ask the customer to choose an option.
-- A genuinely unrelated non-commercial question may still be answered normally. Any
-  material change or new commercial scope waits for a terminal execution outcome and must
-  never create a second command.
+OPERATION RESULTS AND COMMUNICATION:
+- execution_components contains authenticated per-operation facts. active_execution_status
+  is only the current group's summary; never replace individual results with that label.
+- Preserve every confirmed component and its provider_reference even when another failed
+  or is unknown. Null certainty means no recorded final outcome, not proof of no call.
+- Payment initiation (including a link/instruction) is distinct from settlement. Source
+  unavailable means unknown; not_recorded means no record in that source, not paid.
+- operational_messages contains persisted asynchronous chunks in enqueue order, each with
+  its own status. pending/leased/manual_review do not prove the customer received it;
+  accepted_by_manychat proves channel API acceptance only, not delivery or reading.
+- Never repeat or replace the already-commanded workflow, especially an uncertain effect.
+  Questions, new facts and independent read-only consultations remain possible. A read
+  does not authorize a new selection or effect; history does not establish fresh availability.
 """.strip()
+
 
 _RECAP_REUSE_SYSTEM_SUFFIX: Final = """
 FRESH CONSULTATION REUSE:
@@ -438,6 +446,14 @@ def _request_wire(
         "selection_review_required": request.selection_review_required,
         "progress_review_required": request.progress_review_required,
         "active_execution_status": request.active_execution_status,
+        "execution_components": [component_wire(c) for c in request.execution_components],
+        "operational_messages": [
+            {"outbox_id": m.outbox_id, "release_id": m.release_id,
+             "source_message_id": m.source_message_id, "chunk_index": m.chunk_index,
+             "text": m.text, "author": m.author.value, "status": m.status,
+             "updated_at": m.updated_at.isoformat()}
+            for m in request.operational_messages
+        ],
         "recap_reuse_required": request.recap_reuse_required,
         "public_reply_correction_reasons": [
             item.value for item in request.public_reply_correction_reasons

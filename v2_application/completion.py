@@ -410,6 +410,38 @@ class PublicOutboxStore:
             values.append(acceptance)
         return tuple(values)
 
+    def conversation_messages(self, lead_id: str) -> tuple:
+        """Return outbox facts in enqueue order, without claiming or sending rows."""
+        from v2_contracts.execution_context import OperationalMessage
+
+        rows = self._connection.execute(
+            "SELECT outbox_id,release_id,source_message_id,chunk_index,text,author,"
+            "status,updated_at,acceptance_json,acceptance_hash FROM public_outbox "
+            "WHERE lead_id=? ORDER BY rowid",
+            (lead_id,),
+        ).fetchall()
+        messages = []
+        for row in rows:
+            status = row[6]
+            if status == "delivered":
+                if type(row[8]) is not str or type(row[9]) is not str:
+                    raise RuntimeError("accepted public row lacks canonical evidence")
+                acceptance = PublicChannelAcceptance.from_canonical_bytes(
+                    row[8].encode()
+                )
+                if acceptance.canonical_hash() != row[9]:
+                    raise RuntimeError("public acceptance evidence hash mismatch")
+                status = acceptance.state.value
+            messages.append(
+                OperationalMessage(
+                    *row[:5],
+                    PublicMessageAuthor(row[5]),
+                    status,
+                    datetime.fromisoformat(row[7]),
+                )
+            )
+        return tuple(messages)
+
     def pending_count(self) -> int:
         return self._connection.execute(
             "SELECT count(*) FROM public_outbox WHERE status='pending'"

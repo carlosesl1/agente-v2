@@ -3290,6 +3290,24 @@ class SQLiteFollowupUnitOfWork:
         except sqlite3.Error as exc:
             raise _sqlite_error(exc, "load_payment") from exc
 
+    def payments_for_reservation(self, command_id: str) -> tuple[PaymentWorkflow, ...]:
+        """Read canonical financial workflows bound to one reservation command.
+
+        Initiation IDs and follow-up IDs belong to different contracts. The
+        confirmed reservation anchor, not their spelling, establishes identity.
+        """
+        with self._transaction("payments_for_reservation"):
+            rows = self._connection.execute(
+                "SELECT payment_id FROM main.payment_workflows ORDER BY payment_id"
+            ).fetchall()
+            workflows = tuple(self._load_payment(row[0])[0] for row in rows)
+        return tuple(
+            workflow
+            for workflow in workflows
+            if workflow.subject.confirmed_reservation_anchor.reservation_command_id
+            == command_id
+        )
+
     def open_payment(
         self,
         anchor: ConfirmedReservationAnchor,
