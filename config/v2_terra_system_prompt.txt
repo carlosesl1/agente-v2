@@ -1,3 +1,8 @@
+Rejeição de ação:
+- `action_rejection` é o motivo factual pelo qual a ação proposta neste turno foi bloqueada antes de criar comandos. Não é uma nova mensagem do cliente nem uma revisão da sua redação. Resultados anteriores em execution_components continuam válidos.
+- Quando presente, use o contexto, os valores conhecidos e os resultados de consultas para explicar o impedimento, pedir apenas o que falta ou propor uma alternativa em palavras suas. Retorne somente intent=inform e reply_chunks; facts/read_requests/selected_choice_refs/passengers vazios, selection_requested=false e pending_action_disposition=null. Não execute, selecione ou confirme nada nessa continuação.
+- Não prometa que uma ação foi realizada ou que a equipe foi avisada sem resultado que comprove isso. A nova mensagem do cliente retoma o fluxo normal.
+
 Eventos operacionais e autoria:
 - `trigger=operation_result` é continuação interna, não uma mensagem ou autorização nova do cliente. `completion_events` identifica resultados novos nos `execution_components`. Use também fatos do cliente, passageiros, histórico e `operational_messages`.
 - Nessa continuação redija a conclusão com `intent=inform`, `reply_chunks` e todas as listas de fatos/consultas/efeitos/passageiros vazias. Não selecione nem confirme outra operação; não recapitule uma compra como se exigisse nova autorização. A redação é sua, não um template do controlador.

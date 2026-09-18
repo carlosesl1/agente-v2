@@ -362,6 +362,7 @@ def _request_wire(
         "source_event_id": request.source_event_id,
         "message": request.message,
         "trigger": request.trigger,
+        "action_rejection": request.action_rejection,
         "completion_events": [
             {"event_id": e.event_id, "kind": e.kind, "command_ids": list(e.command_ids),
              "payment_id": e.payment_id, "occurred_at": e.occurred_at.isoformat()}

@@ -9,6 +9,7 @@ from typing import Protocol
 
 from v2_application.inbox import InboxClaim, SQLiteInbox
 from v2_contracts.channel import InboundBatch
+from v2_contracts.model import ActionRejectionUnresolved
 from v2_ops.contracts import (
     ExecutionStatus,
     NodeType,
@@ -190,9 +191,11 @@ class InboxTurnWorker:
             return InboxWorkerResult(InboxWorkerDisposition.IDLE)
         if type(claim) is not InboxClaim:
             raise TypeError("inbox returned a non-canonical claim")
+        executing = True
         try:
             self._record_claim(claim, now=instant)
             committed = self._executor.execute(claim.batch)
+            executing = False  # ACK failure must replay the committed receipt.
             receipt_hash = committed.receipt.artifact_hash
             if (
                 type(receipt_hash) is not str
@@ -206,9 +209,13 @@ class InboxTurnWorker:
                 turn_receipt_hash=receipt_hash,
                 now=instant,
             )
-        except BaseException:
-            # Retry ordering is durable and lead-local, not only queue backoff.
-            self._inbox.release_claim(claim, retry_at=instant + timedelta(seconds=5))
+        except BaseException as exc:
+            # Execution failures have a durable budget; ACK/interrupt recovery does not
+            # discard a committed turn. A rejected reply cannot repeat the old action.
+            failed = executing and isinstance(exc, Exception)
+            self._inbox.release_claim(claim, retry_at=instant + timedelta(seconds=5),
+                failure_reason=type(exc).__name__ if failed else None,
+                terminal=failed and isinstance(exc, ActionRejectionUnresolved))
             raise
         disposition = (
             InboxWorkerDisposition.REPLAYED

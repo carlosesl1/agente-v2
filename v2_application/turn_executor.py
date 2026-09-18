@@ -79,6 +79,7 @@ from v2_application.conversation import (
     V2ConversationDecision,
     V2ConversationReducer,
     _model_owned_reply,
+    _merge_projection,
     customer_context_values,
     effective_customer_material_hash,
     reservation_profile_ready,
@@ -121,6 +122,7 @@ from v2_contracts.execution_context import ExecutionContext, OperationalMessage
 from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.model import (
     PRIVATE_CUSTOMER_FACT_ORDER,
+    ActionRejectionUnresolved,
     AuditedModelTurn,
     ConsultationHistoryEntry,
     ModelAttachment,
@@ -143,6 +145,10 @@ _ZERO_HASH: Final = "0" * 64
 
 class TurnExecutionError(RuntimeError):
     """The turn could not be reduced into one authenticated v8 commit."""
+
+
+class _ActionContractRejected(TurnExecutionError):
+    """Deterministic pre-commit authority refusal; no command was committed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1439,6 +1445,86 @@ class V2TurnExecutor:
             operational_messages=execution_context.messages,
         )
 
+        def reject_action(
+            reason: str,
+            rejected: AuditedModelTurn,
+            observations: tuple[ReadObservation, ...] = (),
+            denied_decision: V2ConversationDecision | None = None,
+        ) -> tuple[_PreparedTurn, int, int]:
+            # This is an operation result, not a prose review. One reply-only call;
+            # never recurse into proposal reduction, reads or commercial effects.
+            rejected_frames = _frame_commitments(rejected)
+            known_projection = _merge_projection(
+                projection, first_proposal,
+                fact_commitment_hash=rejected_frames[0].canonical_hash(),
+            )
+            known_projection = _merge_projection(
+                known_projection, rejected.proposal,
+                fact_commitment_hash=rejected_frames[-1].canonical_hash(),
+            )
+            reply_request = replace(
+                request,
+                request_id=_opaque("model-rejection", batch.batch_id, current.version),
+                action_rejection=reason,
+                locale=known_projection.locale,
+                state_facts=_service_model_facts(known_projection,
+                    private_facts=private_facts, profile=profile, now=now),
+                passengers=projection_passenger_inputs(known_projection),
+                observations=observations,
+            )
+            response = trace.call(
+                NodeType.MAYA_REQUEST,
+                lambda: self._model.complete_audited(reply_request),
+                input_value=reply_request,
+                output_value=lambda value: value.proposal,
+                technical_metadata={"reason": "action_rejected"},
+            )
+            if type(response) is not AuditedModelTurn:
+                raise ActionRejectionUnresolved("rejection reply must be an audited turn")
+            reply = response.proposal
+            expected = ModelProposal(
+                source_event_id=batch.batch_id, intent="inform",
+                reply_chunks=reply.reply_chunks, facts=(), read_requests=(), effect_proposals=(),
+                clarification_question=reply.clarification_question,
+            )
+            if reply != expected or not reply.reply_chunks:
+                raise ActionRejectionUnresolved("rejection continuation is reply-only")
+            trace.record_value(NodeType.MAYA_RESPONSE, reply,
+                technical_metadata={"reason": "action_rejected"})
+            authored = AuditedModelTurn.combine((rejected, response))
+            frames = _frame_commitments(authored)
+            decision = V2ConversationDecision(
+                next_state=replace(current.state, version=current.version + 1,
+                    processed_event_ids=(*current.state.processed_event_ids, batch.batch_id)),
+                projection=known_projection, commands=(),
+                public_reply=_model_owned_reply("inform", reply),
+            )
+            if first_proposal.pending_disposition == "revoke" and pending_action is not None:
+                # Preserve the customer's already-typed revocation, never the denied
+                # followup's attempt to restore/confirm the old summary.
+                decision = self._reducer.reduce(
+                    state=current.state, projection=known_projection,
+                    proposal=replace(reply, intent="adjust", pending_disposition="revoke"),
+                    profile=profile, private_facts=private_facts, reads=(),
+                    fact_commitment_hash=frames[-1].canonical_hash(), now=self._clock.now(),
+                )
+            elif denied_decision is not None:
+                decision = replace(denied_decision, public_reply=_model_owned_reply("inform", reply))
+            if decision.commands or decision.handoff_request or decision.authenticated_system_replies:
+                raise ActionRejectionUnresolved("rejection continuation cannot create commands")
+            return self._finalize(
+                batch=batch, sources=sources, event_hash=event_hash,
+                current=current, fencing_token=fencing_token,
+                projection=known_projection, profile=profile, private_facts=private_facts,
+                private_update_turn=private_update_turn, pending_action=None,
+                now=now, decision_now=self._clock.now(), decision=decision,
+                proposal=reply, audited=authored, frames=frames,
+                final_frame_hash=frames[-1].canonical_hash(),
+                boundary_reads=(), v2_observations=(),
+                previous_receipt_hash=previous_receipt_hash,
+                superseded_turns=superseded_turns,
+            )
+
         first_audited = trace.call(
             NodeType.MAYA_REQUEST,
             lambda: self._model.complete_audited(request),
@@ -1541,7 +1627,7 @@ class V2TurnExecutor:
         if blocks_active_commercial_progression(
             current.state, first_proposal, execution_status=execution_status,
         ):
-            raise TurnExecutionError("proposal conflicts with commanded workflow")
+            return reject_action("proposal conflicts with commanded workflow", first_audited)
         first_audited = AuditedModelTurn.from_frames(
             proposal=first_proposal,
             frames=first_audited.frames,
@@ -1621,7 +1707,7 @@ class V2TurnExecutor:
         pre_read_floor = now
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
-            raise TurnExecutionError("model proposed duplicate reads")
+            return reject_action("model proposed duplicate reads", first_audited)
         v2_observations = ()
         if read_requests:
             accepted_observations: list[ReadObservation] = []
@@ -1784,7 +1870,8 @@ class V2TurnExecutor:
             if blocks_active_commercial_progression(
                 current.state, proposal, execution_status=execution_status,
             ):
-                raise TurnExecutionError("proposal conflicts with commanded workflow")
+                return reject_action("proposal conflicts with commanded workflow",
+                    AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
             second_audited = AuditedModelTurn.from_frames(
                 proposal=proposal,
                 frames=second_audited.frames,
@@ -1799,15 +1886,18 @@ class V2TurnExecutor:
             )
             effective_profile_complete = profile_ready()
             if proposal.intent == "confirm" and not critical_confirmation_bound:
-                raise TurnExecutionError("post-read frame cannot create confirmation authority")
+                return reject_action("post-read frame cannot create confirmation authority",
+                    AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
             if (
                 first_proposal.intent == "adjust"
                 and first_proposal.pending_disposition == "revoke"
                 and (proposal.intent != "adjust" or proposal.pending_disposition != "revoke")
             ):
-                raise TurnExecutionError("post-read frame cannot restore a revoked summary")
+                return reject_action("post-read frame cannot restore a revoked summary",
+                    AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
             if proposal.read_requests:
-                raise TurnExecutionError("model exceeded the single read round")
+                return reject_action("model exceeded the single read round",
+                    AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
             audited = AuditedModelTurn.combine((first_audited, second_audited))
         else:
             audited = first_audited
@@ -1822,7 +1912,7 @@ class V2TurnExecutor:
         if blocks_active_commercial_progression(
             current.state, proposal, execution_status=execution_status,
         ):
-            raise TurnExecutionError("proposal conflicts with commanded workflow")
+            return reject_action("proposal conflicts with commanded workflow", audited, v2_observations)
         audited = AuditedModelTurn.from_frames(
             proposal=proposal,
             frames=audited.frames,
@@ -1915,32 +2005,36 @@ class V2TurnExecutor:
         try:
             decision = reduce_current(proposal, reason="primary")
         except ConversationReductionError as exc:
-            raise TurnExecutionError("proposal violates conversation contract") from exc
+            return reject_action(str(exc), audited, v2_observations)
         if decision.public_reply.kind == "approval_expired":
-            raise TurnExecutionError("confirmation authority expired before decision")
-        return self._finalize(
-            batch=batch,
-            sources=sources,
-            event_hash=event_hash,
-            current=current,
-            fencing_token=fencing_token,
-            projection=projection,
-            profile=profile,
-            private_facts=private_facts,
-            private_update_turn=private_update_turn,
-            pending_action=pending_action,
-            now=now,
-            decision_now=decision_now,
-            decision=decision,
-            proposal=proposal,
-            audited=audited,
-            frames=frames,
-            final_frame_hash=final_frame_hash,
-            boundary_reads=boundary_reads,
-            v2_observations=v2_observations,
-            previous_receipt_hash=previous_receipt_hash,
-            superseded_turns=superseded_turns,
-        )
+            return reject_action("confirmation authority expired before decision",
+                audited, v2_observations, denied_decision=decision)
+        try:
+            return self._finalize(
+                batch=batch,
+                sources=sources,
+                event_hash=event_hash,
+                current=current,
+                fencing_token=fencing_token,
+                projection=projection,
+                profile=profile,
+                private_facts=private_facts,
+                private_update_turn=private_update_turn,
+                pending_action=pending_action,
+                now=now,
+                decision_now=decision_now,
+                decision=decision,
+                proposal=proposal,
+                audited=audited,
+                frames=frames,
+                final_frame_hash=final_frame_hash,
+                boundary_reads=boundary_reads,
+                v2_observations=v2_observations,
+                previous_receipt_hash=previous_receipt_hash,
+                superseded_turns=superseded_turns,
+            )
+        except _ActionContractRejected as exc:
+            return reject_action(str(exc), audited, v2_observations)
 
     def _finalize(
         self, *,
@@ -2208,7 +2302,7 @@ class V2TurnExecutor:
         if command_rows and (
             approval_deadline is None or commit_now >= approval_deadline
         ):
-            raise TurnExecutionError("critical approval expired before commit")
+            raise _ActionContractRejected("critical approval expired before commit")
         if command_rows and (
             not self._reducer.confirmation_projection_matches(
                 current.state.workflow,
@@ -2219,7 +2313,7 @@ class V2TurnExecutor:
                 now=commit_now,
             )
         ):
-            raise TurnExecutionError("critical approval scope changed before commit")
+            raise _ActionContractRejected("critical approval scope changed before commit")
         commit_private_facts = self._private_customer_facts.load(batch.lead_id)
         if type(commit_private_facts) is not PrivateCustomerFactSnapshot:
             raise TypeError("private customer owner must return an exact snapshot")

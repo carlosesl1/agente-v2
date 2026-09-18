@@ -84,6 +84,10 @@ _EXECUTION_STATUSES: Final = frozenset(
 )
 
 
+class ActionRejectionUnresolved(ValueError):
+    """The single communication-only rejection continuation is invalid."""
+
+
 class InvalidModelProposal(ValueError):
     """Raised when a model response violates the closed V2 grammar."""
 
@@ -332,12 +336,17 @@ class ModelRequest:
     trigger: str = "customer_message"
     completion_events: tuple[CompletionEvent, ...] = ()
     attachments: tuple[ModelAttachment, ...] = ()
+    action_rejection: str | None = None
 
     def __post_init__(self) -> None:
         for values, expected in ((self.execution_components, ExecutionComponentContext),
                                  (self.operational_messages, OperationalMessage)):
             if type(values) is not tuple or any(type(item) is not expected for item in values):
                 raise InvalidModelProposal("operational context must contain exact contracts")
+        if self.action_rejection is not None:
+            _text(self.action_rejection, "action_rejection")
+            if self.trigger != "customer_message":
+                raise InvalidModelProposal("action rejection requires a customer turn")
         _text(self.request_id, "request_id", identifier=True)
         _text(self.lead_id, "lead_id", identifier=True)
         _text(self.source_event_id, "source_event_id", identifier=True)

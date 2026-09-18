@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS inbound_events (
   turn_receipt_hash TEXT,
   completed_at TEXT,
   batch_id TEXT,
-  retry_at TEXT
+  retry_at TEXT,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  failure_reason TEXT
 ) STRICT;
 CREATE INDEX IF NOT EXISTS inbound_events_lead_status
 ON inbound_events(lead_id,status,occurred_at,event_id);
@@ -187,7 +189,11 @@ class SQLiteInbox:
                 connection.execute(
                     "ALTER TABLE inbound_events ADD COLUMN completed_at TEXT"
                 )
-            for column in ("batch_id", "retry_at"):
+            if "failure_count" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_events ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+                )
+            for column in ("batch_id", "retry_at", "failure_reason"):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE inbound_events ADD COLUMN {column} TEXT"
@@ -444,11 +450,17 @@ class SQLiteInbox:
             connection.close()
 
     def release_claim(
-        self, claim: InboxClaim, *, retry_at: datetime | None = None
+        self, claim: InboxClaim, *, retry_at: datetime | None = None,
+        failure_reason: str | None = None, terminal: bool = False,
     ) -> None:
         """Release a lease without losing its batch or lead-local retry schedule."""
         if type(claim) is not InboxClaim:
             raise TypeError("claim must be an exact InboxClaim")
+        if type(terminal) is not bool or (terminal and failure_reason is None):
+            raise ValueError("terminal failure requires a reason")
+        if failure_reason is not None and (type(failure_reason) is not str or not failure_reason):
+            raise ValueError("failure_reason must be a non-empty exact string")
+        failed = int(failure_reason is not None)
         retry_text = None if retry_at is None else _utc_text(retry_at, "retry_at")
         event_ids = tuple(event.event_id for event in claim.events)
         placeholders = ",".join("?" for _ in event_ids)
@@ -456,11 +468,14 @@ class SQLiteInbox:
         try:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
-                f"UPDATE inbound_events SET status='pending',claim_token=NULL,"
+                f"UPDATE inbound_events SET status=CASE "
+                f"WHEN ? OR (? AND failure_count+1 >= 3) THEN 'manual_review' "
+                f"ELSE 'pending' END,claim_token=NULL,"
+                f"failure_count=failure_count+?,failure_reason=COALESCE(?,failure_reason),"
                 f"claim_expires_at=NULL,retry_at=COALESCE(?,retry_at) "
                 f"WHERE status='claimed' AND claim_token=? "
                 f"AND event_id IN ({placeholders})",
-                (retry_text, claim.claim_token, *event_ids),
+                (terminal, failed, failed, failure_reason, retry_text, claim.claim_token, *event_ids),
             )
             if cursor.rowcount != len(event_ids):
                 raise RuntimeError("inbox claim release is stale or divergent")

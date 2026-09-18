@@ -1786,6 +1786,7 @@ def test_incomplete_selection_without_read_fails_closed_without_reducer_error() 
         read_requests=(),
         effect_proposals=(),
     )
+    corrected = replace(corrected, facts=())
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first, corrected])
     port = FakeLodgingReadPort(store)
@@ -1797,11 +1798,13 @@ def test_incomplete_selection_without_read_fails_closed_without_reducer_error() 
         reads=V2ReadService({ReadKind.LODGING: port}),
     )
     try:
-        with pytest.raises(TurnExecutionError, match="conversation contract"):
-            executor.execute(BATCH)
+        result = executor.execute(BATCH)
+        assert result.reply_chunks == corrected.reply_chunks
+        assert model.calls[-1].action_rejection
+        assert store._connection.execute("SELECT count(*) FROM boundary_public_outbox").fetchone() == (1,)
         assert len(port.calls) == 0
-        assert len(model.calls) == 1
-        for table in ("boundary_commands", "boundary_command_relays", "boundary_public_outbox"):
+        assert len(model.calls) == 2
+        for table in ("boundary_commands", "boundary_command_relays"):
             assert store._connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
     finally:
         store.close()
@@ -1850,6 +1853,7 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         read_requests=(),
         effect_proposals=(),
     )
+    corrected = replace(corrected, facts=())
     store = SQLiteBoundaryStore.open_memory_v8()
     model = FakeAuditedModel(store, [first, final, corrected])
     port = FakeLodgingReadPort(store)
@@ -1861,11 +1865,13 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         reads=V2ReadService({ReadKind.LODGING: port}),
     )
     try:
-        with pytest.raises(TurnExecutionError, match="conversation contract"):
-            executor.execute(BATCH)
+        result = executor.execute(BATCH)
+        assert result.reply_chunks == corrected.reply_chunks
+        assert model.calls[-1].action_rejection
+        assert store._connection.execute("SELECT count(*) FROM boundary_public_outbox").fetchone() == (1,)
         assert len(port.calls) == 1
-        assert len(model.calls) == 2
-        for table in ("boundary_commands", "boundary_command_relays", "boundary_public_outbox"):
+        assert len(model.calls) == 3
+        for table in ("boundary_commands", "boundary_command_relays"):
             assert store._connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
     finally:
         store.close()
@@ -4271,10 +4277,11 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
         ]
 
         calls_before = len(model.calls)
-        with pytest.raises(TurnExecutionError, match="commanded workflow"):
-            executor.execute(duplicate_batch)
+        result = executor.execute(duplicate_batch)
+        assert result.reply_chunks == (corrected_status,)
+        assert model.calls[-1].action_rejection
         assert len(read_port.calls) == reads_after_confirmation
-        assert len(model.calls) == calls_before + 1
+        assert len(model.calls) == calls_before + 2
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (1,)
@@ -4742,10 +4749,12 @@ def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() ->
             model.proposals[1],
             reply_chunks=(expired_text,),
         )
-        with pytest.raises(TurnExecutionError, match="authority expired"):
-            executor.execute(second_batch)
+        model.proposals[1] = replace(_proposal(expired_text), source_event_id=second_batch.batch_id)
+        result = executor.execute(second_batch)
+        assert result.reply_chunks == (expired_text,)
+        assert model.calls[-1].action_rejection
         assert len(read_port.calls) == 1
-        assert len(model.calls) == 3
+        assert len(model.calls) == 4
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone()[0] == 0
@@ -4770,12 +4779,16 @@ def test_approval_expiring_between_reducer_and_commit_persists_zero_effect_rows(
         ),
     )
     try:
-        with pytest.raises(TurnExecutionError, match="approval expired before commit"):
-            executor.execute(second_batch)
+        recovery = replace(_proposal("A autorização venceu; preciso de uma nova confirmação."),
+            source_event_id=second_batch.batch_id)
+        model.proposals.append(recovery)
+        result = executor.execute(second_batch)
+        assert result.reply_chunks == recovery.reply_chunks
+        assert model.calls[-1].action_rejection
         assert len(read_port.calls) == 2
-        assert len(model.calls) == 4
-        assert store.load_state(BATCH.lead_id).version == 1
-        assert store.load_turn_receipt(second_batch.batch_id) is None
+        assert len(model.calls) == 5
+        assert store.load_state(BATCH.lead_id).version == 2
+        assert store.load_turn_receipt(second_batch.batch_id) is not None
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone()[0] == 0

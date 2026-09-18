@@ -1,4 +1,7 @@
-# Active implementation — V2 atendimento simples, incremento 4
+# Active implementation — V2 rejection continuity (local)
+
+- **Correção de continuidade concluída localmente:** rejeição factual retorna à mesma Maya uma vez, resposta informativa segue recibo/outbox; recuperação inválida ou três falhas de execução chegam a `manual_review`, liberando entradas seguintes. ACK comprometido usa replay. Sem deploy.
+- Evidência: `docs/refactor/evidence/2026-09-18-v2-rejection-continuity.md`; **192 focais**, integral **2261 passaram + 2958 subtestes**, as mesmas **sete falhas da base 8f92904 reexecutada**. Fonte testada conferida por hash; não é autorização de promoção.
 
 - Authorized by Carlos on 2026-09-18 in the current chat: incremental simplification with complete lead context, per-component outcomes and removal of redundant conversational protocols. Production and real operations are explicitly outside this authorization.
 - Branch: `refactor/v2-atendimento-simples-727d3625`; required worktree: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
@@ -12,7 +15,7 @@
 - Local increment **3B**: explicit internal completion events call the same Maya; receipt/source identities atomically bind authored replies; customer turns consolidate only before dispatch. No schema/database/new queue; historical messages preserved; recovery cannot repeat reservation/payment effects.
 - Increment 3B evidence: **380 focal passed**; whole **2261 passed, 7 historical failed, 2958 subtests passed**, no new failure IDs. Twenty-two causal scenarios fail on the preceding source and pass here. Model/transports simulated; runtime authority OK. No real-model E2E, publication or deploy.
 - Increment 4 evidence: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-04.md`; **363 focal passed**; whole **2247 passed, 7 historical failed, 2958 subtests passed**, same exact failure IDs. Fifteen new scenarios fail on the immutable predecessor and pass on the candidate; source/log hashes sealed.
-- NEXT: qualify natural conversation with the real Maya in isolation and address historical suite debt. Local simplification is implemented, not deployed. No real-model E2E or rollout approval is claimed. GA remains NO-GO pending separate reconciliation/authorization.
+- DONE locally: narrow rejection-continuity correction authorized by Carlos in this chat, per `docs/superpowers/plans/2026-09-18-v2-rejection-continuity.md`. Same Maya, one factual communication-only continuation and bounded inbox failures; no new agent/queue/table or real effects. Local base `8f92904`. Production remains unchanged and GA NO-GO. Real-model qualification and historical suite debt remain separate.
 - Clean baseline: Bókun transport and active-execution suites passed `60 passed in 1.33s` in a clean environment. These are baseline contract tests, not proof of corrected Bókun or E2E conversation.
 - Runner note: the first dependency command was blocked by the tool's long-lived-process detector; the subsequent minimal runner executed successfully. No product failure was hidden.
 - Required pre-commit boundary command: `python3 scripts/check_fasttrack_boundaries.py`; documentation diff must pass `git diff --check`.

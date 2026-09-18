@@ -159,7 +159,7 @@ def test_pending_confirmation_is_bound_in_normal_adapter_frame():
 @pytest.mark.parametrize("initial_intent", ["inform", "adjust"])
 def test_post_tool_cannot_invent_initial_confirmation(initial_intent):
     store, model, port, batch, executor = fx._approval_expiry_fixture(
-        approval_ttl=timedelta(minutes=5), confirmation_clock=fx.FixedClock()
+        approval_ttl=timedelta(minutes=5), confirmation_clock=fx.SequenceClock()
     )
     confirmation = model.proposals[0]
     read = replace(port.calls[0], request_id="read:confirmation-escalation")
@@ -172,10 +172,14 @@ def test_post_tool_cannot_invent_initial_confirmation(initial_intent):
         read_requests=(read,),
         pending_disposition="revoke" if initial_intent == "adjust" else None,
     )
-    model.proposals[:] = [initial, confirmation]
+    recovery = replace(fx._proposal("Essa ação não foi autorizada."), source_event_id=batch.batch_id)
+    model.proposals[:] = [initial, confirmation, recovery]
     try:
-        with pytest.raises(fx.TurnExecutionError):
-            executor.execute(batch)
+        result = executor.execute(batch)
+        assert result.reply_chunks == recovery.reply_chunks
+        assert model.calls[-1].action_rejection
+        if initial_intent == "adjust":
+            assert not isinstance(store.load_state(batch.lead_id).state.workflow, fx.AwaitingConfirmationState)
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (0,)
