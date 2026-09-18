@@ -201,7 +201,7 @@ Conversas com modelo real exigem harness isolado e efeitos de negócio fechados,
 - Fonte inicial: worktree limpa no commit base verificado.
 - Baseline focal: `tests/test_v2_bokun_write_transport.py` e `tests/test_v2_active_execution.py`, executados com ambiente limpo e plugins pytest automáticos desabilitados: **60 passed in 1.33s**.
 - A tentativa inicial de runner contendo `uvicorn` foi bloqueada pelo detector de processo longo da ferramenta antes da execução. O runner sem essa dependência não necessária executou e substitui a tentativa; não houve teste de produto reprovado nessa etapa.
-- Não foram implementadas correções nem executados testes E2E novos. Os testes existentes ainda incluem o fixture Bókun incorreto identificado pela investigação.
+- No registro inicial desta especificação, não havia correções implementadas nem testes E2E novos; o fixture Bókun ainda era incorreto. Estado posterior do primeiro incremento: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-01.md`. Esse incremento não entrega a simplificação completa.
 - Revisão interna: contexto não é outro banco; pessoa não é inferida pelo controlador; resultado não autoriza retry; falha de mensagem não repete reserva; compatibilidade histórica não mantém uma segunda implementação ativa.
 
 Execução autorizada em incrementos, com plano causal antes de cada conjunto de alterações. Primeiro plano: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-01-bokun.md`. Produção e operações reais permanecem fora da autorização.

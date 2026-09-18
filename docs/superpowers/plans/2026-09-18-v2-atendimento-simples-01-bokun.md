@@ -58,7 +58,7 @@ env -i HOME=/home/ubuntu PATH=/usr/local/bin:/usr/bin:/bin \
   PYTHONPATH=/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625 \
   PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 HERMES_LEADS_AGENT_CONFIG_PATH=/dev/null \
   UV_CACHE_DIR=/home/ubuntu/.cache/uv \
-  uv run --no-project --with pytest --with pydantic --with PyYAML \
+  uv run --no-project --python 3.12 --with pytest --with pydantic --with PyYAML \
   --with cryptography --with httpx --with fastapi python -m pytest
 ```
 
@@ -68,9 +68,9 @@ env -i HOME=/home/ubuntu PATH=/usr/local/bin:/usr/bin:/bin \
 
 **Interfaces:** Mantém `_external_checkout_option(payload: object) -> Mapping[str, object] | None`; consumidores continuam `_checkout_base_amount` e `_submit_body_v2`.
 
-- [ ] Trocar os três fixtures positivos `allowedMethods` na raiz por `paymentMethods: {allowedMethods: [...]}`. Não modificar os asserts comerciais. O teste de seleção deve continuar usando primeira opção incompatível e segunda válida, com valores diferentes.
-- [ ] Executar RED: `TEST tests/test_v2_bokun_write_transport.py::test_bokun_v2_submit_booking_id_confirms_without_readback tests/test_v2_bokun_write_transport.py::test_submit_selects_option_that_explicitly_allows_external_payment -q`. Esperado: falha porque a opção nested não é encontrada, não erro de import.
-- [ ] Acrescentar regressão adversarial do seletor:
+- [x] Trocar os três fixtures positivos `allowedMethods` na raiz por `paymentMethods: {allowedMethods: [...]}`. Não modificar os asserts comerciais. O teste de seleção deve continuar usando primeira opção incompatível e segunda válida, com valores diferentes.
+- [x] Executar RED: `TEST tests/test_v2_bokun_write_transport.py::test_bokun_v2_submit_booking_id_confirms_without_readback tests/test_v2_bokun_write_transport.py::test_submit_selects_option_that_explicitly_allows_external_payment -q`. Esperado: falha porque a opção nested não é encontrada, não erro de import.
+- [x] Acrescentar regressão adversarial do seletor:
 
 ```python
 @pytest.mark.parametrize('payment_methods', [None, [], {}, {'allowedMethods': None}, {'allowedMethods': 'RESERVE_FOR_EXTERNAL_PAYMENT'}, {'allowedMethods': []}, {'allowedMethods': ['CUSTOMER_FULL_PAYMENT']}])
@@ -83,7 +83,7 @@ def test_checkout_rejects_invalid_nested_methods_even_with_top_level_decoy(payme
     assert BokunHTTPTransport._external_checkout_option({'options': [option]}) is None
 ```
 
-- [ ] Implementar apenas a leitura correta (sem fallback de raiz):
+- [x] Implementar apenas a leitura correta (sem fallback de raiz):
 
 ```python
 for option in options:
@@ -96,15 +96,15 @@ for option in options:
 return None
 ```
 
-- [ ] GREEN: suíte completa `TEST tests/test_v2_bokun_write_transport.py -q`. Confirmar transporte `POST cart → GET checkout → POST submit`, uma única chamada de submit, lote multipassageiro existente preservado. Testes de limite de preço e de status ambíguo não são afrouxados.
+- [x] GREEN: suíte completa `TEST tests/test_v2_bokun_write_transport.py -q`. Confirmar transporte `POST cart → GET checkout → POST submit`, uma única chamada de submit, lote multipassageiro existente preservado. Testes de limite de preço e de status ambíguo não são afrouxados.
 
 ## Task 2 — Causa anterior ao submit sem novo protocolo
 
-**Files:** `v2_adapters/provider_http.py:2008–2010`, `v2_adapters/_provider_common.py:133–139`; `tests/test_v2_bokun_write_transport.py`; `tests/test_v2_reservations.py`.
+**Files:** `v2_adapters/provider_http.py:2008–2010`, `v2_adapters/_provider_common.py:133–139`; `tests/test_v2_bokun_checkout_contract.py` (novo, reutiliza helpers de `test_v2_bokun_write_transport.py`); `tests/test_v2_reservations.py`.
 
 **Interfaces:** Retorno técnico do transporte continua dict `status`; no caso delimitado de ausência de opção, acrescenta `reason='checkout_external_payment_unavailable'`. `ProviderExecutionResult` e `ExecutionOutcome` não mudam de schema. `normalized_status` recebe esse motivo fechado; `certainty` permanece `CALLED_NO_EFFECT` para booking final. Isso não significa ausência do carrinho auxiliar.
 
-- [ ] Criar teste do transporte completo que responde cart válido, checkout sem pagamento externo e falha imediatamente se receber submit. O resultado exigido é:
+- [x] Criar teste do transporte completo que responde cart válido, checkout sem pagamento externo e falha imediatamente se receber submit. O resultado exigido é:
 
 ```python
 assert result == {
@@ -117,7 +117,7 @@ assert len(seen) == 2
 
 Reutilizar `_dispatch_payload`, `_checkout` e `_transport`; o cart sintético tem a mesma atividade/tarifa/data/categoria desses helpers. Incluir segunda execução de cenário válido com opções de valores diferentes: a primeira não permite pagamento externo e não pode fornecer o valor usado na autorização do submit. No cenário inválido, a presença do método somente no topo é um decoy e não autoriza submit.
 
-- [ ] Criar matriz de port com `_provider_port_permit` e `BokunReservationPort` existentes:
+- [x] Criar matriz de port com `_provider_port_permit` e `BokunReservationPort` existentes:
 
 ```python
 @pytest.mark.parametrize(('response', 'expected'), [
@@ -143,9 +143,9 @@ def test_bokun_port_preserves_no_submit_cause(response, expected):
     assert outcome.normalized_status == expected
 ```
 
-- [ ] RED: executar os novos testes; motivo ausente e classificação indevida `rejected` devem falhar.
-- [ ] Antes de obter `_checkout_base_amount`, quando `_external_checkout_option` é `None`, retornar o dict delimitado acima. Não adicionar retries nem reenviar carrinho.
-- [ ] Na normalização existente, preservar a distinção:
+- [x] RED: executar os novos testes; motivo ausente e classificação indevida `rejected` devem falhar.
+- [x] Antes de obter `_checkout_base_amount`, quando `_external_checkout_option` é `None`, retornar o dict delimitado acima. Não adicionar retries nem reenviar carrinho.
+- [x] Na normalização existente, preservar a distinção:
 
 ```python
 if status in ('rejected', 'no_effect'):
@@ -166,21 +166,33 @@ if status in ('rejected', 'no_effect'):
 
 Não propagar texto arbitrário como status. O contrato antigo sem motivo continua legível; o histórico não é reescrito. A definição de rejeição do submit e os casos incertos já existentes permanecem.
 
-- [ ] GREEN: `TEST tests/test_v2_bokun_write_transport.py tests/test_v2_reservations.py -q`.
-- [ ] Provar persistência e não repetição: no teste de worker parametrizado por certeza de `test_v2_reservations.py`, incluir o motivo novo em um resultado `CALLED_NO_EFFECT`, fechar/reabrir SQLite temporário e verificar que o estado `FailedNoEffectState.outcome.normalized_status` preserva o código e a próxima execução não faz outra chamada. Usar a fixture/worker existente, sem banco real.
+- [x] GREEN: `TEST tests/test_v2_bokun_write_transport.py tests/test_v2_reservations.py -q`.
+- [x] Provar persistência e não repetição: em `test_bokun_local_checkout_cause_survives_reopen_without_replay` de `test_v2_reservations.py`, incluir o motivo novo em um resultado `CALLED_NO_EFFECT`, fechar/reabrir SQLite temporário e verificar que o estado `FailedNoEffectState.outcome.normalized_status` preserva o código e a próxima execução não faz outra chamada. Usar a fixture/worker existente, sem banco real.
 
 ## Task 3 — Revisão e entrega do incremento
 
-- [ ] Rodar conjunto afetado:
+- [x] Rodar conjunto afetado:
 
 ```text
-TEST tests/test_v2_bokun_write_transport.py tests/test_v2_reservations.py tests/test_v2_provider_http_transports.py tests/test_v2_active_execution.py tests/test_v2_completion_projector.py tests/test_fasttrack_boundaries.py -q
+TEST tests/test_v2_bokun_checkout_contract.py tests/test_v2_bokun_write_transport.py tests/test_v2_reservations.py tests/test_v2_provider_http_transports.py tests/test_v2_active_execution.py tests/test_v2_completion_projector.py tests/test_fasttrack_boundaries.py -q
 ```
 
-- [ ] Rodar `python3 scripts/check_fasttrack_boundaries.py`, `git diff --check`, compileall dos dois módulos alterados e Ruff fixado `0.15.10` nos dois módulos e testes alterados. Distinguir achado preexistente de regressão, sem limpeza fora de escopo.
-- [ ] Revisar diff inline: não há fallback de formato inventado, retry após escrita, mudança de certeza ou política financeira. Confirmar que os testes atravessam HTTPTransport e port, não apenas helper.
-- [ ] Atualizar este checklist e `docs/refactor/ACTIVE.md` com comandos/resultados reais e pendências. Commit local dos arquivos nominados; não promover nem alegar validação E2E real.
-- [ ] Verificar worktree limpa e autoridade runtime OK, preservar artefatos locais de RED/GREEN e hashes. Relatar explicitamente que contexto completo e protocolos ainda pertencem aos incrementos seguintes.
+- [x] Rodar `python3 scripts/check_fasttrack_boundaries.py`, `git diff --check`, compileall dos dois módulos alterados e Ruff fixado `0.15.10` nos dois módulos e testes alterados. Distinguir achado preexistente de regressão, sem limpeza fora de escopo.
+- [x] Revisar diff inline: não há fallback de formato inventado, retry após escrita, mudança de certeza ou política financeira. Confirmar que os testes atravessam HTTPTransport e port, não apenas helper.
+- [x] Atualizar este checklist e `docs/refactor/ACTIVE.md` com comandos/resultados reais e pendências. Commit local dos arquivos nominados; não promover nem alegar validação E2E real.
+- [x] Verificar worktree limpa e autoridade runtime OK, preservar artefatos locais de RED/GREEN e hashes. Relatar explicitamente que contexto completo e protocolos ainda pertencem aos incrementos seguintes.
+
+## Execução e revisão do incremento
+
+Revisão inline, sem subagentes. Os testes HTTP da tarefa 2 foram isolados em `tests/test_v2_bokun_checkout_contract.py`, reaproveitando os helpers existentes; a persistência usa um teste dedicado do worker Bókun, com SQLite temporário reaberto. Não houve acréscimo de arquitetura de produção.
+
+- RED do parser: 9 falhas esperadas; GREEN do transporte: 65 aprovados.
+- RED do motivo: 5 falhas esperadas; GREEN transporte/port: 119 aprovados.
+- Evidência final suportada: Python 3.12.14, 152 testes afetados aprovados; Ruff 0.15.10/compileall/guard/diff check aprovados.
+- Suíte inteira: 2.205 aprovados, 7 falhas históricas, 2.958 subtests aprovados; exatamente os mesmos sete node IDs reproduzidos na base anterior. A suíte inteira não é verde.
+- Falhas de harness preservadas: runner inicial usou Python 3.11 por não fixar `--python`; archive de baseline sem histórico Git teve uma falha adicional. Ambos foram corrigidos e reexecutados sem alterar produto para esconder falhas.
+- Registro: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-01.md`. O commit final/estado limpo e hashes ficam vinculados por `INCREMENT-1-EVIDENCE.json` na pasta externa dos logs.
+- Sem push, CI remoto, E2E de modelo real ou promoção. Os incrementos 2–4 continuam pendentes.
 
 ## Cobertura e limites
 

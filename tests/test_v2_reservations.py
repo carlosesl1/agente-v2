@@ -14,6 +14,7 @@ from reservation_domain import (
     EconomicTerms,
     ExecutionCertainty,
     ExecutionOutcome,
+    FailedNoEffectState,
     ManualReviewState,
     Money,
     PassengerFacts,
@@ -592,6 +593,70 @@ def test_bokun_booking_id_confirmation_is_durable_and_not_replayed(
         ).fetchone() == (1, "outcome_recorded")
     finally:
         store.close()
+
+
+def test_bokun_local_checkout_cause_survives_reopen_without_replay(tmp_path: Path) -> None:
+    command = _group_activity_command(_group_passengers())
+    path = tmp_path / "bokun-checkout-blocked.sqlite3"
+    bundle = build_reservation_relay_bundle(command)
+    source_hash = hashlib.sha256(command.command_id.encode()).hexdigest()
+    reason = "checkout_external_payment_unavailable"
+    calls = []
+
+    def transport(operation, payload, *, idempotency_key):
+        calls.append((operation, payload, idempotency_key))
+        return {"status": "no_effect", "reason": reason}
+
+    adapter = V2ReservationExecutionAdapter(
+        provider="bokun",
+        port=BokunReservationPort(transport),
+        authorization=_authorization("bokun"),
+        require_private_binding=False,
+    )
+
+    def worker(store):
+        return V2ReservationWorker(
+            store=store,
+            adapters=(adapter,),
+            effect_guard=FakeCommercialEffectGuard(),
+            worker_id="worker:bokun-checkout-blocked",
+            lease_ttl=timedelta(seconds=30),
+        )
+
+    store = SQLiteUnitOfWork.open_v6(path)
+    try:
+        store.accept_boundary_reservation(
+            operation_id=reservation_target_operation_id(
+                bundle_hash=bundle.artifact_hash,
+                source_turn_receipt_hash=source_hash,
+            ),
+            source_turn_receipt_hash=source_hash,
+            bundle=bundle,
+        )
+        first = worker(store).run_once(now=NOW + timedelta(seconds=1))
+        assert first.disposition is V2WorkerDisposition.CALLED_NO_EFFECT
+        assert first.transition.state.outcome.normalized_status == reason
+    finally:
+        store.close()
+
+    reopened = SQLiteUnitOfWork.open_v6(path)
+    try:
+        state = reopened.load_workflow(command.workflow_id)
+        assert isinstance(state, FailedNoEffectState)
+        assert state.outcome.certainty is ExecutionCertainty.CALLED_NO_EFFECT
+        assert state.outcome.normalized_status == reason
+        assert state.outcome.provider_reference is None
+        assert worker(reopened).run_once(
+            now=NOW + timedelta(seconds=2)
+        ).disposition is V2WorkerDisposition.IDLE
+        assert len(calls) == 1
+        assert reopened._connection.execute(
+            "SELECT dispatch_slots_consumed,status FROM execution_ledger "
+            "WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone() == (1, "outcome_recorded")
+    finally:
+        reopened.close()
 
 
 def test_timeout_after_dispatch_becomes_called_unknown_without_retry(
@@ -1315,6 +1380,42 @@ def test_cloudbeds_maximum_raw_reference_fits_execution_outcome() -> None:
 
     assert result.provider_reference == raw_reference
     assert outcome.provider_reference == f"provider:cloudbeds:{raw_reference}"
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ({"status": "no_effect"}, "no_effect"),
+        ({"status": "rejected"}, "rejected"),
+        (
+            {"status": "no_effect", "reason": "checkout_external_payment_unavailable"},
+            "checkout_external_payment_unavailable",
+        ),
+        ({"status": "no_effect", "reason": "untrusted-provider-text"}, "no_effect"),
+        (
+            {"status": "rejected", "reason": "checkout_external_payment_unavailable"},
+            "rejected",
+        ),
+    ],
+)
+def test_bokun_port_preserves_no_submit_cause(response, expected: str) -> None:
+    permit = _provider_port_permit(provider="bokun", operation="book_activity")
+
+    def transport(operation, payload, *, idempotency_key):
+        return response
+
+    result = BokunReservationPort(transport).execute(permit)
+
+    assert result.certainty is ProviderCertainty.CALLED_NO_EFFECT
+    assert result.normalized_status == expected
+    outcome = ExecutionOutcome(
+        command_id=permit.command_id,
+        certainty=ExecutionCertainty.CALLED_NO_EFFECT,
+        normalized_status=result.normalized_status,
+        provider_reference=None,
+        evidence=result.evidence,
+    )
+    assert outcome.normalized_status == expected
 
 
 def test_bokun_port_normalizes_confirmed_booking_reference_like_base() -> None:

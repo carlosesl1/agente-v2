@@ -131,9 +131,16 @@ def reservation_result(
             ),
         )
     if status in ("rejected", "no_effect"):
+        normalized_status = status
+        if (
+            provider == "bokun"
+            and status == "no_effect"
+            and response.get("reason") == "checkout_external_payment_unavailable"
+        ):
+            normalized_status = "checkout_external_payment_unavailable"
         return ProviderExecutionResult(
             ProviderCertainty.CALLED_NO_EFFECT,
-            "rejected",
+            normalized_status,
             None,
             (evidence,),
         )

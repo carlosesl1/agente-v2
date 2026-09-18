@@ -89,7 +89,9 @@ def _checkout(
             {
                 "formattedAmount": amount,
                 "invoice": {"remainingAmount": amount},
-                "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
+                "paymentMethods": {
+                    "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
+                },
             }
         ],
         "questions": {
@@ -269,12 +271,12 @@ def test_submit_selects_option_that_explicitly_allows_external_payment() -> None
         {
             "formattedAmount": "999.00",
             "invoice": {"remainingAmount": "999.00"},
-            "allowedMethods": ["CUSTOMER_FULL_PAYMENT"],
+            "paymentMethods": {"allowedMethods": ["CUSTOMER_FULL_PAYMENT"]},
         },
         {
             "formattedAmount": "300.00",
             "invoice": {"remainingAmount": "300.00"},
-            "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
+            "paymentMethods": {"allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"]},
         },
     ]
 
@@ -308,6 +310,30 @@ def test_submit_selects_option_that_explicitly_allows_external_payment() -> None
     )
 
     assert body["paymentMethod"] == "RESERVE_FOR_EXTERNAL_PAYMENT"
+
+
+@pytest.mark.parametrize(
+    "payment_methods",
+    [
+        None,
+        [],
+        {},
+        {"allowedMethods": None},
+        {"allowedMethods": "RESERVE_FOR_EXTERNAL_PAYMENT"},
+        {"allowedMethods": []},
+        {"allowedMethods": ["CUSTOMER_FULL_PAYMENT"]},
+    ],
+)
+def test_checkout_rejects_invalid_nested_methods_even_with_top_level_decoy(
+    payment_methods: object,
+) -> None:
+    option = {
+        "allowedMethods": ["RESERVE_FOR_EXTERNAL_PAYMENT"],
+        "paymentMethods": payment_methods,
+        "formattedAmount": "300.00",
+    }
+
+    assert BokunHTTPTransport._external_checkout_option({"options": [option]}) is None
 
 
 def test_bokun_v2_submit_booking_id_confirms_without_readback() -> None:

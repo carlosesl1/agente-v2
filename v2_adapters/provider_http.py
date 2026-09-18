@@ -2005,6 +2005,11 @@ class BokunHTTPTransport:
         )
         if not 200 <= checkout_status < 300:
             return {"status": "no_effect"}
+        if self._external_checkout_option(checkout_payload) is None:
+            return {
+                "status": "no_effect",
+                "reason": "checkout_external_payment_unavailable",
+            }
         checkout_base_amount = self._checkout_base_amount(checkout_payload)
         if checkout_base_amount is None or checkout_base_amount > amount:
             return {"status": "no_effect"}
@@ -2910,16 +2915,18 @@ class BokunHTTPTransport:
         options = checkout.get("options")
         if not isinstance(options, list):
             return None
-        return next(
-            (
-                option
-                for option in options
-                if isinstance(option, Mapping)
-                and isinstance(option.get("allowedMethods"), list)
-                and "RESERVE_FOR_EXTERNAL_PAYMENT" in option["allowedMethods"]
-            ),
-            None,
-        )
+        for option in options:
+            if not isinstance(option, Mapping):
+                continue
+            methods = option.get("paymentMethods")
+            allowed = (
+                methods.get("allowedMethods")
+                if isinstance(methods, Mapping)
+                else None
+            )
+            if isinstance(allowed, list) and "RESERVE_FOR_EXTERNAL_PAYMENT" in allowed:
+                return option
+        return None
 
     @staticmethod
     def _checkout_amount(payload: object) -> Decimal | None:

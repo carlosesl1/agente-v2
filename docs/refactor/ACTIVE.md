@@ -12,7 +12,12 @@
 - Runner note: the first dependency command was blocked by the tool's long-lived-process detector; the subsequent minimal runner executed successfully. No product failure was hidden.
 - Required pre-commit boundary command: `python3 scripts/check_fasttrack_boundaries.py`; documentation diff must pass `git diff --check`.
 - Historical NEXT entries below are retained for provenance only and confer no current implementation/rollout authority.
-- NEXT: execute increment 1 plan (test-first nested checkout and no-submit cause), validate affected suites, and report the increment before advancing to context changes. No deploy or external effects.
+- Local increment 1: nested checkout and precise no-submit cause implemented; no schema/database or retry layer added.
+- Evidence: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-01.md`; actual logs and hashes under `/home/ubuntu/workspace/v2-simplificacao-atendimento-727d3625/`.
+- Supported runner: Python 3.12.14; final affected suites `152 passed`; whole diagnostic `2205 passed, 7 failed, 2958 subtests passed`. The same seven failure IDs reproduce on functional base `8980646d...`; do not call the whole suite green. Ruff 0.15.10, compileall and boundaries passed.
+- Graphify: code-only pre-change map bound to `ee4dfaa`, with documented extraction gaps; navigation aid, not runtime authority.
+- Decision: local correction validated; no new rollout authorization, real-model E2E or remote CI. Full-context/protocol simplification is still pending.
+- NEXT: report increment 1 evidence and the remaining work; the next functional increment is complete lead context and explicit person/role binding under the already-approved design, with its own causal plan before edits. No deploy or external effects.
 
 ## Preserved historical correction — Maya V2 current-observation completion
 
