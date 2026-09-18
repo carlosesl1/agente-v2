@@ -1,13 +1,13 @@
-# Active implementation — V2 atendimento simples, incremento 1
+# Active implementation — V2 atendimento simples, incremento 2
 
 - Authorized by Carlos on 2026-09-18 in the current chat: incremental simplification with complete lead context, per-component outcomes and removal of redundant conversational protocols. Production and real operations are explicitly outside this authorization.
 - Branch: `refactor/v2-atendimento-simples-727d3625`; required worktree: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
 - Verified isolated-test source base: `8980646d5615db9ecb32c97f4579ba09080dc02a`. GA remains independently declared by the verified live authority; this document is not runtime authority.
 - Design: `docs/superpowers/specs/2026-09-18-v2-atendimento-simples-design.md`.
 - Carlos approved the written specification with “Siga” in the current chat; Graphify is authorized as navigation aid.
-- Active plan: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-01-bokun.md` (inline execution, no subagents).
+- Active plan: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-02-contexto.md` (inline execution, no subagents). Carlos authorized advancement with “Siga” after the increment 1 report.
 - Ownership: Maya interprets and authors; tools return facts; controller validates effects. Lead-provided values are reusable in the conversation without PII masking/presence-only substitution.
-- Deliverable in this increment: nested Bókun checkout parser and accurate local no-submit classification, with causal tests. No deploy, provider write, WhatsApp message, live-state edit, V3, legacy or Ops change.
+- Deliverable in this increment: reusable customer/passenger values, explicit holder role, conversational booking phone and history bounded by bytes rather than four exchanges. No deploy, provider write, WhatsApp message, live-state edit, V3, legacy or Ops UI/deploy change. The existing Ops request serializer receives only the mechanical contract compatibility update.
 - Clean baseline: Bókun transport and active-execution suites passed `60 passed in 1.33s` in a clean environment. These are baseline contract tests, not proof of corrected Bókun or E2E conversation.
 - Runner note: the first dependency command was blocked by the tool's long-lived-process detector; the subsequent minimal runner executed successfully. No product failure was hidden.
 - Required pre-commit boundary command: `python3 scripts/check_fasttrack_boundaries.py`; documentation diff must pass `git diff --check`.
@@ -16,8 +16,10 @@
 - Evidence: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-01.md`; actual logs and hashes under `/home/ubuntu/workspace/v2-simplificacao-atendimento-727d3625/`.
 - Supported runner: Python 3.12.14; final affected suites `152 passed`; whole diagnostic `2205 passed, 7 failed, 2958 subtests passed`. The same seven failure IDs reproduce on functional base `8980646d...`; do not call the whole suite green. Ruff 0.15.10, compileall and boundaries passed.
 - Graphify: code-only pre-change map bound to `ee4dfaa`, with documented extraction gaps; navigation aid, not runtime authority.
-- Decision: local correction validated; no new rollout authorization, real-model E2E or remote CI. Full-context/protocol simplification is still pending.
-- NEXT: report increment 1 evidence and the remaining work; the next functional increment is complete lead context and explicit person/role binding under the already-approved design, with its own causal plan before edits. No deploy or external effects.
+- Local increment 2: values and passenger roles reach model requests; shared effective-value resolver; explicit holder binding; reusable contact phone; byte-budgeted dialogue without four-turn deletion. Presence-only fields and name-based role inference removed; confirmation shares normal context serialization.
+- Increment 2 evidence: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-02.md`; focal `272 passed`, final whole diagnostic `2216 passed, 7 failed, 2958 subtests passed`. Same seven historical IDs; twelve new causal cases fail on the preceding source and pass here. Eight simulated turns preserve data and original dialogue across reopening, with no business commands.
+- Decision: increments 1 and 2 validated locally; no rollout authorization, real-model E2E or remote CI. Outcome/history/protocol simplification is still pending; whole suite is not green.
+- NEXT: increment 3 — component-level outcomes/payments and asynchronous completion in conversation history, retaining scoped idempotency/unknown-effect protection. Then remove redundant review/correction protocols. No deploy or external effects.
 
 ## Preserved historical correction — Maya V2 current-observation completion
 

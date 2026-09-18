@@ -64,21 +64,23 @@ def test_conversation_exchange_is_bounded_and_hides_raw_text_from_repr() -> None
         ConversationExchange(customer_message="message", assistant_reply_chunks=())
 
 
-def test_model_request_accepts_at_most_four_recent_exchanges() -> None:
+def test_model_request_uses_byte_budget_instead_of_four_exchange_count() -> None:
+    from v2_contracts.model import MAX_DIALOGUE_CONTEXT_BYTES
+
     exchanges = tuple(
-        ConversationExchange(f"customer {index}", (f"assistant {index}",))
-        for index in range(4)
+        ConversationExchange(f"customer {i}", (f"assistant {i}",)) for i in range(12)
     )
-
     assert _request(recent_dialogue=exchanges).recent_dialogue == exchanges
-
-    with pytest.raises(InvalidModelProposal, match="four-exchange bound"):
-        _request(
-            recent_dialogue=(
-                *exchanges,
-                ConversationExchange("customer 5", ("assistant 5",)),
-            )
+    large = tuple(ConversationExchange("a" * 16000, ("b" * 16000,)) for _ in range(3))
+    assert (
+        sum(
+            len(item.customer_message) + len(item.assistant_reply_chunks[0])
+            for item in large
         )
+        > MAX_DIALOGUE_CONTEXT_BYTES
+    )
+    with pytest.raises(InvalidModelProposal, match="byte bound"):
+        _request(recent_dialogue=large)
 
 
 def test_private_dialogue_store_is_exact_idempotent_bounded_and_restart_safe(
@@ -91,12 +93,14 @@ def test_private_dialogue_store_is_exact_idempotent_bounded_and_restart_safe(
 
     loaded = store.load_recent_dialogue("lead:context")
     assert tuple(item.customer_message for item in loaded) == (
+        "customer message 1",
         "customer message 2",
         "customer message 3",
         "customer message 4",
         "customer message 5",
     )
     assert tuple(item.assistant_reply_chunks for item in loaded) == (
+        ("assistant reply 1",),
         ("assistant reply 2",),
         ("assistant reply 3",),
         ("assistant reply 4",),
@@ -143,6 +147,7 @@ def test_private_dialogue_retention_uses_commit_order_when_timestamps_tie(
     assert tuple(
         item.customer_message for item in store.load_recent_dialogue("lead:context")
     ) == (
+        "customer message 1",
         "customer message 2",
         "customer message 3",
         "customer message 4",

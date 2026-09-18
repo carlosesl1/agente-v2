@@ -65,21 +65,14 @@ def test_pending_tour_schedule_question_never_uses_unrelated_hostel_hours() -> N
     assert "não trouxer uma resposta direta e específica para o passeio" in PROMPT
 
 
-def test_private_profile_marker_prevents_reasking_authenticated_contact() -> None:
-    assert "private_profile_complete=true" in PROMPT
-    assert "autenticou nome, e-mail e telefone do contato principal" in PROMPT
-    assert "validou o país canônico do binding ou de um fato tipado persistido" in PROMPT
-    assert "autenticou nome, e-mail, telefone e país do contato principal" not in PROMPT
-    assert "país explicitamente informado na mensagem atual" in PROMPT
-    assert "Estados Unidos (US)" in PROMPT
-    assert "country_code=US" in PROMPT
-    assert "mesmo com intent=inform" in PROMPT
-    assert "não peça novamente esses dados do contato" in PROMPT
-    assert "lista canônica que informa quais campos já existem" in PROMPT
-    assert "Mesmo quando a mensagem principal for uma pergunta" in PROMPT
-    assert "17 May 1991" in PROMPT
-    assert "1991-05-17" in PROMPT
-    assert "female→f" in PROMPT
+def test_reusable_values_replace_presence_only_prompt() -> None:
+    assert "valores comerciais e os dados conhecidos do titular/contato" in PROMPT
+    assert "Reutilize os dados, mesmo que informados em turnos anteriores" in PROMPT
+    assert "private_customer_fact_names" not in PROMPT
+    assert "Os valores persistidos retornam ao seu contexto" in PROMPT
+    assert "não altera o destinatário ManyChat" in PROMPT
+    assert "titular vinculado a passageiro" in PROMPT
+    assert "ISO YYYY-MM-DD" in PROMPT
 
 
 def test_holder_ambiguity_never_blocks_a_complete_read_only_consultation() -> None:
@@ -183,15 +176,13 @@ def test_public_payment_language_hides_internal_provider_names() -> None:
 
 def test_multiple_activity_passengers_use_complete_private_manifest() -> None:
     assert "qualquer composição positiva aceita pela oferta" in PROMPT
-    assert "manifesto individual estiver completo" in PROMPT
+    assert "manifesto individual completo" in PROMPT
     assert "Tamanho do grupo não abre handoff por si só" in PROMPT
-    assert "Para grupo, siga o manifesto de passageiros abaixo" in PROMPT
-    assert "o contato principal não coincidir com uma posição do manifesto" in PROMPT
-    assert "nascimento e gênero próprios do contato principal" in PROMPT
-    assert "nunca copie esses valores de um passageiro diferente" in PROMPT
-    assert "passenger_manifest_status" in PROMPT
-    assert "posição" in PROMPT
-    assert "campos ainda não fornecidos são null" in PROMPT
+    assert "Não copie dados entre pessoas diferentes" in PROMPT
+    assert "Só uma pessoa pode ser titular" in PROMPT
+    assert "is_holder=true" in PROMPT
+    assert "passenger_manifest_status" not in PROMPT
+    assert "Campos não atualizados são null" in PROMPT
     assert "`handoff_status`" in PROMPT
     assert "acknowledgement_pending" in PROMPT
     assert "nunca diga que uma pessoa recebeu" in PROMPT

@@ -26,7 +26,7 @@ from v2_application.turn_executor import (
     _state_model_facts,
 )
 from v2_contracts.model import ModelProposal, ModelRequest
-from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
+from v2_contracts.passengers import PassengerInput
 
 
 def _input(
@@ -276,44 +276,32 @@ def test_manifest_conflict_and_party_change_fail_closed() -> None:
     assert complete_manifest(reset, Party(3, 0)) is None
 
 
-def test_model_request_exposes_manifest_progress_without_private_values() -> None:
-    status = PassengerManifestStatus(
-        required_adults=2,
-        required_children=1,
-        complete_positions=(1,),
-        missing_by_position=(
-            (2, ("birth_date", "gender")),
-            (3, ("full_name", "birth_date", "gender", "country_code")),
-        ),
+def test_model_request_exposes_passenger_values_and_role() -> None:
+    passenger = PassengerInput(
+        2, "adult", "Pessoa Original", date(1990, 1, 2), None, "BR", is_holder=True
     )
     request = ModelRequest(
-        request_id="request:manifest-status",
-        lead_id="manychat:manifest-status",
-        source_event_id="batch:manifest-status",
-        message="Enviei os dados solicitados.",
-        locale="pt-BR",
-        state_version=2,
-        passenger_manifest_status=status,
+        "request:manifest",
+        "lead:manifest",
+        "turn:manifest",
+        "Use os dados",
+        "pt-BR",
+        2,
+        passengers=(passenger,),
     )
-
-    envelope = json.loads(_request_wire(request, "Closed prompt."))
-    user = json.loads(envelope["messages"][0][1])
-    serialized = json.dumps(user, ensure_ascii=False)
-
-    assert user["passenger_manifest_status"] == {
-        "required_adults": 2,
-        "required_children": 1,
-        "complete_positions": [1],
-        "missing_by_position": [
-            {"position": 2, "fields": ["birth_date", "gender"]},
-            {
-                "position": 3,
-                "fields": ["full_name", "birth_date", "gender", "country_code"],
-            },
-        ],
-    }
-    assert "Pessoa Original" not in serialized
-    assert "1990-01-02" not in serialized
+    user = json.loads(json.loads(_request_wire(request, "Prompt"))["messages"][0][1])
+    assert user["passengers"] == [
+        dict(
+            position=2,
+            participant_type="adult",
+            full_name="Pessoa Original",
+            birth_date="1990-01-02",
+            gender=None,
+            country_code="BR",
+            is_holder=True,
+        )
+    ]
+    assert "passenger_manifest_status" not in user
 
 
 def test_private_manifest_fact_round_trips_but_is_not_model_state() -> None:

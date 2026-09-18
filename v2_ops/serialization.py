@@ -10,6 +10,7 @@ from reservation_boundary.public_dispatch import (
     PublicDispatchClaim,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicChannelAcceptance
+from v2_contracts.model import PRIVATE_CUSTOMER_FACT_ORDER
 from v2_contracts.model import ModelProposal, ModelRequest
 from v2_contracts.payments import (
     PaymentInstruction,
@@ -139,7 +140,11 @@ def _serialize_model_request(value: ModelRequest) -> SerializedPair:
             "observation_count": len(value.observations),
             "consultation_count": len(value.consultation_history),
             "fact_count": len(value.state_facts),
-            "private_fact_names": list(value.private_customer_fact_names),
+            "private_fact_names": [
+                name
+                for name in PRIVATE_CUSTOMER_FACT_ORDER
+                if name in {fact.name for fact in value.state_facts}
+            ],
             "private_profile_complete": value.private_profile_complete,
             "handoff_status": value.handoff_status,
             "confirmation_review_required": value.confirmation_review_required,

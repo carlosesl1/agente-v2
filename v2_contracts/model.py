@@ -18,7 +18,7 @@ from v2_contracts.critical_actions import (
     PendingCriticalActionContext,
 )
 from v2_contracts.providers import ReadObservation, ReadRequest
-from v2_contracts.passengers import PassengerInput, PassengerManifestStatus
+from v2_contracts.passengers import PassengerInput
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -55,10 +55,9 @@ PRIVATE_CUSTOMER_FACT_ORDER: Final = (
     "gender",
 )
 _PRIVATE_CUSTOMER_FACTS: Final = frozenset(PRIVATE_CUSTOMER_FACT_ORDER)
-_MAX_DIALOGUE_EXCHANGES: Final = 4
 _MAX_DIALOGUE_MESSAGE_BYTES: Final = 16_384
 _MAX_DIALOGUE_REPLY_BYTES: Final = 16_384
-_MAX_DIALOGUE_CONTEXT_BYTES: Final = 64 * 1024
+MAX_DIALOGUE_CONTEXT_BYTES: Final = 64 * 1024
 _HANDOFF_STATUSES: Final = frozenset(
     {
         "requested",
@@ -332,8 +331,7 @@ class ModelRequest:
     observations: tuple[ReadObservation, ...] = ()
     consultation_history: tuple[ConsultationHistoryEntry, ...] = ()
     state_facts: tuple[ModelFact, ...] = ()
-    private_customer_fact_names: tuple[str, ...] = ()
-    passenger_manifest_status: PassengerManifestStatus | None = None
+    passengers: tuple[PassengerInput, ...] = ()
     critical_outcome: str | None = None
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
@@ -390,8 +388,6 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "recent_dialogue must contain exact ConversationExchange values"
             )
-        if len(self.recent_dialogue) > _MAX_DIALOGUE_EXCHANGES:
-            raise InvalidModelProposal("recent_dialogue exceeds the four-exchange bound")
         dialogue_bytes = sum(
             len(item.customer_message.encode("utf-8"))
             + sum(
@@ -400,7 +396,7 @@ class ModelRequest:
             )
             for item in self.recent_dialogue
         )
-        if dialogue_bytes > _MAX_DIALOGUE_CONTEXT_BYTES:
+        if dialogue_bytes > MAX_DIALOGUE_CONTEXT_BYTES:
             raise InvalidModelProposal("recent_dialogue exceeds the aggregate byte bound")
         if type(self.observations) is not tuple or any(
             type(item) is not ReadObservation for item in self.observations
@@ -435,33 +431,16 @@ class ModelRequest:
             raise InvalidModelProposal("state_facts must contain exact ModelFact values")
         if len({item.name for item in self.state_facts}) != len(self.state_facts):
             raise InvalidModelProposal("state_facts must have unique names")
-        if any(item.name in _PRIVATE_CUSTOMER_FACTS for item in self.state_facts):
-            raise InvalidModelProposal("private customer values are forbidden in state_facts")
-        if (
-            type(self.private_customer_fact_names) is not tuple
-            or any(
-                type(item) is not str or item not in _PRIVATE_CUSTOMER_FACTS
-                for item in self.private_customer_fact_names
-            )
-            or len(set(self.private_customer_fact_names))
-            != len(self.private_customer_fact_names)
+        if type(self.passengers) is not tuple or any(
+            type(item) is not PassengerInput for item in self.passengers
         ):
             raise InvalidModelProposal(
-                "private_customer_fact_names must be a unique closed tuple"
+                "passengers must contain exact PassengerInput values"
             )
-        expected_private_names = tuple(
-            item
-            for item in PRIVATE_CUSTOMER_FACT_ORDER
-            if item in self.private_customer_fact_names
-        )
-        if self.private_customer_fact_names != expected_private_names:
-            raise InvalidModelProposal("private_customer_fact_names must be canonical")
-        if self.passenger_manifest_status is not None and type(
-            self.passenger_manifest_status
-        ) is not PassengerManifestStatus:
-            raise InvalidModelProposal(
-                "passenger_manifest_status must be exact or None"
-            )
+        if len({item.position for item in self.passengers}) != len(self.passengers):
+            raise InvalidModelProposal("passenger positions must be unique")
+        if sum(item.is_holder is True for item in self.passengers) > 1:
+            raise InvalidModelProposal("passengers have multiple holders")
         if self.critical_outcome not in (
             None,
             "proposal_revoked_after_refresh",

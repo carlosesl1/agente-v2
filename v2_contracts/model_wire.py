@@ -154,17 +154,14 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
             "maxItems": 64,
             "items": _object(
                 {
+                    "is_holder": {"anyOf": [{"type": "boolean"}, {"type": "null"}]},
                     "position": {"type": "integer", "minimum": 1},
                     "participant_type": {
                         "type": "string",
                         "enum": ["adult", "child"],
                     },
-                    "full_name": {
-                        "anyOf": [dict(_TEXT), {"type": "null"}]
-                    },
-                    "birth_date": {
-                        "anyOf": [dict(_ISO_DATE), {"type": "null"}]
-                    },
+                    "full_name": {"anyOf": [dict(_TEXT), {"type": "null"}]},
+                    "birth_date": {"anyOf": [dict(_ISO_DATE), {"type": "null"}]},
                     "gender": {
                         "anyOf": [
                             {"type": "string", "enum": ["m", "f"]},

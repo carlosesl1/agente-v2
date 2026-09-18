@@ -251,13 +251,12 @@ def test_same_turn_divergence_fails_without_echoing_private_values(tmp_path: Pat
         store.close()
 
 
-def test_store_rejects_phone_and_non_profile_facts_without_persisting(
+def test_store_rejects_non_profile_facts_without_persisting(
     tmp_path: Path,
 ) -> None:
     store = SQLitePrivateCustomerFactStore(tmp_path / "private-customer.sqlite3")
     try:
         for fact in (
-            ModelFact("phone_e164", "+12025550123"),
             ModelFact("service", "hostel"),
         ):
             with pytest.raises(PrivateCustomerFactValidationError, match="catalog"):

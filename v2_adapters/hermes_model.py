@@ -133,33 +133,26 @@ não use intent=confirm.
 
 
 _PRIVATE_PROFILE_SYSTEM_SUFFIX: Final = """
-PRIVATE RESERVATION HOLDER PROTOCOL:
-- The current message is the complete original customer text. It may contain private
-  context intentionally supplied for service. Interpret that complete context directly.
-- private_customer_fact_names is a presence-only list for durable fields already known.
-  Never ask again for a listed field unless the customer explicitly corrects it.
-- Output full_name, email, or country_code only when the complete message semantically
-  identifies that value as belonging to the reservation holder. country_code must be ISO
-  alpha-2. Do not infer country from phone, language, locale, or defaults.
-- First-person self-identification is holder evidence. A spouse, companion, passenger,
-  hostel, property, agency, or other third party is not the holder by default. Use another
-  person's values only when the customer explicitly says that person is or will be the
-  reservation holder.
-- If holder attribution is genuinely ambiguous, do not guess. Write one natural question
-  in the final reply chunk with expects_reply=true and emit no guessed private fact,
-  selection, confirmation, or
-  effect. A complete availability/price query may still emit its provider read in the
-  same frame; holder identity is a write-boundary requirement, not a read prerequisite.
-- Never output phone_e164 from conversational text. Authenticated phone identity exists
-  only when phone_e164 is present in private_customer_fact_names; a typed phone may inform
-  conversation but cannot replace that identity.
-- Newly interpreted holder facts may accompany a read request in the same proposal. The
-  parent validates and persists them before dispatching any provider read.
-- If one message both corrects holder data and appears to confirm an older summary, the
-  correction wins: emit adjust with pending_action_disposition=revoke, never confirm. A fresh
-  summary and a later natural confirmation are required.
-- Customer data voluntarily supplied in the current message may be repeated naturally in
-  reply_chunks. Never mention schemas, providers, payloads, state, bindings, or technical validation.
+SERVICE CUSTOMER CONTEXT:
+- state_facts contains known values, including the reservation holder and contact data.
+  passengers contains the known people with stable positions within this party and an
+  explicit is_holder role. Reuse these values and the dialogue; do not collect them again.
+- You interpret who each fact belongs to. Never assume that equal names or position 1
+  identify the holder. When the customer designates an existing passenger as holder,
+  emit a passenger update at that position with is_holder=true; do not copy the person's
+  values to separate holder facts. Other fields may be null for a role-only update.
+  is_holder=null preserves the role; false detaches that passenger. Only one holder.
+- Correct linked person data via passengers at the same position. Use standalone holder
+  facts when no passenger is linked. Contact email and phone_e164 are reusable booking
+  contact values; a conversational phone never changes the ManyChat recipient identity.
+- Use all known conversation data, not just the latest message. Current explicit corrections
+  override older values. Never infer nationality from phone or language. If attribution is
+  genuinely ambiguous, ask naturally rather than assigning a person. This does not block
+  an independent availability query.
+- A material correction is not confirmation of an older summary: use adjust/revoke and
+  obtain a fresh summary before executing. Interpret facts and read requests together.
+- Lead-provided data can be repeated naturally. Reply to the customer's question even when
+  updating facts. Do not expose internal protocol vocabulary to the customer.
 """.strip()
 
 
@@ -471,14 +464,18 @@ def _request_wire(
             }
             for item in request.state_facts
         ]
-    if request.private_customer_fact_names:
-        user_payload["private_customer_fact_names"] = list(
-            request.private_customer_fact_names
-        )
-    if request.passenger_manifest_status is not None:
-        user_payload["passenger_manifest_status"] = (
-            request.passenger_manifest_status.to_public_dict()
-        )
+    user_payload["passengers"] = [
+        {
+            "position": item.position,
+            "participant_type": item.participant_type,
+            "full_name": item.full_name,
+            "birth_date": item.birth_date.isoformat() if item.birth_date else None,
+            "gender": item.gender,
+            "country_code": item.country_code,
+            "is_holder": item.is_holder,
+        }
+        for item in request.passengers
+    ]
     if request.pending_action is not None:
         user_payload["pending_action"] = {
             "summary_version": request.pending_action.summary_version,
@@ -499,7 +496,9 @@ def _request_wire(
     messages.append(["user", _canonical(user_payload).decode("utf-8")])
     return _canonical(
         {
-            "system_prompt": (
+            "system_prompt": system_prompt
+            if request.confirmation_review_required
+            else (
                 system_prompt
                 + "\n\n"
                 + _PRIVATE_PROFILE_SYSTEM_SUFFIX
@@ -539,29 +538,7 @@ def _confirmation_review_wire(request: ModelRequest, system_prompt: str) -> byte
         raise InvalidModelProposal(
             "contextual confirmation review requires an exact pending action"
         )
-    pending = request.pending_action
-    user_payload = {
-        "request_id": request.request_id,
-        "source_event_id": request.source_event_id,
-        "message": request.message,
-        "attachments": [
-            {"media_type": item.media_type, "content_status": item.content_status.value}
-            for item in request.attachments
-        ],
-        "locale": request.locale,
-        "pending_action": {
-            "summary_version": pending.summary_version,
-            "action_kinds": [item.value for item in pending.action_kinds],
-            "public_summary": pending.public_summary,
-            "expires_at": pending.expires_at.isoformat(),
-        },
-    }
-    return _canonical(
-        {
-            "system_prompt": system_prompt,
-            "messages": [["user", _canonical(user_payload).decode("utf-8")]],
-        }
-    )
+    return _request_wire(request, system_prompt)
 
 
 def _fact(value: object) -> ModelFact:
@@ -617,7 +594,10 @@ def _passenger(value: object) -> PassengerInput:
         "gender",
         "country_code",
     }
-    if type(value) is not dict or set(value) != expected:
+    if type(value) is not dict or set(value) not in (
+        expected,
+        expected | {"is_holder"},
+    ):
         raise InvalidModelProposal("passenger update fields mismatch")
     birth_date = value["birth_date"]
     if birth_date is not None:
@@ -635,6 +615,7 @@ def _passenger(value: object) -> PassengerInput:
             birth_date=birth_date,
             gender=value["gender"],
             country_code=value["country_code"],
+            is_holder=value.get("is_holder"),
         )
     except (TypeError, ValueError) as exc:
         raise InvalidModelProposal("passenger update is invalid") from exc

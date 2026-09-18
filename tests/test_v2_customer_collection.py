@@ -20,9 +20,8 @@ from reservation_domain.signature import canonical_subject, subject_signature
 from reservation_domain.types import EconomicTerms, Money, OfferSnapshot, Party, ServiceKind
 from v2_adapters.hermes_model import _request_wire
 from v2_application.conversation import V2ConversationReducer
-from v2_application.turn_executor import _private_customer_fact_names, _state_model_facts
+from v2_application.turn_executor import _service_model_facts, _state_model_facts
 from v2_contracts.model import (
-    InvalidModelProposal,
     ModelFact,
     ModelProposal,
     ModelRequest,
@@ -57,7 +56,7 @@ def _proposal(event_id: str, facts: tuple[ModelFact, ...]) -> ModelProposal:
     )
 
 
-def test_private_customer_facts_are_presence_markers_not_model_state() -> None:
+def test_customer_values_reach_model_state() -> None:
     facts = (
         ModelFact("full_name", "Carlos Eduardo"),
         ModelFact("email", "carlos@example.invalid"),
@@ -73,41 +72,20 @@ def test_private_customer_facts_are_presence_markers_not_model_state() -> None:
         message="Pode continuar",
         locale="pt-BR",
         state_version=3,
-        private_customer_fact_names=tuple(item.name for item in facts),
+        state_facts=facts,
     )
 
     wire = json.loads(_request_wire(request, "closed prompt"))
     user = json.loads(wire["messages"][0][1])
 
-    assert "state_facts" not in user
-    assert user["private_customer_fact_names"] == [
-        "full_name",
-        "email",
-        "phone_e164",
-        "country_code",
-        "birth_date",
-        "gender",
-    ]
-    serialized = json.dumps(user, ensure_ascii=False)
-    assert "Carlos Eduardo" not in serialized
-    assert "carlos@example.invalid" not in serialized
-    assert "1990-01-02" not in serialized
+    assert {item["name"]: item["value"] for item in user["state_facts"]} == {
+        item.name: item.value.isoformat() if type(item.value) is date else item.value
+        for item in facts
+    }
+    assert "private_customer_fact_names" not in user
 
 
-def test_model_request_rejects_private_values_in_state_facts() -> None:
-    with pytest.raises(InvalidModelProposal, match="private"):
-        ModelRequest(
-            request_id="request:private-state",
-            lead_id="manychat:private-state",
-            source_event_id="event:private-state",
-            message="Pode continuar",
-            locale="pt-BR",
-            state_version=3,
-            state_facts=(ModelFact("email", "carlos@example.invalid"),),
-        )
-
-
-def test_executor_exposes_only_private_fact_presence() -> None:
+def test_executor_exposes_persisted_customer_values() -> None:
     projection = ConversationProjection(
         stage=ConversationStage.RECEPTIONIST,
         desired_services=(),
@@ -123,13 +101,19 @@ def test_executor_exposes_only_private_fact_presence() -> None:
     )
 
     assert _state_model_facts(projection) == (ModelFact("service", "agency"),)
-    assert _private_customer_fact_names(projection) == (
-        "birth_date",
-        "gender",
+    assert _service_model_facts(
+        projection,
+        profile=_profile_without_contact_fields(),
+        private_facts=None,
+        now=NOW,
+    ) == (
+        ModelFact("service", "agency"),
+        ModelFact("birth_date", date(1990, 1, 2)),
+        ModelFact("gender", "m"),
     )
 
 
-def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields() -> None:
+def test_profile_values_are_valid_and_fresh_not_presence_markers() -> None:
     profile = PrivateCustomerBinding(
         binding_id="profile-binding:invalid-presence-markers",
         content_hash="f" * 64,
@@ -142,7 +126,7 @@ def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields()
         complete=True,
     )
 
-    assert _private_customer_fact_names(
+    assert _service_model_facts(
         ConversationProjection(
             stage=ConversationStage.RECEPTIONIST,
             desired_services=(),
@@ -152,14 +136,17 @@ def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields()
         ),
         profile=profile,
         now=NOW,
-    ) == ("phone_e164",)
+        private_facts=None,
+    ) == (
+        ModelFact("phone_e164", "+12025550196"),
+    )
 
     expired = replace(
         profile,
         observed_at=NOW - timedelta(minutes=6),
         expires_at=NOW,
     )
-    assert _private_customer_fact_names(
+    assert _service_model_facts(
         ConversationProjection(
             stage=ConversationStage.RECEPTIONIST,
             desired_services=(),
@@ -169,6 +156,7 @@ def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields()
         ),
         profile=expired,
         now=NOW,
+        private_facts=None,
     ) == ()
 
     valid_but_expired = PrivateCustomerBinding(
@@ -195,10 +183,11 @@ def test_manychat_presence_markers_include_only_effectively_valid_fresh_fields()
         ),
         reservation_execution_projection=None,
     )
-    assert _private_customer_fact_names(
+    assert _service_model_facts(
         legacy_projection,
         profile=valid_but_expired,
         now=NOW,
+        private_facts=None,
     ) == ()
 
 

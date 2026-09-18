@@ -678,7 +678,7 @@ def test_pending_action_wire_is_public_only() -> None:
         assert forbidden not in serialized
 
 
-def test_private_profile_completeness_wire_is_boolean_only() -> None:
+def test_profile_completeness_and_reusable_values_reach_wire() -> None:
     request = ModelRequest(
         request_id="request:private-profile-marker",
         lead_id="manychat:private-profile-marker",
@@ -686,9 +686,9 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
         message="Quero reservar.",
         locale="pt-BR",
         state_version=0,
-        private_customer_fact_names=(
-            "full_name",
-            "phone_e164",
+        state_facts=(
+            ModelFact("full_name", "Pessoa Exemplo"),
+            ModelFact("phone_e164", "+12025550196"),
         ),
         private_profile_complete=True,
     )
@@ -697,11 +697,12 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     user = json.loads(envelope["messages"][0][1])
 
     assert user["private_profile_complete"] is True
-    assert user["private_customer_fact_names"] == ["full_name", "phone_e164"]
-    assert "presence-only" in envelope["system_prompt"]
-    assert "Never output phone_e164 from conversational text" in envelope[
-        "system_prompt"
-    ]
+    assert {f["name"]: f["value"] for f in user["state_facts"]} == {
+        "full_name": "Pessoa Exemplo",
+        "phone_e164": "+12025550196",
+    }
+    assert "SERVICE CUSTOMER CONTEXT" in envelope["system_prompt"]
+    assert "phone never changes the ManyChat recipient" in envelope["system_prompt"]
     assert "CURRENT-TURN COMMERCIAL PROGRESSION" in envelope["system_prompt"]
     assert '"one adult" or "1 adulto"' in envelope["system_prompt"]
     assert user["handoff_status"] is None
@@ -709,7 +710,7 @@ def test_private_profile_completeness_wire_is_boolean_only() -> None:
     assert user["selection_review_required"] is False
     assert user["active_execution_status"] is None
     assert user["recap_reuse_required"] is False
-    assert "identity is a write-boundary requirement" in envelope["system_prompt"]
+    assert "availability query" in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
         "Pessoa Qualificação",
@@ -751,7 +752,6 @@ def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
             ),
         ),
         state_facts=(ModelFact("service", "hostel"),),
-        private_customer_fact_names=("full_name", "email"),
         public_reply_correction_reasons=reasons,
     )
 
@@ -1020,7 +1020,7 @@ def test_original_private_context_reaches_maya_with_holder_semantics() -> None:
         message=original_message,
         locale="pt-BR",
         state_version=0,
-        private_customer_fact_names=("phone_e164",),
+        state_facts=(ModelFact("phone_e164", "+12025550196"),),
     )
 
     envelope = json.loads(_request_wire(request, "Closed prompt."))
@@ -1033,13 +1033,12 @@ def test_original_private_context_reaches_maya_with_holder_semantics() -> None:
     assert spouse_email in user["message"]
     assert typed_phone in user["message"]
     assert "reservation holder" in prompt
-    assert "spouse" in prompt
-    assert "third party" in prompt
-    assert "explicitly" in prompt
+    assert "who each fact belongs to" in prompt
+    assert "explicit" in prompt
     assert "phone_e164" in prompt
-    assert "do not guess" in prompt
-    assert "correction wins" in prompt
-    assert "pending_action_disposition=revoke" in prompt
+    assert "never assume" in prompt
+    assert "corrections" in prompt
+    assert "adjust/revoke" in prompt
     assert "bracketed private-field markers" not in prompt
 
 
@@ -1247,13 +1246,12 @@ def test_legacy_schema_cannot_confirm_a_pending_critical_action() -> None:
 def _confirmation_review_request() -> ModelRequest:
     return ModelRequest(
         request_id="request:contextual-confirmation-review",
-        lead_id="manychat:private-lead-should-not-cross-review-wire",
+        lead_id="manychat:contextual-confirmation",
         source_event_id="batch:contextual-confirmation-review",
         message="Está certinho como você resumiu; siga com tudo aquilo.",
         locale="pt-BR",
         state_version=7,
         state_facts=(ModelFact("language", "pt-BR"),),
-        private_customer_fact_names=("full_name", "email"),
         private_profile_complete=True,
         handoff_status=None,
         pending_action=_pending_action(),
@@ -1302,7 +1300,7 @@ def _decision_only_review_payload(decision: str = "approve") -> bytes:
     ).encode()
 
 
-def test_confirmation_review_wire_is_minimal_public_only_and_requests_v8() -> None:
+def test_confirmation_review_wire_preserves_shared_context_and_requests_v8() -> None:
     envelope = json.loads(
         _confirmation_review_wire(
             _confirmation_review_request(),
@@ -1311,14 +1309,11 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_v8() -> No
     )
     user = json.loads(envelope["messages"][0][1])
 
-    assert set(user) == {
-        "request_id",
-        "source_event_id",
-        "message",
-        "attachments",
-        "locale",
-        "pending_action",
-    }
+    assert user["lead_id"] == _confirmation_review_request().lead_id
+    assert user["state_facts"] == [{"name": "language", "value": "pt-BR"}]
+    assert user["passengers"] == []
+    assert user["confirmation_review_required"] is True
+    assert user["private_profile_complete"] is True
     assert user["attachments"] == []
     assert user["pending_action"] == {
         "summary_version": 1,
@@ -1332,12 +1327,7 @@ def test_confirmation_review_wire_is_minimal_public_only_and_requests_v8() -> No
     assert "v2-contextual-confirmation-review-v1" not in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
-        "private-lead-should-not-cross-review-wire",
-        "state_facts",
         "private_customer_fact_names",
-        "private_profile_complete",
-        "handoff_status",
-        "observations",
         "passenger_manifest_status",
         "offer:",
         "provider_ref",
@@ -1446,7 +1436,7 @@ def test_confirmation_review_returns_exact_maya_authored_parent_bound_v8_proposa
     assert envelope["system_prompt"] == _CONFIRMATION_REVIEW_SYSTEM_PROMPT
     serialized = captured[0].decode()
     assert "general proposal prompt must not be used for review" not in serialized
-    assert "private-lead-should-not-cross-review-wire" not in serialized
+    assert request.lead_id in serialized
     assert "must-not-cross" not in serialized
 
 

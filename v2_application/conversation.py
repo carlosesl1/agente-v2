@@ -72,6 +72,7 @@ from v2_application.critical_actions import (
     pending_action_context,
 )
 from v2_application.passengers import (
+    projection_passenger_inputs,
     merge_projection_manifest,
     projection_passengers,
 )
@@ -438,14 +439,13 @@ def _effective_customer_material_hash_from_values(
     return hashlib.sha256(b"v2-effective-customer-material-v1\0" + payload).hexdigest()
 
 
-def resolve_effective_customer(
+def customer_context_values(
     profile: PrivateCustomerBinding,
     projection: ConversationProjection,
     now: datetime,
     *,
     private_facts: PrivateCustomerFactSnapshot | None = None,
-    activity_party: Party | None = None,
-) -> EffectiveCustomerResolution:
+) -> tuple[dict[str, object], tuple[str, ...]]:
     if type(profile) is not PrivateCustomerBinding:
         raise TypeError("profile must be exact PrivateCustomerBinding")
     if type(projection) is not ConversationProjection:
@@ -505,26 +505,22 @@ def resolve_effective_customer(
     )
     phone = profile.phone_e164 if profile_fresh else None
 
-    passengers = ()
-    if activity_party is not None:
-        try:
-            passengers = projection_passengers(projection, activity_party) or ()
-        except (TypeError, ValueError):
-            return EffectiveCustomerResolution(None, (), ("passenger_manifest",))
-        matching_passenger = next(
-            (
-                passenger
-                for passenger in passengers
-                if full_name is not None
-                and canonical_full_name(passenger.full_name) == full_name
-            ),
-            None,
+    holder = next(
+        (row for row in projection_passenger_inputs(projection) if row.is_holder), None
+    )
+    if holder is not None:
+        # An explicit reference, never equality of names or position 1 by default.
+        # Missing values belong to this person; do not borrow from a different holder.
+        full_name, name_conflict = _canonical_optional(
+            holder.full_name, canonical_full_name
         )
-        if matching_passenger is not None:
-            if birth_date_value is None:
-                birth_date_value = matching_passenger.birth_date
-            if gender_value is None:
-                gender_value = matching_passenger.gender
+        country, country_conflict = _canonical_optional(
+            holder.country_code, canonical_country_code
+        )
+        birth_date_value, gender_value = holder.birth_date, holder.gender
+        birth_conflict = gender_conflict = False
+    if private_facts is not None and private_facts.phone_e164 is not None:
+        phone = private_facts.phone_e164
 
     conflicts = tuple(
         name
@@ -537,6 +533,46 @@ def resolve_effective_customer(
         )
         if conflict
     )
+    values = dict(
+        full_name=full_name,
+        email=email,
+        phone_e164=phone,
+        country_code=country,
+        birth_date=birth_date_value,
+        gender=gender_value,
+    )
+    return {key: value for key, value in values.items() if value is not None}, conflicts
+
+
+def resolve_effective_customer(
+    profile: PrivateCustomerBinding,
+    projection: ConversationProjection,
+    now: datetime,
+    *,
+    private_facts: PrivateCustomerFactSnapshot | None = None,
+    activity_party: Party | None = None,
+) -> EffectiveCustomerResolution:
+    values, conflicts = customer_context_values(
+        profile, projection, now, private_facts=private_facts
+    )
+    full_name = values.get("full_name")
+    email = values.get("email")
+    phone = values.get("phone_e164")
+    country = values.get("country_code")
+    birth_date_value = values.get("birth_date")
+    gender_value = values.get("gender")
+    legacy_country = _projection_values(projection).get("country_code")
+    private_name = private_facts.full_name if private_facts else None
+    private_email = private_facts.email if private_facts else None
+    private_country = private_facts.country_code if private_facts else legacy_country
+    private_birth = private_facts.birth_date if private_facts else None
+    private_gender = private_facts.gender if private_facts else None
+    passengers = ()
+    if activity_party is not None:
+        try:
+            passengers = projection_passengers(projection, activity_party) or ()
+        except (TypeError, ValueError):
+            return EffectiveCustomerResolution(None, (), ("passenger_manifest",))
     required_customer_values: tuple[tuple[str, object | None], ...] = (
         ("full_name", full_name),
         ("email", email),
@@ -572,7 +608,11 @@ def resolve_effective_customer(
             private_gender,
         )
     )
-    if split_origin_used:
+    if (
+        split_origin_used
+        or (private_facts and private_facts.phone_e164)
+        or any(row.is_holder for row in projection_passenger_inputs(projection))
+    ):
         snapshot_hash = _private_snapshot_hash(
             private_facts,
             legacy_country=legacy_country,

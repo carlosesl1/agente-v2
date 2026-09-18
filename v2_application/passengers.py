@@ -15,10 +15,10 @@ from v2_contracts.passengers import (
 )
 
 
-_MANIFEST_SCHEMA: Final = "v2-passenger-manifest-v1"
+_MANIFEST_SCHEMA: Final = "v2-passenger-manifest-v2"
 _MANIFEST_FIELDS: Final = frozenset(("schema", "adults", "children", "passengers"))
 _PASSENGER_FIELDS: Final = frozenset(
-    ("position", "participant_type", *PASSENGER_FIELD_ORDER)
+    ("position", "participant_type", "is_holder", *PASSENGER_FIELD_ORDER)
 )
 _FACT_ORDER: Final = {
     "language": 0,
@@ -81,6 +81,7 @@ def _blank_manifest(party: Party) -> dict[str, object]:
                 "birth_date": None,
                 "gender": None,
                 "country_code": None,
+                "is_holder": False,
             }
             for position in range(1, party.adults + party.children + 1)
         ],
@@ -98,7 +99,16 @@ def _load(manifest_json: str, party: Party) -> dict[str, object]:
         raise ValueError("passenger manifest must use canonical JSON")
     if type(decoded) is not dict or set(decoded) != _MANIFEST_FIELDS:
         raise ValueError("passenger manifest fields mismatch")
-    if decoded["schema"] != _MANIFEST_SCHEMA:
+    if decoded["schema"] == "v2-passenger-manifest-v1":
+        if type(decoded["passengers"]) is not list or any(
+            type(row) is not dict or set(row) != _PASSENGER_FIELDS - {"is_holder"}
+            for row in decoded["passengers"]
+        ):
+            raise ValueError("legacy passenger manifest fields mismatch")
+        decoded["schema"] = _MANIFEST_SCHEMA
+        for row in decoded["passengers"]:
+            row["is_holder"] = False
+    elif decoded["schema"] != _MANIFEST_SCHEMA:
         raise ValueError("passenger manifest schema mismatch")
     if decoded["adults"] != party.adults or decoded["children"] != party.children:
         raise ValueError("passenger manifest party mismatch")
@@ -106,6 +116,14 @@ def _load(manifest_json: str, party: Party) -> dict[str, object]:
     total = party.adults + party.children
     if type(passengers) is not list or len(passengers) != total:
         raise ValueError("passenger manifest cardinality mismatch")
+    if any(
+        type(row.get("is_holder")) is not bool
+        for row in passengers
+        if type(row) is dict
+    ):
+        raise ValueError("passenger holder role must be boolean")
+    if sum(row.get("is_holder") is True for row in passengers if type(row) is dict) > 1:
+        raise ValueError("passenger manifest has multiple holders")
     for expected_position, passenger in enumerate(passengers, start=1):
         if type(passenger) is not dict or set(passenger) != _PASSENGER_FIELDS:
             raise ValueError("passenger manifest entry fields mismatch")
@@ -162,6 +180,8 @@ def merge_manifest(
     positions = tuple(item.position for item in updates)
     if len(positions) != len(set(positions)):
         raise ValueError("passenger updates must have unique positions")
+    if sum(item.is_holder is True for item in updates) > 1:
+        raise ValueError("passenger updates assign multiple holders")
     current = _blank_manifest(party)
     if existing_json is not None:
         if type(existing_json) is not str:
@@ -182,6 +202,24 @@ def merge_manifest(
             raise ValueError("passenger update type does not match party position")
         row = passengers[update.position - 1]
         assert type(row) is dict
+        prior_holder = next(
+            (other["position"] for other in passengers if other["is_holder"]), None
+        )
+        role_changed = (
+            update.is_holder is True
+            and prior_holder not in (None, update.position)
+            or update.is_holder is False
+            and prior_holder == update.position
+        )
+        if role_changed and not allow_replacement:
+            raise PassengerManifestConflict(
+                "holder role correction requires explicit adjustment"
+            )
+        if update.is_holder is True:
+            for other in passengers:
+                other["is_holder"] = False
+        if update.is_holder is not None:
+            row["is_holder"] = update.is_holder
         for name in PASSENGER_FIELD_ORDER:
             value = getattr(update, name)
             if type(value) is date:
@@ -395,6 +433,27 @@ def merge_projection_manifest(
         locale=projection.locale,
         facts=tuple(sorted(facts.values(), key=lambda item: _FACT_ORDER[item.name])),
         reservation_execution_projection=projection.reservation_execution_projection,
+    )
+
+
+def projection_passenger_inputs(
+    projection: ConversationProjection,
+) -> tuple[PassengerInput, ...]:
+    """Read the existing person rows, including the explicit holder role."""
+    party = projection_manifest_party(projection)
+    if party is None:
+        return ()
+    rows = _load(projection_manifest_json(projection), party)["passengers"]
+    return tuple(
+        PassengerInput(
+            **{
+                **row,
+                "birth_date": date.fromisoformat(row["birth_date"])
+                if row["birth_date"]
+                else None,
+            }
+        )
+        for row in rows
     )
 
 

@@ -84,7 +84,7 @@ def _fixtures() -> tuple[object, ...]:
         message=PRIVATE_SENTINELS[2],
         locale="pt-BR",
         state_version=3,
-        private_customer_fact_names=("email",),
+        state_facts=(ModelFact("email", "person@example.invalid"),),
     )
     model_proposal = ModelProposal(
         source_event_id=event.event_id,

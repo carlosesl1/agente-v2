@@ -92,6 +92,7 @@ def _group_projection(*, second_is_contact: bool = False) -> ConversationProject
                 date(1992, 3, 4),
                 "m",
                 "BR",
+                is_holder=second_is_contact,
             ),
         ),
         Party(2, 0),
@@ -169,7 +170,7 @@ def test_group_activity_requires_distinct_main_contact_birth_and_gender() -> Non
     assert resolution.conflicting_fields == ()
 
 
-def test_group_activity_derives_main_contact_only_from_matching_passenger() -> None:
+def test_group_activity_derives_holder_from_explicit_passenger_role() -> None:
     resolution = resolve_effective_customer(
         _profile(full_name=NAME, email=EMAIL, country=COUNTRY),
         _group_projection(second_is_contact=True),

@@ -3153,7 +3153,8 @@ def test_invalid_model_private_facts_are_collection_only_without_controller_pros
         assert result.receipt.relay_rows == ()
         assert result.reply_chunks == (maya_text,)
         assert len(model.calls) == 1
-        assert snapshot.present_fact_names == ()
+        assert snapshot.present_fact_names == ("phone_e164",)
+        assert snapshot.phone_e164 == "+12025550177"
     finally:
         private_store.close()
         store.close()
@@ -3261,21 +3262,23 @@ def test_maya_holder_facts_persist_before_read_and_continue_to_summary_same_turn
         assert result.receipt.relay_rows == ()
         assert read_port.calls == [read_request]
         assert len(model.calls) == 2
-        assert model.calls[0].private_customer_fact_names == ("phone_e164",)
-        assert model.calls[1].private_customer_fact_names == (
-            "full_name",
-            "email",
-            "phone_e164",
-            "country_code",
-        )
+        assert {
+            f.name: f.value
+            for f in model.calls[0].state_facts
+            if f.name == "phone_e164"
+        } == {"phone_e164": "+5575999990199"}
+        values = {f.name: f.value for f in model.calls[1].state_facts}
+        assert values["full_name"] == private_name
+        assert values["email"] == private_email
+        assert values["country_code"] == "BR"
+        assert values["phone_e164"] == typed_phone
         assert model.calls[0].message == message
         assert model.calls[1].message == message
         assert snapshot.full_name == private_name
         assert snapshot.email == private_email
         assert snapshot.country_code == "BR"
         assert type(state.workflow) is AwaitingConfirmationState
-        assert state.workflow.draft.customer.phone_e164 == "+" + "5575999990199"
-        assert state.workflow.draft.customer.phone_e164 != typed_phone
+        assert state.workflow.draft.customer.phone_e164 == typed_phone
         reopened = SQLiteBoundaryStore.open_readonly_v8(boundary_path)
         reopened.close()
     finally:
@@ -3396,7 +3399,7 @@ def test_conversation_country_marks_authenticated_manychat_contact_complete_next
 
         assert model.calls[0].private_profile_complete is False
         assert model.calls[1].private_profile_complete is True
-        assert "country_code" in model.calls[1].private_customer_fact_names
+        assert ModelFact("country_code", "US") in model.calls[1].state_facts
     finally:
         store.close()
 
@@ -4614,10 +4617,13 @@ def test_complete_group_manifest_still_marks_distinct_holder_profile_incomplete(
         executor.execute(second_batch)
 
         request = model.calls[-1]
-        assert request.passenger_manifest_status is not None
-        assert request.passenger_manifest_status.complete_positions == (1, 2)
+        assert tuple(row.position for row in request.passengers) == (1, 2)
+        assert all(
+            row.full_name and row.birth_date and row.gender and row.country_code
+            for row in request.passengers
+        )
         assert request.private_profile_complete is False
-        assert "birth_date" not in request.private_customer_fact_names
+        assert "birth_date" not in {fact.name for fact in request.state_facts}
     finally:
         private.close()
         store.close()

@@ -1,9 +1,4 @@
-"""Private durable owner for conversational reservation-profile fallbacks.
-
-The exact values in this module never belong to the public conversation projection,
-Maya artifacts, logs, or evidence.  Only ordered field-presence markers may leave
-this owner toward model context.
-"""
+"""Durable conversational customer values, available to Maya and effect resolution."""
 
 from __future__ import annotations
 
@@ -18,7 +13,11 @@ import sqlite3
 import unicodedata
 
 from reservation_boundary.types import StringSlot, TypedFact
-from v2_contracts.model import ConversationExchange, ModelFact
+from v2_contracts.model import (
+    ConversationExchange,
+    ModelFact,
+    MAX_DIALOGUE_CONTEXT_BYTES,
+)
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -43,6 +42,7 @@ _PRIVATE_FACT_ORDER = (
     "country_code",
     "birth_date",
     "gender",
+    "phone_e164",
 )
 _PRIVATE_FACTS = frozenset(_PRIVATE_FACT_ORDER)
 
@@ -122,6 +122,11 @@ def canonical_gender(value: object) -> str:
     return normalized
 
 
+def canonical_phone(value: object) -> str:
+    ModelFact("phone_e164", value)
+    return value
+
+
 def _identifier(value: object, field: str) -> str:
     if type(value) is not str or _ID_RE.fullmatch(value) is None:
         raise PrivateCustomerFactValidationError(
@@ -193,6 +198,7 @@ def _canonical_fact_rows(
         "country_code": canonical_country_code,
         "birth_date": canonical_birth_date,
         "gender": canonical_gender,
+        "phone_e164": canonical_phone,
     }
     values = {
         item.name: canonicalizers[item.name](item.value)
@@ -211,6 +217,7 @@ class PrivateCustomerFactSnapshot:
     gender: str | None
     content_hash: str
     source_turns: tuple[tuple[str, str], ...]
+    phone_e164: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.lead_id, "lead_id")
@@ -244,6 +251,8 @@ class PrivateCustomerFactSnapshot:
             raise PrivateCustomerFactValidationError(
                 "private customer source turns are invalid"
             )
+        if self.phone_e164 is not None:
+            canonical_phone(self.phone_e164)
         expected_names = tuple(
             name
             for name, value in (
@@ -252,6 +261,7 @@ class PrivateCustomerFactSnapshot:
                 ("country_code", self.country_code),
                 ("birth_date", self.birth_date),
                 ("gender", self.gender),
+                ("phone_e164", self.phone_e164),
             )
             if value is not None
         )
@@ -265,6 +275,7 @@ class PrivateCustomerFactSnapshot:
             self.country_code,
             self.birth_date,
             self.gender,
+            self.phone_e164,
         )
         if self.content_hash != expected_hash:
             raise PrivateCustomerFactValidationError(
@@ -322,7 +333,20 @@ def _snapshot_hash(
     country_code: str | None,
     birth_date: date | None,
     gender: str | None,
+    phone_e164: str | None = None,
 ) -> str:
+    if phone_e164 is not None:
+        return _domain_hash(
+            b"v2-private-customer-fact-snapshot-v3",
+            _canonical_json(
+                {
+                    "prior": _snapshot_hash(
+                        full_name, email, country_code, birth_date, gender
+                    ),
+                    "phone_e164": phone_e164,
+                }
+            ),
+        )
     if birth_date is None and gender is None:
         return _domain_hash(
             b"v2-private-customer-fact-snapshot-v1",
@@ -405,7 +429,7 @@ _EXPECTED_TABLE_SQL = {
         CREATE TABLE private_customer_facts (
             lead_id TEXT NOT NULL,
             fact_name TEXT NOT NULL
-                CHECK (fact_name IN ('full_name','email','country_code','birth_date','gender')),
+                CHECK (fact_name IN ('full_name','email','country_code','birth_date','gender','phone_e164')),
             private_value TEXT NOT NULL,
             value_hash TEXT NOT NULL,
             source_turn_id TEXT NOT NULL,
@@ -501,7 +525,8 @@ def _canonical_passenger_manifest_fact(fact: object) -> TypedFact:
         ) from None
     if (
         type(decoded) is not dict
-        or decoded.get("schema") != "v2-passenger-manifest-v1"
+        or decoded.get("schema")
+        not in ("v2-passenger-manifest-v1", "v2-passenger-manifest-v2")
         or _canonical_json(decoded).decode("utf-8") != fact.value.value
     ):
         raise PrivateCustomerFactValidationError(
@@ -632,17 +657,15 @@ class SQLitePrivateCustomerFactStore:
                 ).fetchone()
                 if (
                     fact_schema_row is not None
-                    and "'birth_date'" not in fact_schema_row[0]
+                    and "'phone_e164'" not in fact_schema_row[0]
                 ):
-                    legacy_fact_schema = _EXPECTED_TABLE_SQL[
-                        "private_customer_facts"
-                    ].replace(
-                        "'country_code','birth_date','gender'",
-                        "'country_code'",
-                    )
-                    if _normalized_schema_sql(
-                        fact_schema_row[0]
-                    ) != _normalized_schema_sql(legacy_fact_schema):
+                    current_sql = _EXPECTED_TABLE_SQL["private_customer_facts"]
+                    prior_sql = current_sql.replace(",'phone_e164'", "")
+                    legacy_sql = prior_sql.replace(",'birth_date','gender'", "")
+                    if _normalized_schema_sql(fact_schema_row[0]) not in {
+                        _normalized_schema_sql(prior_sql),
+                        _normalized_schema_sql(legacy_sql),
+                    }:
                         raise RuntimeError("private customer schema is incompatible")
                     connection.execute(
                         "ALTER TABLE private_customer_facts "
@@ -694,7 +717,7 @@ class SQLitePrivateCustomerFactStore:
                 "ON t.lead_id=f.lead_id AND t.source_turn_id=f.source_turn_id "
                 "WHERE f.lead_id=? ORDER BY CASE f.fact_name "
                 "WHEN 'full_name' THEN 1 WHEN 'email' THEN 2 "
-                "WHEN 'country_code' THEN 3 WHEN 'birth_date' THEN 4 ELSE 5 END",
+                "WHEN 'country_code' THEN 3 WHEN 'birth_date' THEN 4 WHEN 'gender' THEN 5 ELSE 6 END",
                 (canonical_lead,),
             ).fetchall()
         except sqlite3.DatabaseError:
@@ -707,6 +730,7 @@ class SQLitePrivateCustomerFactStore:
             "country_code": canonical_country_code,
             "birth_date": canonical_birth_date,
             "gender": canonical_gender,
+            "phone_e164": canonical_phone,
         }
         for row in rows:
             (
@@ -770,8 +794,10 @@ class SQLitePrivateCustomerFactStore:
                 values.get("country_code"),
                 birth_date_value,
                 values.get("gender"),
+                values.get("phone_e164"),
             ),
             source_turns=tuple(sources),
+            phone_e164=values.get("phone_e164"),
         )
 
     def load_recent_dialogue(
@@ -785,13 +811,14 @@ class SQLitePrivateCustomerFactStore:
                 "SELECT source_turn_id,source_event_hash,customer_message,"
                 "assistant_reply_chunks_json,private_content_hash,committed_at "
                 "FROM private_dialogue_turns WHERE lead_id=? "
-                "ORDER BY committed_at DESC,rowid DESC LIMIT 4",
+                "ORDER BY committed_at DESC,rowid DESC",
                 (canonical_lead,),
-            ).fetchall()
+            )
         except sqlite3.DatabaseError:
             raise RuntimeError("private dialogue read failed") from None
         exchanges: list[ConversationExchange] = []
-        for row in reversed(rows):
+        byte_count = 0
+        for row in rows:
             (
                 source_turn_id,
                 source_event_hash,
@@ -829,8 +856,14 @@ class SQLitePrivateCustomerFactStore:
                 or canonical_content_hash != expected_hash
             ):
                 raise RuntimeError("private dialogue row is invalid")
+            size = len(exchange.customer_message.encode("utf-8")) + sum(
+                len(chunk.encode("utf-8")) for chunk in exchange.assistant_reply_chunks
+            )
+            if byte_count + size > MAX_DIALOGUE_CONTEXT_BYTES:
+                break
+            byte_count += size
             exchanges.append(exchange)
-        return tuple(exchanges)
+        return tuple(reversed(exchanges))
 
     def record_dialogue_turn(
         self,
@@ -885,12 +918,6 @@ class SQLitePrivateCustomerFactStore:
                 "assistant_reply_chunks_json,private_content_hash,committed_at) "
                 "VALUES (?,?,?,?,?,?,?)",
                 (canonical_lead, canonical_turn, *material),
-            )
-            self._connection.execute(
-                "DELETE FROM private_dialogue_turns WHERE lead_id=? AND source_turn_id "
-                "NOT IN (SELECT source_turn_id FROM private_dialogue_turns "
-                "WHERE lead_id=? ORDER BY committed_at DESC,rowid DESC LIMIT 4)",
-                (canonical_lead, canonical_lead),
             )
             self._connection.execute("COMMIT")
         except PrivateCustomerFactIdentityConflict:

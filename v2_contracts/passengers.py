@@ -27,6 +27,7 @@ class PassengerInput:
     birth_date: date | None
     gender: str | None
     country_code: str | None
+    is_holder: bool | None = None
 
     def __post_init__(self) -> None:
         if type(self.position) is not int or self.position < 1:
@@ -51,7 +52,11 @@ class PassengerInput:
             if _COUNTRY_RE.fullmatch(country) is None:
                 raise ValueError("passenger input country_code must be ISO alpha-2")
             object.__setattr__(self, "country_code", country)
-        if all(getattr(self, name) is None for name in PASSENGER_FIELD_ORDER):
+        if self.is_holder is not None and type(self.is_holder) is not bool:
+            raise ValueError("is_holder must be an exact bool or None")
+        if self.is_holder is None and all(
+            getattr(self, name) is None for name in PASSENGER_FIELD_ORDER
+        ):
             raise ValueError("passenger input must carry at least one material field")
 
 

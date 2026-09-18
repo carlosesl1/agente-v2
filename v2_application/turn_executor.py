@@ -67,6 +67,7 @@ from v2_application.active_execution import (
     is_regressive_post_command_reply,
 )
 from v2_application.conversation import (
+    customer_context_values,
     ConversationReductionError,
     V2ConversationReducer,
     effective_customer_material_hash,
@@ -74,6 +75,7 @@ from v2_application.conversation import (
 )
 from v2_application.read_bridge import bridge_availability_observation
 from v2_application.passengers import (
+    projection_passenger_inputs,
     PassengerManifestConflict,
     attach_projection_manifest,
     merge_projection_manifest,
@@ -632,56 +634,39 @@ def _public_artifact_facts(facts: tuple[TypedFact, ...]) -> tuple[TypedFact, ...
     )
 
 
-def _private_customer_fact_names(
+def _service_model_facts(
     projection: ConversationProjection,
     *,
-    private_facts: PrivateCustomerFactSnapshot | None = None,
-    profile: PrivateCustomerBinding | None = None,
-    now: datetime | None = None,
-) -> tuple[str, ...]:
-    present = {
-        item.name
-        for item in projection.facts
-        if item.name not in {"full_name", "email", "phone_e164", "country_code"}
-    }
-    if private_facts is not None:
-        if type(private_facts) is not PrivateCustomerFactSnapshot:
-            raise TypeError("private_facts must be exact or None")
-        present.update(private_facts.present_fact_names)
-    if profile is not None:
-        if type(profile) is not PrivateCustomerBinding:
-            raise TypeError("profile must be exact or None")
-        if (
-            type(now) is not datetime
-            or now.tzinfo is None
-            or now.utcoffset() != timedelta(0)
-        ):
-            raise TypeError("profile presence markers require exact UTC now")
-        if profile.observed_at <= now < profile.expires_at:
-            for name, value, canonicalizer in (
-                ("full_name", profile.full_name, canonical_full_name),
-                ("email", profile.email, canonical_email),
-                ("country_code", profile.country_code, canonical_country_code),
-            ):
-                if value is None:
-                    continue
-                try:
-                    canonicalizer(value)
-                except (TypeError, ValueError):
-                    continue
-                present.add(name)
-            if profile.gender in {"m", "f"}:
-                present.add("gender")
-            if profile.phone_e164 is not None:
-                present.add("phone_e164")
-    return tuple(name for name in PRIVATE_CUSTOMER_FACT_ORDER if name in present)
+    private_facts: PrivateCustomerFactSnapshot | None,
+    profile: PrivateCustomerBinding,
+    now: datetime,
+) -> tuple[ModelFact, ...]:
+    values, _conflicts = customer_context_values(
+        profile,
+        projection,
+        now,
+        private_facts=private_facts,
+    )
+    known: list[ModelFact] = []
+    for name in PRIVATE_CUSTOMER_FACT_ORDER:
+        if name not in values:
+            continue
+        try:
+            known.append(ModelFact(name, values[name]))
+        except ValueError:
+            # Invalid channel-profile fields are not accepted reservation facts.
+            continue
+    return _authoritative_language_facts(
+        (*_state_model_facts(projection), *known),
+        projection.locale,
+    )
 
 
 _PRIVATE_CONVERSATION_FALLBACK_NAMES: Final = frozenset(
-    ("full_name", "email", "country_code", "birth_date", "gender")
+    ("full_name", "email", "country_code", "birth_date", "gender", "phone_e164")
 )
 _COMMAND_BLOCKING_PRIVATE_FACT_NAMES: Final = frozenset(
-    ("full_name", "email", "country_code")
+    ("full_name", "email", "country_code", "phone_e164")
 )
 
 
@@ -691,25 +676,19 @@ def _partition_private_customer_facts(
     tuple[ModelFact, ...],
     tuple[ModelFact, ...],
     tuple[str, ...],
-    bool,
 ]:
     private: list[ModelFact] = []
     public: list[ModelFact] = []
     invalid: set[str] = set()
-    phone_proposed = False
     canonicalizers = {
         "full_name": canonical_full_name,
         "email": canonical_email,
         "country_code": canonical_country_code,
-        "birth_date": lambda value: date.fromisoformat(
-            canonical_birth_date(value)
-        ),
+        "birth_date": lambda value: date.fromisoformat(canonical_birth_date(value)),
         "gender": canonical_gender,
+        "phone_e164": lambda value: ModelFact("phone_e164", value).value,
     }
     for fact in proposal.facts:
-        if fact.name == "phone_e164":
-            phone_proposed = True
-            continue
         if fact.name in _PRIVATE_CONVERSATION_FALLBACK_NAMES:
             try:
                 value = canonicalizers[fact.name](fact.value)
@@ -724,7 +703,7 @@ def _partition_private_customer_facts(
         for name in ("full_name", "email", "country_code")
         if name in invalid
     )
-    return tuple(private), tuple(public), invalid_names, phone_proposed
+    return tuple(private), tuple(public), invalid_names
 
 
 def _authoritative_language_facts(
@@ -1700,23 +1679,20 @@ class V2TurnExecutor:
             message=batch.combined_text,
             attachments=tuple(
                 ModelAttachment(event.media_type)
-                for event in batch.events if event.media_url is not None
+                for event in batch.events
+                if event.media_url is not None
             ),
             locale=projection.locale,
             state_version=current.version,
             recent_dialogue=recent_dialogue,
             consultation_history=consultation_history,
-            state_facts=_authoritative_language_facts(
-                _state_model_facts(projection),
-                projection.locale,
-            ),
-            private_customer_fact_names=_private_customer_fact_names(
+            state_facts=_service_model_facts(
                 projection,
                 private_facts=private_facts,
                 profile=profile,
                 now=now,
             ),
-            passenger_manifest_status=_passenger_status(projection),
+            passengers=projection_passenger_inputs(projection),
             critical_outcome=_critical_outcome(projection),
             pending_action=pending_action,
             private_profile_complete=effective_profile_complete,
@@ -1740,12 +1716,13 @@ class V2TurnExecutor:
                 self._model,
                 request=replace(
                     request,
-                    private_customer_fact_names=_private_customer_fact_names(
+                    state_facts=_service_model_facts(
                         projection,
                         private_facts=private_facts,
                         profile=profile,
                         now=now,
                     ),
+                    passengers=projection_passenger_inputs(projection),
                     private_profile_complete=profile_ready(),
                 ),
                 audited=audited,
@@ -1784,7 +1761,6 @@ class V2TurnExecutor:
             first_private_facts,
             first_public_facts,
             first_invalid_private_facts,
-            _first_phone_proposed,
         ) = _partition_private_customer_facts(first_proposal)
         first_public_facts = _authoritative_language_facts(
             first_public_facts,
@@ -1894,17 +1870,14 @@ class V2TurnExecutor:
                 ),
                 confirmation_review_required=confirmation_review,
                 selection_review_required=selection_review,
-                private_customer_fact_names=_private_customer_fact_names(
+                state_facts=_service_model_facts(
                     projection,
                     private_facts=private_facts,
                     profile=profile,
                     now=now,
                 ),
                 private_profile_complete=effective_profile_complete,
-                passenger_manifest_status=_passenger_status(
-                    projection,
-                    first_proposal,
-                ),
+                passengers=projection_passenger_inputs(projection),
             )
             review_audited = trace.call(
                 NodeType.MAYA_REVIEW,
@@ -1927,7 +1900,6 @@ class V2TurnExecutor:
                 review_private_facts,
                 review_public_facts,
                 review_invalid_private_facts,
-                _review_phone_proposed,
             ) = _partition_private_customer_facts(review_proposal)
             review_public_facts = _authoritative_language_facts(
                 review_public_facts,
@@ -2170,27 +2142,21 @@ class V2TurnExecutor:
                 message=batch.combined_text,
                 attachments=tuple(
                     ModelAttachment(event.media_type)
-                    for event in batch.events if event.media_url is not None
+                    for event in batch.events
+                    if event.media_url is not None
                 ),
                 locale=projection.locale,
                 state_version=current.version,
                 recent_dialogue=recent_dialogue,
                 observations=v2_observations,
                 consultation_history=consultation_history,
-                state_facts=_authoritative_language_facts(
-                    _state_model_facts(projection),
-                    projection.locale,
-                ),
-                private_customer_fact_names=_private_customer_fact_names(
+                state_facts=_service_model_facts(
                     projection,
                     private_facts=private_facts,
                     profile=profile,
                     now=now,
                 ),
-                passenger_manifest_status=_passenger_status(
-                    projection,
-                    first_proposal,
-                ),
+                passengers=projection_passenger_inputs(projection),
                 critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
                 private_profile_complete=effective_profile_complete,
@@ -2222,7 +2188,6 @@ class V2TurnExecutor:
                 second_private_facts,
                 second_public_facts,
                 second_invalid_private_facts,
-                _second_phone_proposed,
             ) = _partition_private_customer_facts(proposal)
             second_public_facts = _authoritative_language_facts(
                 second_public_facts,
@@ -2297,10 +2262,14 @@ class V2TurnExecutor:
                         current.version,
                     ),
                     selection_review_required=True,
-                    passenger_manifest_status=_passenger_status(
+                    state_facts=_service_model_facts(
                         projection,
-                        proposal,
+                        private_facts=private_facts,
+                        profile=profile,
+                        now=now,
                     ),
+                    passengers=projection_passenger_inputs(projection),
+                    private_profile_complete=profile_ready(),
                 )
                 selection_review_audited = trace.call(
                     NodeType.MAYA_REVIEW,
@@ -2332,7 +2301,6 @@ class V2TurnExecutor:
                         selection_review_private_facts,
                         selection_review_public_facts,
                         selection_review_invalid_private_facts,
-                        _selection_review_phone_proposed,
                     ) = _partition_private_customer_facts(selection_review_proposal)
                     if selection_review_invalid_private_facts:
                         raise TurnExecutionError(
