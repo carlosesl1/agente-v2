@@ -1,4 +1,19 @@
-# Active correction — Maya V2 current-observation completion
+# Active design — V2 atendimento simples com contexto completo
+
+- Authorized by Carlos on 2026-09-18 in the current chat: incremental simplification with complete lead context, per-component outcomes and removal of redundant conversational protocols. Production and real operations are explicitly outside this authorization.
+- Branch: `refactor/v2-atendimento-simples-727d3625`; required worktree: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
+- Verified isolated-test source base: `8980646d5615db9ecb32c97f4579ba09080dc02a`. GA remains independently declared by the verified live authority; this document is not runtime authority.
+- Design: `docs/superpowers/specs/2026-09-18-v2-atendimento-simples-design.md`.
+- Plan: not written; written-spec review is the current decision boundary.
+- Ownership: Maya interprets and authors; tools return facts; controller validates effects. Lead-provided values are reusable in the conversation without PII masking/presence-only substitution.
+- Deliverable in this phase: reviewed design document and this scope declaration only. No functional source change, deploy, provider write, WhatsApp message, live-state edit, V3, legacy or Ops change.
+- Clean baseline: Bókun transport and active-execution suites passed `60 passed in 1.33s` in a clean environment. These are baseline contract tests, not proof of corrected Bókun or E2E conversation.
+- Runner note: the first dependency command was blocked by the tool's long-lived-process detector; the subsequent minimal runner executed successfully. No product failure was hidden.
+- Required pre-commit boundary command: `python3 scripts/check_fasttrack_boundaries.py`; documentation diff must pass `git diff --check`.
+- Historical NEXT entries below are retained for provenance only and confer no current implementation/rollout authority.
+- NEXT: Carlos reviews the written design. After approval, create the causal implementation plan, including the exact old paths to delete, before functional edits. No deploy or external effects.
+
+## Preserved historical correction — Maya V2 current-observation completion
 
 - Authorized by Carlos in the current chat on 2026-09-15: free disk space, correct the authenticated-price omission found in the real WhatsApp conversation, retest the isolated contact and proceed through the established immutable rollout gates.
 - Runtime authority verified `OK` before work; authenticated GA/test base `2ba6735d063e2232d8539d5e1ef85841b31f0525`, tree `53e19d67a6d48cc6b902a09290bc7c57f3d118ec`, image ID `sha256:13d07f45390110e505def42d098fa33ea1119ff55a887dd624200f62875d093a`.
