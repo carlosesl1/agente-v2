@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 
+from reservation_domain import ExecutionCertainty
+from reservation_execution import PreparationFailure
 from tests.test_v2_outcome_projector import (
     NOW,
     US_PHONE,
@@ -13,26 +14,22 @@ from tests.test_v2_outcome_projector import (
     _persist,
     _stores,
 )
-from reservation_domain import ExecutionCertainty
-from reservation_execution import PreparationFailure
+from tests.v2_completion_helpers import CompletionMaya, authored_chunks, make_completion
 from v2_adapters.stripe import StripeLinkAdapter
 from v2_adapters.wise import WiseInstructionAdapter
-from v2_application.completion import PublicOutboxStore
-from v2_application.completion_projector import (
-    CompletionProjector,
-    _confirmation_text,
-    _payment_text,
-)
+from v2_application.completion import PublicOutboxStore, PublicReply
+from v2_application.completion_projector import _opaque
 from v2_application.payments import PaymentInitiationWorker, PaymentService
 from v2_application.reservations import ReservationAllocator
-from v2_contracts.localization import CustomerLanguage
 from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.payments import BusinessUnit, PaymentMethod
 
 
 class _ClosedInstruction:
     def instruction(self, obligation):
-        raise AssertionError(f"unexpected non-Stripe obligation: {obligation.payment_id}")
+        raise AssertionError(
+            f"unexpected non-Stripe obligation: {obligation.payment_id}"
+        )
 
 
 class _ClosedStripe:
@@ -52,8 +49,7 @@ class _StripeTransport:
         return {
             "link_id": f"plink-test-{request.business_unit.value}",
             "url": (
-                "https://buy.stripe.com/test_"
-                f"{request.business_unit.value}_completion"
+                f"https://buy.stripe.com/test_{request.business_unit.value}_completion"
             ),
         }
 
@@ -77,19 +73,6 @@ def _payment_worker(payments, transport: _StripeTransport) -> PaymentInitiationW
     )
 
 
-def _completion(execution, payments, public: PublicOutboxStore) -> CompletionProjector:
-    return CompletionProjector(
-        execution=execution,
-        payment_store=payments,
-        public_store=public,
-        subscriber_id="1873018537",
-        account_profiles={
-            BusinessUnit.HOSTEL: "stripe-account:hostel:test",
-            BusinessUnit.AGENCY: "stripe-account:agency:test",
-        },
-    )
-
-
 def _fail_next_before_provider(execution, *, now) -> None:
     claim = execution.claim_command(
         worker_id="worker:completion-preflight-fixture",
@@ -109,425 +92,184 @@ def _fail_next_before_provider(execution, *, now) -> None:
     assert disposition.value == "terminal_not_called"
 
 
-def test_payment_link_text_uses_the_natural_article_for_each_business_unit() -> None:
-    assert _payment_text(
-        BusinessUnit.HOSTEL,
-        "https://buy.stripe.com/test_hostel",
-        CustomerLanguage.PT_BR,
-    ) == "Link de pagamento da hospedagem: https://buy.stripe.com/test_hostel"
-    assert _payment_text(
-        BusinessUnit.AGENCY,
-        "https://buy.stripe.com/test_tour",
-        CustomerLanguage.PT_BR,
-    ) == "Link de pagamento do passeio: https://buy.stripe.com/test_tour"
-    assert _payment_text(
-        BusinessUnit.HOSTEL,
-        "https://buy.stripe.com/test_hostel",
-        CustomerLanguage.EN,
-    ) == "Accommodation payment link: https://buy.stripe.com/test_hostel"
-    assert _payment_text(
-        BusinessUnit.AGENCY,
-        "https://buy.stripe.com/test_tour",
-        CustomerLanguage.EN,
-    ) == "Tour payment link: https://buy.stripe.com/test_tour"
-    with pytest.raises(ValueError, match="customer_language"):
-        _payment_text(
-            BusinessUnit.AGENCY,
-            "https://buy.stripe.com/test_tour",
-            None,
-        )
-
-
-def test_single_lodging_confirmation_enters_public_outbox_once(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-lodging.sqlite3").resolve())
-    try:
-        command = next(
-            item
-            for item in ReservationAllocator().allocate(_package_command()).commands
-            if item.operation.value == "reserve_lodging"
-        )
-        _persist(execution, (command,))
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
-
-        projector = _completion(execution, payments, public)
-        first = projector.run_once(now=NOW + timedelta(seconds=3))
-        replay = projector.run_once(now=NOW + timedelta(seconds=4))
-
-        assert first.inserted == 1
-        assert replay.inserted == 0
-        texts = tuple(
-            row[0]
-            for row in public._connection.execute(
-                "SELECT text FROM public_outbox ORDER BY release_id,chunk_index"
-            )
-        )
-        assert texts == ("Sua hospedagem foi confirmada.",)
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_single_activity_confirmation_enters_public_outbox_once(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-activity.sqlite3").resolve())
-    try:
-        command = next(
-            item
-            for item in ReservationAllocator().allocate(
-                _package_command(phone_e164=US_PHONE)
-            ).commands
-            if item.operation.value == "book_activity"
-        )
-        _persist(execution, (command,))
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
-
-        projector = _completion(execution, payments, public)
-        first = projector.run_once(now=NOW + timedelta(seconds=3))
-        replay = projector.run_once(now=NOW + timedelta(seconds=4))
-
-        assert first.inserted == 1
-        assert replay.inserted == 0
-        texts = tuple(
-            row[0]
-            for row in public._connection.execute(
-                "SELECT text FROM public_outbox ORDER BY release_id,chunk_index"
-            )
-        )
-        assert texts == ("Your tour has been confirmed.",)
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_package_confirmation_and_two_links_enter_public_outbox_once(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public.sqlite3").resolve())
-    try:
-        commands = ReservationAllocator().allocate(_package_command()).commands
-        _persist(execution, commands)
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=2),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 2
-        worker = _payment_worker(payments, _StripeTransport())
-        worker.run_once(now=NOW + timedelta(seconds=4))
-        worker.run_once(now=NOW + timedelta(seconds=5))
-
-        projector = _completion(execution, payments, public)
-        first = projector.run_once(now=NOW + timedelta(seconds=6))
-        replay = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=7)
-        )
-
-        assert first.inserted == 3
-        assert replay.inserted == 0
-        rows = public._connection.execute(
-            "SELECT release_id,text,author FROM public_outbox "
-            "ORDER BY release_id,chunk_index"
-        ).fetchall()
-        assert len(rows) == 3
-        texts = tuple(row[1] for row in rows)
-        assert {
-            PublicMessageAuthor(row[2]) for row in rows
-        } == {PublicMessageAuthor.AUTHENTICATED_SYSTEM}
-        assert sum("confirmad" in text.casefold() for text in texts) == 1
-        assert sum("https://buy.stripe.com/" in text for text in texts) == 2
-        assert all("product:" not in text for text in texts)
-        assert rows[0][0].startswith("release:00-reservation:")
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_foreign_phone_package_uses_english_confirmation_and_links(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-english-package.sqlite3").resolve())
-    try:
-        commands = ReservationAllocator().allocate(
-            _package_command(phone_e164=US_PHONE)
-        ).commands
-        _persist(execution, commands)
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=2),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 2
-        worker = _payment_worker(payments, _StripeTransport())
-        worker.run_once(now=NOW + timedelta(seconds=4))
-        worker.run_once(now=NOW + timedelta(seconds=5))
-
-        projected = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=6)
-        )
-
-        assert projected.inserted == 3
-        texts = tuple(
-            row[0]
-            for row in public._connection.execute(
-                "SELECT text FROM public_outbox ORDER BY release_id,chunk_index"
-            )
-        )
-        assert "Your accommodation and tour have been confirmed." in texts
-        assert any(text.startswith("Accommodation payment link: ") for text in texts)
-        assert any(text.startswith("Tour payment link: ") for text in texts)
-        assert all("Link de pagamento" not in text for text in texts)
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_confirmation_rejects_mixed_phone_languages_in_one_group() -> None:
-    brazilian = ReservationAllocator().allocate(_package_command()).commands
-    foreign = ReservationAllocator().allocate(
-        _package_command(phone_e164=US_PHONE)
-    ).commands
-
-    with pytest.raises(RuntimeError, match="customer language"):
-        _confirmation_text((brazilian[0], foreign[1]))
-
-
-def test_unknown_stripe_link_never_enters_public_outbox(tmp_path: Path) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public.sqlite3").resolve())
-    try:
-        command = ReservationAllocator().allocate(_package_command()).commands[0]
-        _persist(execution, (command,))
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
-        result = _payment_worker(payments, _StripeTransport(fail=True)).run_once(
-            now=NOW + timedelta(seconds=3)
-        )
-        assert result.disposition.value == "manual_review"
-
-        projected = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=4)
-        )
-
-        assert projected.inserted == 1
-        texts = tuple(
-            row[0]
-            for row in public._connection.execute(
-                "SELECT text FROM public_outbox ORDER BY release_id"
-            )
-        )
-        assert len(texts) == 1
-        assert "confirmad" in texts[0].casefold()
-        assert "http" not in texts[0]
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_package_no_effect_failure_enters_public_outbox_once_without_payment(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-package-failed.sqlite3").resolve())
-    try:
-        commands = ReservationAllocator().allocate(_package_command()).commands
-        _persist(execution, commands)
-        _fail_next_before_provider(
-            execution,
-            now=NOW + timedelta(seconds=1),
-        )
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=2),
-            certainty=ExecutionCertainty.CALLED_NO_EFFECT,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 0
-
-        projector = _completion(execution, payments, public)
-        first = projector.run_once(now=NOW + timedelta(seconds=4))
-        replay = projector.run_once(now=NOW + timedelta(seconds=5))
-
-        assert first.inserted == 1
-        assert replay.inserted == 0
-        assert payments.completed_offers() == ()
-        text = public._connection.execute(
-            "SELECT text FROM public_outbox"
-        ).fetchone()[0]
-        assert text == (
-            "Não foi possível concluir a hospedagem nem o passeio. "
-            "Nenhuma reserva foi confirmada e nenhum pagamento foi criado."
-        )
-        assert "process" not in text.casefold()
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_unknown_package_result_requires_verification_and_never_invites_retry(
-    tmp_path: Path,
-) -> None:
+@pytest.mark.parametrize("service", ["package", "reserve_lodging", "book_activity"])
+@pytest.mark.parametrize("certainty", list(ExecutionCertainty))
+def test_terminal_result_is_an_event_not_a_controller_template(
+    tmp_path, service, certainty
+):
     execution, payments, _ = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-package-unknown.sqlite3").resolve())
-    try:
-        commands = ReservationAllocator().allocate(_package_command()).commands
-        _persist(execution, commands)
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.CALLED_UNKNOWN,
-        )
-        _fail_next_before_provider(
-            execution,
-            now=NOW + timedelta(seconds=2),
-        )
-
-        projected = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=3)
-        )
-
-        assert projected.inserted == 1
-        assert payments.completed_offers() == ()
-        text = public._connection.execute(
-            "SELECT text FROM public_outbox"
-        ).fetchone()[0]
-        assert text == (
-            "O resultado da solicitação ficou incerto e precisa ser verificado antes de "
-            "qualquer nova tentativa. Nenhum novo pagamento foi criado automaticamente."
-        )
-        assert "tente novamente" not in text.casefold()
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_partial_package_confirmation_reports_partial_effect_without_payment(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(tmp_path)
-    public = PublicOutboxStore((tmp_path / "public-package-partial.sqlite3").resolve())
-    try:
-        commands = ReservationAllocator().allocate(_package_command()).commands
-        _persist(execution, commands)
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=1),
-            certainty=ExecutionCertainty.EFFECT_CONFIRMED,
-        )
-        _finish_next(
-            execution,
-            now=NOW + timedelta(seconds=2),
-            certainty=ExecutionCertainty.CALLED_NO_EFFECT,
-        )
-        assert outcome.run_once(now=NOW + timedelta(seconds=3)).inserted == 0
-
-        projected = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=4)
-        )
-
-        assert projected.inserted == 1
-        assert payments.completed_offers() == ()
-        text = public._connection.execute(
-            "SELECT text FROM public_outbox"
-        ).fetchone()[0]
-        assert "foi confirmad" in text
-        assert "não foi possível concluir" in text
-        assert "Nenhum pagamento foi criado" in text
-        assert "antes de uma nova tentativa" in text
-    finally:
-        public.close()
-        payments.close()
-        execution.close()
-
-
-def test_wise_instruction_enters_public_outbox_after_confirmed_reservation(
-    tmp_path: Path,
-) -> None:
-    execution, payments, outcome = _stores(
-        tmp_path,
-        enabled_methods=(PaymentMethod.WISE,),
+    public = PublicOutboxStore(tmp_path / "public.sqlite3")
+    commands = (
+        ReservationAllocator().allocate(_package_command(phone_e164=US_PHONE)).commands
     )
-    public = PublicOutboxStore((tmp_path / "public-wise.sqlite3").resolve())
+    if service != "package":
+        commands = tuple(c for c in commands if c.operation.value == service)
+    _persist(execution, commands)
+    projector = make_completion(tmp_path, execution, payments, public)
     try:
-        command = ReservationAllocator().allocate(
-            _package_command(payment_method="wise")
-        ).commands[0]
-        _persist(execution, (command,))
+        assert projector.events() == ()
+        for i in range(len(commands)):
+            if certainty is ExecutionCertainty.NOT_CALLED:
+                _fail_next_before_provider(execution, now=NOW + timedelta(seconds=i))
+            else:
+                _finish_next(
+                    execution, now=NOW + timedelta(seconds=i), certainty=certainty
+                )
+        (event,) = projector.events()
+        assert event.command_ids == tuple(sorted(c.command_id for c in commands))
+        assert event.kind == "reservation_result"
+        assert public.pending_count() == 0
+        assert projector.run_once(now=NOW).inserted == 1
+        (request,) = projector.executor._model.calls
+        assert {c.outcome.certainty for c in request.execution_components} == {
+            certainty.value
+        }
+        assert len(request.execution_components) == len(commands)
+        assert authored_chunks(projector)[0].text == CompletionMaya.text
+        assert authored_chunks(projector)[0].author == "maya"
+        assert projector.run_once(now=NOW).inserted == 0
+        assert len(projector.executor._model.calls) == 1
+    finally:
+        projector._boundary.close()
+        public.close()
+        payments.close()
+        execution.close()
+
+
+@pytest.mark.parametrize("method", [PaymentMethod.STRIPE, PaymentMethod.WISE])
+def test_package_results_and_two_payment_components_reach_one_maya_turn(
+    tmp_path, method
+):
+    execution, payments, outcome = _stores(tmp_path, enabled_methods=(method,))
+    public = PublicOutboxStore(tmp_path / "public.sqlite3")
+    commands = (
+        ReservationAllocator()
+        .allocate(_package_command(payment_method=method.value))
+        .commands
+    )
+    _persist(execution, commands)
+    for i in range(2):
         _finish_next(
             execution,
-            now=NOW + timedelta(seconds=1),
+            now=NOW + timedelta(seconds=i),
             certainty=ExecutionCertainty.EFFECT_CONFIRMED,
         )
-        assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 1
-        worker = PaymentInitiationWorker(
+    assert outcome.run_once(now=NOW + timedelta(seconds=2)).inserted == 2
+    worker = (
+        _payment_worker(payments, _StripeTransport())
+        if method is PaymentMethod.STRIPE
+        else PaymentInitiationWorker(
             store=payments,
             payments=PaymentService(
                 stripe=_ClosedStripe(),
                 wise=WiseInstructionAdapter(
                     instructions={
-                        "stripe-account:hostel:test": "Dados Wise da hospedagem; aguarde validação.",
-                        "stripe-account:agency:test": "Dados Wise da agência; aguarde validação.",
+                        "stripe-account:hostel:test": "Dados Wise hostel",
+                        "stripe-account:agency:test": "Dados Wise agência",
                     }
                 ),
                 pix=_ClosedInstruction(),
             ),
-            worker_id="worker:wise-completion-test",
+            worker_id="worker:wise-completion",
             lease_ttl=timedelta(seconds=30),
         )
-        assert worker.run_once(
-            now=NOW + timedelta(seconds=3)
-        ).disposition.value == "completed"
-
-        projected = _completion(execution, payments, public).run_once(
-            now=NOW + timedelta(seconds=4)
-        )
-
-        assert projected.inserted == 2
-        texts = tuple(
-            row[0]
-            for row in public._connection.execute(
-                "SELECT text FROM public_outbox ORDER BY release_id"
+    )
+    for i in range(2):
+        worker.run_once(now=NOW + timedelta(seconds=3 + i))
+    projector = make_completion(tmp_path, execution, payments, public)
+    try:
+        assert len(projector.events()) == 3
+        assert projector.run_once(now=NOW).inserted == 1
+        (request,) = projector.executor._model.calls
+        assert len(request.completion_events) == 3
+        assert len(request.execution_components) == 2
+        offers = [p.offer for c in request.execution_components for p in c.payments]
+        assert len(offers) == 2
+        assert all(not p.settled for p in offers)
+        if method is PaymentMethod.STRIPE:
+            assert all(
+                p.public_url.startswith("https://buy.stripe.com/") for p in offers
             )
-        )
-        assert any("Dados Wise da hospedagem" in text for text in texts)
-        assert all("https://" not in text for text in texts)
+        else:
+            assert all("Dados Wise" in p.public_text for p in offers)
+            assert {p.public_text for p in offers} == {
+                p.public_text for p in payments.completed_offers()
+            }
+        assert len(authored_chunks(projector)) == 1
+        assert public.pending_count() == 0
+        assert projector.run_once(now=NOW).inserted == 0
     finally:
+        projector._boundary.close()
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_unknown_payment_has_no_success_event_but_exposes_uncertainty_in_context(
+    tmp_path,
+):
+    execution, payments, outcome = _stores(tmp_path)
+    public = PublicOutboxStore(tmp_path / "public.sqlite3")
+    command = ReservationAllocator().allocate(_package_command()).commands[0]
+    _persist(execution, (command,))
+    _finish_next(execution, now=NOW, certainty=ExecutionCertainty.EFFECT_CONFIRMED)
+    outcome.run_once(now=NOW + timedelta(seconds=1))
+    assert (
+        _payment_worker(payments, _StripeTransport(fail=True))
+        .run_once(now=NOW + timedelta(seconds=2))
+        .disposition.value
+        == "manual_review"
+    )
+    projector = make_completion(tmp_path, execution, payments, public)
+    try:
+        assert len(projector.events()) == 1
+        projector.run_once(now=NOW)
+        (request,) = projector.executor._model.calls
+        initiation = request.execution_components[0].payments[0]
+        assert initiation.status == "manual_review"
+        assert initiation.offer is None
+    finally:
+        projector._boundary.close()
+        public.close()
+        payments.close()
+        execution.close()
+
+
+def test_existing_legacy_release_suppresses_regeneration_without_rewriting_history(
+    tmp_path,
+):
+    execution, payments, _ = _stores(tmp_path)
+    public = PublicOutboxStore(tmp_path / "public.sqlite3")
+    command = ReservationAllocator().allocate(_package_command()).commands[0]
+    _persist(execution, (command,))
+    _finish_next(execution, now=NOW, certainty=ExecutionCertainty.EFFECT_CONFIRMED)
+    release = _opaque(
+        "release:00-reservation",
+        command.payload.customer.customer_ref,
+        command.draft_id,
+        str(command.draft_version),
+    )
+    public.enqueue(
+        PublicReply(
+            release_id=release,
+            lead_id="manychat:1873018537",
+            message_id="message:legacy",
+            channel="manychat",
+            chunks=("Texto histórico preservado.",),
+            author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+        ),
+        now=NOW,
+    )
+    projector = make_completion(tmp_path, execution, payments, public)
+    try:
+        assert projector.run_once(now=NOW).inserted == 0
+        assert not projector.executor._model.calls
+        assert (
+            public.conversation_messages("manychat:1873018537")[0].text
+            == "Texto histórico preservado."
+        )
+    finally:
+        projector._boundary.close()
         public.close()
         payments.close()
         execution.close()

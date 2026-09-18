@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Final
 
+from reservation_boundary.completion import completion_messages
 from reservation_boundary.conversation import (
     ConversationProjection,
     ConversationStage,
@@ -26,9 +27,11 @@ from reservation_boundary.conversation import (
 )
 from reservation_boundary.reads import (
     Phase8ToolReadRequest,
-    ReadObservation as BoundaryReadObservation,
     ReadService,
     SanitizedLookupResult,
+)
+from reservation_boundary.reads import (
+    ReadObservation as BoundaryReadObservation,
 )
 from reservation_boundary.serialization import semantic_hash
 from reservation_boundary.sqlite_store import (
@@ -40,6 +43,7 @@ from reservation_boundary.sqlite_store import (
     StateNotFound,
     TurnArtifactWrite,
     TurnReceipt,
+    VersionedBoundaryState,
     kernel_decision_commitment,
 )
 from reservation_boundary.types import (
@@ -66,22 +70,28 @@ from v2_application.active_execution import (
     blocks_active_commercial_progression,
     is_regressive_post_command_reply,
 )
+from v2_application.completion_projector import (
+    CompletionContext,
+    CompletionProjector,
+    CompletionSuperseded,
+)
 from v2_application.conversation import (
-    customer_context_values,
     ConversationReductionError,
+    V2ConversationDecision,
     V2ConversationReducer,
+    _model_owned_reply,
+    customer_context_values,
     effective_customer_material_hash,
     reservation_profile_ready,
 )
-from v2_application.read_bridge import bridge_availability_observation
 from v2_application.passengers import (
-    projection_passenger_inputs,
     PassengerManifestConflict,
     attach_projection_manifest,
     merge_projection_manifest,
     projection_manifest_fact,
     projection_manifest_party,
     projection_manifest_status,
+    projection_passenger_inputs,
 )
 from v2_application.private_customer_facts import (
     PrivateCustomerFactSnapshot,
@@ -93,6 +103,7 @@ from v2_application.private_customer_facts import (
     canonical_gender,
 )
 from v2_application.public_reply import apply_positive_grounding
+from v2_application.read_bridge import bridge_availability_observation
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import (
     build_handoff_relay_bundle,
@@ -107,10 +118,12 @@ from v2_application.turn_plan import (
 )
 from v2_application.turns import validate_productive_proposal
 from v2_contracts.channel import InboundBatch, PublicMessageAuthor
+from v2_contracts.completion import CompletionTurn
 from v2_contracts.critical_actions import ApprovalBasis, PendingCriticalActionContext
+from v2_contracts.execution_context import ExecutionContext, OperationalMessage
 from v2_contracts.localization import customer_language_from_phone
-from v2_contracts.execution_context import ExecutionContext
 from v2_contracts.model import (
+    PRIVATE_CUSTOMER_FACT_ORDER,
     AuditedModelTurn,
     ConsultationHistoryEntry,
     InvalidModelProposal,
@@ -118,7 +131,6 @@ from v2_contracts.model import (
     ModelFact,
     ModelProposal,
     ModelRequest,
-    PRIVATE_CUSTOMER_FACT_ORDER,
     PublicReplyCorrectionReason,
 )
 from v2_contracts.passengers import PassengerManifestStatus
@@ -235,6 +247,7 @@ class _PreparedTurn:
     public_rows: tuple[PublicOutboxWrite, ...]
     reply_chunks: tuple[str, ...]
     private_profile_material_hash: str | None
+    superseded_completion_turns: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -460,7 +473,7 @@ def _repair_requested_activity_selection(
     )
 
 
-def _source_events(batch: InboundBatch) -> tuple[SourceEventIdentity, ...]:
+def _source_events(batch: InboundBatch | CompletionTurn) -> tuple[SourceEventIdentity, ...]:
     return tuple(
         SourceEventIdentity(event.event_id, event.payload_hash)
         for event in batch.events
@@ -1375,6 +1388,7 @@ class V2TurnExecutor:
         turn_timeout: timedelta,
         max_commit_attempts: int,
         execution_status_resolver: ExecutionStatusResolver | None = None,
+        completion_projector: CompletionProjector | None = None,
         ops_recorder: OpsRecorder | None = None,
         ops_full_content: bool = False,
     ) -> None:
@@ -1427,29 +1441,32 @@ class V2TurnExecutor:
         self._turn_timeout = turn_timeout
         self._max_commit_attempts = max_commit_attempts
         self._execution_status_resolver = execution_status_resolver
+        self._completion_projector = completion_projector
         self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
         self._ops_full_content = ops_full_content
 
     def _record_committed_dialogue(
         self,
-        batch: InboundBatch,
+        batch: InboundBatch | CompletionTurn,
         *,
         event_hash: str,
         reply_chunks: tuple[str, ...],
         committed_at: datetime,
     ) -> None:
+        if type(batch) is CompletionTurn:
+            return  # Persisted outbox already records this authored operational message.
         self._private_customer_facts.record_dialogue_turn(
             lead_id=batch.lead_id,
             source_turn_id=batch.batch_id,
-            source_event_hash=event_hash,
+            source_event_hash=_event_hash(_source_events(batch)),
             customer_message=batch.combined_text,
             assistant_reply_chunks=reply_chunks,
             committed_at=committed_at,
         )
 
-    def execute(self, batch: InboundBatch) -> V2TurnExecutionResult:
-        if type(batch) is not InboundBatch:
-            raise TypeError("batch must be an exact InboundBatch")
+    def execute(self, batch: InboundBatch | CompletionTurn) -> V2TurnExecutionResult:
+        if type(batch) not in (InboundBatch, CompletionTurn):
+            raise TypeError("batch must be an exact InboundBatch or CompletionTurn")
         sources = _source_events(batch)
         event_hash = _event_hash(sources)
         trace = OpsExecutionTrace(
@@ -1459,12 +1476,12 @@ class V2TurnExecutor:
         )
         replay = self._store.load_turn_receipt(batch.batch_id)
         if replay is not None:
-            if replay.event_hash != event_hash or replay.source_events != sources:
+            if replay.event_hash != _event_hash(replay.source_events) or replay.source_events[:len(sources)] != sources:
                 raise TurnExecutionError("aggregate turn replay identity diverged")
             reply_chunks = _reply_from_receipt(replay)
             self._record_committed_dialogue(
                 batch,
-                event_hash=event_hash,
+                event_hash=replay.event_hash,
                 reply_chunks=reply_chunks,
                 committed_at=replay.committed_at,
             )
@@ -1529,7 +1546,7 @@ class V2TurnExecutor:
                         raise TurnExecutionError("private profile changed before commit")
                 trace.call(
                     NodeType.TURN_COMMIT,
-                    lambda: self._store.commit_turn_v8(
+                    call=lambda prepared=prepared, expected_version=expected_version, fencing_token=fencing_token: self._store.commit_turn_v8(
                         expected_version=expected_version,
                         fencing_token=fencing_token,
                         commit=prepared.commit,
@@ -1539,13 +1556,14 @@ class V2TurnExecutor:
                         internal_jobs=prepared.internal_jobs,
                         public_rows=prepared.public_rows,
                         committed_at=prepared.receipt.committed_at,
+                        superseded_completion_turns=prepared.superseded_completion_turns,
                     ),
                     attempt=1,
                     technical_metadata={"batch_id": batch.batch_id},
                 )
                 self._record_committed_dialogue(
                     batch,
-                    event_hash=event_hash,
+                    event_hash=prepared.receipt.event_hash,
                     reply_chunks=prepared.reply_chunks,
                     committed_at=prepared.receipt.committed_at,
                 )
@@ -1565,8 +1583,8 @@ class V2TurnExecutor:
                 replay = self._store.load_turn_receipt(batch.batch_id)
                 if replay is not None:
                     if (
-                        replay.event_hash != event_hash
-                        or replay.source_events != sources
+                        replay.event_hash != _event_hash(replay.source_events)
+                        or replay.source_events[:len(sources)] != sources
                     ):
                         raise TurnExecutionError(
                             "concurrent aggregate turn identity diverged"
@@ -1574,7 +1592,7 @@ class V2TurnExecutor:
                     reply_chunks = _reply_from_receipt(replay)
                     self._record_committed_dialogue(
                         batch,
-                        event_hash=event_hash,
+                        event_hash=replay.event_hash,
                         reply_chunks=reply_chunks,
                         committed_at=replay.committed_at,
                     )
@@ -1591,7 +1609,7 @@ class V2TurnExecutor:
 
     def _prepare(
         self,
-        batch: InboundBatch,
+        batch: InboundBatch | CompletionTurn,
         *,
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
@@ -1608,6 +1626,19 @@ class V2TurnExecutor:
         except StateNotFound:
             self._store.create_genesis(batch.lead_id, claimed_at=now)
         current, fencing_token = self._store.acquire_fence(batch.lead_id)
+        completion_context = (CompletionContext() if self._completion_projector is None
+                              else self._completion_projector.context(batch.lead_id))
+        if type(batch) is CompletionTurn:
+            pending = {(s.source_event_id, s.source_event_hash) for s in completion_context.sources}
+            if any((s.source_event_id, s.source_event_hash) not in pending for s in sources):
+                raise CompletionSuperseded("completion was consumed by another turn")
+            completion_events = batch.events
+            superseded_turns = ()
+        else:
+            sources = (*sources, *completion_context.sources)
+            event_hash = _event_hash(sources)
+            completion_events = completion_context.events
+            superseded_turns = completion_context.superseded_turns
         execution_context = (
             ExecutionContext(status=active_execution_status(current.state))
             if self._execution_status_resolver is None
@@ -1615,6 +1646,13 @@ class V2TurnExecutor:
         )
         if type(execution_context) is not ExecutionContext:
             raise TypeError("execution resolver must return exact context")
+        boundary_messages = tuple(
+            OperationalMessage(identity, turn_id, turn_id, chunk.ordinal, chunk.text,
+                PublicMessageAuthor(chunk.author),
+                "accepted_by_manychat" if status == "delivered" else status, updated)
+            for identity, turn_id, chunk, status, updated in completion_messages(self._store, batch.lead_id)
+        )
+        execution_context = replace(execution_context, messages=(*execution_context.messages, *boundary_messages))
         execution_status = execution_context.status
         projection = self._store.load_latest_conversation_projection(batch.lead_id)
         if projection is None:
@@ -1681,9 +1719,11 @@ class V2TurnExecutor:
             lead_id=batch.lead_id,
             source_event_id=batch.batch_id,
             message=batch.combined_text,
+            trigger="operation_result" if type(batch) is CompletionTurn else "customer_message",
+            completion_events=completion_events,
             attachments=tuple(
                 ModelAttachment(event.media_type)
-                for event in batch.events
+                for event in (batch.events if type(batch) is InboundBatch else ())
                 if event.media_url is not None
             ),
             locale=projection.locale,
@@ -1754,6 +1794,43 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
+        if type(batch) is CompletionTurn:
+            communication_only = ModelProposal(
+                source_event_id=batch.batch_id, intent="inform",
+                reply_chunks=first_proposal.reply_chunks, facts=(), read_requests=(), effect_proposals=(),
+            )
+            if first_proposal != communication_only:
+                raise ValueError("operation_result is communication-only")
+            completion_frames = _frame_commitments(first_audited)
+            completion_decision = V2ConversationDecision(
+                next_state=replace(current.state, version=current.version + 1,
+                    processed_event_ids=(*current.state.processed_event_ids, batch.batch_id)),
+                projection=projection, commands=(),
+                public_reply=_model_owned_reply("inform", first_proposal),
+            )
+            return self._finalize(
+                batch=batch,
+                sources=sources,
+                event_hash=event_hash,
+                current=current,
+                fencing_token=fencing_token,
+                projection=projection,
+                profile=profile,
+                private_facts=private_facts,
+                private_update_turn=False,
+                pending_action=None,
+                now=now,
+                decision_now=self._clock.now(),
+                decision=completion_decision,
+                proposal=first_proposal,
+                audited=first_audited,
+                frames=completion_frames,
+                final_frame_hash=completion_frames[-1].canonical_hash(),
+                boundary_reads=(),
+                v2_observations=(),
+                previous_receipt_hash=previous_receipt_hash,
+                superseded_turns=superseded_turns,
+            )
         turn_locale = _proposal_locale(first_proposal.facts, projection.locale)
         projection = replace(projection, locale=turn_locale)
         first_proposal = replace(
@@ -1777,7 +1854,7 @@ class V2TurnExecutor:
                 self._private_customer_facts,
                 lead_id=batch.lead_id,
                 source_turn_id=batch.batch_id,
-                source_event_hash=event_hash,
+                source_event_hash=_event_hash(_source_events(batch)),
                 facts=first_private_facts,
                 persisted_at=now,
             )
@@ -1916,7 +1993,7 @@ class V2TurnExecutor:
                     self._private_customer_facts,
                     lead_id=batch.lead_id,
                     source_turn_id=batch.batch_id,
-                    source_event_hash=event_hash,
+                    source_event_hash=_event_hash(_source_events(batch)),
                     facts=review_private_facts,
                     persisted_at=now,
                 )
@@ -2206,7 +2283,7 @@ class V2TurnExecutor:
                     self._private_customer_facts,
                     lead_id=batch.lead_id,
                     source_turn_id=batch.batch_id,
-                    source_event_hash=event_hash,
+                    source_event_hash=_event_hash(_source_events(batch)),
                     facts=second_private_facts,
                     persisted_at=now,
                 )
@@ -2323,7 +2400,7 @@ class V2TurnExecutor:
                             self._private_customer_facts,
                             lead_id=batch.lead_id,
                             source_turn_id=batch.batch_id,
-                            source_event_hash=event_hash,
+                            source_event_hash=_event_hash(_source_events(batch)),
                             facts=selection_review_private_facts,
                             persisted_at=now,
                         )
@@ -2557,6 +2634,54 @@ class V2TurnExecutor:
                 raise TurnExecutionError(
                     "critical expiry correction changed reducer disposition"
                 )
+        return self._finalize(
+            batch=batch,
+            sources=sources,
+            event_hash=event_hash,
+            current=current,
+            fencing_token=fencing_token,
+            projection=projection,
+            profile=profile,
+            private_facts=private_facts,
+            private_update_turn=private_update_turn,
+            pending_action=pending_action,
+            now=now,
+            decision_now=decision_now,
+            decision=decision,
+            proposal=proposal,
+            audited=audited,
+            frames=frames,
+            final_frame_hash=final_frame_hash,
+            boundary_reads=boundary_reads,
+            v2_observations=v2_observations,
+            previous_receipt_hash=previous_receipt_hash,
+            superseded_turns=superseded_turns,
+        )
+
+    def _finalize(
+        self, *,
+        batch: InboundBatch | CompletionTurn,
+        sources: tuple[SourceEventIdentity, ...],
+        event_hash: str,
+        current: VersionedBoundaryState,
+        fencing_token: int,
+        projection: ConversationProjection,
+        profile: PrivateCustomerBinding,
+        private_facts: PrivateCustomerFactSnapshot,
+        private_update_turn: bool,
+        pending_action: PendingCriticalActionContext | None,
+        now: datetime,
+        decision_now: datetime,
+        decision: V2ConversationDecision,
+        proposal: ModelProposal,
+        audited: AuditedModelTurn,
+        frames: tuple[TranscriptCommitment, ...],
+        final_frame_hash: str,
+        boundary_reads: tuple[BoundaryReadObservation, ...],
+        v2_observations: tuple[ReadObservation, ...],
+        previous_receipt_hash: str,
+        superseded_turns: tuple[str, ...],
+    ) -> tuple[_PreparedTurn, int, int]:
         if not any(item.name == "language" for item in decision.projection.facts):
             language_fact = TypedFact(
                 "language",
@@ -2578,7 +2703,7 @@ class V2TurnExecutor:
             self._private_customer_facts.persist_passenger_manifest(
                 lead_id=batch.lead_id,
                 source_turn_id=batch.batch_id,
-                source_event_hash=event_hash,
+                source_event_hash=_event_hash(_source_events(batch)),
                 fact=manifest_fact,
                 persisted_at=decision_now,
             )
@@ -2892,6 +3017,7 @@ class V2TurnExecutor:
                 public_rows=public_rows,
                 reply_chunks=tuple(item.text for item in chunks),
                 private_profile_material_hash=private_profile_material_hash,
+                superseded_completion_turns=superseded_turns,
             ),
             current.version,
             fencing_token,

@@ -28,8 +28,8 @@ from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
-from v2_adapters.manychat_profile import ManyChatProfileAdapter
 from v2_adapters.manychat import ManyChatFlowDeliveryAdapter
+from v2_adapters.manychat_profile import ManyChatProfileAdapter
 from v2_adapters.payment_instructions import FilePaymentInstructionCatalog
 from v2_adapters.pix import PixInstructionAdapter
 from v2_adapters.provider_http import (
@@ -48,9 +48,7 @@ from v2_adapters.stripe import (
     WiseExchangeRateReader,
 )
 from v2_adapters.wise import WiseInstructionAdapter
-from v2_application.inbox_worker import InboxTurnWorker
 from v2_application.active_execution import ReservationExecutionStatusResolver
-from v2_application.lead_identity import DurableLeadResolver
 from v2_application.bokun_audit import (
     BokunAuditProjector,
     BokunAuditStatus,
@@ -64,27 +62,29 @@ from v2_application.cloudbeds_audit import (
     SQLiteCloudbedsAuditStore,
 )
 from v2_application.completion_projector import CompletionProjector
+from v2_application.conversation import V2ConversationReducer
 from v2_application.critical_actions import CriticalActionPolicy
+from v2_application.inbox_worker import InboxTurnWorker
+from v2_application.lead_identity import DurableLeadResolver
 from v2_application.outcome_projector import ReservationOutcomeProjector
 from v2_application.payments import PaymentInitiationWorker, PaymentService
-from v2_application.relay_worker import BoundaryRelayWorker
-from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
 from v2_application.public_delivery import CombinedPublicDeliveryWorker
+from v2_application.reads import PrivateOfferBindingResolver, V2ReadService
 from v2_application.recovery import (
     HandoffCoordinator,
     ManualReviewHandoffProjector,
 )
+from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reservations import V2ReservationExecutionAdapter
-from v2_application.workers import V2ReservationWorker
 from v2_application.turn_executor import V2TurnExecutor
+from v2_application.workers import V2ReservationWorker
+from v2_contracts.critical_actions import CriticalActionKind
+from v2_contracts.payments import BusinessUnit, PaymentMethod
 from v2_contracts.providers import (
     ProviderWriteAuthorization,
     ReadKind,
     ReadRequest,
 )
-from v2_contracts.payments import BusinessUnit, PaymentMethod
-from v2_contracts.critical_actions import CriticalActionKind
-from v2_application.conversation import V2ConversationReducer
 from v2_host.composition import V2Container, V2Role
 from v2_host.manychat_handoff import ManyChatHandoffDeliveryAdapter
 from v2_host.public_authority import (
@@ -97,7 +97,6 @@ from v2_host.worker_main import (
     WorkerHealthResult,
     WorkerQueue,
 )
-
 
 _READ_PROBE_TIME_ZONE = ZoneInfo("America/Bahia")
 _READ_PROBE_LEAD_DAYS = 30
@@ -602,6 +601,7 @@ def _build_inbox_worker(
     container: V2Container,
     settings: V2Settings,
     reads: V2ReadService,
+    completion_projector: CompletionProjector | None = None,
 ) -> InboxTurnWorker:
     if (
         container.boundary is None
@@ -658,6 +658,7 @@ def _build_inbox_worker(
         locale="pt-BR",
         turn_timeout=turn_budget,
         max_commit_attempts=2,
+        completion_projector=completion_projector,
         execution_status_resolver=ReservationExecutionStatusResolver(
             container.execution,
             payment_store=container.payment_initiation,
@@ -671,6 +672,8 @@ def _build_inbox_worker(
         ops_recorder=container.ops_recorder,
         ops_full_content=settings.ops_trace_full_content,
     )
+    if completion_projector is not None:
+        completion_projector.executor = executor
     return InboxTurnWorker(
         inbox=container.inbox,
         executor=executor,
@@ -907,6 +910,23 @@ def build_worker_set(
         if settings.ops_trace_path is not None
         else None
     )
+    completion_enabled = (
+        settings.runtime_mode in {RuntimeMode.SHADOW, RuntimeMode.CONTROLLED_WRITE, RuntimeMode.GENERAL_AVAILABILITY}
+        and (bool(settings.allowed_subscriber_ids) or settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY)
+    )
+    completion_projector = (
+        CompletionProjector(
+            execution=container.execution,
+            payment_store=container.payment_initiation,
+            public_store=container.public_outbox,
+            boundary=container.boundary,
+            lead_resolver=DurableLeadResolver(
+                boundary=container.boundary, execution=container.execution, followup=container.followup,
+            ),
+            include_payment_offers=bool(settings.enabled_payment_methods),
+            inbox=container.inbox,
+        ) if completion_enabled else ClosedCapabilityWorker("completion_projector")
+    )
     inbox_worker: object
     if settings.runtime_mode in {
         RuntimeMode.SHADOW,
@@ -917,6 +937,7 @@ def build_worker_set(
             container=container,
             settings=settings,
             reads=reads,
+            completion_projector=completion_projector if completion_enabled else None,
         )
     else:
         inbox_worker = ClosedCapabilityWorker("inbox_turns")
@@ -946,9 +967,6 @@ def build_worker_set(
         else ClosedCapabilityWorker("reservation_writes")
     )
     payment_enabled = bool(settings.enabled_payment_methods)
-    completion_enabled = bool(settings.allowed_subscriber_ids) or (
-        settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
-    )
     payment_worker: object = (
         _build_payment_worker(
             container=container,
@@ -973,30 +991,6 @@ def build_worker_set(
         )
         if payment_enabled
         else ClosedCapabilityWorker("outcome_projector")
-    )
-    completion_projector: object = (
-        CompletionProjector(
-            execution=container.execution,
-            payment_store=container.payment_initiation,
-            public_store=container.public_outbox,
-            account_profiles=(
-                {
-                    BusinessUnit.HOSTEL: settings.stripe_account_profiles["hostel"],
-                    BusinessUnit.AGENCY: settings.stripe_account_profiles["agency"],
-                }
-                if payment_enabled
-                else None
-            ),
-            subscriber_id=(
-                settings.allowed_subscriber_ids[0]
-                if settings.runtime_mode is RuntimeMode.CONTROLLED_WRITE
-                else ""
-            ),
-            lead_resolver=lead_resolver,
-            include_payment_offers=payment_enabled,
-        )
-        if completion_enabled
-        else ClosedCapabilityWorker("completion_projector")
     )
     public_delivery: object
     if settings.manychat_delivery_enabled:

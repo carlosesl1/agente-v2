@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from v2_adapters.execution_context import component_wire
-
 import hashlib
 import json
 import os
 import subprocess
-
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
 
+from v2_adapters.execution_context import component_wire
 from v2_contracts.critical_actions import ApprovalBasis, CriticalActionKind
 from v2_contracts.model import (
     AuditedModelTurn,
@@ -27,8 +25,8 @@ from v2_contracts.model import (
     proposal_requires_progress_review,
 )
 from v2_contracts.model_wire import V8_RESPONSE_FIELDS
-from v2_contracts.providers import ReadKind, ReadRequest
 from v2_contracts.passengers import PassengerInput
+from v2_contracts.providers import ReadKind, ReadRequest
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
 _CHILD_ENV_ALLOWLIST: Final = frozenset(
@@ -433,6 +431,12 @@ def _request_wire(
         "lead_id": request.lead_id,
         "source_event_id": request.source_event_id,
         "message": request.message,
+        "trigger": request.trigger,
+        "completion_events": [
+            {"event_id": e.event_id, "kind": e.kind, "command_ids": list(e.command_ids),
+             "payment_id": e.payment_id, "occurred_at": e.occurred_at.isoformat()}
+            for e in request.completion_events
+        ],
         "attachments": [
             {"media_type": item.media_type, "content_status": item.content_status.value}
             for item in request.attachments

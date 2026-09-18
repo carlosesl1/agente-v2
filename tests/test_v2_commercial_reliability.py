@@ -1,20 +1,27 @@
+import json
 from datetime import date, timedelta
 from decimal import Decimal
-import json
 
 import httpx
 import pytest
 
 from reservation_domain import ExecutionCertainty
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
-from tests.test_v2_outcome_projector import NOW, _stores, _package_command, _finish_next
 from tests.test_v2_inbox_relay_workers import OneRelaySource, _source_receipt
+from tests.test_v2_outcome_projector import NOW, _finish_next, _package_command, _stores
+from tests.v2_completion_helpers import make_completion
 from v2_adapters.provider_http import (
-    CloudbedsHTTPTransport, ProviderHTTPError, _validate_cloudbeds_rate_revalidation,
+    CloudbedsHTTPTransport,
+    ProviderHTTPError,
+    _validate_cloudbeds_rate_revalidation,
 )
 from v2_application.completion import PublicOutboxStore
-from v2_application.completion_projector import CompletionProjector
-from v2_application.relay_worker import BoundaryRelayWorker, CommandRelayClaim, build_reservation_relay_bundle, reservation_target_operation_id
+from v2_application.relay_worker import (
+    BoundaryRelayWorker,
+    CommandRelayClaim,
+    build_reservation_relay_bundle,
+    reservation_target_operation_id,
+)
 from v2_application.reservations import ReservationAllocator
 
 
@@ -45,7 +52,7 @@ def _relay(execution, commands):
 def test_package_relay_registers_complete_group_before_projection_and_restart(tmp_path, success):
     execution, payments, projector = _stores(tmp_path)
     public = PublicOutboxStore(tmp_path / 'public.sqlite3')
-    completion = CompletionProjector(execution=execution, payment_store=None, public_store=public, account_profiles=None, subscriber_id='123456789', include_payment_offers=False)
+    completion = make_completion(tmp_path, execution, None, public, include_payment_offers=False)
     commands = ReservationAllocator().allocate(_package_command()).commands
     try:
         _relay(execution, commands).run_once(now=NOW)
@@ -55,16 +62,14 @@ def test_package_relay_registers_complete_group_before_projection_and_restart(tm
         execution.close()
         execution = SQLiteUnitOfWork.open_v6(tmp_path / 'execution.sqlite3')
         projector._execution = completion._execution = execution
+        completion.executor._execution_status_resolver._execution = execution
         _finish_next(execution, now=NOW + timedelta(seconds=3), certainty=ExecutionCertainty.EFFECT_CONFIRMED if success else ExecutionCertainty.CALLED_NO_EFFECT)
         assert projector.run_once(now=NOW + timedelta(seconds=4)).inserted == (2 if success else 0)
         assert completion.run_once(now=NOW + timedelta(seconds=4)).inserted == 1
         if not success:
-            text = public._connection.execute(
-                'SELECT text FROM public_outbox'
-            ).fetchone()[0]
-            assert 'foi confirmad' in text
-            assert 'não foi possível concluir' in text
-            assert 'Nenhum pagamento foi criado' in text
+            components = completion.executor._model.calls[-1].execution_components
+            assert {c.outcome.certainty for c in components} == {"effect_confirmed", "called_no_effect"}
+            assert all(c.payment_initiation_status == "unavailable" for c in components)
         _relay(execution, commands).run_once(now=NOW + timedelta(seconds=5))
         assert projector.run_once(now=NOW + timedelta(seconds=6)).inserted == 0
         assert completion.run_once(now=NOW + timedelta(seconds=6)).inserted == 0
@@ -72,6 +77,7 @@ def test_package_relay_registers_complete_group_before_projection_and_restart(tm
         ids = [json.loads(row[0])['obligation']['payment_id'] for row in rows]
         assert len(ids) == len(set(ids)) == (2 if success else 0)
     finally:
+        completion._boundary.close()
         execution.close()
         payments.close()
         public.close()
@@ -220,14 +226,15 @@ def _read(row):
 
 
 def test_real_boundary_membership_uses_authenticated_receipt_and_rejects_missing_row():
-    from tests.test_phase8_boundary_atomic_commit import Phase8BoundaryAtomicCommitTests
     from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
+    from tests.test_phase8_boundary_atomic_commit import Phase8BoundaryAtomicCommitTests
     from v2_application.relay_worker import _complete_relay_group
 
     fixture = Phase8BoundaryAtomicCommitTests()
     fixture.setUp()
     try:
         from dataclasses import replace
+
         from reservation_boundary.sqlite_store import CommandRelayWrite
         current, token, commit, receipt, artifacts, _, internal, public = fixture._case()
         bundle = build_reservation_relay_bundle(commit.commands[0])

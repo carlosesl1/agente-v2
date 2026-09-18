@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+import v2_host.production as production
 from reservation_domain import (
     ExecutionCertainty,
     ReservationOperation,
@@ -16,30 +17,29 @@ from reservation_domain import (
     dumps_command,
 )
 from reservation_execution import DispatchRequest
-from v2_application.critical_actions import CriticalActionDisposition
+from reservation_followup.workers import HandoffOutboxWorker
+from tests.phase5_helpers import T0, persist_script, workflow_events
 from v2_application.cloudbeds_audit import SQLiteCloudbedsAuditStore
+from v2_application.completion_projector import CompletionProjector
+from v2_application.critical_actions import CriticalActionDisposition
+from v2_application.outcome_projector import ReservationOutcomeProjector
+from v2_application.payments import PaymentInitiationWorker
+from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
+from v2_application.public_delivery import CombinedPublicDeliveryWorker
+from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
+from v2_application.workers import V2ReservationWorker
 from v2_contracts.critical_actions import CriticalActionKind
 from v2_contracts.providers import ReadKind
-from reservation_followup.workers import HandoffOutboxWorker
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import (
-    _critical_action_policy,
     ClosedCapabilityWorker,
     ReconciliationStage,
+    _critical_action_policy,
     build_read_service,
     build_worker_set,
 )
 from v2_host.settings import RuntimeMode, V2Settings
 from v2_host.worker_main import WorkerFailureReason, WorkerQueue, _load_worker_factory
-from v2_application.payments import PaymentInitiationWorker
-from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
-from v2_application.outcome_projector import ReservationOutcomeProjector
-from v2_application.completion_projector import CompletionProjector
-from v2_application.public_delivery import CombinedPublicDeliveryWorker
-from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
-from v2_application.workers import V2ReservationWorker
-import v2_host.production as production
-from tests.phase5_helpers import T0, persist_script, workflow_events
 
 REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 
@@ -641,7 +641,8 @@ def test_general_availability_builds_full_multi_lead_worker_graph(
         assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
         assert type(workers[WorkerQueue.PUBLIC_DELIVERY]) is CombinedPublicDeliveryWorker
         assert type(workers[WorkerQueue.HANDOFF]) is HandoffOutboxWorker
-        assert workers[WorkerQueue.POST_PAYMENT]._lead_id is None
+        assert workers[WorkerQueue.POST_PAYMENT].executor is workers[WorkerQueue.INBOX]._executor
+        assert workers[WorkerQueue.INBOX]._executor._completion_projector is workers[WorkerQueue.POST_PAYMENT]
         assert workers[WorkerQueue.POST_PAYMENT]._lead_resolver is not None
         delivery = workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
         assert delivery._allowed_subscriber_id is None
@@ -1298,12 +1299,34 @@ def test_reconciliation_rejects_hardlinked_audit_store_before_schema_write(
 
 
 def test_confirmed_lodging_recovery_projects_completion_after_write_gate_closes(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     armed = _audit_enabled_settings(tmp_path)
     first_container = V2Container.open(settings=armed, role=V2Role.WORKER)
     try:
-        _seed_confirmed_cloudbeds_outcome(first_container, suffix="post-crash")
+        from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
+        from tests import test_v2_turn_executor as turn_fixtures
+        from tests.test_v2_outcome_projector import _finish_next
+        event = replace(turn_fixtures.EVENT, lead_id="manychat:1873018537", subscriber_id="1873018537")
+        batch = replace(turn_fixtures.BATCH, lead_id=event.lead_id,
+                        subscriber_id=event.subscriber_id, events=(event,))
+        with monkeypatch.context() as fixture_patch:
+            fixture_patch.setattr(turn_fixtures, "EVENT", event)
+            fixture_patch.setattr(turn_fixtures, "BATCH", batch)
+            fixture_patch.setattr(turn_fixtures, "AUTHORITY", replace(turn_fixtures.AUTHORITY,
+                scope_subject_id=event.subscriber_id))
+            fixture_patch.setattr(turn_fixtures.SQLiteBoundaryStore, "open_memory_v8", lambda: first_container.boundary)
+            _, _, _, confirmation, executor = turn_fixtures._approval_expiry_fixture(
+                approval_ttl=timedelta(minutes=30), confirmation_clock=turn_fixtures.SequenceClock())
+            confirmed_turn = executor.execute(confirmation)
+            assert confirmed_turn.receipt.command_rows, confirmed_turn.reply_chunks
+        relay = BoundaryRelayWorker(boundary=SQLiteBoundaryWorkerStore(first_container.boundary),
+            reservation_target=first_container.execution, handoff_target=first_container.followup,
+            worker_id="worker:completion-recovery", lease_ttl=timedelta(seconds=30)
+        ).run_once(now=turn_fixtures.NOW + timedelta(minutes=1))
+        assert relay.disposition.value == "relayed", relay
+        _finish_next(first_container.execution, now=turn_fixtures.NOW + timedelta(minutes=1, seconds=1),
+                     certainty=ExecutionCertainty.EFFECT_CONFIRMED)
     finally:
         first_container.close()
 
@@ -1319,6 +1342,13 @@ def test_confirmed_lodging_recovery_projects_completion_after_write_gate_closes(
         completion = workers[WorkerQueue.POST_PAYMENT]
 
         assert type(completion) is CompletionProjector
+        from tests.v2_completion_helpers import CompletionMaya
+        from v2_host.public_authority import GeneralAvailabilityPublicAuthorityResolver
+        completion.executor._model = CompletionMaya(recovered.boundary)
+        completion.executor._profile = turn_fixtures.FakeProfile(recovered.boundary)
+        completion.executor._clock = turn_fixtures.ScriptedClock((turn_fixtures.NOW + timedelta(minutes=2),))
+        completion.executor._public_authority = GeneralAvailabilityPublicAuthorityResolver(
+            store=recovered.boundary, hmac_key=b"g" * 32)
         first = completion.run_once(now=T0 + timedelta(minutes=4))
         replay = completion.run_once(now=T0 + timedelta(minutes=5))
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from v2_contracts.execution_context import ExecutionComponentContext, OperationalMessage
-
 import hashlib
 import hmac
 import json
@@ -14,13 +12,15 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import ClassVar, Final
 
+from v2_contracts.completion import CompletionEvent
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
     PendingCriticalActionContext,
 )
-from v2_contracts.providers import ReadObservation, ReadRequest
+from v2_contracts.execution_context import ExecutionComponentContext, OperationalMessage
 from v2_contracts.passengers import PassengerInput
+from v2_contracts.providers import ReadObservation, ReadRequest
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -344,6 +344,8 @@ class ModelRequest:
     active_execution_status: str | None = None
     execution_components: tuple[ExecutionComponentContext, ...] = ()
     operational_messages: tuple[OperationalMessage, ...] = ()
+    trigger: str = "customer_message"
+    completion_events: tuple[CompletionEvent, ...] = ()
     recap_reuse_required: bool = False
     public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
     attachments: tuple[ModelAttachment, ...] = ()
@@ -360,7 +362,16 @@ class ModelRequest:
             type(item) is not ModelAttachment for item in self.attachments
         ):
             raise InvalidModelProposal("attachments must contain exact ModelAttachment values")
-        if self.message != "" or not self.attachments:
+        if self.trigger not in {"customer_message", "operation_result"}:
+            raise InvalidModelProposal("invalid turn trigger")
+        if type(self.completion_events) is not tuple or any(
+            type(e) is not CompletionEvent or e.lead_id != self.lead_id for e in self.completion_events
+        ):
+            raise InvalidModelProposal("completion events must belong to the request lead")
+        if self.trigger == "operation_result":
+            if self.message != "" or self.attachments or not self.completion_events:
+                raise InvalidModelProposal("operation_result requires events, not customer text")
+        elif self.message != "" or not self.attachments:
             _text(self.message, "message")
         _text(self.locale, "locale")
         if type(self.state_version) is not int or self.state_version < 0:

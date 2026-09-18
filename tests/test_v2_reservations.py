@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import date, timedelta
 import hashlib
 import json
+from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
+from reservation_boundary.sqlite_store import _reservation_command_binds_workflow
 from reservation_domain import (
     CommandPayload,
     CustomerFacts,
@@ -17,8 +18,8 @@ from reservation_domain import (
     FailedNoEffectState,
     ManualReviewState,
     Money,
-    PassengerFacts,
     Party,
+    PassengerFacts,
     ReservationCommand,
     ReservationOperation,
     ServiceKind,
@@ -27,7 +28,6 @@ from reservation_domain import (
     loads_state,
     split_package_command,
 )
-from reservation_boundary.sqlite_store import _reservation_command_binds_workflow
 from reservation_domain.signature import command_identity, subject_signature
 from reservation_execution import DispatchPermit, Lease, PreparationFailure
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
@@ -36,30 +36,27 @@ from v2_adapters._provider_common import ProviderReadError
 from v2_adapters.bokun import BokunReservationPort
 from v2_adapters.cloudbeds import CloudbedsReservationPort
 from v2_application.completion import PublicOutboxStore
-from v2_application.completion_projector import CompletionProjector
 from v2_application.payments import SQLitePaymentInitiationStore
 from v2_application.reads import PrivateOfferBindingResolver
+from v2_application.relay_worker import (
+    build_reservation_relay_bundle,
+    reservation_target_operation_id,
+)
 from v2_application.reservations import (
     DispatchRejected,
     ReservationAllocator,
     V2ReservationExecutionAdapter,
     _provider_payload,
 )
-from v2_application.relay_worker import (
-    build_reservation_relay_bundle,
-    reservation_target_operation_id,
-)
 from v2_application.turn_executor import _execution_commands
 from v2_application.workers import V2ReservationWorker, V2WorkerDisposition
 from v2_contracts.private_offers import PrivateOfferBinding
-from v2_contracts.payments import BusinessUnit
 from v2_contracts.providers import (
     ProviderCertainty,
     ProviderDispatchPermit,
     ProviderExecutionResult,
     ProviderWriteAuthorization,
 )
-
 
 NOW = T0 + timedelta(minutes=1)
 
@@ -514,23 +511,19 @@ def test_cloudbeds_confirmation_is_durable_and_group_replay_is_idle(
             (command.command_id,),
         ).fetchone() == (1, "outcome_recorded")
 
-        completion = CompletionProjector(
-            execution=store,
-            payment_store=payments,
-            public_store=public,
-            subscriber_id="1000000001",
-            account_profiles={
-                BusinessUnit.HOSTEL: "stripe-account:hostel:test",
-                BusinessUnit.AGENCY: "stripe-account:agency:test",
-            },
-        ).run_once(now=NOW + timedelta(seconds=3))
-        assert completion.inserted == 1
-        public_text = public._connection.execute(
-            "SELECT text FROM public_outbox"
-        ).fetchone()[0]
-        assert public_text == "Sua hospedagem foi confirmada."
-        assert raw_reference not in public_text
-        assert outcome.provider_reference not in public_text
+        from tests.v2_completion_helpers import (
+            CompletionMaya,
+            authored_chunks,
+            make_completion,
+        )
+        completion = make_completion(tmp_path, store, payments, public, lead_id="manychat:1000000001")
+        try:
+            assert completion.run_once(now=NOW + timedelta(seconds=3)).inserted == 1
+            assert authored_chunks(completion)[0].text == CompletionMaya.text
+            assert completion.executor._model.calls[0].execution_components[0].outcome.provider_reference == outcome.provider_reference
+            assert public.pending_count() == 0
+        finally:
+            completion._boundary.close()
     finally:
         public.close()
         payments.close()

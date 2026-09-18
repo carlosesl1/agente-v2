@@ -2197,6 +2197,7 @@ class SQLiteBoundaryStore:
         public_rows: tuple[PublicOutboxWrite, ...],
         committed_at: datetime,
         fault_hook: Callable[[str], None] | None = None,
+        superseded_completion_turns: tuple[str, ...] = (),
     ) -> TurnReceipt:
         """Persist one complete v8 turn and every owned effect row atomically."""
         self._ensure_open()
@@ -2219,6 +2220,10 @@ class SQLiteBoundaryStore:
                 raise TypeError(f"{name} must be an exact tuple of exact {member_type.__name__}")
         if fault_hook is not None and not callable(fault_hook):
             raise TypeError("fault_hook must be callable or None")
+        if type(superseded_completion_turns) is not tuple or any(
+            type(item) is not str for item in superseded_completion_turns
+        ) or len(set(superseded_completion_turns)) != len(superseded_completion_turns):
+            raise ValueError("superseded completion turns must be unique exact IDs")
         if commit.facts:
             raise ValueError("facts must be reduced into state before v8 persistence")
         if commit.outbox:
@@ -2497,6 +2502,15 @@ class SQLiteBoundaryStore:
                     raise StateNotFound(lead_key)
                 if state_row != (expected, token):
                     raise ConcurrencyConflict("state version or fencing token is stale")
+                if superseded_completion_turns:
+                    from reservation_boundary.completion import (
+                        cancel_unattempted_completions,
+                    )
+                    cancel_unattempted_completions(
+                        self, lead_id=lead_key, turn_ids=superseded_completion_turns,
+                        receipt=receipt, now=committed_at,
+                    )
+                    fault("after_completion_consolidation")
                 if execute(
                     "state_update",
                     "UPDATE boundary_state SET version=?,state_json=?,state_hash=?,updated_at=? "

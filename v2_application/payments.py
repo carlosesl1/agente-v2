@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
-from enum import Enum
 import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import sqlite3
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
+from enum import Enum
+from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -18,6 +18,8 @@ from reservation_followup import PaymentEvidenceRecorded
 from reservation_followup.payment import PixVisualEvidence
 from reservation_followup.sqlite_store import (
     IdentityConflict as FollowupIdentityConflict,
+)
+from reservation_followup.sqlite_store import (
     SQLiteFollowupUnitOfWork,
 )
 from v2_contracts.localization import CustomerLanguage
@@ -1050,6 +1052,15 @@ class SQLitePaymentInitiationStore:
         except Exception as exc:
             raise RuntimeError("completed payment ciphertext is invalid") from exc
         return _offer_from_bytes(raw)
+
+    def completed_offer_events(self) -> tuple:
+        """Stable result identities/times from the authenticated payment owner."""
+        rows = self._connection.execute(
+            "SELECT initiation_id,result_json,result_hash,updated_at FROM payment_initiations "
+            "WHERE status='completed' ORDER BY initiation_id"
+        ).fetchall()
+        return tuple((self._completed_offer(identity, raw, digest), digest,
+                      datetime.fromisoformat(updated)) for identity, raw, digest, updated in rows)
 
     def completed_offers(self) -> tuple[PaymentMethodOffer, ...]:
         rows = self._connection.execute(

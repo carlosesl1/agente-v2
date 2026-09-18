@@ -266,6 +266,13 @@ class SQLiteInbox:
         finally:
             connection.close()
 
+    def has_waiting_lead(self, lead_id: str) -> bool:
+        with self._connect() as connection:
+            return connection.execute(
+                "SELECT 1 FROM inbound_events WHERE lead_id=? AND status IN ('pending','claimed') LIMIT 1",
+                (lead_id,),
+            ).fetchone() is not None
+
     def pending_count(self) -> int:
         with self._connect() as connection:
             row = connection.execute(

@@ -1,15 +1,17 @@
-# Active implementation — V2 atendimento simples, incremento 3A
+# Active implementation — V2 atendimento simples, incremento 3B
 
 - Authorized by Carlos on 2026-09-18 in the current chat: incremental simplification with complete lead context, per-component outcomes and removal of redundant conversational protocols. Production and real operations are explicitly outside this authorization.
 - Branch: `refactor/v2-atendimento-simples-727d3625`; required worktree: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
 - Verified isolated-test source base: `8980646d5615db9ecb32c97f4579ba09080dc02a`. GA remains independently declared by the verified live authority; this document is not runtime authority.
 - Design: `docs/superpowers/specs/2026-09-18-v2-atendimento-simples-design.md`.
 - Carlos approved the written specification with “Siga” in the current chat; Graphify is authorized as navigation aid.
-- Active plan: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-03-resultados.md` (inline, sem subagentes). Carlos autorizou avanço com “Siga” após incremento 2. 3A entrega contexto de resultados/comunicação; 3B entrega autoria assíncrona Maya com recuperação deduplicada.
+- Active plan: `docs/superpowers/plans/2026-09-18-v2-atendimento-simples-03b-autoria.md` (inline, sem subagentes). Carlos autorizou 3B com “Siga” após entrega local do 3A. 3B implementado e validado localmente; evidência `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-03b.md`.
 - Ownership: Maya interprets and authors; tools return facts; controller validates effects. Lead-provided values are reusable in the conversation without PII masking/presence-only substitution.
 - Local increment 3A complete: component outcomes, initiation/settlement records and authenticated asynchronous outbox history reach Maya; factual collection and independent reads preserve the immutable commanded workflow. No deploy, real provider/channel call, active-state edit, V3, legacy or Ops change.
 - Increment 3A evidence: `docs/refactor/evidence/2026-09-18-v2-atendimento-simples-03a.md`; focal **271 passed**; whole diagnostic **2234 passed, 7 failed, 2958 subtests passed**, same historical IDs. Eighteen new tests fail causally on the previous source. Phase 6 package manifest/checksums regenerated and verified, not ignored.
-- Next local slice: **3B**, agent-authored async continuation and communication-only recovery/deduplication. Reading existing outbox prose into context is not implementation of 3B. Redundant review-protocol removal remains increment 4. No runtime rollout authorization.
+- Local increment **3B**: explicit internal completion events call the same Maya; receipt/source identities atomically bind authored replies; customer turns consolidate only before dispatch. No schema/database/new queue; historical messages preserved; recovery cannot repeat reservation/payment effects.
+- Increment 3B evidence: **380 focal passed**; whole **2261 passed, 7 historical failed, 2958 subtests passed**, no new failure IDs. Twenty-two causal scenarios fail on the preceding source and pass here. Model/transports simulated; runtime authority OK. No real-model E2E, publication or deploy.
+- Next local slice: **4**, removal of redundant review/correction protocols in customer turns. 3B does not claim this removal, natural-conversation qualification or rollout approval. GA remains NO-GO pending separate reconciliation/authorization.
 - Clean baseline: Bókun transport and active-execution suites passed `60 passed in 1.33s` in a clean environment. These are baseline contract tests, not proof of corrected Bókun or E2E conversation.
 - Runner note: the first dependency command was blocked by the tool's long-lived-process detector; the subsequent minimal runner executed successfully. No product failure was hidden.
 - Required pre-commit boundary command: `python3 scripts/check_fasttrack_boundaries.py`; documentation diff must pass `git diff --check`.

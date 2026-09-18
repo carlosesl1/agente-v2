@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
 import hashlib
 import hmac
 import json
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from v2_application.turn_executor import PublicTurnAuthority
 from v2_contracts.channel import InboundBatch
+from v2_contracts.completion import CompletionTurn
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -241,7 +242,7 @@ class ManifestPublicAuthorityResolver:
         chunk_count: int,
         now: datetime,
     ) -> PublicTurnAuthority:
-        if type(batch) is not InboundBatch:
+        if type(batch) not in (InboundBatch, CompletionTurn):
             raise TypeError("authority resolver requires exact InboundBatch")
         if type(chunk_count) is not int or chunk_count < 1 or chunk_count > 32:
             raise ValueError("public chunk count is outside the finite authority range")
@@ -347,7 +348,7 @@ class GeneralAvailabilityPublicAuthorityResolver:
         chunk_count: int,
         now: datetime,
     ) -> PublicTurnAuthority:
-        if type(batch) is not InboundBatch:
+        if type(batch) not in (InboundBatch, CompletionTurn):
             raise TypeError("authority resolver requires exact InboundBatch")
         if type(chunk_count) is not int or not 1 <= chunk_count <= 32:
             raise ValueError("public chunk count is outside the finite authority range")

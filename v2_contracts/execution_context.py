@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+
 from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.payments import (
     PaymentInstruction,
@@ -158,6 +159,8 @@ class OperationalMessage:
             "leased",
             "manual_review",
             "accepted_by_manychat",
+            "dispatch_fenced",
+            "cancelled",
         }:
             raise ValueError("invalid communication status")
 

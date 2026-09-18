@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 import hashlib
 import hmac
 import json
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -48,7 +48,6 @@ from v2_contracts.providers import ProviderWriteAuthorization
 from v2_host.composition import V2Container, V2Role
 from v2_host.production import ClosedCapabilityWorker, build_worker_set
 from v2_host.worker_main import WorkerQueue
-
 
 NOW = datetime(2026, 11, 1, 13, 0, tzinfo=timezone.utc)
 RESERVATION_ID = "reservation-monotonic-e2e-001"
@@ -273,14 +272,12 @@ def test_monotonic_cloudbeds_survives_crash_completes_and_replays_once(
         result_encryption_key=PAYMENT_RESULT_KEY,
     )
     public = PublicOutboxStore((tmp_path / "public.sqlite3").resolve())
-    completion = CompletionProjector(
-        execution=execution,
-        payment_store=payments,
-        public_store=public,
-        subscriber_id="1873018537",
-        account_profiles=None,
-        include_payment_offers=False,
+    from tests.v2_completion_helpers import (
+        CompletionMaya,
+        authored_chunks,
+        make_completion,
     )
+    completion = make_completion(tmp_path, execution, payments, public, include_payment_offers=False)
     first_completion = completion.run_once(now=NOW + timedelta(seconds=2))
     assert first_completion.inserted == 1
 
@@ -368,11 +365,10 @@ def test_monotonic_cloudbeds_survives_crash_completes_and_replays_once(
     assert payments._connection.execute(
         "SELECT count(*) FROM payment_initiations"
     ).fetchone() == (0,)
-    public_rows = public._connection.execute(
-        "SELECT text FROM public_outbox ORDER BY release_id,chunk_index"
-    ).fetchall()
-    assert public_rows == [("Sua hospedagem foi confirmada.",)]
-    assert RESERVATION_ID not in public_rows[0][0]
+    assert tuple(c.text for c in authored_chunks(completion)) == (CompletionMaya.text,)
+    assert completion.executor._model.calls[0].execution_components[0].outcome.provider_reference
+    assert public.pending_count() == 0
+    completion._boundary.close()
     assert not (tmp_path / "followup.sqlite3").exists()
     assert {request.url.path for request in post_requests} == {
         "/api/v1.1/postReservation"
