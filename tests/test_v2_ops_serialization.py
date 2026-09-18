@@ -37,7 +37,6 @@ from v2_contracts.providers import (
 from v2_ops.contracts import canonical_json_bytes, validate_closed_json
 from v2_ops.serialization import serialize_ops_value
 
-
 NOW = datetime(2026, 8, 13, 18, 0, 0, tzinfo=timezone.utc)
 H = "a" * 64
 PRIVATE_SENTINELS = (
@@ -256,12 +255,7 @@ EXPECTED_KEYS = (
             "private_fact_names",
             "private_profile_complete",
             "handoff_status",
-            "confirmation_review_required",
-            "selection_review_required",
-            "progress_review_required",
             "active_execution_status",
-            "recap_reuse_required",
-            "correction_reason_count",
         }
     ),
     frozenset(

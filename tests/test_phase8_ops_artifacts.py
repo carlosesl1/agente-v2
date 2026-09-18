@@ -5,7 +5,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.v2.yaml"
 PROMPT = ROOT / "config/v2_terra_system_prompt.txt"
@@ -156,7 +155,6 @@ def test_versioned_terra_prompt_closes_model_grammar_and_business_effects() -> N
         "pending_action_disposition",
         "pending_action",
         "passengers",
-        "progress_review_required",
         "product:buracao",
         "Nunca exponha choice_ref",
         "Não invente valor",
@@ -165,6 +163,11 @@ def test_versioned_terra_prompt_closes_model_grammar_and_business_effects() -> N
     ):
         assert literal in prompt
     for legacy_output_field in (
+        "progress_review_required",
+        "confirmation_review_required",
+        "selection_review_required",
+        "recap_reuse_required",
+        "public_reply_correction_reasons",
         "v2-model-proposal-v7",
         "v2-model-proposal-v6",
         "v2-model-proposal-v5",

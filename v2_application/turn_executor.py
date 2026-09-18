@@ -68,7 +68,6 @@ from v2_application.active_execution import (
     ExecutionStatusResolver,
     active_execution_status,
     blocks_active_commercial_progression,
-    is_regressive_post_command_reply,
 )
 from v2_application.completion_projector import (
     CompletionContext,
@@ -102,7 +101,6 @@ from v2_application.private_customer_facts import (
     canonical_full_name,
     canonical_gender,
 )
-from v2_application.public_reply import apply_positive_grounding
 from v2_application.read_bridge import bridge_availability_observation
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import (
@@ -112,8 +110,7 @@ from v2_application.relay_worker import (
 from v2_application.reservations import ReservationAllocator
 from v2_application.turn_plan import (
     derive_adjustment_reads,
-    normalize_initial_commercial_plan,
-    preserve_initial_adjustment,
+    derive_selection_reads,
     preserve_initial_facts,
 )
 from v2_application.turns import validate_productive_proposal
@@ -126,12 +123,10 @@ from v2_contracts.model import (
     PRIVATE_CUSTOMER_FACT_ORDER,
     AuditedModelTurn,
     ConsultationHistoryEntry,
-    InvalidModelProposal,
     ModelAttachment,
     ModelFact,
     ModelProposal,
     ModelRequest,
-    PublicReplyCorrectionReason,
 )
 from v2_contracts.passengers import PassengerManifestStatus
 from v2_contracts.ports import AuditedModelPort
@@ -250,13 +245,6 @@ class _PreparedTurn:
     superseded_completion_turns: tuple[str, ...] = ()
 
 
-@dataclass(slots=True)
-class _PublicReplyCorrectionBudget:
-    consumed: bool = False
-
-
-
-
 def _canonical(schema: str, data: object) -> bytes:
     return json.dumps(
         {"schema": schema, "version": 1, "data": data},
@@ -274,203 +262,6 @@ def _domain_hash(domain: str, payload: bytes) -> str:
 def _opaque(prefix: str, *parts: object) -> str:
     payload = "\x00".join(str(item) for item in parts).encode("utf-8")
     return f"{prefix}:" + hashlib.sha256(payload).hexdigest()[:32]
-
-
-def _structured_selection_review_required(
-    state_facts: tuple[ModelFact, ...],
-    current_facts: tuple[ModelFact, ...],
-    *,
-    private_profile_complete: bool,
-    passenger_manifest_complete: bool = False,
-) -> bool:
-    """Gate one semantic selection review from closed structured facts only."""
-
-    if (
-        type(state_facts) is not tuple
-        or any(type(item) is not ModelFact for item in state_facts)
-        or type(current_facts) is not tuple
-        or any(type(item) is not ModelFact for item in current_facts)
-        or type(private_profile_complete) is not bool
-        or type(passenger_manifest_complete) is not bool
-    ):
-        raise TypeError("selection review gate requires exact V2 contracts")
-    if not private_profile_complete:
-        return False
-    values: dict[str, str | int | date] = {}
-    for fact in (*state_facts, *current_facts):
-        current = values.get(fact.name)
-        if current is not None and current != fact.value:
-            return False
-        values[fact.name] = fact.value
-    adults = values.get("adults")
-    children = values.get("children", 0)
-    if type(adults) is not int or type(children) is not int:
-        return False
-    commercially_complete = (
-        type(values.get("product_id")) is str
-        and adults >= 1
-        and children >= 0
-        and values.get("payment_method") in {"stripe", "wise", "pix"}
-    )
-    if not commercially_complete:
-        return False
-    if values.get("service") == "agency":
-        return type(values.get("activity_date") or values.get("start_date")) is date
-    if values.get("service") == "package":
-        start_date = values.get("start_date")
-        end_date = values.get("end_date")
-        return (
-            type(start_date) is date
-            and type(end_date) is date
-            and end_date > start_date
-            and type(values.get("activity_date")) is date
-        )
-    return False
-
-
-def _post_read_package_selection_review_required(
-    proposal: ModelProposal,
-    observations: tuple[ReadObservation, ...],
-) -> bool:
-    if type(proposal) is not ModelProposal:
-        raise TypeError("package selection review proposal must be exact")
-    if type(observations) is not tuple or any(
-        type(item) is not ReadObservation for item in observations
-    ):
-        raise TypeError("package selection review observations must be exact")
-    if (
-        proposal.intent != "inform"
-        or proposal.read_requests
-        or proposal.target_offer_id is not None
-        or proposal.target_offer_ids
-        or proposal.selection_requested
-    ):
-        return False
-    values = {item.name: item.value for item in proposal.facts}
-    if values.get("service") != "package":
-        return False
-    providers = {
-        item.provider
-        for item in observations
-        if item.public_payload.get("available") is not False
-    }
-    return {"cloudbeds", "bokun"}.issubset(providers)
-
-
-def _repair_requested_activity_selection(
-    first_proposal: ModelProposal,
-    second_proposal: ModelProposal,
-    *,
-    state_facts: tuple[ModelFact, ...],
-    observations: tuple[ReadObservation, ...],
-    private_profile_complete: bool,
-    passenger_manifest_complete: bool = False,
-) -> ModelProposal:
-    """Complete an explicitly signalled selection from exact structured evidence."""
-
-    if (
-        type(first_proposal) is not ModelProposal
-        or type(second_proposal) is not ModelProposal
-        or type(state_facts) is not tuple
-        or any(type(item) is not ModelFact for item in state_facts)
-        or type(observations) is not tuple
-        or any(type(item) is not ReadObservation for item in observations)
-        or type(private_profile_complete) is not bool
-        or type(passenger_manifest_complete) is not bool
-    ):
-        raise TypeError("selection repair requires exact V2 contracts")
-    if (
-        not first_proposal.selection_requested
-        or not private_profile_complete
-        or second_proposal.intent not in ("inform", "select")
-        or second_proposal.read_requests
-        or len(first_proposal.read_requests) != 1
-        or len(observations) != 1
-    ):
-        return second_proposal
-    request = first_proposal.read_requests[0]
-    observation = observations[0]
-    if request.kind is not ReadKind.ACTIVITY:
-        return second_proposal
-    request_adults, request_children = request.activity_party()
-
-    values: dict[str, str | int | date] = {}
-    for fact in (*state_facts, *first_proposal.facts, *second_proposal.facts):
-        current = values.get(fact.name)
-        if current is not None and current != fact.value:
-            return second_proposal
-        values[fact.name] = fact.value
-    activity_date = values.get("activity_date") or values.get("start_date")
-    adults = values.get("adults")
-    children = values.get("children", 0)
-    if (
-        values.get("service") != "agency"
-        or values.get("product_id") != request.product_id
-        or activity_date != request.activity_date
-        or type(adults) is not int
-        or type(children) is not int
-        or adults < 1
-        or children < 0
-        or request_adults != adults
-        or request_children != children
-        or values.get("payment_method") not in {"stripe", "wise", "pix"}
-        or (
-            adults + children == 1
-            and (
-                type(values.get("birth_date")) is not date
-                or values.get("gender") not in {"m", "f"}
-            )
-        )
-        or (adults + children > 1 and not passenger_manifest_complete)
-    ):
-        return second_proposal
-
-    payload = observation.public_payload
-    offer_id = payload.get("offer_id")
-    if (
-        observation.request_hash != request.canonical_hash()
-        or payload.get("available") is not True
-        or payload.get("price_includes_booking_fee") is not True
-        or payload.get("product_id") != request.product_id
-        or payload.get("activity_date") != request.activity_date.isoformat()
-        or payload.get("adults") != request_adults
-        or payload.get("children") != request_children
-        or payload.get("participants") != request_adults + request_children
-        or type(offer_id) is not str
-        or not offer_id.startswith("offer:")
-    ):
-        return second_proposal
-    existing_fact_names = {item.name for item in second_proposal.facts}
-    canonical_selection_facts = (
-        ModelFact("service", "agency"),
-        ModelFact("product_id", request.product_id),
-        ModelFact("activity_date", request.activity_date),
-        ModelFact("adults", adults),
-        ModelFact("children", children),
-        ModelFact("payment_method", values["payment_method"]),
-        *(
-            (
-                ModelFact("birth_date", values["birth_date"]),
-                ModelFact("gender", values["gender"]),
-            )
-            if adults + children == 1
-            else ()
-        ),
-    )
-    return replace(
-        second_proposal,
-        intent="select",
-        facts=(
-            *second_proposal.facts,
-            *(
-                fact
-                for fact in canonical_selection_facts
-                if fact.name not in existing_fact_names
-            ),
-        ),
-        target_offer_id=offer_id,
-        selection_requested=False,
-    )
 
 
 def _source_events(batch: InboundBatch | CompletionTurn) -> tuple[SourceEventIdentity, ...]:
@@ -794,54 +585,6 @@ def _authoritative_read_locales(
     )
 
 
-def _selection_binding_failure_proposal(
-    proposal: ModelProposal,
-    *,
-    locale: str,
-) -> ModelProposal:
-    if type(proposal) is not ModelProposal or type(locale) is not str:
-        raise TypeError("selection binding guard requires exact contracts")
-    if proposal.intent != "select":
-        raise ValueError("selection binding guard requires select intent")
-    return replace(
-        proposal,
-        intent="inform",
-        read_requests=(),
-        effect_proposals=(),
-        target_offer_id=None,
-        target_offer_ids=(),
-        confirmed_summary_version=None,
-        confirmed_action_kinds=(),
-        approval_basis=None,
-        selection_requested=False,
-        pending_disposition=None,
-    )
-
-
-def _active_execution_guard_proposal(
-    proposal: ModelProposal,
-    *,
-    locale: str,
-) -> ModelProposal:
-    if type(proposal) is not ModelProposal or type(locale) is not str:
-        raise TypeError("active execution guard requires exact contracts")
-    return replace(
-        proposal,
-        intent="inform",
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-        target_offer_id=None,
-        target_offer_ids=(),
-        confirmed_summary_version=None,
-        confirmed_action_kinds=(),
-        approval_basis=None,
-        selection_requested=False,
-        pending_disposition=None,
-        passengers=(),
-    )
-
-
 def _collection_only_proposal(
     proposal: ModelProposal,
     *,
@@ -959,47 +702,6 @@ def _same_terminal_structure(
     )
 
 
-def _request_public_reply_correction(
-    model: AuditedModelPort,
-    *,
-    request: ModelRequest,
-    audited: AuditedModelTurn,
-    expected: ModelProposal,
-    reason: PublicReplyCorrectionReason,
-) -> tuple[ModelProposal, AuditedModelTurn]:
-    if (
-        type(request) is not ModelRequest
-        or type(audited) is not AuditedModelTurn
-        or type(expected) is not ModelProposal
-        or type(reason) is not PublicReplyCorrectionReason
-    ):
-        raise TypeError("public reply correction requires exact contracts")
-    correction_request = replace(
-        request,
-        request_id=_opaque(
-            "model-public-reply-correction",
-            request.request_id,
-            reason.value,
-        ),
-        observations=(),
-        confirmation_review_required=False,
-        selection_review_required=False,
-        progress_review_required=False,
-        recap_reuse_required=False,
-        public_reply_correction_reasons=(reason,),
-    )
-    try:
-        corrected_audited = model.complete_audited(correction_request)
-        if type(corrected_audited) is not AuditedModelTurn:
-            raise TypeError("model must return exact AuditedModelTurn")
-        corrected = validate_productive_proposal(corrected_audited.proposal)
-    except InvalidModelProposal as exc:
-        raise TurnExecutionError("public reply correction remained invalid") from exc
-    if not _same_terminal_structure(expected, corrected):
-        raise TurnExecutionError("public reply correction remained invalid")
-    return corrected, AuditedModelTurn.combine((audited, corrected_audited))
-
-
 def _persist_private_collection(
     owner: object,
     *,
@@ -1092,14 +794,6 @@ def _merge_passenger_updates(
         )
     except (PassengerManifestConflict, TypeError, ValueError) as exc:
         raise TurnExecutionError("passenger manifest update was rejected") from exc
-
-
-def _passenger_manifest_complete(
-    projection: ConversationProjection,
-    proposal: ModelProposal | None = None,
-) -> bool:
-    status = _passenger_status(projection, proposal)
-    return status is not None and not status.missing_by_position
 
 
 def _critical_outcome(projection: ConversationProjection) -> str | None:
@@ -1494,14 +1188,12 @@ class V2TurnExecutor:
             return V2TurnExecutionResult(replay, reply_chunks, True)
 
         last_conflict: ConcurrencyConflict | None = None
-        correction_budget = _PublicReplyCorrectionBudget()
         for _ in range(self._max_commit_attempts):
             try:
                 prepared, expected_version, fencing_token = self._prepare(
                     batch,
                     sources=sources,
                     event_hash=event_hash,
-                    correction_budget=correction_budget,
                     trace=trace,
                 )
                 if prepared.private_profile_material_hash is not None:
@@ -1613,11 +1305,8 @@ class V2TurnExecutor:
         *,
         sources: tuple[SourceEventIdentity, ...],
         event_hash: str,
-        correction_budget: _PublicReplyCorrectionBudget,
         trace: OpsExecutionTrace,
     ) -> tuple[_PreparedTurn, int, int]:
-        if type(correction_budget) is not _PublicReplyCorrectionBudget:
-            raise TypeError("public reply correction budget must be exact")
         if type(trace) is not OpsExecutionTrace:
             raise TypeError("trace must be an exact OpsExecutionTrace")
         now = self._clock.now()
@@ -1750,33 +1439,6 @@ class V2TurnExecutor:
             operational_messages=execution_context.messages,
         )
 
-        def request_public_reply_correction(
-            expected: ModelProposal,
-            audited: AuditedModelTurn,
-            reason: PublicReplyCorrectionReason,
-        ) -> tuple[ModelProposal, AuditedModelTurn]:
-            if correction_budget.consumed:
-                raise TurnExecutionError("public reply correction was already consumed")
-            correction_budget.consumed = True
-            corrected = _request_public_reply_correction(
-                self._model,
-                request=replace(
-                    request,
-                    state_facts=_service_model_facts(
-                        projection,
-                        private_facts=private_facts,
-                        profile=profile,
-                        now=now,
-                    ),
-                    passengers=projection_passenger_inputs(projection),
-                    private_profile_complete=profile_ready(),
-                ),
-                audited=audited,
-                expected=expected,
-                reason=reason,
-            )
-            return corrected
-
         first_audited = trace.call(
             NodeType.MAYA_REQUEST,
             lambda: self._model.complete_audited(request),
@@ -1865,7 +1527,6 @@ class V2TurnExecutor:
             effective_profile_complete = profile_ready()
         collection_only = bool(first_invalid_private_facts)
         first_proposal = replace(first_proposal, facts=first_public_facts)
-        correction_reason: PublicReplyCorrectionReason | None = None
         if collection_only:
             first_proposal = _collection_only_proposal(
                 first_proposal,
@@ -1874,33 +1535,13 @@ class V2TurnExecutor:
                 invalid_fact_names=first_invalid_private_facts,
                 revoke_pending=pending_action is not None,
             )
-        elif pending_action is None:
-            normalized = normalize_initial_commercial_plan(first_proposal)
-            if (
-                first_proposal.intent == "select"
-                and normalized.intent == "inform"
-                and not normalized.read_requests
-            ):
-                correction_reason = (
-                    PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY
-                )
-            first_proposal = normalized
+        elif pending_action is None and not first_proposal.read_requests:
+            first_proposal = replace(first_proposal,
+                read_requests=derive_selection_reads(first_proposal))
         if blocks_active_commercial_progression(
-            current.state,
-            first_proposal,
-            execution_status=execution_status,
+            current.state, first_proposal, execution_status=execution_status,
         ):
-            first_proposal = _active_execution_guard_proposal(
-                first_proposal,
-                locale=projection.locale,
-            )
-            correction_reason = PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT
-        if correction_reason is not None:
-            first_proposal, first_audited = request_public_reply_correction(
-                first_proposal,
-                first_audited,
-                correction_reason,
-            )
+            raise TurnExecutionError("proposal conflicts with commanded workflow")
         first_audited = AuditedModelTurn.from_frames(
             proposal=first_proposal,
             frames=first_audited.frames,
@@ -1913,148 +1554,6 @@ class V2TurnExecutor:
             frame_commitment_hash=first_frame_hash,
         )
         effective_profile_complete = profile_ready()
-        selection_review = (
-            not collection_only
-            and current.state.handoff is None
-            and execution_status is None
-            and pending_action is None
-            and first_proposal.intent == "inform"
-            and not first_proposal.read_requests
-            and _structured_selection_review_required(
-                _authoritative_language_facts(
-                    _state_model_facts(projection),
-                    projection.locale,
-                ),
-                first_proposal.facts,
-                private_profile_complete=effective_profile_complete,
-                passenger_manifest_complete=_passenger_manifest_complete(
-                    projection,
-                    first_proposal,
-                ),
-            )
-        )
-        confirmation_review = (
-            not collection_only
-            and pending_action is not None
-            and first_proposal.intent == "inform"
-            and not first_proposal.read_requests
-        )
-        if selection_review or confirmation_review:
-            review_request = replace(
-                request,
-                request_id=_opaque(
-                    (
-                        "model-confirmation-review"
-                        if confirmation_review
-                        else "model-selection-review"
-                    ),
-                    batch.batch_id,
-                    current.version,
-                ),
-                confirmation_review_required=confirmation_review,
-                selection_review_required=selection_review,
-                state_facts=_service_model_facts(
-                    projection,
-                    private_facts=private_facts,
-                    profile=profile,
-                    now=now,
-                ),
-                private_profile_complete=effective_profile_complete,
-                passengers=projection_passenger_inputs(projection),
-            )
-            review_audited = trace.call(
-                NodeType.MAYA_REVIEW,
-                lambda: self._model.complete_audited(review_request),
-                input_value=review_request,
-                output_value=lambda audited: audited.proposal,
-                technical_metadata={"review": "semantic"},
-            )
-            if type(review_audited) is not AuditedModelTurn:
-                raise TypeError("model must return exact AuditedModelTurn")
-            review_proposal = validate_productive_proposal(review_audited.proposal)
-            trace.record_value(
-                NodeType.MAYA_RESPONSE,
-                review_proposal,
-                technical_metadata={"review": "semantic"},
-            )
-            if review_proposal.source_event_id != batch.batch_id:
-                raise TurnExecutionError("semantic review source event diverged")
-            (
-                review_private_facts,
-                review_public_facts,
-                review_invalid_private_facts,
-            ) = _partition_private_customer_facts(review_proposal)
-            review_public_facts = _authoritative_language_facts(
-                review_public_facts,
-                projection.locale,
-            )
-            if review_private_facts:
-                private_facts = _persist_private_collection(
-                    self._private_customer_facts,
-                    lead_id=batch.lead_id,
-                    source_turn_id=batch.batch_id,
-                    source_event_hash=_event_hash(_source_events(batch)),
-                    facts=review_private_facts,
-                    persisted_at=now,
-                )
-                private_update_turn = private_update_turn or any(
-                    item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
-                    for item in review_private_facts
-                )
-                effective_profile_complete = profile_ready()
-            review_proposal = replace(review_proposal, facts=review_public_facts)
-            if review_invalid_private_facts:
-                collection_only = True
-                first_proposal = _collection_only_proposal(
-                    review_proposal,
-                    public_facts=review_public_facts,
-                    locale=projection.locale,
-                    invalid_fact_names=review_invalid_private_facts,
-                    revoke_pending=pending_action is not None,
-                )
-            elif (
-                selection_review
-                and review_proposal.selection_requested
-                or confirmation_review
-                and review_proposal.intent
-                in ("confirm", "adjust", "request_handoff")
-            ):
-                first_proposal = review_proposal
-                review_frame_hash = _frame_commitments(review_audited)[-1].canonical_hash()
-                projection = _merge_passenger_updates(
-                    projection,
-                    review_proposal,
-                    frame_commitment_hash=review_frame_hash,
-                )
-                effective_profile_complete = profile_ready()
-            review_audited = AuditedModelTurn.from_frames(
-                proposal=review_proposal,
-                frames=review_audited.frames,
-                ephemeral_session_id=review_audited.closure.ephemeral_session_id,
-            )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=(*first_audited.frames, *review_audited.frames),
-                ephemeral_session_id=review_audited.closure.ephemeral_session_id,
-            )
-        if not collection_only and pending_action is None:
-            normalized = normalize_initial_commercial_plan(first_proposal)
-            if (
-                first_proposal.intent == "select"
-                and normalized.intent == "inform"
-                and not normalized.read_requests
-            ):
-                normalized, first_audited = request_public_reply_correction(
-                    normalized,
-                    first_audited,
-                    PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY,
-                )
-            first_proposal = normalized
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
         if private_update_turn and not collection_only:
             first_proposal = _private_update_no_command_proposal(
                 first_proposal,
@@ -2119,27 +1618,6 @@ class V2TurnExecutor:
                 item for item in read_requests if item.kind is ReadKind.KNOWLEDGE
             )
             derived_confirmation_reads = False
-        if blocks_active_commercial_progression(
-            current.state,
-            first_proposal,
-            execution_status=execution_status,
-        ):
-            read_requests = ()
-            derived_confirmation_reads = False
-            first_proposal = _active_execution_guard_proposal(
-                first_proposal,
-                locale=projection.locale,
-            )
-            first_proposal, first_audited = request_public_reply_correction(
-                first_proposal,
-                first_audited,
-                PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-            )
-            first_audited = AuditedModelTurn.from_frames(
-                proposal=first_proposal,
-                frames=first_audited.frames,
-                ephemeral_session_id=first_audited.closure.ephemeral_session_id,
-            )
         pre_read_floor = now
         request_hashes = tuple(item.canonical_hash() for item in read_requests)
         if len(request_hashes) != len(set(request_hashes)):
@@ -2233,12 +1711,13 @@ class V2TurnExecutor:
                 recent_dialogue=recent_dialogue,
                 observations=v2_observations,
                 consultation_history=consultation_history,
-                state_facts=_service_model_facts(
-                    projection,
-                    private_facts=private_facts,
-                    profile=profile,
-                    now=now,
-                ),
+                state_facts=tuple({
+                    fact.name: fact for fact in (
+                        *_service_model_facts(projection, private_facts=private_facts,
+                            profile=profile, now=now),
+                        *first_proposal.facts,
+                    )
+                }.values()),
                 passengers=projection_passenger_inputs(projection),
                 critical_outcome=_critical_outcome(projection),
                 pending_action=pending_action,
@@ -2303,159 +1782,32 @@ class V2TurnExecutor:
                     revoke_pending=pending_action is not None,
                 )
             if blocks_active_commercial_progression(
-                current.state,
-                proposal,
-                execution_status=execution_status,
+                current.state, proposal, execution_status=execution_status,
             ):
-                proposal = _active_execution_guard_proposal(
-                    proposal,
-                    locale=projection.locale,
-                )
-                proposal, second_audited = request_public_reply_correction(
-                    proposal,
-                    second_audited,
-                    PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-                )
+                raise TurnExecutionError("proposal conflicts with commanded workflow")
             second_audited = AuditedModelTurn.from_frames(
                 proposal=proposal,
                 frames=second_audited.frames,
                 ephemeral_session_id=second_audited.closure.ephemeral_session_id,
             )
             second_frame_hash = _frame_commitments(second_audited)[-1].canonical_hash()
+            proposal = preserve_initial_facts(first_proposal, proposal)
             projection = _merge_passenger_updates(
                 projection,
                 proposal,
                 frame_commitment_hash=second_frame_hash,
             )
             effective_profile_complete = profile_ready()
-            proposal = preserve_initial_facts(first_proposal, proposal)
+            if proposal.intent == "confirm" and not critical_confirmation_bound:
+                raise TurnExecutionError("post-read frame cannot create confirmation authority")
+            if (
+                first_proposal.intent == "adjust"
+                and first_proposal.pending_disposition == "revoke"
+                and (proposal.intent != "adjust" or proposal.pending_disposition != "revoke")
+            ):
+                raise TurnExecutionError("post-read frame cannot restore a revoked summary")
             if proposal.read_requests:
                 raise TurnExecutionError("model exceeded the single read round")
-            if (
-                not collection_only
-                and effective_profile_complete
-                and _post_read_package_selection_review_required(
-                    proposal,
-                    v2_observations,
-                )
-            ):
-                selection_review_request = replace(
-                    followup,
-                    request_id=_opaque(
-                        "model-post-read-selection-review",
-                        batch.batch_id,
-                        current.version,
-                    ),
-                    selection_review_required=True,
-                    state_facts=_service_model_facts(
-                        projection,
-                        private_facts=private_facts,
-                        profile=profile,
-                        now=now,
-                    ),
-                    passengers=projection_passenger_inputs(projection),
-                    private_profile_complete=profile_ready(),
-                )
-                selection_review_audited = trace.call(
-                    NodeType.MAYA_REVIEW,
-                    lambda: self._model.complete_audited(selection_review_request),
-                    input_value=selection_review_request,
-                    output_value=lambda audited: audited.proposal,
-                    technical_metadata={"review": "selection"},
-                )
-                if type(selection_review_audited) is not AuditedModelTurn:
-                    raise TypeError("model must return exact AuditedModelTurn")
-                selection_review_proposal = validate_productive_proposal(
-                    selection_review_audited.proposal
-                )
-                trace.record_value(
-                    NodeType.MAYA_RESPONSE,
-                    selection_review_proposal,
-                    technical_metadata={"review": "selection"},
-                )
-                if selection_review_proposal.source_event_id != batch.batch_id:
-                    raise TurnExecutionError(
-                        "post-read selection review source event diverged"
-                    )
-                if (
-                    selection_review_proposal.intent
-                    in ("inform", "select", "request_handoff")
-                    and not selection_review_proposal.read_requests
-                ):
-                    (
-                        selection_review_private_facts,
-                        selection_review_public_facts,
-                        selection_review_invalid_private_facts,
-                    ) = _partition_private_customer_facts(selection_review_proposal)
-                    if selection_review_invalid_private_facts:
-                        raise TurnExecutionError(
-                            "post-read selection review private facts are invalid"
-                        )
-                    selection_review_public_facts = _authoritative_language_facts(
-                        selection_review_public_facts,
-                        projection.locale,
-                    )
-                    if selection_review_private_facts:
-                        private_facts = _persist_private_collection(
-                            self._private_customer_facts,
-                            lead_id=batch.lead_id,
-                            source_turn_id=batch.batch_id,
-                            source_event_hash=_event_hash(_source_events(batch)),
-                            facts=selection_review_private_facts,
-                            persisted_at=now,
-                        )
-                        private_update_turn = private_update_turn or any(
-                            item.name in _COMMAND_BLOCKING_PRIVATE_FACT_NAMES
-                            for item in selection_review_private_facts
-                        )
-                        effective_profile_complete = profile_ready()
-                    proposal = preserve_initial_facts(
-                        proposal,
-                        replace(
-                            selection_review_proposal,
-                            facts=selection_review_public_facts,
-                            passengers=(),
-                        ),
-                    )
-                selection_review_audited = AuditedModelTurn.from_frames(
-                    proposal=proposal,
-                    frames=selection_review_audited.frames,
-                    ephemeral_session_id=(
-                        selection_review_audited.closure.ephemeral_session_id
-                    ),
-                )
-                second_audited = AuditedModelTurn.combine(
-                    (second_audited, selection_review_audited)
-                )
-            if not collection_only:
-                proposal = _repair_requested_activity_selection(
-                    first_proposal,
-                    proposal,
-                    state_facts=_authoritative_language_facts(
-                        _state_model_facts(projection),
-                        projection.locale,
-                    ),
-                    observations=v2_observations,
-                    private_profile_complete=effective_profile_complete,
-                    passenger_manifest_complete=_passenger_manifest_complete(
-                        projection,
-                        proposal,
-                    ),
-                )
-                if derived_confirmation_reads and (
-                    proposal.intent != "confirm"
-                    or proposal.confirmed_summary_version
-                    != first_proposal.confirmed_summary_version
-                    or proposal.confirmed_action_kinds
-                    != first_proposal.confirmed_action_kinds
-                    or proposal.approval_basis is not first_proposal.approval_basis
-                ):
-                    proposal, second_audited = request_public_reply_correction(
-                        replace(first_proposal, read_requests=()),
-                        second_audited,
-                        PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-                    )
-                proposal = preserve_initial_adjustment(first_proposal, proposal)
             audited = AuditedModelTurn.combine((first_audited, second_audited))
         else:
             audited = first_audited
@@ -2468,35 +1820,9 @@ class V2TurnExecutor:
                 locale=projection.locale,
             )
         if blocks_active_commercial_progression(
-            current.state,
-            proposal,
-            execution_status=execution_status,
+            current.state, proposal, execution_status=execution_status,
         ):
-            proposal = _active_execution_guard_proposal(
-                proposal,
-                locale=projection.locale,
-            )
-            proposal, audited = request_public_reply_correction(
-                proposal,
-                audited,
-                PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-            )
-        elif is_regressive_post_command_reply(
-            current.state,
-            proposal,
-            execution_status=execution_status,
-        ):
-            proposal, audited = request_public_reply_correction(
-                proposal,
-                audited,
-                PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-            )
-        proposal = apply_positive_grounding(
-            proposal,
-            v2_observations,
-            locale=projection.locale,
-            force=private_update_turn,
-        )
+            raise TurnExecutionError("proposal conflicts with commanded workflow")
         audited = AuditedModelTurn.from_frames(
             proposal=proposal,
             frames=audited.frames,
@@ -2588,52 +1914,10 @@ class V2TurnExecutor:
 
         try:
             decision = reduce_current(proposal, reason="primary")
-        except ConversationReductionError:
-            if proposal.intent != "select":
-                raise
-            proposal = _selection_binding_failure_proposal(
-                proposal,
-                locale=projection.locale,
-            )
-            proposal, audited = request_public_reply_correction(
-                proposal,
-                audited,
-                PublicReplyCorrectionReason.SELECTION_BINDING_FAILURE,
-            )
-            audited = AuditedModelTurn.from_frames(
-                proposal=proposal,
-                frames=audited.frames,
-                ephemeral_session_id=audited.closure.ephemeral_session_id,
-            )
-            frames = _frame_commitments(audited)
-            final_frame_hash = frames[-1].canonical_hash()
-            fact_commitment_hash = final_frame_hash
-            decision = reduce_current(
-                proposal,
-                reason="selection_binding_failure",
-            )
+        except ConversationReductionError as exc:
+            raise TurnExecutionError("proposal violates conversation contract") from exc
         if decision.public_reply.kind == "approval_expired":
-            proposal, audited = request_public_reply_correction(
-                proposal,
-                audited,
-                PublicReplyCorrectionReason.CRITICAL_AUTHORITY_EXPIRED,
-            )
-            audited = AuditedModelTurn.from_frames(
-                proposal=proposal,
-                frames=audited.frames,
-                ephemeral_session_id=audited.closure.ephemeral_session_id,
-            )
-            frames = _frame_commitments(audited)
-            final_frame_hash = frames[-1].canonical_hash()
-            fact_commitment_hash = final_frame_hash
-            decision = reduce_current(
-                proposal,
-                reason="critical_authority_expired",
-            )
-            if decision.public_reply.kind != "approval_expired":
-                raise TurnExecutionError(
-                    "critical expiry correction changed reducer disposition"
-                )
+            raise TurnExecutionError("confirmation authority expired before decision")
         return self._finalize(
             batch=batch,
             sources=sources,

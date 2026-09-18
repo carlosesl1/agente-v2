@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import date, datetime, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -22,7 +21,6 @@ from v2_contracts.model import (
     ModelFact,
     ModelProposal,
     ModelRequest,
-    proposal_requires_progress_review,
 )
 from v2_contracts.model_wire import V8_RESPONSE_FIELDS
 from v2_contracts.passengers import PassengerInput
@@ -73,40 +71,6 @@ _RESPONSE_FIELDS_V6: Final = frozenset((*_RESPONSE_FIELDS_V5, "passengers"))
 _RESPONSE_FIELDS_V7: Final = frozenset(
     (*_RESPONSE_FIELDS_V6, "clarification_question")
 )
-_CONFIRMATION_REVIEW_SYSTEM_PROMPT: Final = """
-You are Maya reviewing one pending critical action. You have no tools and no authority
-to execute anything. Compare the complete current message with the complete pending
-public summary and author the customer-facing response. Return exactly one V8 JSON
-object with only these fields: intent, reply_chunks, facts, read_requests,
-selected_choice_refs, selection_requested, pending_action_disposition, and passengers.
-Return no commentary or extra field. Each reply_chunks item is exactly
-{"text":"...","expects_reply":false}; write one or two customer-facing messages.
-
-The only supported intents are confirm, adjust, and inform. facts may contain only
-language to update conversational locale, never commercial terms. read_requests,
-selected_choice_refs, and passengers must be empty; selection_requested must be false;
-no reply chunk may expect a customer reply.
-
-Use confirm only when the complete message unconditionally approves the exact pending
-summary without changing, narrowing, postponing, or conditioning any material term or
-action. For confirm set pending_action_disposition to null. The parent binds the exact
-summary version, actions, source event and approval basis; never copy those values.
-
-Use adjust for refusal, cancellation, postponement, withdrawal, a new condition, or a
-material change. For adjust set pending_action_disposition to revoke.
-
-Use inform for a question, ambiguity, hesitation, unrelated text, or insufficient
-evidence. For inform set pending_action_disposition to null. Judge the complete message
-semantically in context; never decide from a word, token, emoji, substring, fixed
-expression, regex, or alias.
-""".strip()
-_CONFIRMATION_REVIEW_REPAIR_SUFFIX: Final = """
-PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
-Return exactly one complete V8 object under the supplied confirmation contract. Write
-customer-facing reply_chunks once. Use only confirm with parent-owned binding, adjust
-with pending_action_disposition revoke, or inform with null disposition. Return no
-commentary, mechanical ID, authority field, or extra field.
-""".strip()
 _PROTOCOL_REPAIR_SUFFIX: Final = """
 
 PROTOCOL REPAIR: the previous child response was rejected by the closed parser.
@@ -170,22 +134,13 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 - For one activity participant, including service=package, emit explicit birth_date and
   gender from the current message as typed facts and keep passengers empty. Do this in the
   same frame even when the message also asks to keep the package or prepare its summary.
-- When selection_review_required is true without observations, first extract any explicit
-  individual birth_date/gender or group passenger updates from the complete current
-  message. If that message asks to prepare the current option, preserve the complete
-  commercial facts, set selection_requested=true, and emit the exact fresh read now.
 - This progression authorizes only read_requests. It never authorizes a reservation,
   payment, handoff, delivery, or effect.
 - For a package, resolve the customer's lodging and activity references semantically
   against current observations. When both are unambiguous and all selection requirements
   are complete, select exactly the two matching public choice_ref values atomically.
-- When selection_review_required is true and observations are present, this is a post-read
-  semantic adjudication pass. Re-read the complete customer message against the observed
-  options. If the customer unambiguously committed to one lodging option and one activity
-  option, return intent=select with exactly those two values in selected_choice_refs;
-  otherwise remain inform. Do not emit new or changed facts: for select, repeat only the
-  exact commercial facts required by the select contract. Emit no passenger updates or
-  new reads, and never choose by list position unless the customer requested that criterion.
+- After a provider read, select only the public choices explicitly justified by the
+  complete customer message and current observations; otherwise remain inform.
 
 PROGRESSIVE HANDOFF TRIAGE:
 - An explicit human request, sensitive complaint, or real safety concern requires immediate
@@ -219,11 +174,6 @@ FINAL TURN COMPLETION RULES (highest salience):
   received or is following. acknowledged proves the external handoff operation was accepted,
   not that a person read it. completed may be described as completed; manual_review and
   cancelled must be stated without inventing delivery.
-- When progress_review_required=true, the preceding valid proposal had no structured
-  progression and no reply chunk marked as awaiting a customer answer. Reinterpret once.
-  Advance now, ask the one
-  necessary clarification, or give a conclusive grounded answer. Never fabricate a read,
-  fact, effect, delivery or human acknowledgement.
 """.strip()
 
 _CURRENT_OBSERVATION_COMPLETION_SUFFIX: Final = """
@@ -274,16 +224,6 @@ OPERATION RESULTS AND COMMUNICATION:
 """.strip()
 
 
-_RECAP_REUSE_SYSTEM_SUFFIX: Final = """
-FRESH CONSULTATION REUSE:
-- recap_reuse_required=true means the parent proved that every informational read from
-  the earlier frame exactly matches fresh committed consultation_history.
-- Answer the complete current message from that public recap context. Emit no read,
-  selection, confirmation, effect, private fact, or passenger update.
-- This is recap-only and cannot authorize any action. If the customer wants to select,
-  reserve, confirm, or change scope, say a fresh check will be required for that action.
-""".strip()
-
 _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX: Final = """
 KNOWN ACTIVITY INFORMATION ROUTING:
 - When the customer asks about a known activity's difficulty, duration, preparation, or what to bring, request activity_description in the initial frame.
@@ -304,16 +244,6 @@ SIMPLE FORMED-GROUP RECOMMENDATION:
   the exact product, date and party before selection or booking.
 """.strip()
 
-
-_PUBLIC_REPLY_CORRECTION_SUFFIX: Final = """
-PUBLIC REPLY CORRECTION
-The previous candidate could not be published for the listed closed reasons.
-You, Maya, must write the corrected customer-facing reply.
-Do not request another read after observations.
-Do not strengthen operational status beyond exact receipts.
-Return one valid V8 frame with the eight conversational fields. Write each public chunk
-once; the parent will bind mechanical authority and will not rewrite the text.
-""".strip()
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
@@ -446,9 +376,6 @@ def _request_wire(
         "critical_outcome": request.critical_outcome,
         "private_profile_complete": request.private_profile_complete,
         "handoff_status": request.handoff_status,
-        "confirmation_review_required": request.confirmation_review_required,
-        "selection_review_required": request.selection_review_required,
-        "progress_review_required": request.progress_review_required,
         "active_execution_status": request.active_execution_status,
         "execution_components": [component_wire(c) for c in request.execution_components],
         "operational_messages": [
@@ -457,10 +384,6 @@ def _request_wire(
              "text": m.text, "author": m.author.value, "status": m.status,
              "updated_at": m.updated_at.isoformat()}
             for m in request.operational_messages
-        ],
-        "recap_reuse_required": request.recap_reuse_required,
-        "public_reply_correction_reasons": [
-            item.value for item in request.public_reply_correction_reasons
         ],
         "observations": observations,
         "consultation_history": consultation_history,
@@ -516,9 +439,7 @@ def _request_wire(
     messages.append(["user", _canonical(user_payload).decode("utf-8")])
     return _canonical(
         {
-            "system_prompt": system_prompt
-            if request.confirmation_review_required
-            else (
+            "system_prompt": (
                 system_prompt
                 + "\n\n"
                 + _PRIVATE_PROFILE_SYSTEM_SUFFIX
@@ -528,8 +449,6 @@ def _request_wire(
                 + _CONSULTATION_HISTORY_SYSTEM_SUFFIX
                 + "\n\n"
                 + _ACTIVE_EXECUTION_SYSTEM_SUFFIX
-                + "\n\n"
-                + _RECAP_REUSE_SYSTEM_SUFFIX
                 + "\n\n"
                 + _ACTIVITY_INFORMATION_ROUTING_SYSTEM_SUFFIX
                 + "\n\n"
@@ -542,23 +461,10 @@ def _request_wire(
                     if request.observations
                     else ""
                 )
-                + (
-                    "\n\n" + _PUBLIC_REPLY_CORRECTION_SUFFIX
-                    if request.public_reply_correction_reasons
-                    else ""
-                )
             ),
             "messages": messages,
         }
     )
-
-
-def _confirmation_review_wire(request: ModelRequest, system_prompt: str) -> bytes:
-    if not request.confirmation_review_required or request.pending_action is None:
-        raise InvalidModelProposal(
-            "contextual confirmation review requires an exact pending action"
-        )
-    return _request_wire(request, system_prompt)
 
 
 def _fact(value: object) -> ModelFact:
@@ -992,63 +898,6 @@ def _proposal(
         raise InvalidModelProposal("model proposal is invalid") from exc
 
 
-def _confirmation_proposal(payload: bytes, request: ModelRequest) -> ModelProposal:
-    if not request.confirmation_review_required or request.pending_action is None:
-        raise InvalidModelProposal(
-            "contextual confirmation review requires an exact pending action"
-        )
-    proposal = _proposal(
-        payload,
-        request,
-        require_v8=True,
-    )
-    if not 1 <= len(proposal.reply_chunks) <= 2:
-        raise InvalidModelProposal(
-            "confirmation reply_chunks must contain one or two exact strings"
-        )
-    if (
-        any(fact.name != "language" for fact in proposal.facts)
-        or proposal.read_requests
-        or proposal.effect_proposals
-        or proposal.target_offer_id is not None
-        or proposal.target_offer_ids
-        or proposal.selection_requested
-        or proposal.passengers
-        or proposal.clarification_question is not None
-    ):
-        raise InvalidModelProposal("confirmation proposal carries unsupported fields")
-
-    pending = request.pending_action
-    if proposal.intent == "confirm":
-        valid = (
-            proposal.confirmed_summary_version == pending.summary_version
-            and proposal.confirmed_action_kinds == pending.action_kinds
-            and proposal.approval_basis is ApprovalBasis.CONTEXTUAL_REFERENCE
-            and proposal.pending_disposition is None
-        )
-    elif proposal.intent == "adjust":
-        valid = (
-            proposal.confirmed_summary_version is None
-            and not proposal.confirmed_action_kinds
-            and proposal.approval_basis is None
-            and proposal.pending_disposition == "revoke"
-        )
-    elif proposal.intent == "inform":
-        valid = (
-            proposal.confirmed_summary_version is None
-            and not proposal.confirmed_action_kinds
-            and proposal.approval_basis is None
-            and proposal.pending_disposition is None
-        )
-    else:
-        valid = False
-    if not valid:
-        raise InvalidModelProposal(
-            "confirmation proposal is not bound to the exact pending action"
-        )
-    return proposal
-
-
 class HermesModelAdapter:
     def __init__(
         self,
@@ -1194,43 +1043,6 @@ class HermesModelAdapter:
         return turn, turn.frames[0]
 
 
-    def _maybe_progress_review(
-        self,
-        request: ModelRequest,
-        turn: AuditedModelTurn,
-    ) -> AuditedModelTurn:
-        if (
-            request.progress_review_required
-            or request.attachments
-            or request.observations
-            or request.pending_action is not None
-            or request.handoff_status is not None
-            or request.confirmation_review_required
-            or request.selection_review_required
-            or request.active_execution_status is not None
-            or request.recap_reuse_required
-            or request.public_reply_correction_reasons
-            or not proposal_requires_progress_review(turn.proposal)
-        ):
-            return turn
-        review_request = replace(
-            request,
-            request_id=(
-                "progress-review:"
-                + hashlib.sha256(request.request_id.encode("utf-8")).hexdigest()
-            ),
-            progress_review_required=True,
-        )
-        reviewed = self._complete_audited(
-            review_request,
-            allow_protocol_repair=False,
-        )
-        return AuditedModelTurn.from_frames(
-            proposal=reviewed.proposal,
-            frames=(*turn.frames, *reviewed.frames),
-            ephemeral_session_id=reviewed.closure.ephemeral_session_id,
-        )
-
     def complete_audited(self, request: ModelRequest) -> AuditedModelTurn:
         return self._complete_audited(request, allow_protocol_repair=True)
 
@@ -1244,27 +1056,13 @@ class HermesModelAdapter:
             raise TypeError("request must be an exact ModelRequest")
         if type(allow_protocol_repair) is not bool:
             raise TypeError("allow_protocol_repair must be an exact bool")
-        if request.confirmation_review_required:
-            base_prompt = _CONFIRMATION_REVIEW_SYSTEM_PROMPT
-            prompts = (base_prompt,) + (
-                (base_prompt + "\n\n" + _CONFIRMATION_REVIEW_REPAIR_SUFFIX,)
-                if allow_protocol_repair
-                else ()
-            )
-            wire = _confirmation_review_wire
-
-            def decode(response: bytes) -> ModelProposal:
-                return _confirmation_proposal(response, request)
-
-        else:
-            base_prompt = self._system_prompt
-            prompts = (base_prompt,) + (
-                (base_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,)
-                if allow_protocol_repair
-                else ()
-            )
-            wire = _request_wire
-            decode = None
+        base_prompt = self._system_prompt
+        prompts = (base_prompt,) + (
+            (base_prompt + "\n\n" + _PROTOCOL_REPAIR_SUFFIX,)
+            if allow_protocol_repair else ()
+        )
+        wire = _request_wire
+        decode = None
         original_stdin = wire(request, base_prompt)
         attempted_frames: list[AuditedTranscriptFrame] = []
         for prompt in prompts:
@@ -1281,7 +1079,7 @@ class HermesModelAdapter:
                         frames=(*attempted_frames, *turn.frames),
                         ephemeral_session_id=turn.closure.ephemeral_session_id,
                     )
-                return self._maybe_progress_review(request, turn)
+                return turn
             attempted_frames.append(frame)
 
         raise InvalidModelProposal(

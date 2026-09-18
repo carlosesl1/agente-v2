@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 from v2_application.turn_plan import (
-    normalize_initial_commercial_plan,
+    derive_selection_reads,
 )
 from v2_contracts.model import ConsultationHistoryEntry, ModelFact, ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
@@ -91,14 +90,13 @@ def test_complete_package_selection_derives_both_refresh_components() -> None:
         )
     )
 
-    normalized = normalize_initial_commercial_plan(proposal)
+    normalized = derive_selection_reads(proposal)
 
-    assert tuple(item.kind for item in normalized.read_requests) == (
+    assert tuple(item.kind for item in normalized) == (
         ReadKind.LODGING,
         ReadKind.ACTIVITY,
     )
-    assert normalized.effect_proposals == ()
-    assert normalized.intent == "inform"
+    assert proposal.intent == "select"
 
 
 def test_incomplete_inform_plan_does_not_invent_a_read() -> None:
@@ -110,7 +108,7 @@ def test_incomplete_inform_plan_does_not_invent_a_read() -> None:
         )
     )
 
-    assert normalize_initial_commercial_plan(proposal) == proposal
+    assert derive_selection_reads(proposal) == ()
 
 
 def test_complete_inform_plan_without_model_read_stays_read_free() -> None:
@@ -124,10 +122,10 @@ def test_complete_inform_plan_without_model_read_stays_read_free() -> None:
         )
     )
 
-    assert normalize_initial_commercial_plan(proposal) == proposal
+    assert derive_selection_reads(proposal) == ()
 
 
-def test_incomplete_selection_clears_unbound_structure_without_rewriting_maya_text() -> None:
+def test_incomplete_selection_produces_no_refresh_and_keeps_typed_intent() -> None:
     proposal = ModelProposal(
         source_event_id="batch:turn-plan-incomplete-selection",
         intent="select",
@@ -142,19 +140,15 @@ def test_incomplete_selection_clears_unbound_structure_without_rewriting_maya_te
         target_offer_id="offer:" + "3" * 64,
     )
 
-    normalized = normalize_initial_commercial_plan(proposal)
+    normalized = derive_selection_reads(proposal)
 
-    assert normalized.intent == "inform"
-    assert normalized.read_requests == ()
-    assert normalized.target_offer_id is None
-    assert normalized.target_offer_ids == ()
-    assert normalized.selection_requested is False
-    assert normalized.reply_chunks == proposal.reply_chunks
-    assert normalized.clarification_question == proposal.clarification_question
+    assert normalized == ()
+    assert proposal.intent == "select"
+    assert proposal.target_offer_id == "offer:" + "3" * 64
 
 
 def test_explicit_reads_remain_model_owned() -> None:
     request = _lodging_read()
     proposal = _proposal(facts=(), reads=(request,))
-    assert normalize_initial_commercial_plan(proposal) is proposal
-    assert normalize_initial_commercial_plan(_proposal(facts=())).read_requests == ()
+    assert derive_selection_reads(proposal) == ()
+    assert derive_selection_reads(_proposal(facts=())) == ()

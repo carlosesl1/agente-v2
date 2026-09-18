@@ -4,16 +4,30 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
-import test_v2_turn_executor as te
 import test_v2_conversation_reducer as cr
+import test_v2_turn_executor as te
+
 from reservation_followup.handoff import (
-    HandoffRequested, HandoffReasonCode, HandoffEffectPolicy, HandoffCancelled,
-    HandoffCancellationCode, new_handoff, reduce_handoff,
+    HandoffCancellationCode,
+    HandoffCancelled,
+    HandoffEffectPolicy,
+    HandoffReasonCode,
+    HandoffRequested,
+    new_handoff,
+    reduce_handoff,
 )
-from v2_adapters.hermes_model import _v8_proposal, _request_wire, _confirmation_proposal
-from v2_contracts.model import ModelProposal, ModelRequest, ModelFact, InvalidModelProposal
+from v2_adapters.hermes_model import _request_wire, _v8_proposal
+from v2_contracts.critical_actions import (
+    CriticalActionKind,
+    PendingCriticalActionContext,
+)
+from v2_contracts.model import (
+    InvalidModelProposal,
+    ModelFact,
+    ModelProposal,
+    ModelRequest,
+)
 from v2_contracts.providers import ReadKind, ReadRequest
-from v2_contracts.critical_actions import PendingCriticalActionContext, CriticalActionKind
 
 
 def frame(source, text="Resposta da Maya.", reads=()):
@@ -69,7 +83,6 @@ def test_explicit_same_scope_read_is_not_replaced_by_recap(message):
         executor.execute(te.BATCH)
         result = executor.execute(batch)
         assert len(port.calls) == 2
-        assert model.calls[-1].recap_reuse_required is False
         assert len(result.receipt.read_observations) == 1
         assert result.receipt.command_rows == result.receipt.relay_rows == ()
     finally:
@@ -111,9 +124,9 @@ def test_handoff_reopens_only_when_inactive(cancelled):
         assert decision.next_state.handoff == old
 
 
-def confirmation_request(review=False):
+def confirmation_request():
     return ModelRequest(request_id="request:confirm", lead_id="lead:test", source_event_id="event:confirm",
-        message="Proceed.", locale="pt-BR", state_version=1, confirmation_review_required=review,
+        message="Proceed.", locale="pt-BR", state_version=1,
         pending_action=PendingCriticalActionContext(summary_version=1, action_kinds=(CriticalActionKind.RESERVE_LODGING,),
             public_summary="Resumo pendente.", expires_at=cr.NOW + timedelta(minutes=5)))
 
@@ -123,14 +136,10 @@ def confirmation_wire(facts):
         read_requests=[], selected_choice_refs=[], selection_requested=False, pending_action_disposition=None, passengers=[])
 
 
-@pytest.mark.parametrize("review", [False, True])
-def test_confirmation_accepts_locale_only_fact(review):
-    request = confirmation_request(review)
+def test_confirmation_accepts_locale_only_fact():
+    request = confirmation_request()
     wire = confirmation_wire([dict(name="language", value="en")])
-    if review:
-        proposal = _confirmation_proposal(json.dumps(wire).encode(), request)
-    else:
-        proposal = _v8_proposal(wire, request)
+    proposal = _v8_proposal(wire, request)
     assert proposal.facts == (ModelFact("language", "en"),)
 
 

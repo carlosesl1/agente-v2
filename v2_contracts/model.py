@@ -88,18 +88,6 @@ class InvalidModelProposal(ValueError):
     """Raised when a model response violates the closed V2 grammar."""
 
 
-class PublicReplyCorrectionReason(str, Enum):
-    TYPED_CLARIFICATION_MISMATCH = "typed_clarification_mismatch"
-    OPERATIONAL_STATUS_CONFLICT = "operational_status_conflict"
-    READ_REMOVED_BY_AUTHORITY = "read_removed_by_authority"
-    SELECTION_BINDING_FAILURE = "selection_binding_failure"
-    ACTIVE_EXECUTION_CONFLICT = "active_execution_conflict"
-    STALE_CONSULTATION_REUSE = "stale_consultation_reuse"
-    INVALID_CONFIRMATION_REVIEW = "invalid_confirmation_review"
-    RECURSIVE_READ_AFTER_OBSERVATION = "recursive_read_after_observation"
-    CRITICAL_AUTHORITY_EXPIRED = "critical_authority_expired"
-
-
 def _text(value: object, name: str, *, identifier: bool = False) -> str:
     if type(value) is not str or not value or value != value.strip():
         raise InvalidModelProposal(f"{name} must be a non-empty exact string")
@@ -338,16 +326,11 @@ class ModelRequest:
     pending_action: PendingCriticalActionContext | None = None
     private_profile_complete: bool = False
     handoff_status: str | None = None
-    confirmation_review_required: bool = False
-    selection_review_required: bool = False
-    progress_review_required: bool = False
     active_execution_status: str | None = None
     execution_components: tuple[ExecutionComponentContext, ...] = ()
     operational_messages: tuple[OperationalMessage, ...] = ()
     trigger: str = "customer_message"
     completion_events: tuple[CompletionEvent, ...] = ()
-    recap_reuse_required: bool = False
-    public_reply_correction_reasons: tuple[PublicReplyCorrectionReason, ...] = ()
     attachments: tuple[ModelAttachment, ...] = ()
 
     def __post_init__(self) -> None:
@@ -378,29 +361,6 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "state_version must be a non-negative exact integer"
             )
-        if type(self.public_reply_correction_reasons) is not tuple:
-            raise InvalidModelProposal(
-                "public reply correction reasons must be an exact tuple"
-            )
-        if any(
-            type(item) is not PublicReplyCorrectionReason
-            for item in self.public_reply_correction_reasons
-        ):
-            raise InvalidModelProposal(
-                "public reply correction reasons must contain exact enum values"
-            )
-        if len(self.public_reply_correction_reasons) > 4:
-            raise InvalidModelProposal(
-                "public reply correction reasons exceed the four-reason bound"
-            )
-        if len(set(self.public_reply_correction_reasons)) != len(
-            self.public_reply_correction_reasons
-        ):
-            raise InvalidModelProposal("public reply correction reasons must be unique")
-        if self.public_reply_correction_reasons != tuple(
-            sorted(self.public_reply_correction_reasons, key=lambda item: item.value)
-        ):
-            raise InvalidModelProposal("public reply correction reasons must be canonical")
         if type(self.recent_dialogue) is not tuple or any(
             type(item) is not ConversationExchange for item in self.recent_dialogue
         ):
@@ -482,67 +442,11 @@ class ModelRequest:
             raise InvalidModelProposal(
                 "handoff_status is outside the closed request catalog"
             )
-        if type(self.confirmation_review_required) is not bool:
-            raise InvalidModelProposal(
-                "confirmation_review_required must be an exact boolean"
-            )
-        if self.confirmation_review_required and self.pending_action is None:
-            raise InvalidModelProposal(
-                "confirmation review requires a pending critical action"
-            )
-        if type(self.selection_review_required) is not bool:
-            raise InvalidModelProposal(
-                "selection_review_required must be an exact boolean"
-            )
-        if self.selection_review_required and self.pending_action is not None:
-            raise InvalidModelProposal(
-                "selection review cannot coexist with a pending critical action"
-            )
-        if self.selection_review_required and not self.private_profile_complete:
-            raise InvalidModelProposal(
-                "selection review requires a complete private profile marker"
-            )
-        if self.selection_review_required and self.confirmation_review_required:
-            raise InvalidModelProposal("model semantic reviews must be mutually exclusive")
-        if type(self.progress_review_required) is not bool:
-            raise InvalidModelProposal(
-                "progress_review_required must be an exact boolean"
-            )
-        if self.progress_review_required and (
-            self.pending_action is not None
-            or self.observations
-            or self.confirmation_review_required
-            or self.selection_review_required
-        ):
-            raise InvalidModelProposal(
-                "progress review must be initial and mutually exclusive"
-            )
         if self.active_execution_status is not None and (
             self.active_execution_status not in _EXECUTION_STATUSES
         ):
             raise InvalidModelProposal(
                 "active_execution_status is outside the closed request catalog"
-            )
-        if type(self.recap_reuse_required) is not bool:
-            raise InvalidModelProposal(
-                "recap_reuse_required must be an exact boolean"
-            )
-        if self.recap_reuse_required and (
-            self.observations
-            or self.confirmation_review_required
-            or self.selection_review_required
-        ):
-            raise InvalidModelProposal(
-                "recap reuse cannot coexist with observations or semantic reviews"
-            )
-        if self.public_reply_correction_reasons and (
-            self.progress_review_required
-            or self.confirmation_review_required
-            or self.selection_review_required
-            or self.recap_reuse_required
-        ):
-            raise InvalidModelProposal(
-                "public reply correction and semantic reviews must be mutually exclusive"
             )
 
 
@@ -727,23 +631,6 @@ class ModelProposal:
             raise InvalidModelProposal(
                 "approval assertion fields are allowed only for confirm"
             )
-
-
-def proposal_requires_progress_review(proposal: ModelProposal) -> bool:
-    """Detect a structural no-op without inspecting any natural-language text."""
-
-    if type(proposal) is not ModelProposal:
-        raise TypeError("proposal must be an exact ModelProposal")
-    material_facts = tuple(fact for fact in proposal.facts if fact.name != "language")
-    return (
-        proposal.intent == "inform"
-        and not material_facts
-        and not proposal.read_requests
-        and not proposal.effect_proposals
-        and not proposal.selection_requested
-        and not proposal.passengers
-        and proposal.clarification_question is None
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -962,6 +849,5 @@ __all__ = [
     "ModelFact",
     "ModelProposal",
     "ModelRequest",
-    "PublicReplyCorrectionReason",
     "TurnResult",
 ]

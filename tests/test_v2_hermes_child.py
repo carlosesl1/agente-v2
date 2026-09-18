@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 
 import pytest
 
-import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import _request_wire
 from v2_contracts.model import ModelRequest
 from v2_host.hermes_child import run, run_structured
@@ -258,10 +257,9 @@ def test_child_accepts_four_private_exchanges_and_keeps_current_request_last() -
     assert prompt.rfind('{"message":"current"}') > prompt.rfind("assistant 3")
 
 
-def test_child_transports_public_reply_correction_without_changing_current_request() -> (
+def test_child_transports_normal_context_without_changing_current_request() -> (
     None
 ):
-    reason_type = model_contracts.PublicReplyCorrectionReason
     request = ModelRequest(
         request_id="request:child-correction-transport",
         lead_id="manychat:child-correction-transport",
@@ -269,7 +267,7 @@ def test_child_transports_public_reply_correction_without_changing_current_reque
         message="Continue com uma resposta corrigida.",
         locale="pt-BR",
         state_version=2,
-        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
+
     )
     wire = _request_wire(request, "Return V2 JSON.")
     envelope = json.loads(wire)
@@ -283,27 +281,15 @@ def test_child_transports_public_reply_correction_without_changing_current_reque
     run(("hermes", "--profile", "leads"), wire, execute=execute)
 
     prompt = captured["command"][-1]
-    correction_suffix = """PUBLIC REPLY CORRECTION
-The previous candidate could not be published for the listed closed reasons.
-You, Maya, must write the corrected customer-facing reply.
-Do not request another read after observations.
-Do not strengthen operational status beyond exact receipts.
-Return one valid V8 frame with the eight conversational fields. Write each public chunk
-once; the parent will bind mechanical authority and will not rewrite the text."""
     child_wrapper = (
         "\n\nYou are running as a tool-free child. Do not call tools or perform effects. "
         "Return exactly one JSON object matching the supplied system contract, with no "
         "Markdown fence, preface, or trailing commentary. The parent validates every field."
     )
-    current_request_delimiter = "\n\nCURRENT REQUEST JSON:\n"
     assert set(envelope) == {"system_prompt", "messages"}
-    assert json.loads(current_request)["public_reply_correction_reasons"] == [
-        "typed_clarification_mismatch"
-    ]
-    assert envelope["system_prompt"].endswith(correction_suffix)
+    assert "public_reply_correction_reasons" not in json.loads(current_request)
+    assert "PUBLIC REPLY CORRECTION" not in envelope["system_prompt"]
     assert prompt.startswith(envelope["system_prompt"] + child_wrapper)
-    assert prompt.count(correction_suffix) == 1
-    assert prompt.index(correction_suffix) < prompt.index(current_request_delimiter)
     assert prompt.endswith(current_request)
     assert prompt.count(current_request) == 1
     assert captured["command"][3:5] == ("--toolsets", "")

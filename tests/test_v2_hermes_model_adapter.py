@@ -1,22 +1,18 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 import v2_adapters.hermes_model as hermes_model_module
-import v2_contracts.model as model_contracts
 from v2_adapters.hermes_model import (
-    _CONFIRMATION_REVIEW_REPAIR_SUFFIX,
-    _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
     _PROTOCOL_REPAIR_SUFFIX,
-    _confirmation_review_wire,
+    HermesModelAdapter,
     _proposal,
     _request_wire,
-    HermesModelAdapter,
 )
 from v2_contracts.critical_actions import (
     ApprovalBasis,
@@ -706,10 +702,10 @@ def test_profile_completeness_and_reusable_values_reach_wire() -> None:
     assert "CURRENT-TURN COMMERCIAL PROGRESSION" in envelope["system_prompt"]
     assert '"one adult" or "1 adulto"' in envelope["system_prompt"]
     assert user["handoff_status"] is None
-    assert user["confirmation_review_required"] is False
-    assert user["selection_review_required"] is False
+    assert "confirmation_review_required" not in user
+    assert "selection_review_required" not in user
     assert user["active_execution_status"] is None
-    assert user["recap_reuse_required"] is False
+    assert "recap_reuse_required" not in user
     assert "availability query" in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
@@ -720,84 +716,6 @@ def test_profile_completeness_and_reusable_values_reach_wire() -> None:
         "content_hash",
     ):
         assert forbidden not in serialized
-
-
-def test_public_reply_correction_wire_is_closed_public_and_terminal() -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
-    observed_at = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-    reasons = tuple(
-        sorted(
-            (
-                reason_type.TYPED_CLARIFICATION_MISMATCH,
-                reason_type.OPERATIONAL_STATUS_CONFLICT,
-            ),
-            key=lambda item: item.value,
-        )
-    )
-    request = ModelRequest(
-        request_id="request:public-reply-correction-wire",
-        lead_id="manychat:public-reply-correction-wire",
-        source_event_id="batch:public-reply-correction-wire",
-        message="Continue o atendimento.",
-        locale="pt-BR",
-        state_version=4,
-        observations=(
-            ReadObservation(
-                request_hash="a" * 64,
-                provider="cloudbeds",
-                observed_at=observed_at,
-                expires_at=observed_at + timedelta(minutes=5),
-                public_payload={"available": False},
-                private_binding_hash="b" * 64,
-            ),
-        ),
-        state_facts=(ModelFact("service", "hostel"),),
-        public_reply_correction_reasons=reasons,
-    )
-
-    envelope = json.loads(_request_wire(request, "Closed prompt."))
-    current = json.loads(envelope["messages"][-1][1])
-    expected_suffix = """PUBLIC REPLY CORRECTION
-The previous candidate could not be published for the listed closed reasons.
-You, Maya, must write the corrected customer-facing reply.
-Do not request another read after observations.
-Do not strengthen operational status beyond exact receipts.
-Return one valid V8 frame with the eight conversational fields. Write each public chunk
-once; the parent will bind mechanical authority and will not rewrite the text."""
-
-    assert set(envelope) == {"system_prompt", "messages"}
-    assert current["public_reply_correction_reasons"] == [
-        item.value for item in reasons
-    ]
-    assert current["state_facts"] == [{"name": "service", "value": "hostel"}]
-    assert current["observations"] == [
-        {
-            "request_hash": "a" * 64,
-            "provider": "cloudbeds",
-            "observed_at": observed_at.isoformat(),
-            "expires_at": (observed_at + timedelta(minutes=5)).isoformat(),
-            "public_payload": {"available": False},
-        }
-    ]
-    assert hermes_model_module._PUBLIC_REPLY_CORRECTION_SUFFIX == expected_suffix
-    assert envelope["system_prompt"].endswith(expected_suffix)
-    assert envelope["system_prompt"].count("PUBLIC REPLY CORRECTION") == 1
-    serialized = envelope["messages"][-1][1]
-    assert "private_binding_hash" not in serialized
-    assert "b" * 64 not in serialized
-
-    ordinary_request = ModelRequest(
-        request_id="request:without-public-reply-correction",
-        lead_id="manychat:without-public-reply-correction",
-        source_event_id="batch:without-public-reply-correction",
-        message="Continue o atendimento.",
-        locale="pt-BR",
-        state_version=0,
-    )
-    ordinary = json.loads(_request_wire(ordinary_request, "Closed."))
-    ordinary_current = json.loads(ordinary["messages"][-1][1])
-    assert ordinary_current["public_reply_correction_reasons"] == []
-    assert "PUBLIC REPLY CORRECTION" not in ordinary["system_prompt"]
 
 
 def test_recent_dialogue_is_transport_only_context_before_complete_current_request() -> None:
@@ -978,7 +896,7 @@ def test_active_execution_and_recap_reuse_are_closed_public_markers() -> None:
         state_version=3,
         consultation_history=(history,),
         active_execution_status="queued",
-        recap_reuse_required=True,
+
     )
 
     envelope = json.loads(_request_wire(request, "Closed prompt."))
@@ -986,10 +904,10 @@ def test_active_execution_and_recap_reuse_are_closed_public_markers() -> None:
     prompt = envelope["system_prompt"]
 
     assert user["active_execution_status"] == "queued"
-    assert user["recap_reuse_required"] is True
+    assert "recap_reuse_required" not in user
     assert user["observations"] == []
     assert "OPERATION RESULTS AND COMMUNICATION" in prompt
-    assert "FRESH CONSULTATION REUSE" in prompt
+    assert "FRESH CONSULTATION REUSE" not in prompt
     with pytest.raises(InvalidModelProposal, match="closed request catalog"):
         ModelRequest(
             request_id="request:bad-active-status",
@@ -1197,32 +1115,6 @@ def test_v5_parser_distinguishes_preserve_from_revocation() -> None:
         )
 
 
-def test_confirmation_review_requires_pending_action() -> None:
-    with pytest.raises(InvalidModelProposal, match="pending critical action"):
-        ModelRequest(
-            request_id="request:review-without-pending",
-            lead_id="lead:review-without-pending",
-            source_event_id="batch:review-without-pending",
-            message="Confirmado.",
-            locale="pt-BR",
-            state_version=0,
-            confirmation_review_required=True,
-        )
-
-
-def test_selection_review_requires_complete_private_profile_marker() -> None:
-    with pytest.raises(InvalidModelProposal, match="complete private profile"):
-        ModelRequest(
-            request_id="request:selection-review-incomplete-profile",
-            lead_id="lead:selection-review-incomplete-profile",
-            source_event_id="batch:selection-review-incomplete-profile",
-            message="Prepare o resumo.",
-            locale="pt-BR",
-            state_version=0,
-            selection_review_required=True,
-        )
-
-
 def test_legacy_schema_cannot_confirm_a_pending_critical_action() -> None:
     payload = {
         "schema": "v2-model-proposal-v2",
@@ -1255,7 +1147,7 @@ def _confirmation_review_request() -> ModelRequest:
         private_profile_complete=True,
         handoff_status=None,
         pending_action=_pending_action(),
-        confirmation_review_required=True,
+
     )
 
 
@@ -1300,11 +1192,11 @@ def _decision_only_review_payload(decision: str = "approve") -> bytes:
     ).encode()
 
 
-def test_confirmation_review_wire_preserves_shared_context_and_requests_v8() -> None:
+def test_request_wire_preserves_shared_context_and_requests_v8() -> None:
     envelope = json.loads(
-        _confirmation_review_wire(
+        _request_wire(
             _confirmation_review_request(),
-            _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
+            "general Maya prompt",
         )
     )
     user = json.loads(envelope["messages"][0][1])
@@ -1312,7 +1204,7 @@ def test_confirmation_review_wire_preserves_shared_context_and_requests_v8() -> 
     assert user["lead_id"] == _confirmation_review_request().lead_id
     assert user["state_facts"] == [{"name": "language", "value": "pt-BR"}]
     assert user["passengers"] == []
-    assert user["confirmation_review_required"] is True
+    assert "confirmation_review_required" not in user
     assert user["private_profile_complete"] is True
     assert user["attachments"] == []
     assert user["pending_action"] == {
@@ -1321,9 +1213,9 @@ def test_confirmation_review_wire_preserves_shared_context_and_requests_v8() -> 
         "public_summary": _pending_action().public_summary,
         "expires_at": "2026-07-28T06:30:00+00:00",
     }
-    assert "V8 JSON" in envelope["system_prompt"]
+    assert "general Maya prompt" in envelope["system_prompt"]
     assert "source_event_id exactly" not in envelope["system_prompt"]
-    assert "reply_chunks" in envelope["system_prompt"]
+    assert "SERVICE CUSTOMER CONTEXT" in envelope["system_prompt"]
     assert "v2-contextual-confirmation-review-v1" not in envelope["system_prompt"]
     serialized = json.dumps(user, ensure_ascii=False)
     for forbidden in (
@@ -1374,7 +1266,7 @@ def test_confirmation_review_wire_preserves_shared_context_and_requests_v8() -> 
         ),
     ),
 )
-def test_confirmation_review_returns_exact_maya_authored_parent_bound_v8_proposal(
+def test_pending_confirmation_returns_exact_maya_authored_parent_bound_v8_proposal(
     overrides: dict[str, object],
     reply_chunks: tuple[str, ...],
     expected_intent: str,
@@ -1433,9 +1325,9 @@ def test_confirmation_review_returns_exact_maya_authored_parent_bound_v8_proposa
     assert turn.frames[0].stdin_bytes == captured[0]
     assert turn.closure.ephemeral_session_id.startswith("uds:")
     envelope = json.loads(captured[0])
-    assert envelope["system_prompt"] == _CONFIRMATION_REVIEW_SYSTEM_PROMPT
+    assert envelope["system_prompt"].startswith("general proposal prompt must not be used for review")
     serialized = captured[0].decode()
-    assert "general proposal prompt must not be used for review" not in serialized
+    assert "general proposal prompt must not be used for review" in serialized
     assert request.lead_id in serialized
     assert "must-not-cross" not in serialized
 
@@ -1472,7 +1364,7 @@ def test_confirmation_review_returns_exact_maya_authored_parent_bound_v8_proposa
         "pending-disposition",
     ),
 )
-def test_confirmation_review_repairs_structurally_unbound_proposal_once(
+def test_pending_confirmation_repairs_structurally_unbound_proposal_once(
     invalid_overrides: dict[str, object],
 ) -> None:
     invalid = _confirmation_proposal_payload(**invalid_overrides)
@@ -1509,8 +1401,8 @@ def test_confirmation_review_repairs_structurally_unbound_proposal_once(
 
     assert responses == []
     assert len(prompts) == 2
-    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX not in prompts[0]
-    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX in prompts[1]
+    assert _PROTOCOL_REPAIR_SUFFIX not in prompts[0]
+    assert _PROTOCOL_REPAIR_SUFFIX in prompts[1]
     assert len(turn.frames) == 2
     assert [frame.response_bytes for frame in turn.frames] == [invalid, repaired]
     assert turn.closure.ephemeral_session_id.startswith("uds:")
@@ -1620,8 +1512,8 @@ def test_invalid_confirmation_reviews_fail_closed_after_bounded_attempts(
     assert str(captured.value) == "model proposal remained invalid after bounded attempts"
     assert responses == []
     assert len(prompts) == 2
-    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX not in prompts[0]
-    assert _CONFIRMATION_REVIEW_REPAIR_SUFFIX in prompts[1]
+    assert _PROTOCOL_REPAIR_SUFFIX not in prompts[0]
+    assert _PROTOCOL_REPAIR_SUFFIX in prompts[1]
     assert [frame.response_bytes for frame in attempted_frames] == invalid_frames
     assert all(
         "effect_proposals" not in json.loads(frame.response_bytes)
@@ -1720,13 +1612,13 @@ def test_ordinary_invalid_proposals_fail_closed_after_one_protocol_repair(
         for frame in attempted_frames
     )
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
 
 
-def test_adapter_revises_structural_noop_once_with_same_complete_context() -> None:
+def test_adapter_accepts_structural_noop_once_with_same_complete_context() -> None:
     request = ModelRequest(
         request_id="request:progress-review-runtime",
         lead_id="manychat:progress-review-runtime",
@@ -1775,15 +1667,14 @@ def test_adapter_revises_structural_noop_once_with_same_complete_context() -> No
 
     turn = adapter.complete_audited(request)
 
-    assert [item["progress_review_required"] for item in seen] == [False, True]
-    assert [item["message"] for item in seen] == [request.message, request.message]
-    assert turn.proposal.clarification_question == (
-        "Which year should I use for those November dates?"
-    )
-    assert len(turn.frames) == 2
+    assert len(seen) == 1
+    assert [item["message"] for item in seen] == [request.message]
+    assert turn.proposal.clarification_question is None
+    assert turn.proposal.reply_chunks == ("I am ready to help.",)
+    assert len(turn.frames) == 1
 
 
-def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None:
+def test_protocol_repair_accepts_valid_noop_without_review() -> None:
     request = ModelRequest(
         request_id="request:progress-review-budget",
         lead_id="manychat:progress-review-budget",
@@ -1801,7 +1692,7 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
             pytest.fail("progress review attempted an unexpected nested repair call")
         envelope = json.loads(kwargs["input"])
         user = json.loads(envelope["messages"][-1][1])
-        review_flags.append(user["progress_review_required"])
+        review_flags.append("progress_review_required" in user)
         return SimpleNamespace(
             returncode=0,
             stdout=b"PHASE8_RESULT\x00" + responses.pop(0),
@@ -1817,13 +1708,11 @@ def test_progress_review_has_one_attempt_after_initial_protocol_repair() -> None
         environ={},
     )
 
-    with pytest.raises(InvalidModelProposal) as captured:
-        adapter.complete_audited(request)
-
-    assert type(captured.value) is InvalidModelProposal
-    assert str(captured.value) == "model proposal remained invalid after bounded attempts"
-    assert responses == []
-    assert review_flags == [False, False, True]
+    turn = adapter.complete_audited(request)
+    assert turn.proposal.reply_chunks == ("I am ready to help.",)
+    assert len(turn.frames) == 2
+    assert responses == [b"{}"]
+    assert review_flags == [False, False]
 
 
 def _versioned_proposal_payload(
@@ -1866,10 +1755,9 @@ def _versioned_proposal_payload(
 
 
 @pytest.mark.parametrize("legacy_schema_version", range(1, 7))
-def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v8(
+def test_normal_protocol_rejects_each_legacy_schema_and_repairs_with_v8(
     legacy_schema_version: int,
 ) -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
     request = ModelRequest(
         request_id=f"request:correction-legacy-v{legacy_schema_version}",
         lead_id=f"manychat:correction-legacy-v{legacy_schema_version}",
@@ -1877,7 +1765,7 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v8(
         message="Corrija a resposta mantendo a autoria da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
+
     )
     legacy = _versioned_proposal_payload(
         legacy_schema_version,
@@ -1927,15 +1815,12 @@ def test_public_reply_correction_rejects_each_legacy_schema_and_repairs_with_v8(
     assert turn.proposal.effect_proposals == ()
     assert seen[0][1] == seen[1][1]
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
-    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["typed_clarification_mismatch"],
-        ["typed_clarification_mismatch"],
-    ]
+    assert all("public_reply_correction_reasons" not in current for _, current in seen)
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
 
 
 @pytest.mark.parametrize("legacy_schema_version", range(1, 7))
@@ -1995,10 +1880,9 @@ def test_ordinary_request_rejects_each_legacy_schema_and_repairs_with_v8(
     assert turn.proposal.facts == (ModelFact("service", "activity"),)
 
 
-def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
+def test_normal_protocol_rejects_two_legacy_frames_and_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
     request = ModelRequest(
         request_id="request:correction-two-legacy-frames",
         lead_id="manychat:correction-two-legacy-frames",
@@ -2006,7 +1890,7 @@ def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
         message="Corrija a resposta sem substituir a voz da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
+
     )
     legacy_frames = [
         _versioned_proposal_payload(
@@ -2078,19 +1962,15 @@ def test_public_reply_correction_rejects_two_legacy_frames_and_fails_closed(
     assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
     assert seen[0][1] == seen[1][1]
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
-    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["typed_clarification_mismatch"],
-        ["typed_clarification_mismatch"],
-    ]
+    assert all("public_reply_correction_reasons" not in current for _, current in seen)
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
 
 
-def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
+def test_normal_protocol_has_one_protocol_repair_and_no_nested_review() -> None:
     request = ModelRequest(
         request_id="request:bounded-public-reply-correction",
         lead_id="manychat:bounded-public-reply-correction",
@@ -2098,7 +1978,7 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
         message="Continue o atendimento com a pergunta tipada correta.",
         locale="pt-BR",
         state_version=5,
-        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
+
     )
     repaired = _v8_bytes(
         reply_chunks=["Posso continuar com a pergunta tipada correta."]
@@ -2127,7 +2007,6 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
 
     turn = adapter.complete_audited(request)
 
-    correction_suffix = hermes_model_module._PUBLIC_REPLY_CORRECTION_SUFFIX
     assert len(seen) == 2
     assert len(turn.frames) == 2
     assert turn.proposal.reply_chunks == (
@@ -2135,21 +2014,17 @@ def test_public_reply_correction_has_one_protocol_repair_and_no_nested_review() 
     )
     assert _PROTOCOL_REPAIR_SUFFIX not in seen[0][0]
     assert _PROTOCOL_REPAIR_SUFFIX in seen[1][0]
-    assert all(prompt.endswith(correction_suffix) for prompt, _ in seen)
+    assert all("PUBLIC REPLY CORRECTION" not in prompt for prompt, _ in seen)
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
-    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["typed_clarification_mismatch"],
-        ["typed_clarification_mismatch"],
-    ]
+    assert all("public_reply_correction_reasons" not in current for _, current in seen)
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
 
 
-def test_public_reply_correction_repairs_recursive_read_after_observation() -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
+def test_normal_protocol_repairs_recursive_read_after_observation() -> None:
     repeated_read = ReadRequest(
         request_id="read:child-correction-repeat",
         kind=ReadKind.ACTIVITY_DESCRIPTION,
@@ -2176,9 +2051,7 @@ def test_public_reply_correction_repairs_recursive_read_after_observation() -> N
                 private_binding_hash="a" * 64,
             ),
         ),
-        public_reply_correction_reasons=(
-            reason_type.RECURSIVE_READ_AFTER_OBSERVATION,
-        ),
+
     )
 
     def payload(
@@ -2245,19 +2118,15 @@ def test_public_reply_correction_repairs_recursive_read_after_observation() -> N
     assert turn.proposal.reply_chunks == repaired_chunks
     assert turn.proposal.read_requests == ()
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
-    assert [current["public_reply_correction_reasons"] for _, current in seen] == [
-        ["recursive_read_after_observation"],
-        ["recursive_read_after_observation"],
-    ]
+    assert all("public_reply_correction_reasons" not in current for _, current in seen)
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
 
 
-def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None:
-    reason_type = model_contracts.PublicReplyCorrectionReason
+def test_normal_protocol_fails_closed_after_two_invalid_frames() -> None:
     request = ModelRequest(
         request_id="request:child-correction-invalid-frames",
         lead_id="manychat:child-correction-invalid-frames",
@@ -2265,7 +2134,7 @@ def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None
         message="Corrija a resposta sem substituir a voz da Maya.",
         locale="pt-BR",
         state_version=6,
-        public_reply_correction_reasons=(reason_type.TYPED_CLARIFICATION_MISMATCH,),
+
     )
     responses = [b"{}", b"{}"]
     seen: list[tuple[str, dict[str, object]]] = []
@@ -2303,10 +2172,10 @@ def test_public_reply_correction_fails_closed_after_two_invalid_frames() -> None
     assert [_PROTOCOL_REPAIR_SUFFIX in prompt for prompt, _ in seen] == [False, True]
     assert [current["request_id"] for _, current in seen] == [request.request_id] * 2
     for _, current in seen:
-        assert current["progress_review_required"] is False
-        assert current["confirmation_review_required"] is False
-        assert current["selection_review_required"] is False
-        assert current["recap_reuse_required"] is False
+        assert "progress_review_required" not in current
+        assert "confirmation_review_required" not in current
+        assert "selection_review_required" not in current
+        assert "recap_reuse_required" not in current
     assert published is None or (
         not published.closure.ephemeral_session_id.startswith("deterministic:")
         and all(

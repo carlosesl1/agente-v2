@@ -8,23 +8,22 @@ from types import SimpleNamespace
 
 from scripts.validate_contextual_confirmation_model import CASES, run_validation
 from v2_adapters.hermes_model import (
-    _CONFIRMATION_REVIEW_SYSTEM_PROMPT,
-    _confirmation_proposal,
     HermesModelAdapter,
+    _v8_proposal,
 )
 
 
 def test_parent_binding_never_classifies_message_text_or_uses_lexical_triggers() -> None:
-    source = inspect.getsource(_confirmation_proposal)
-    prompt = " ".join(_CONFIRMATION_REVIEW_SYSTEM_PROMPT.split())
+    source = inspect.getsource(_v8_proposal)
+    prompt = (Path(__file__).resolve().parents[1] / "config" / "v2_terra_system_prompt.txt").read_text()
 
     assert "request.message" not in source
     assert "casefold" not in source
     assert "re." not in source
     assert "Sim, confirmo exatamente esse resumo" not in prompt
     assert "Confirmed. Please book exactly that summary" not in prompt
-    assert "Judge the complete message semantically in context" in prompt
-    assert "never decide from a word, token, emoji" in prompt
+    assert "única responsável pela interpretação semântica" in prompt
+    assert "o pai não usa palavras-chave ou regex" in prompt
 
 
 def test_sandbox_validator_checks_typed_semantics_without_printing_messages() -> None:
@@ -87,10 +86,10 @@ def test_sandbox_validator_checks_typed_semantics_without_printing_messages() ->
         assert case.message not in serialized_report
         assert case.summary not in serialized_report
     for wire in captured_inputs:
-        serialized = wire.decode()
+        serialized = json.loads(wire)["messages"][-1][1]
         assert "provider_ref" not in serialized
         assert "subject_signature" not in serialized
-        assert "private_customer" not in serialized
+        assert "private_customer_fact_names" not in serialized
         assert "offer:" not in serialized
 
 

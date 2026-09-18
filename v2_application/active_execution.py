@@ -14,15 +14,15 @@ from reservation_domain import (
 )
 from reservation_execution import LedgerStatus
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
-from v2_contracts.model import ModelProposal
+from v2_application.lead_identity import payment_id_for_command
 from v2_contracts.execution_context import (
-    ExecutionContext,
-    ExecutionComponentContext,
-    ExecutedOffer,
     ComponentOutcome,
+    ExecutedOffer,
+    ExecutionComponentContext,
+    ExecutionContext,
     PaymentSettlementContext,
 )
-from v2_application.lead_identity import payment_id_for_command
+from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -268,37 +268,6 @@ def blocks_active_commercial_progression(
         or proposal.selection_requested
         or proposal.effect_proposals
     )
-
-
-def is_regressive_post_command_reply(
-    state: BoundaryState,
-    proposal: ModelProposal,
-    *,
-    execution_status: str | None = None,
-) -> bool:
-    """Ground a regressive model output while the same command is active.
-
-    This is status-only: it cannot authorize, enqueue, select, or read anything. It
-    validates only the structured model proposal and never interprets customer text.
-    """
-
-    if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
-        raise TypeError("post-command reply guard requires exact V2 contracts")
-    status = execution_status or active_execution_status(state)
-    if status not in {"queued", "executing"}:
-        return False
-    if (
-        proposal.intent != "inform"
-        or proposal.facts
-        or proposal.read_requests
-        or proposal.effect_proposals
-        or proposal.target_offer_id is not None
-        or proposal.target_offer_ids
-        or proposal.selection_requested
-        or proposal.passengers
-    ):
-        return False
-    return proposal.clarification_question is not None
 
 
 def _request_matches_active_draft(

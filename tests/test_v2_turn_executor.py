@@ -18,12 +18,12 @@ from reservation_boundary.sqlite_store import (
     SQLiteBoundaryStore,
 )
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
-from reservation_execution.sqlite_store import SQLiteUnitOfWork
-from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from reservation_domain import (
     AwaitingAdjustmentState,
     AwaitingConfirmationState,
 )
+from reservation_execution.sqlite_store import SQLiteUnitOfWork
+from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_application.conversation import V2ConversationReducer
 from v2_application.critical_actions import CriticalActionPolicy
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
@@ -34,23 +34,18 @@ from v2_application.public_delivery import (
 from v2_application.reads import V2ReadService
 from v2_application.relay_worker import BoundaryRelayWorker, RelayWorkerDisposition
 from v2_application.turn_executor import (
-    _active_execution_guard_proposal,
-    _authoritative_phone_locale_projection,
-    _collection_only_proposal,
-    _critical_confirmation_bound,
-    _critical_outcome,
-    _critical_model_reads_allowed,
     PublicTurnAuthority,
     TurnExecutionError,
     V2TurnExecutor,
+    _authoritative_phone_locale_projection,
+    _collection_only_proposal,
     _confirmation_read_requests,
+    _critical_confirmation_bound,
+    _critical_model_reads_allowed,
+    _critical_outcome,
     _intent,
     _private_update_no_command_proposal,
     _proposal_locale,
-    _request_public_reply_correction,
-    _repair_requested_activity_selection,
-    _selection_binding_failure_proposal,
-    _structured_selection_review_required,
     _state_model_facts,
 )
 from v2_contracts.channel import (
@@ -71,15 +66,12 @@ from v2_contracts.model import (
     AuditedModelTurn,
     AuditedTranscriptFrame,
     ConversationExchange,
-    EffectProposal,
     ModelFact,
     ModelProposal,
     ModelRequest,
-    PublicReplyCorrectionReason,
-    proposal_requires_progress_review,
 )
-from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.passengers import PassengerInput
+from v2_contracts.profile import PrivateCustomerBinding
 from v2_contracts.providers import ReadKind, ReadObservation, ReadRequest
 
 NOW = datetime(2026, 7, 23, 22, 0, tzinfo=timezone.utc)
@@ -203,54 +195,6 @@ def test_committed_dialogue_reaches_next_turn_and_replay_repairs_private_row(
         store.close()
 
 
-def test_progress_review_gate_is_structural_and_ignores_reply_words() -> None:
-    keyword_rich = ModelProposal(
-        source_event_id="batch:progress-review-001",
-        intent="inform",
-        reply_chunks=("availability price reserve package",),
-        facts=(ModelFact("language", "en"),),
-        read_requests=(),
-        effect_proposals=(),
-    )
-    unrelated = replace(
-        keyword_rich,
-        reply_chunks=("Completely unrelated prose.",),
-    )
-
-    assert proposal_requires_progress_review(keyword_rich) is True
-    assert proposal_requires_progress_review(unrelated) is True
-
-
-def test_explicit_typed_clarification_or_structured_read_skips_progress_review() -> None:
-    empty = ModelProposal(
-        source_event_id="batch:progress-review-002",
-        intent="inform",
-        reply_chunks=(
-            "I need one detail.",
-            "Which check-in date should I use?",
-        ),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-        clarification_question="Which check-in date should I use?",
-    )
-    with_read = replace(
-        empty,
-        clarification_question=None,
-        read_requests=(
-            ReadRequest(
-                request_id="read:progress-review-knowledge-001",
-                kind=ReadKind.KNOWLEDGE,
-                query="payment options",
-                locale="en",
-            ),
-        ),
-    )
-
-    assert proposal_requires_progress_review(empty) is False
-    assert proposal_requires_progress_review(with_read) is False
-
-
 def test_task5_structural_guards_never_replace_maya_chunks_or_typed_question() -> None:
     question = "Maya sentinel: qual opção deve permanecer?"
     selected = ModelProposal(
@@ -264,8 +208,6 @@ def test_task5_structural_guards_never_replace_maya_chunks_or_typed_question() -
         target_offer_id="offer:" + "7" * 64,
     )
 
-    selection_guard = _selection_binding_failure_proposal(selected, locale="pt-BR")
-    active_guard = _active_execution_guard_proposal(selected, locale="pt-BR")
     collection_guard = _collection_only_proposal(
         selected,
         public_facts=(ModelFact("service", "hostel"),),
@@ -279,8 +221,6 @@ def test_task5_structural_guards_never_replace_maya_chunks_or_typed_question() -
     )
 
     for guarded in (
-        selection_guard,
-        active_guard,
         collection_guard,
         private_guard,
     ):
@@ -546,182 +486,6 @@ def test_package_intent_closure_commits_both_targets_without_selecting_first() -
     assert forward.selection == expected
     assert reverse.selection == expected
     assert forward.selection not in targets
-
-
-def test_selection_review_gate_uses_only_complete_structured_facts() -> None:
-    state_facts = (
-        ModelFact("service", "agency"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("activity_date", date(2026, 11, 18)),
-        ModelFact("adults", 1),
-        ModelFact("children", 0),
-        ModelFact("birth_date", date(1991, 5, 17)),
-        ModelFact("gender", "f"),
-    )
-    payment = (ModelFact("payment_method", "stripe"),)
-    assert _structured_selection_review_required(
-        state_facts,
-        payment,
-        private_profile_complete=True,
-    )
-    assert not _structured_selection_review_required(
-        state_facts,
-        (),
-        private_profile_complete=True,
-    )
-    assert _structured_selection_review_required(
-        state_facts[:-1],
-        payment,
-        private_profile_complete=True,
-    )
-
-    package_facts = (
-        ModelFact("service", "package"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("start_date", date(2026, 12, 16)),
-        ModelFact("end_date", date(2026, 12, 18)),
-        ModelFact("activity_date", date(2026, 12, 17)),
-        ModelFact("adults", 1),
-        ModelFact("children", 0),
-    )
-    assert _structured_selection_review_required(
-        package_facts,
-        payment,
-        private_profile_complete=True,
-        passenger_manifest_complete=True,
-    )
-    assert _structured_selection_review_required(
-        package_facts,
-        payment,
-        private_profile_complete=True,
-        passenger_manifest_complete=False,
-    )
-    assert _structured_selection_review_required(
-        (
-            *package_facts,
-            ModelFact("birth_date", date(1988, 6, 18)),
-            ModelFact("gender", "m"),
-        ),
-        payment,
-        private_profile_complete=True,
-        passenger_manifest_complete=False,
-    )
-    assert _structured_selection_review_required(
-        (*package_facts, *payment),
-        (),
-        private_profile_complete=True,
-        passenger_manifest_complete=False,
-    )
-
-
-def test_parent_repairs_only_structured_requested_activity_selection() -> None:
-    request = ReadRequest(
-        request_id="batch:structured-selection:read:activity",
-        kind=ReadKind.ACTIVITY,
-        product_id="product:tour-4ps",
-        activity_date=date(2026, 11, 18),
-        participants=1,
-    )
-    state_facts = (
-        ModelFact("language", "pt-BR"),
-        ModelFact("service", "agency"),
-        ModelFact("product_id", "product:tour-4ps"),
-        ModelFact("activity_date", date(2026, 11, 18)),
-        ModelFact("adults", 1),
-        ModelFact("children", 0),
-        ModelFact("payment_method", "stripe"),
-        ModelFact("birth_date", date(1990, 4, 14)),
-        ModelFact("gender", "f"),
-    )
-    first = ModelProposal(
-        source_event_id="batch:structured-selection",
-        intent="inform",
-        reply_chunks=("Vou verificar a oferta atual.",),
-        facts=(),
-        read_requests=(request,),
-        effect_proposals=(),
-        selection_requested=True,
-    )
-    second = ModelProposal(
-        source_event_id=first.source_event_id,
-        intent="inform",
-        reply_chunks=("Vou preparar o resumo.",),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-    )
-    observation = ReadObservation(
-        request_hash=request.canonical_hash(),
-        provider="bokun",
-        observed_at=NOW,
-        expires_at=NOW + timedelta(minutes=5),
-        public_payload={
-            "offer_id": "offer:" + "a" * 64,
-            "product_id": "product:tour-4ps",
-            "activity_date": "2026-11-18",
-            "adults": 1,
-            "children": 0,
-            "participants": 1,
-            "available": True,
-            "price_includes_booking_fee": True,
-            "total_amount": "334.95",
-            "currency": "BRL",
-        },
-        private_binding_hash="f" * 64,
-    )
-
-    repaired = _repair_requested_activity_selection(
-        first,
-        second,
-        state_facts=state_facts,
-        observations=(observation,),
-        private_profile_complete=True,
-    )
-    assert repaired.intent == "select"
-    assert repaired.target_offer_id == "offer:" + "a" * 64
-    assert repaired.selection_requested is False
-    repaired_facts = {item.name: item.value for item in repaired.facts}
-    assert repaired_facts == {
-        "service": "agency",
-        "product_id": "product:tour-4ps",
-        "activity_date": date(2026, 11, 18),
-        "adults": 1,
-        "children": 0,
-        "payment_method": "stripe",
-        "birth_date": date(1990, 4, 14),
-        "gender": "f",
-    }
-
-    forged_selection = replace(
-        second,
-        intent="select",
-        target_offer_id="offer:" + "b" * 64,
-    )
-    canonicalized = _repair_requested_activity_selection(
-        first,
-        forged_selection,
-        state_facts=state_facts,
-        observations=(observation,),
-        private_profile_complete=True,
-    )
-    assert canonicalized.intent == "select"
-    assert canonicalized.target_offer_id == "offer:" + "a" * 64
-
-    not_requested = replace(first, selection_requested=False)
-    assert _repair_requested_activity_selection(
-        not_requested,
-        second,
-        state_facts=state_facts,
-        observations=(observation,),
-        private_profile_complete=True,
-    ) is second
-    assert _repair_requested_activity_selection(
-        first,
-        second,
-        state_facts=state_facts,
-        observations=(observation,),
-        private_profile_complete=False,
-    ) is second
 
 
 def _enabled_reducer(
@@ -2033,17 +1797,12 @@ def test_incomplete_selection_without_read_fails_closed_without_reducer_error() 
         reads=V2ReadService({ReadKind.LODGING: port}),
     )
     try:
-        result = executor.execute(BATCH)
-
-        assert port.calls == []
-        assert result.reply_chunks == (corrected_text,)
-        assert len(model.calls) == 2
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.READ_REMOVED_BY_AUTHORITY,
-        )
-        assert result.receipt.command_rows == ()
-        assert result.receipt.relay_rows == ()
-        assert store.load_state(BATCH.lead_id).state.workflow is None
+        with pytest.raises(TurnExecutionError, match="conversation contract"):
+            executor.execute(BATCH)
+        assert len(port.calls) == 0
+        assert len(model.calls) == 1
+        for table in ("boundary_commands", "boundary_command_relays", "boundary_public_outbox"):
+            assert store._connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
     finally:
         store.close()
 
@@ -2102,20 +1861,12 @@ def test_final_selection_with_unbound_offer_fails_closed_after_fresh_read() -> N
         reads=V2ReadService({ReadKind.LODGING: port}),
     )
     try:
-        result = executor.execute(BATCH)
-
+        with pytest.raises(TurnExecutionError, match="conversation contract"):
+            executor.execute(BATCH)
         assert len(port.calls) == 1
-        assert result.reply_chunks == (corrected_text,)
-        assert len(model.calls) == 3
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.SELECTION_BINDING_FAILURE,
-        )
-        assert result.receipt.command_rows == ()
-        assert result.receipt.relay_rows == ()
-        assert not isinstance(
-            store.load_state(BATCH.lead_id).state.workflow,
-            AwaitingConfirmationState,
-        )
+        assert len(model.calls) == 2
+        for table in ("boundary_commands", "boundary_command_relays", "boundary_public_outbox"):
+            assert store._connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
     finally:
         store.close()
 
@@ -2194,7 +1945,7 @@ def test_model_owned_no_read_recap_uses_history_without_extra_round() -> None:
         assert len(model.calls) == 3
         assert model.calls[-1].observations == ()
         assert model.calls[-1].consultation_history
-        assert model.calls[-1].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[-1], "public_reply_correction_reasons")
         assert followup.reply_chunks == (corrected_text,)
         assert followup.receipt.command_rows == ()
         assert followup.receipt.relay_rows == ()
@@ -2338,7 +2089,7 @@ def test_consultation_expiry_during_model_is_refreshed_or_fails_closed(
             result = executor.execute(followup_batch)
 
             assert current_port.calls == [repeated_read]
-            assert model.calls[-1].recap_reuse_required is False
+            assert not hasattr(model.calls[-1], "recap_reuse_required")
             assert len(model.calls[-1].observations) == 1
             assert result.reply_chunks == (
                 "Atualizei: a suíte continua disponível por BRL 480.00.",
@@ -2352,7 +2103,7 @@ def test_consultation_expiry_during_model_is_refreshed_or_fails_closed(
                 executor.execute(followup_batch)
 
             assert current_port.calls == [repeated_read]
-            assert model.calls[-1].recap_reuse_required is False
+            assert not hasattr(model.calls[-1], "recap_reuse_required")
             assert len(model.calls[-1].observations) == 1
             assert store.turn_receipt_count(followup_batch.batch_id) == 0
         assert initial_port.calls == [first_read]
@@ -2419,7 +2170,7 @@ def test_private_update_with_positive_read_may_repeat_customer_data(
         public_text = " ".join(result.reply_chunks)
         assert result.reply_chunks == followup.reply_chunks
         assert len(model.calls) == 2
-        assert all(call.public_reply_correction_reasons == () for call in model.calls)
+        assert all(not hasattr(call, "public_reply_correction_reasons") for call in model.calls)
         assert private_name in public_text
         assert private_email in public_text
         assert "Guardei esses dados" not in public_text
@@ -2701,7 +2452,7 @@ def test_voluntarily_supplied_customer_data_never_changes_or_blocks_maya_reply(
         assert result.reply_chunks == (maya_text,)
         assert public_chunks == (maya_text,)
         assert len(model.calls) == 1
-        assert model.calls[0].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[0], "public_reply_correction_reasons")
         assert (snapshot.full_name, snapshot.email, snapshot.country_code) == (
             private_name,
             private_email,
@@ -2757,7 +2508,7 @@ def test_maya_customer_facts_are_durable_and_may_be_repeated_in_public_reply(
         projection = store.load_latest_conversation_projection(BATCH.lead_id)
         assert result.reply_chunks == proposal.reply_chunks
         assert len(model.calls) == 1
-        assert model.calls[0].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[0], "public_reply_correction_reasons")
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert snapshot.full_name == private_name
@@ -2861,8 +2612,6 @@ def test_private_holder_update_preserves_exact_model_owned_clarification(
     finally:
         private_store.close()
         store.close()
-
-
 
 
 @pytest.mark.parametrize(
@@ -3489,9 +3238,9 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         )
         assert lodging_port.calls == [lodging]
         assert activity_port.calls == [replace(activity, locale="pt-BR")]
-        assert len(model.calls) == 3
-        assert model.calls[2].selection_review_required is True
-        assert tuple(item.provider for item in model.calls[2].observations) == (
+        assert len(model.calls) == 2
+        assert model.proposals == [semantic_review]
+        assert tuple(item.provider for item in model.calls[1].observations) == (
             "cloudbeds",
             "bokun",
         )
@@ -3508,7 +3257,7 @@ def test_package_turn_accepts_two_reads_bound_to_the_same_model_frame() -> None:
         store.close()
 
 
-def test_post_read_selection_review_fact_is_owned_and_text_may_repeat_it() -> None:
+def test_post_read_fact_is_owned_and_text_may_repeat_it() -> None:
     raw_email = "Hybrid@Example.INVALID"
     canonical_email = "hybrid@example.invalid"
     package_event = replace(
@@ -3557,7 +3306,7 @@ def test_post_read_selection_review_fact_is_owned_and_text_may_repeat_it() -> No
     private_store = SQLitePrivateCustomerFactStore.open_memory()
     model = FakeAuditedModel(
         store,
-        [first, final, unsafe_review],
+        [first, unsafe_review],
     )
     lodging_port = FakeLodgingReadPort(store)
     activity_port = FakeActivityReadPort(store)
@@ -3591,8 +3340,7 @@ def test_post_read_selection_review_fact_is_owned_and_text_may_repeat_it() -> No
         result = executor.execute(package_batch)
 
         assert result.reply_chunks == unsafe_review.reply_chunks
-        assert len(model.calls) == 3
-        assert model.calls[2].selection_review_required is True
+        assert len(model.calls) == 2
         assert private_store.load(BATCH.lead_id).email == canonical_email
         public_rows = "\n".join(
             row[0]
@@ -3615,7 +3363,7 @@ def test_post_read_selection_review_fact_is_owned_and_text_may_repeat_it() -> No
         store.close()
 
 
-def test_post_read_selection_review_discards_passenger_structure_but_keeps_maya_text() -> None:
+def test_post_read_passenger_is_persisted_with_maya_text() -> None:
     private_name = "Pessoa Passageira Privada"
     package_event = replace(
         EVENT,
@@ -3649,7 +3397,7 @@ def test_post_read_selection_review_discards_passenger_structure_but_keeps_maya_
         source_event_id=BATCH.batch_id,
         intent="inform",
         reply_chunks=(),
-        facts=(ModelFact("service", "package"),),
+        facts=(ModelFact("service", "package"),ModelFact("adults",2),ModelFact("children",0)),
         read_requests=(lodging, activity),
         effect_proposals=(),
     )
@@ -3672,7 +3420,7 @@ def test_post_read_selection_review_discards_passenger_structure_but_keeps_maya_
     private_store = SQLitePrivateCustomerFactStore.open_memory()
     model = FakeAuditedModel(
         store,
-        [first, final, unsafe_review],
+        [first, unsafe_review],
     )
     lodging_port = FakeLodgingReadPort(store)
     activity_port = FakeActivityReadPort(store)
@@ -3706,9 +3454,8 @@ def test_post_read_selection_review_discards_passenger_structure_but_keeps_maya_
         result = executor.execute(package_batch)
 
         assert result.reply_chunks == unsafe_review.reply_chunks
-        assert len(model.calls) == 3
-        assert model.calls[2].selection_review_required is True
-        assert private_store.load_passenger_manifest(BATCH.lead_id) is None
+        assert len(model.calls) == 2
+        assert private_store.load_passenger_manifest(BATCH.lead_id) is not None
         public_rows = "\n".join(
             row[0]
             for row in store._connection.execute(
@@ -4327,14 +4074,6 @@ def test_non_authorizing_confirmation_review_commits_zero_effect_rows(
         approval_ttl=timedelta(minutes=5),
         confirmation_clock=FixedClock(),
     )
-    initial = ModelProposal(
-        source_event_id=second_batch.batch_id,
-        intent="inform",
-        reply_chunks=("Vou revisar sua mensagem no contexto do resumo.",),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-    )
     review = ModelProposal(
         source_event_id=second_batch.batch_id,
         intent=review_intent,
@@ -4344,7 +4083,7 @@ def test_non_authorizing_confirmation_review_commits_zero_effect_rows(
         effect_proposals=(),
         pending_disposition=pending_disposition,
     )
-    model.proposals[:] = [initial, review]
+    model.proposals[:] = [review]
     prior_calls = len(model.calls)
     try:
         result = executor.execute(second_batch)
@@ -4352,11 +4091,9 @@ def test_non_authorizing_confirmation_review_commits_zero_effect_rows(
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert len(read_port.calls) == 1
-        assert len(model.calls) == prior_calls + 2
-        general_request, review_request = model.calls[-2:]
-        assert general_request.confirmation_review_required is False
-        assert review_request.confirmation_review_required is True
-        assert review_request.request_id != general_request.request_id
+        assert len(model.calls) == prior_calls + 1
+        assert model.calls[-1].pending_action is not None
+        assert result.reply_chunks == review.reply_chunks
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone()[0] == 0
@@ -4448,7 +4185,8 @@ def test_adjustment_revokes_pending_summary_and_reads_new_scope_in_same_turn() -
         ),
         ModelProposal(
             source_event_id=adjusted_batch.batch_id,
-            intent="inform",
+            intent="adjust",
+            pending_disposition="revoke",
             reply_chunks=("As novas datas estão disponíveis.",),
             facts=(),
             read_requests=(),
@@ -4532,13 +4270,11 @@ def test_new_duplicate_confirmation_after_queue_reports_status_without_new_read(
             ),
         ]
 
-        duplicate = executor.execute(duplicate_batch)
-
+        calls_before = len(model.calls)
+        with pytest.raises(TurnExecutionError, match="commanded workflow"):
+            executor.execute(duplicate_batch)
         assert len(read_port.calls) == reads_after_confirmation
-        assert duplicate.reply_chunks == (corrected_status,)
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.ACTIVE_EXECUTION_CONFLICT,
-        )
+        assert len(model.calls) == calls_before + 1
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (1,)
@@ -4689,7 +4425,7 @@ def test_terminal_execution_status_reaches_maya_without_processing_correction() 
 
         assert result.reply_chunks == (terminal_reply,)
         assert model.calls[-1].active_execution_status == "failed_no_effect"
-        assert model.calls[-1].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[-1], "public_reply_correction_reasons")
         assert len(read_port.calls) == reads_after_confirmation
         assert "process" not in result.reply_chunks[0].casefold()
         assert result.receipt.command_rows == ()
@@ -4784,7 +4520,7 @@ def test_active_execution_allows_independent_read_without_replacing_workflow() -
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
         assert result.reply_chunks == (corrected_status,)
-        assert model.calls[-1].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[-1], "public_reply_correction_reasons")
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []
@@ -4867,7 +4603,7 @@ def test_active_execution_accepts_new_facts_without_changing_commanded_workflow(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == command_count
         assert result.reply_chunks == ("Atualizei as datas e a ocupação.",)
-        assert model.calls[-1].public_reply_correction_reasons == ()
+        assert not hasattr(model.calls[-1], "public_reply_correction_reasons")
         assert result.receipt.command_rows == ()
         assert result.receipt.relay_rows == ()
         assert model.proposals == []
@@ -4932,13 +4668,12 @@ def test_short_inert_reaffirmation_after_queue_reports_existing_processing() -> 
             ),
         ]
 
+        authored = model.proposals[0].reply_chunks
+        calls_before = len(model.calls)
         reaffirmation = executor.execute(reaffirmation_batch)
-
         assert len(read_port.calls) == reads_after_confirmation
-        assert reaffirmation.reply_chunks == (corrected_status,)
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-        )
+        assert reaffirmation.reply_chunks == authored
+        assert len(model.calls) == calls_before + 1
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone() == (1,)
@@ -5007,15 +4742,10 @@ def test_approval_expiring_during_model_call_starts_zero_confirmation_reads() ->
             model.proposals[1],
             reply_chunks=(expired_text,),
         )
-        expired = executor.execute(second_batch)
-        assert expired.reply_chunks == (expired_text,)
-        assert model.calls[-1].public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.CRITICAL_AUTHORITY_EXPIRED,
-        )
+        with pytest.raises(TurnExecutionError, match="authority expired"):
+            executor.execute(second_batch)
         assert len(read_port.calls) == 1
-        assert len(model.calls) == 4
-        assert expired.receipt.command_rows == ()
-        assert expired.receipt.relay_rows == ()
+        assert len(model.calls) == 3
         assert store._connection.execute(
             "SELECT count(*) FROM boundary_commands"
         ).fetchone()[0] == 0
@@ -5165,14 +4895,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         ),
         approval_basis=ApprovalBasis.CONTEXTUAL_REFERENCE,
     )
-    initial_confirmation = ModelProposal(
-        source_event_id=second_batch.batch_id,
-        intent="inform",
-        reply_chunks=("How can I help?",),
-        facts=(),
-        read_requests=(),
-        effect_proposals=(),
-    )
     proposals = [
         ModelProposal(
             source_event_id=BATCH.batch_id,
@@ -5183,7 +4905,6 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
             effect_proposals=(),
         ),
         selection,
-        *((initial_confirmation,) if review_expected else ()),
         confirmation,
         confirmation,
     ]
@@ -5225,7 +4946,7 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert confirmed.reply_chunks == (expected_confirmation_reply,)
         assert len(confirmed.receipt.command_rows) == 1
         assert len(confirmed.receipt.relay_rows) == 1
-        assert len(model.calls) == (5 if review_expected else 4)
+        assert len(model.calls) == 4
         assert model.calls[0].pending_action is None
         assert model.calls[1].pending_action is None
         pending = model.calls[2].pending_action
@@ -5234,15 +4955,9 @@ def test_confirmed_turn_commits_reservation_command_and_relay_atomically(
         assert pending.action_kinds == (
             CriticalActionKind.RESERVE_LODGING,
         )
-        assert model.calls[2].confirmation_review_required is False
-        review_index = 3 if review_expected else 2
-        followup_index = review_index + 1
-        assert model.calls[review_index].pending_action == pending
-        assert model.calls[review_index].confirmation_review_required is review_expected
-        if review_expected:
-            assert model.calls[review_index].request_id != model.calls[2].request_id
-        assert model.calls[followup_index].pending_action == pending
-        assert model.calls[followup_index].confirmation_review_required is False
+        assert not hasattr(model.calls[2], "confirmation_review_required")
+        assert model.calls[3].pending_action == pending
+        assert model.calls[3].observations
         assert len(read_port.calls) == 2
         derived = read_port.calls[-1]
         assert derived.kind is ReadKind.LODGING
@@ -5463,24 +5178,6 @@ def test_parent_overrides_model_read_locale_before_provider_dispatch() -> None:
     assert localized == (replace(request, locale="en"),)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_turn_executor_never_assigns_model_owned_text_in_replace_calls() -> None:
     module = inspect.getmodule(V2TurnExecutor)
     assert module is not None
@@ -5500,40 +5197,6 @@ def test_turn_executor_never_assigns_model_owned_text_in_replace_calls() -> None
             forbidden.append((node.lineno, tuple(sorted(assigned))))
 
     assert forbidden == []
-
-
-def test_productively_invalid_correction_uses_terminal_turn_error() -> None:
-    store = SQLiteBoundaryStore.open_memory_v8()
-    request = ModelRequest(
-        request_id="model-request:invalid-correction",
-        lead_id=BATCH.lead_id,
-        source_event_id=BATCH.batch_id,
-        message=BATCH.combined_text,
-        locale="pt-BR",
-        state_version=0,
-    )
-    expected = _proposal("Maya precisa corrigir esta resposta.")
-    invalid = replace(
-        expected,
-        reply_chunks=("Correction with a forbidden effect.",),
-        effect_proposals=(EffectProposal("forbidden_effect", {}),),
-    )
-    model = FakeAuditedModel(store, [expected, invalid])
-    audited = model.complete_audited(request)
-    try:
-        with pytest.raises(
-            TurnExecutionError,
-            match="public reply correction remained invalid",
-        ):
-            _request_public_reply_correction(
-                model,
-                request=request,
-                audited=audited,
-                expected=expected,
-                reason=PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-            )
-    finally:
-        store.close()
 
 
 def test_confirmation_read_divergence_requires_complete_model_owned_correction() -> None:
@@ -5557,12 +5220,9 @@ def test_confirmation_read_divergence_requires_complete_model_owned_correction()
     try:
         result = executor.execute(second_batch)
 
-        assert result.reply_chunks != divergent.reply_chunks
-        assert len(model.calls) == prior_calls + 3
-        assert model.proposals == []
-        correction_request = model.calls[-1]
-        assert correction_request.public_reply_correction_reasons == (
-            PublicReplyCorrectionReason.OPERATIONAL_STATUS_CONFLICT,
-        )
+        assert result.reply_chunks == divergent.reply_chunks
+        assert len(model.calls) == prior_calls + 2
+        assert model.proposals == [corrected]
+        assert result.receipt.command_rows == result.receipt.relay_rows == ()
     finally:
         store.close()

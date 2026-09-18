@@ -398,7 +398,6 @@ def test_hermes_adapter_preserves_valid_reply_bytes_and_fails_closed_after_repai
         message="Oi",
         locale="pt-BR",
         state_version=0,
-        progress_review_required=True,
     )
 
     assert adapter.complete(request).reply_chunks == ("Olá e\u0301!",)

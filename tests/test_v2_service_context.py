@@ -1,8 +1,8 @@
 """Causal service-context regressions; local SQLite, no external effects."""
 
+import json
 from dataclasses import replace
 from datetime import date, timedelta
-import json
 
 import pytest
 
@@ -13,13 +13,13 @@ from reservation_boundary import (
     TypedFact,
 )
 from reservation_domain import Party
-from v2_adapters.hermes_model import _request_wire, _passenger
+from tests.test_v2_turn_executor import BATCH, NOW, FakeProfile, SQLiteBoundaryStore
+from v2_adapters.hermes_model import _passenger, _request_wire
 from v2_application.conversation import resolve_effective_customer
-from v2_application.passengers import merge_manifest, attach_projection_manifest
+from v2_application.passengers import attach_projection_manifest, merge_manifest
 from v2_application.private_customer_facts import SQLitePrivateCustomerFactStore
 from v2_contracts.model import ModelFact, ModelRequest
 from v2_contracts.passengers import PassengerInput
-from tests.test_v2_turn_executor import NOW, BATCH, FakeProfile, SQLiteBoundaryStore
 
 
 def _person(position=1, **kw):
@@ -333,6 +333,7 @@ def test_dialogue_budget_does_not_delete_persisted_turns(tmp_path):
 
 def test_phone_schema_migration_preserves_old_snapshot_and_journal(tmp_path):
     import sqlite3
+
     from v2_application.private_customer_facts import _EXPECTED_TABLE_SQL
 
     path = tmp_path / "legacy.sqlite3"
@@ -378,16 +379,16 @@ def test_phone_schema_migration_preserves_old_snapshot_and_journal(tmp_path):
 
 def test_eight_executor_turns_reuse_holder_values_and_original_dialogue(tmp_path):
     from tests.test_v2_turn_executor import (
-        EVENT,
         AUTHORITY,
+        EVENT,
         FakeAuditedModel,
-        FixedClock,
         FixedAuthority,
+        FixedClock,
         _enabled_reducer,
         _install_public_authority,
     )
-    from v2_application.turn_executor import V2TurnExecutor
     from v2_application.reads import V2ReadService
+    from v2_application.turn_executor import V2TurnExecutor
     from v2_contracts.channel import InboundBatch
     from v2_contracts.model import ModelProposal
 
@@ -487,9 +488,9 @@ def test_eight_executor_turns_reuse_holder_values_and_original_dialogue(tmp_path
     store.close()
 
 
-def test_confirmation_review_uses_same_customer_and_dialogue_context():
+def test_pending_action_uses_same_customer_and_dialogue_context():
     from tests.test_v2_hermes_model_adapter import _confirmation_review_request
-    from v2_adapters.hermes_model import _confirmation_review_wire
+    from v2_adapters.hermes_model import _request_wire
     from v2_contracts.model import ConversationExchange
 
     request = replace(
@@ -498,7 +499,7 @@ def test_confirmation_review_uses_same_customer_and_dialogue_context():
         passengers=(_person(1, is_holder=True),),
         recent_dialogue=(ConversationExchange("Sou a titular", ("Entendido",)),),
     )
-    wire = json.loads(_confirmation_review_wire(request, "Prompt"))
+    wire = json.loads(_request_wire(request, "Prompt"))
     user = json.loads(wire["messages"][-1][1])
     assert user["passengers"][0]["is_holder"] is True
     assert user["state_facts"] == [

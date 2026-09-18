@@ -203,12 +203,12 @@ def test_model_owns_dynamic_language_and_atomic_package_selection() -> None:
     assert "selecione atomicamente as duas `choice_ref`" in PROMPT
     assert "não copie `offer_id`" in PROMPT
     assert "não troque pela primeira opção mostrada" in PROMPT
-    assert "adjudicação semântica pós-consulta" in PROMPT
-    assert "não crie nem altere fatos" in PROMPT
-    assert "repita somente os fatos comerciais exatos exigidos" in PROMPT
+    assert "adjudicação semântica pós-consulta" not in PROMPT
+    assert "não crie nem altere fatos" not in PROMPT
+    assert "repita somente os fatos comerciais exatos exigidos" not in PROMPT
     assert "inclusive quando `service=package`" in PROMPT
-    assert "segunda interpretação semântica auditada" in PROMPT
-    assert "Primeiro extraia todo `birth_date`/`gender`" in PROMPT
+    assert "segunda interpretação semântica auditada" not in PROMPT
+    assert "Primeiro extraia todo `birth_date`/`gender`" not in PROMPT
 
 
 def test_healthy_adult_suitability_question_stays_in_automation() -> None:
@@ -243,13 +243,13 @@ def test_terra_prompt_requires_minimal_v8_with_parent_owned_authority() -> None:
     assert "O pai vincula a confirmação" in PROMPT
     assert "Não copie versão, tipos de ação, approval ou IDs" in PROMPT
     assert "Uma confirmação afirmativa curta é válida" in PROMPT
-    assert "`confirmation_review_required: bool`" in PROMPT
-    assert "`selection_review_required: bool`" in PROMPT
-    assert "`progress_review_required: bool`" in PROMPT
+    assert "`confirmation_review_required: bool`" not in PROMPT
+    assert "`selection_review_required: bool`" not in PROMPT
+    assert "`progress_review_required: bool`" not in PROMPT
     assert "pending_action_disposition" in PROMPT
     assert '"preserve"' in PROMPT
     assert '"revoke"' in PROMPT
-    assert "nunca devolva saudação genérica" in PROMPT
+    assert "nunca devolva saudação genérica" not in PROMPT
     for example in (
         "“Sim”",
         "“Pode reservar”",

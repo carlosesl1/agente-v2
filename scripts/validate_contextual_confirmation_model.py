@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Tool-free semantic gate for the narrow contextual-confirmation reviewer."""
+"""Tool-free qualification of confirmation in the normal Maya request path."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Final
 
 if __package__ in (None, ""):
@@ -169,7 +169,6 @@ def _request(case: ValidationCase) -> ModelRequest:
             public_summary=case.summary,
             expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
         ),
-        confirmation_review_required=True,
     )
 
 
@@ -268,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("command must be a non-empty exact string array")
         adapter = HermesModelAdapter(
             command=tuple(decoded),
-            system_prompt="unused by the narrow confirmation reviewer",
+            system_prompt=(Path(__file__).resolve().parents[1] / "config" / "v2_terra_system_prompt.txt").read_text(encoding="utf-8"),
             timeout=args.timeout,
             transcript_key=hashlib.sha256(
                 b"v2-contextual-confirmation-sandbox-validation-v1"

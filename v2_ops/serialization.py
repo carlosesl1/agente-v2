@@ -10,8 +10,7 @@ from reservation_boundary.public_dispatch import (
     PublicDispatchClaim,
 )
 from v2_contracts.channel import InboundBatch, InboundEvent, PublicChannelAcceptance
-from v2_contracts.model import PRIVATE_CUSTOMER_FACT_ORDER
-from v2_contracts.model import ModelProposal, ModelRequest
+from v2_contracts.model import PRIVATE_CUSTOMER_FACT_ORDER, ModelProposal, ModelRequest
 from v2_contracts.payments import (
     PaymentInstruction,
     PaymentSelection,
@@ -25,7 +24,6 @@ from v2_contracts.providers import (
     ReadRequest,
 )
 from v2_ops.contracts import FrozenJSONValue, validate_closed_json
-
 
 SerializedPair: TypeAlias = tuple[dict[str, FrozenJSONValue], dict[str, FrozenJSONValue]]
 
@@ -147,12 +145,7 @@ def _serialize_model_request(value: ModelRequest) -> SerializedPair:
             ],
             "private_profile_complete": value.private_profile_complete,
             "handoff_status": value.handoff_status,
-            "confirmation_review_required": value.confirmation_review_required,
-            "selection_review_required": value.selection_review_required,
-            "progress_review_required": value.progress_review_required,
             "active_execution_status": value.active_execution_status,
-            "recap_reuse_required": value.recap_reuse_required,
-            "correction_reason_count": len(value.public_reply_correction_reasons),
         }
     )
 

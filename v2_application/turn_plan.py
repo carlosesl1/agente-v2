@@ -33,29 +33,6 @@ def preserve_initial_facts(
     )
 
 
-def preserve_initial_adjustment(
-    initial: ModelProposal,
-    observation_frame: ModelProposal,
-) -> ModelProposal:
-    """Let the observation frame phrase an adjustment without changing its disposition."""
-
-    if type(initial) is not ModelProposal or type(observation_frame) is not ModelProposal:
-        raise TypeError("turn plan requires exact ModelProposal values")
-    if initial.intent != "adjust":
-        return observation_frame
-    return replace(
-        observation_frame,
-        intent="adjust",
-        target_offer_id=None,
-        target_offer_ids=(),
-        confirmed_summary_version=None,
-        confirmed_action_kinds=(),
-        approval_basis=None,
-        selection_requested=False,
-        pending_disposition=initial.pending_disposition or "revoke",
-    )
-
-
 def _adjustment_read_id(source_event_id: str, kind: ReadKind) -> str:
     material = f"{source_event_id}\0{kind.value}".encode("utf-8")
     return "adjust-read:" + hashlib.sha256(material).hexdigest()[:32]
@@ -120,43 +97,15 @@ def _commercial_requests(
     return tuple(requests)
 
 
-def normalize_initial_commercial_plan(
-    proposal: ModelProposal,
-) -> ModelProposal:
-    """Require model-owned reads and safely refresh model-owned selections.
-
-    Informational provider reads are semantic actions and must be present in the model
-    proposal. A typed ``select`` intent may still be converted into a current provider
-    refresh because an unobserved target is never execution authority.
-    """
-
+def derive_selection_reads(proposal: ModelProposal) -> tuple[ReadRequest, ...]:
+    """Refresh an explicit typed selection, never infer or rewrite the intent."""
     if type(proposal) is not ModelProposal:
         raise TypeError("commercial plan requires an exact ModelProposal")
     if proposal.read_requests or proposal.intent != "select":
-        return proposal
-
-    requests = _commercial_requests(
+        return ()
+    return _commercial_requests(
         source_event_id=proposal.source_event_id,
         values={item.name: item.value for item in proposal.facts},
-    )
-    if requests:
-        # A model-supplied target without current-turn evidence is not authority.
-        # Refresh first and ask the observation frame to bind a public offer.
-        return replace(
-            proposal,
-            intent="inform",
-            read_requests=requests,
-            target_offer_id=None,
-            target_offer_ids=(),
-            selection_requested=True,
-        )
-
-    return replace(
-        proposal,
-        intent="inform",
-        target_offer_id=None,
-        target_offer_ids=(),
-        selection_requested=False,
     )
 
 
