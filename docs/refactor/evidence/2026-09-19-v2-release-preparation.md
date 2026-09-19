@@ -37,4 +37,32 @@ Logs live outside Git under `/home/ubuntu/workspace/v2-simplificacao-atendimento
 
 ## Decision and remaining gate
 
-GO to build and exercise one local image of this candidate, with disposable state, no credentials and network denied. NO-GO for deployed readiness, real-model qualification, live ManyChat handoff or promotion based solely on this suite. No remote CI execution is claimed.
+Initial suite-only decision was GO to an offline image build, not deployment. The additional bounded image/model evidence below now closes local preparation; live channel qualification and production promotion remain NO-GO. No remote CI execution is claimed.
+
+## Immutable image and offline execution
+
+- Source: `a7864e23015e74821d082eaad6c48dd9097148cd`, tree `3e550c482f394c0a235c233f1af7bb75e1563928`.
+- Image: `sha256:7815b4880763015fd912e5787ad609cd36b1f889db4b623f8ac7f77c1096f630`. Built from `git archive` of that commit. Local image ID only; RepoDigests is empty, so this is not a registry digest/publication.
+- Authenticated 169 source/config bytes from the image; runtime imports rooted in `/app` in the same interpreter as pytest, no mounted runtime checkout/config.
+- `pip check`: passed. Image subset: **68 passed**, covering production composition, inbox reliability/migration, rejection continuity and blocking-error handoff. Test-only packaging constrained to the image's required `26.0`.
+- Ordinary API entrypoint started under UID 10001, rootfs read-only, no external network, no real credentials, disposable state and no host-published port. `/readyz` returned HTTP 200, role `api`, all real-effect gates false. This is API-only readiness, not productive worker/channel readiness.
+- Synthetic inbox compatibility: previous isolated-test image `sha256:f2ebda37b365afde8b290c4fe0a3bde2889750ed06b48aa1204be45549074aea` created state; candidate reopened/migrated and accepted another event; previous image reopened again, recognized both duplicates and accepted a third event. All remained pending. Temporary state removed. This is not a production rollback or a full operational DB downgrade qualification.
+- Preserved setup diagnostics: non-root QA file permissions, unconstrained test-only packaging, fixed image ENTRYPOINT, inbox enum acceptance and no persistent `close()` method. Final qualification runs use corrected harnesses, not product-code changes.
+
+## Real-model bounded smoke in the same image
+
+- Real configured `openai-codex/gpt-5.6-terra`, high effort, actual structured child/parser and productive turn executor. Every real child witnessed zero tools and zero valid tool names before inference.
+- Four real calls, three customer turns, two independent scenarios. Lodging port simulated; no business provider HTTP clients, reservation/payment/delivery/handoff workers, operational DB mounts or real customer IDs. Parent network mechanically denied; only the child model could use network. Private copied auth was removed and operational auth stayed byte-identical.
+- Query for lodging: final reply exactly reproduced the simulated dates, 2 adults, no children, one available unit and BRL 450 total. Follow-up declining reservation/payment was honored.
+- Deliberately injected invalid selection: the real Maya received the rejection and authored an informational request for dates and party, without another action or fabricated controller prose.
+- Final public replies equalled accepted model chunks. Boundary commands **0**, relays **0**, undelivered public rows **3**, delivery receipts **0**, external business effects **0**.
+- End-to-end scenario-turn latencies: **19.173s**, **10.037s**, **9.127s**; these are smoke observations, not an SLA or statistical stability qualification.
+- Model lab ran under non-root UID 1001 because the unprivileged host could not chown a disposable auth copy; ordinary API/image tests independently ran under configured UID 10001. No production-UID real-model qualification is claimed.
+- Preserved preliminary roots: r1 stopped at the image entrypoint before model calls; r2 used a nonnumeric synthetic subscriber and failed authority after two successful real proposals; r3 committed a model reply but the harness decoded the public envelope incorrectly. r4 corrects those fixtures/decoding and passed. These setup failures remain evidence and are not reclassified as product passes.
+- Manual review passed for the bounded smoke only, bound to the raw result hash. One run does not prove broad conversational reliability, real-provider availability, channel delivery or human receipt of a handoff.
+
+## Closure and next gate
+
+`verify_release_evidence.py` passed and wrote `107-release-seal.json`, binding raw logs, runners, image result, compatibility result and manual review by SHA-256. Temporary test containers/auth/state were removed; the pre-existing local registry was not touched. Live runtime authority remains independently verified and no runtime was cut over.
+
+Next: explicitly authorized isolated ManyChat handoff test, observe the actual operator queue/assumption, then separately authorize publication/promotion of the exact qualified artifact. Real reservations/payments remain a separate gate.
