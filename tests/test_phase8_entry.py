@@ -548,11 +548,12 @@ class Phase8EntryTests(unittest.TestCase):
         self.assertIn("dez identidades rejeitadas", index)
         self.assertNotIn("nove identidades rejeitadas", index)
 
-    def test_phase_index_keeps_slice_zero_and_rollout_closed(self) -> None:
+    def test_phase_index_routes_current_work_to_active_authority(self) -> None:
         text = (ROOT / "docs/refactor/README.md").read_text(encoding="utf-8")
         self.assertIn("7. Migração das fronteiras | **concluída", text)
-        self.assertIn("8. Shadow, canary e rollout | **design aprovado", text)
-        self.assertIn("Slice 0 bloqueado", text)
+        self.assertIn("8. Fast-track operacional, shadow e rollout", text)
+        self.assertIn("`ACTIVE.md` — única autoridade", text)
+        self.assertIn("históricos continuam válidos como evidência e contexto, mas não autorizam trabalho", text)
         self.assertIn("9. Remoção do legado | bloqueada", text)
 
 

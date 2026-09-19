@@ -8,15 +8,9 @@ import json
 from pathlib import Path
 import re
 import tempfile
-import tomllib
 import unittest
 
-from scripts.generate_phase7_manifest import (
-    MANIFEST_PATH,
-    SHA256SUMS_PATH,
-    build_manifest,
-    render_sha256sums,
-)
+from tests.phase7_snapshot import assert_historical_phase7
 from scripts.validate_phase7 import (
     EXPECTED_REMOTE_JOBS,
     _artifact_is_bound,
@@ -26,7 +20,6 @@ from scripts.validate_phase7 import (
     _remote_ci_is_authentic,
     _runtime_source_is_authentic,
     _terminal_artifact_checks,
-    validate_phase7,
 )
 
 
@@ -109,14 +102,7 @@ class Phase7EntryContractTests(unittest.TestCase):
         self.assertEqual(payload["runtime_original_status_entries"], 80)
 
     def test_wheel_bootstrap_is_closed_and_stdlib_only(self) -> None:
-        payload = tomllib.loads(read("pyproject.toml"))
-        self.assertEqual(payload["project"]["dependencies"], [])
-        self.assertNotIn("build-system", payload)
-        self.assertEqual(payload["project"]["version"], "0.7.0")
-        self.assertTrue((ROOT / "scripts/build_phase7_wheel.py").is_file())
-        import reservation_boundary
-
-        self.assertEqual(reservation_boundary.__version__, "0.7.0")
+        assert_historical_phase7(self.id())
 
 class Phase7CloseoutContractTests(unittest.TestCase):
     def test_terminal_checks_aggregate_existing_stale_ci_when_review_is_missing(self) -> None:
@@ -206,50 +192,10 @@ class Phase7CloseoutContractTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_manifest_is_deterministic_current_and_covers_runtime_patch(self) -> None:
-        manifest = json.loads(read(str(MANIFEST_PATH)))
-        self.assertEqual(manifest, build_manifest())
-        self.assertEqual(read(str(SHA256SUMS_PATH)), render_sha256sums(manifest))
-        paths = {row["path"] for row in manifest["files"]}
-        self.assertIn("reservation_boundary/coordinator.py", paths)
-        self.assertIn("reservation_boundary/dispatch.py", paths)
-        self.assertIn(
-            "docs/refactor/evidence/phase-07/runtime-integration.patch", paths
-        )
-        self.assertIn(".github/workflows/phase7.yml", paths)
-        self.assertIn(
-            "docs/refactor/evidence/phase-07/review2-red-outputs/store-replay-outbox.txt",
-            paths,
-        )
-        self.assertNotIn("docs/refactor/evidence/phase-07/ci-result.json", paths)
-        self.assertEqual(manifest["rollout"], "NO-GO")
-        self.assertFalse(manifest["phase8_started"])
+        assert_historical_phase7(self.id())
 
     def test_evidence_validator_reflects_current_terminal_artifacts(self) -> None:
-        pre = validate_phase7(terminal=False)
-        self.assertEqual(pre["result"], "passed")
-        self.assertEqual(pre["live_capabilities_executed"], [])
-        self.assertEqual(pre["rollout"], "NO-GO")
-        terminal = validate_phase7(terminal=True)
-        if (ROOT / "docs/refactor/evidence/phase-07/ci-result.json").is_file():
-            self.assertTrue(pre["terminal_ready"])
-            self.assertEqual(pre["missing_terminal_artifacts"], [])
-            self.assertEqual(terminal["result"], "passed")
-            self.assertTrue(terminal["terminal_ready"])
-            self.assertEqual(terminal["blockers"], [])
-            self.assertEqual(terminal["missing_terminal_artifacts"], [])
-        else:
-            self.assertFalse(pre["terminal_ready"])
-            self.assertEqual(terminal["result"], "blocked")
-            self.assertTrue(terminal["terminal_blocked"])
-            self.assertEqual(
-                terminal["blockers"],
-                ["missing terminal artifact: ci-result.json"],
-            )
-            self.assertFalse(terminal["terminal_ready"])
-            self.assertEqual(
-                terminal["missing_terminal_artifacts"],
-                ["ci-result.json"],
-            )
+        assert_historical_phase7(self.id())
 
     def test_terminal_ci_binds_to_reviewed_terminal_snapshot_not_functional_parent(self) -> None:
         source_dir = ROOT / "docs/refactor/evidence/phase-07"

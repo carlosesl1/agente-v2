@@ -1,4 +1,7 @@
-# Active implementation — V2 blocking-error handoff (local)
+# Active implementation — V2 release preparation (local)
+
+- Preparação local: contratos históricos corrigidos sem skips/deselections; 2283 testes + 2958 subtestes passaram. Evidência: `docs/refactor/evidence/2026-09-19-v2-release-preparation.md`.
+- NEXT autorizado: construir e exercitar imagem candidata offline conforme `docs/superpowers/plans/2026-09-19-v2-release-preparation.md`. Sem cutover GA/test/Ops, envio real ou write comercial. Base `d639858`; mesma branch/worktree.
 
 - DONE local: falhas impeditivas da inbox agora chegam ao handoff durável existente (coordenador/outbox/tag/flow), sem depender de resposta da Maya. Reinício, admissão/vínculo interrompidos e identidade anterior ao primeiro commit cobertos. Base `b8e974a`; 65 focais passaram; integral 2273 testes + 2958 subtestes passaram, mesmos sete testes históricos falhando. Evidência: `docs/refactor/evidence/2026-09-19-v2-blocking-error-handoff.md`; plano: `docs/superpowers/plans/2026-09-18-v2-blocking-error-handoff.md`. Sem deploy, entrega real, V3 ou subagentes.
 
