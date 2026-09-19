@@ -13,6 +13,7 @@ from reservation_domain.types import ReservationCommand
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
 from reservation_followup.sqlite_store import SQLiteFollowupUnitOfWork
 from v2_contracts.payments import BusinessUnit
+from v2_application.inbox import SQLiteInbox
 
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -120,6 +121,7 @@ class DurableLeadResolver:
         boundary: SQLiteBoundaryStore,
         execution: SQLiteUnitOfWork,
         followup: SQLiteFollowupUnitOfWork,
+        inbox: SQLiteInbox | None = None,
     ) -> None:
         if type(boundary) is not SQLiteBoundaryStore:
             raise TypeError("boundary must be exact SQLiteBoundaryStore")
@@ -127,6 +129,9 @@ class DurableLeadResolver:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
         if type(followup) is not SQLiteFollowupUnitOfWork:
             raise TypeError("followup must be exact SQLiteFollowupUnitOfWork")
+        if inbox is not None and type(inbox) is not SQLiteInbox:
+            raise TypeError("inbox must be exact SQLiteInbox")
+        self._inbox = inbox
         self._boundary = boundary
         self._execution = execution
         self._followup = followup
@@ -189,13 +194,15 @@ class DurableLeadResolver:
     def lead_id_for_handoff(self, handoff_id: str) -> str:
         workflow = self._followup.load_handoff(handoff_id)
         expected_hash = workflow.request.lead_key_hash
-        rows = tuple(
-            row[0]
-            for row in self._boundary._connection.execute(
+        leads = {
+            row[0] for row in self._boundary._connection.execute(
                 "SELECT lead_key FROM boundary_state ORDER BY lead_key"
             )
-            if hashlib.sha256(row[0].encode("utf-8")).hexdigest() == expected_hash
-        )
+        }
+        if self._inbox is not None:
+            leads.update(self._inbox.lead_ids())
+        rows = tuple(lead for lead in leads
+                     if hashlib.sha256(lead.encode("utf-8")).hexdigest() == expected_hash)
         if len(rows) != 1:
             raise RuntimeError("handoff does not have one durable lead owner")
         return self._manychat_lead(rows[0])

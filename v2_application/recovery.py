@@ -19,10 +19,12 @@ from reservation_followup.handoff import (
 )
 from reservation_followup.sqlite_store import (
     IdentityConflict,
+    HandoffNotFound,
     SQLiteFollowupUnitOfWork,
 )
 from reservation_followup.types import HandoffEffectPolicy
 from v2_contracts.payments import BusinessUnit, PaymentObligation
+from v2_application.inbox import SQLiteInbox
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
@@ -294,12 +296,19 @@ class HandoffCoordinator:
         if type(reason_code) is not HandoffReasonCode:
             raise TypeError("reason_code must be exact HandoffReasonCode")
 
+        material = "\0".join((lead_key_hash, workflow_id, reason_code.value))
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+        try:
+            existing = self._store.load_handoff(f"handoff:v2:{digest}")
+        except HandoffNotFound:
+            pass
+        else:
+            # An operator may have closed it between admission and source linking.
+            return HandoffOpenResult(existing, False)
         active = self._store.find_active_handoff_by_lead_hash(lead_key_hash)
         if active is not None:
             return HandoffOpenResult(active, False)
 
-        material = "\0".join((lead_key_hash, workflow_id, reason_code.value))
-        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
         request = HandoffRequested(
             handoff_id=f"handoff:v2:{digest}",
             lead_key_hash=lead_key_hash,
@@ -340,7 +349,7 @@ class ManualReviewHandoffProjection:
 
 
 class ManualReviewHandoffProjector:
-    """Open one internal handoff for durable reservation uncertainty."""
+    """Forward terminal inbox failures and reservation uncertainty to human handoff."""
 
     def __init__(
         self,
@@ -349,11 +358,15 @@ class ManualReviewHandoffProjector:
         coordinator: HandoffCoordinator,
         lead_id: str = "",
         lead_resolver: object | None = None,
+        inbox: SQLiteInbox | None = None,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
         if type(coordinator) is not HandoffCoordinator:
             raise TypeError("coordinator must be exact HandoffCoordinator")
+        if inbox is not None and type(inbox) is not SQLiteInbox:
+            raise TypeError("inbox must be exact SQLiteInbox")
+        self._inbox = inbox
         self._execution = execution
         self._coordinator = coordinator
         if type(lead_id) is not str:
@@ -370,6 +383,25 @@ class ManualReviewHandoffProjector:
     def run_once(self, *, now: datetime) -> ManualReviewHandoffProjection:
         created = 0
         replayed = 0
+        if self._inbox is not None:
+            for batch_id, lead_id in self._inbox.pending_handoff_batches():
+                if self._lead_id is not None and lead_id != self._lead_id:
+                    continue
+                result = self._coordinator.open_exception_once(
+                    lead_id=lead_id,
+                    workflow_id=batch_id,
+                    source_event_id=batch_id,
+                    reason_code=HandoffReasonCode.OPERATIONAL_REVIEW,
+                    now=now,
+                )
+                self._inbox.record_handoff(
+                    batch_id=batch_id, lead_id=lead_id,
+                    handoff_id=result.workflow.request.handoff_id,
+                )
+                if result.created:
+                    created += 1
+                else:
+                    replayed += 1
         for command, ledger in self._execution.list_outcome_projection_inputs():
             if ledger.status is not LedgerStatus.MANUAL_REVIEW:
                 continue

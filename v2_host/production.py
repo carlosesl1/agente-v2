@@ -242,6 +242,7 @@ class ReconciliationStage:
                     "general-availability handoff requires durable lead ownership"
                 )
             self._manual_handoff = ManualReviewHandoffProjector(
+                inbox=container.inbox,
                 execution=container.execution,
                 coordinator=HandoffCoordinator(store=container.followup),
                 lead_id=(
@@ -666,7 +667,7 @@ def _build_inbox_worker(
             followup=container.followup,
             lead_resolver=DurableLeadResolver(
                 boundary=container.boundary, execution=container.execution,
-                followup=container.followup,
+                followup=container.followup, inbox=container.inbox,
             ),
         ),
         ops_recorder=container.ops_recorder,
@@ -896,7 +897,7 @@ def build_worker_set(
         DurableLeadResolver(
             boundary=container.boundary,
             execution=container.execution,
-            followup=container.followup,
+            followup=container.followup, inbox=container.inbox,
         )
         if settings.runtime_mode is RuntimeMode.GENERAL_AVAILABILITY
         else None
@@ -905,7 +906,7 @@ def build_worker_set(
         DurableLeadResolver(
             boundary=container.boundary,
             execution=container.execution,
-            followup=container.followup,
+            followup=container.followup, inbox=container.inbox,
         )
         if settings.ops_trace_path is not None
         else None
@@ -921,7 +922,7 @@ def build_worker_set(
             public_store=container.public_outbox,
             boundary=container.boundary,
             lead_resolver=DurableLeadResolver(
-                boundary=container.boundary, execution=container.execution, followup=container.followup,
+                boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox,
             ),
             include_payment_offers=bool(settings.enabled_payment_methods),
             inbox=container.inbox,

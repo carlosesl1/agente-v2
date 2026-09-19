@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS inbound_events (
   batch_id TEXT,
   retry_at TEXT,
   failure_count INTEGER NOT NULL DEFAULT 0,
-  failure_reason TEXT
+  failure_reason TEXT,
+  handoff_id TEXT
 ) STRICT;
 CREATE INDEX IF NOT EXISTS inbound_events_lead_status
 ON inbound_events(lead_id,status,occurred_at,event_id);
@@ -193,7 +194,7 @@ class SQLiteInbox:
                 connection.execute(
                     "ALTER TABLE inbound_events ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
-            for column in ("batch_id", "retry_at", "failure_reason"):
+            for column in ("batch_id", "retry_at", "failure_reason", "handoff_id"):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE inbound_events ADD COLUMN {column} TEXT"
@@ -448,6 +449,47 @@ class SQLiteInbox:
             raise
         finally:
             connection.close()
+
+    def pending_handoff_batches(self) -> tuple[tuple[str, str], ...]:
+        """Durable terminal batches not yet admitted to the existing handoff queue."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT batch_id,lead_id FROM inbound_events "
+                "WHERE status='manual_review' AND handoff_id IS NULL "
+                "AND batch_id IS NOT NULL GROUP BY batch_id,lead_id "
+                "ORDER BY MIN(occurred_at),batch_id LIMIT 50"
+            ).fetchall()
+        return tuple((row["batch_id"], row["lead_id"]) for row in rows)
+
+    def record_handoff(self, *, batch_id: str, lead_id: str, handoff_id: str) -> None:
+        """Link only after durable admission; an interrupted link remains retryable."""
+        if any(type(value) is not str or not value for value in (batch_id, lead_id, handoff_id)):
+            raise ValueError("handoff link requires exact non-empty identities")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT status,handoff_id FROM inbound_events WHERE batch_id=? AND lead_id=?",
+                (batch_id, lead_id),
+            ).fetchall()
+            if not rows or any(row["status"] != "manual_review" or
+                               row["handoff_id"] not in (None, handoff_id) for row in rows):
+                raise RuntimeError("handoff link is missing or divergent")
+            connection.execute(
+                "UPDATE inbound_events SET handoff_id=? WHERE batch_id=? AND lead_id=?",
+                (handoff_id, batch_id, lead_id),
+            )
+            connection.commit()
+
+    def lead_ids(self) -> tuple[str, ...]:
+        """Accepted inbound ownership remains available before a turn can commit."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT lead_id,subscriber_id FROM inbound_events ORDER BY lead_id"
+            ).fetchall()
+        for row in rows:
+            if not row["subscriber_id"].isdecimal() or row["lead_id"] != "manychat:" + row["subscriber_id"]:
+                raise RuntimeError("inbound subscriber ownership is divergent")
+        return tuple(row["lead_id"] for row in rows)
 
     def release_claim(
         self, claim: InboxClaim, *, retry_at: datetime | None = None,

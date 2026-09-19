@@ -1,4 +1,6 @@
-# Active implementation — V2 rejection continuity (local)
+# Active implementation — V2 blocking-error handoff (local)
+
+- DONE local: falhas impeditivas da inbox agora chegam ao handoff durável existente (coordenador/outbox/tag/flow), sem depender de resposta da Maya. Reinício, admissão/vínculo interrompidos e identidade anterior ao primeiro commit cobertos. Base `b8e974a`; 65 focais passaram; integral 2273 testes + 2958 subtestes passaram, mesmos sete testes históricos falhando. Evidência: `docs/refactor/evidence/2026-09-19-v2-blocking-error-handoff.md`; plano: `docs/superpowers/plans/2026-09-18-v2-blocking-error-handoff.md`. Sem deploy, entrega real, V3 ou subagentes.
 
 - **Correção de continuidade concluída localmente:** rejeição factual retorna à mesma Maya uma vez, resposta informativa segue recibo/outbox; recuperação inválida ou três falhas de execução chegam a `manual_review`, liberando entradas seguintes. ACK comprometido usa replay. Sem deploy.
 - Evidência: `docs/refactor/evidence/2026-09-18-v2-rejection-continuity.md`; **192 focais**, integral **2261 passaram + 2958 subtestes**, as mesmas **sete falhas da base 8f92904 reexecutada**. Fonte testada conferida por hash; não é autorização de promoção.
