@@ -2,7 +2,9 @@
 
 - Preparação local: contratos históricos corrigidos sem skips/deselections; 2283 testes + 2958 subtestes passaram. Evidência: `docs/refactor/evidence/2026-09-19-v2-release-preparation.md`.
 - DONE local: candidata `a7864e2`, imagem local `sha256:7815b4880763…`, 68 testes na imagem, `/readyz` API-only 200 e compatibilidade de inbox sintética antiga→nova→antiga. Smoke Maya real: 3 turnos/4 chamadas, consulta simulada e recuperação sem replay, zero comandos comerciais/envios. Evidência e limites no relatório acima.
-- NEXT bloqueado por autorização específica: teste de handoff em contato ManyChat autorizado e recebimento pelo atendente; só depois publicação/promoção. GA/test/Ops e estado ativo inalterados; reservas/pagamentos reais fora do escopo.
+- Correção operacional confirmada por Carlos no chat: a tag de handoff pausa completamente as respostas automáticas no ManyChat; nenhum fluxo adicional é necessário. O pedido anterior de captura/fluxo deixa de ser bloqueio.
+- DONE local: handoff somente addTag, sem sendFlow/texto fabricado; outbox, recibos e proteção de resultado incerto preservados. 88 focais e integral 2284 testes + 2958 subtestes passaram; recibo da versão anterior não é reenviado. Evidência: `docs/refactor/evidence/2026-09-20-v2-handoff-tag-only.md`.
+- NEXT: construir/qualificar imagem sucessora com handoff por tag e continuar promoção/teste isolado previamente autorizado; não exigir captura ou fluxo adicional. A imagem `a7864e2` ainda não contém esta correção. GA/Ops/V3 e bancos ativos inalterados; reservas/pagamentos reais fora do escopo.
 
 - DONE local: falhas impeditivas da inbox agora chegam ao handoff durável existente (coordenador/outbox/tag/flow), sem depender de resposta da Maya. Reinício, admissão/vínculo interrompidos e identidade anterior ao primeiro commit cobertos. Base `b8e974a`; 65 focais passaram; integral 2273 testes + 2958 subtestes passaram, mesmos sete testes históricos falhando. Evidência: `docs/refactor/evidence/2026-09-19-v2-blocking-error-handoff.md`; plano: `docs/superpowers/plans/2026-09-18-v2-blocking-error-handoff.md`. Sem deploy, entrega real, V3 ou subagentes.
 

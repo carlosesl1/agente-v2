@@ -44,15 +44,15 @@ def test_handoff_records_receipt_after_transport_time_advances(tmp_path):
         assert (
             worker.run_once(now=NOW + timedelta(seconds=3)).disposition.value == "idle"
         )
-        assert len(calls) == 2
+        assert calls == ["/fb/subscriber/addTag"]
         assert store._connection.execute(
             "SELECT delivered_at FROM handoff_receipts"
-        ).fetchone() == ((NOW + timedelta(seconds=2)).isoformat(),)
+        ).fetchone() == ((NOW + timedelta(seconds=1)).isoformat(),)
     finally:
         store.close()
 
 
-def test_worker_composition_can_persist_partial_handoff_without_retry(tmp_path):
+def test_worker_composition_can_persist_unknown_tag_without_retry(tmp_path):
     settings = V2Settings(
         webhook_secret="synthetic", sqlite_path=tmp_path / "inbox.sqlite3"
     )
@@ -61,9 +61,7 @@ def test_worker_composition_can_persist_partial_handoff_without_retry(tmp_path):
 
     def transport(request):
         calls.append(request.url.path)
-        if len(calls) == 1:
-            return httpx.Response(200, request=request, json={"status": "success"})
-        raise httpx.ConnectError("synthetic failure", request=request)
+        raise httpx.ReadTimeout("tag outcome unknown", request=request)
 
     try:
         store = container.followup
@@ -80,7 +78,7 @@ def test_worker_composition_can_persist_partial_handoff_without_retry(tmp_path):
         assert (
             worker.run_once(now=NOW + timedelta(seconds=31)).disposition.value == "idle"
         )
-        assert len(calls) == 2
+        assert calls == ["/fb/subscriber/addTag"]
     finally:
         container.close()
 
@@ -250,7 +248,7 @@ def test_handoff_known_pre_call_failure_retries_after_restart(tmp_path):
         assert worker.run_once(now=Clock().now()).disposition.value == "delivered"
     finally:
         container.close()
-    assert len(calls) == 3
+    assert calls == ["/fb/subscriber/addTag", "/fb/subscriber/addTag"]
 
 
 @pytest.mark.parametrize("outcome", ["success", "unknown", "crash"])

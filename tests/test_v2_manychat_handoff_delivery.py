@@ -33,7 +33,6 @@ def _adapter(transport) -> ManyChatHandoffDeliveryAdapter:
         transport=transport,
         subscriber_id="1873018537",
         tag_id=301,
-        flow_ns="flow:handoff:v2",
         clock=_Clock(),
     )
 
@@ -47,7 +46,7 @@ def _store(tmp_path):
     return store
 
 
-def test_handoff_adds_tag_then_triggers_flow_once(tmp_path) -> None:
+def test_handoff_only_adds_tag_once(tmp_path) -> None:
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -76,27 +75,17 @@ def test_handoff_adds_tag_then_triggers_flow_once(tmp_path) -> None:
             "/fb/subscriber/addTag",
             {"subscriber_id": "1873018537", "tag_id": 301},
         ),
-        (
-            "/fb/sending/sendFlow",
-            {"subscriber_id": "1873018537", "flow_ns": "flow:handoff:v2"},
-        ),
     ]
     store.close()
 
 
-def test_handoff_partial_mutation_is_manual_review_without_retry(tmp_path) -> None:
+def test_handoff_uncertain_tag_is_manual_review_without_retry(tmp_path) -> None:
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            return httpx.Response(
-                200,
-                request=request,
-                json={"status": "success", "request_id": "tag-confirmed"},
-            )
-        raise httpx.ConnectError("flow response unavailable", request=request)
+        raise httpx.ReadTimeout("tag response unavailable after dispatch", request=request)
 
     store = _store(tmp_path)
     worker = HandoffOutboxWorker(
@@ -111,7 +100,7 @@ def test_handoff_partial_mutation_is_manual_review_without_retry(tmp_path) -> No
 
     assert first.disposition.value == "manual_review"
     assert second.disposition.value == "idle"
-    assert calls == 2
+    assert calls == 1
     assert store._connection.execute(
         "SELECT status FROM handoff_outbox"
     ).fetchone() == ("manual_review",)

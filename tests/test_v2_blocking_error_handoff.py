@@ -86,7 +86,7 @@ def handoff_count(container):
 
 
 @pytest.mark.parametrize("error", [TimeoutError, ActionRejectionUnresolved])
-def test_terminal_turn_reaches_existing_tag_flow_after_restart(runtime, error):
+def test_terminal_turn_reaches_existing_tag_after_restart(runtime, error):
     reopen, seen = runtime
     container, workers = reopen()
     executor = fail_turn(container, workers, error=error)
@@ -99,11 +99,10 @@ def test_terminal_turn_reaches_existing_tag_flow_after_restart(runtime, error):
     assert workers[WorkerQueue.HANDOFF].run_once(now=NOW + timedelta(seconds=21)).disposition.value == "delivered"
     assert seen == [
         ("/fb/subscriber/addTag", {"subscriber_id": "10001", "tag_id": 301}),
-        ("/fb/sending/sendFlow", {"subscriber_id": "10001", "flow_ns": "flow:test-handoff"}),
     ]
     workers[WorkerQueue.RECONCILIATION].run_once(now=NOW + timedelta(seconds=31))
     assert workers[WorkerQueue.HANDOFF].run_once(now=NOW + timedelta(seconds=32)).disposition.value == "idle"
-    assert len(seen) == 2
+    assert len(seen) == 1
     assert executor.calls == (1 if error is ActionRejectionUnresolved else 3)
     assert container.boundary._connection.execute("SELECT count(*) FROM boundary_commands").fetchone() == (0,)
     with sqlite3.connect(container.inbox.path) as db:
@@ -136,7 +135,7 @@ def test_real_invalid_recovery_opens_handoff_without_repeating_maya(runtime):
     assert handoff_count(container) == 1
     assert workers[WorkerQueue.HANDOFF].run_once(now=NOW + timedelta(seconds=4)).disposition.value == "delivered"
     assert len(model.calls) == 2
-    assert len(seen) == 2
+    assert len(seen) == 1
 
 
 def test_admission_then_inbox_link_failure_recovers_one_handoff(runtime, monkeypatch):
@@ -169,7 +168,7 @@ def test_two_failed_batches_same_lead_share_handoff_other_lead_isolated(runtime)
     for _ in range(2):
         assert workers[WorkerQueue.HANDOFF].run_once(now=NOW + timedelta(seconds=3)).disposition.value == "delivered"
     assert {body["subscriber_id"] for _, body in seen} == {"10001", "10002"}
-    assert len(seen) == 4
+    assert len(seen) == 2
 
 
 def test_committed_ack_retry_does_not_open_handoff(runtime, monkeypatch):

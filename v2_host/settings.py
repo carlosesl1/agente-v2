@@ -211,6 +211,7 @@ class V2Settings:
     manychat_payment_description_field_id: int | None = None
     manychat_payment_flow_ns: str = ""
     manychat_handoff_tag_id: int | None = None
+    # Legacy configuration accepted for compatibility; handoff applies only the tag.
     manychat_handoff_flow_ns: str = ""
     stripe_environment: StripeEnvironment = StripeEnvironment.TEST
     stripe_secret_key: str = ""
@@ -491,9 +492,8 @@ class V2Settings:
         if owns_worker and self.manychat_handoff_enabled and (
             not self.manychat_api_key
             or self.manychat_handoff_tag_id is None
-            or not self.manychat_handoff_flow_ns
         ):
-            raise ValueError("ManyChat handoff requires tag and flow")
+            raise ValueError("ManyChat handoff requires API key and tag")
         if type(self.bokun_product_map) is not dict or any(
             type(key) is not str or not key or type(value) is not str or not value
             for key, value in self.bokun_product_map.items()

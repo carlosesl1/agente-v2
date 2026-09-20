@@ -11,24 +11,22 @@ from v2_adapters.manychat import ManyChatTransportNotCalled, ManyChatTransportRe
 
 
 class ManyChatHandoffDeliveryAdapter:
-    """Apply one handoff tag and flow with terminal partial-unknown handling."""
+    """Apply the handoff tag; ManyChat owns the automatic-reply pause."""
 
     delivery_id = "delivery:manychat-handoff-v2"
-    delivery_version = 1
+    delivery_version = 2
 
     def __init__(
         self,
         *,
         transport: object,
         tag_id: int,
-        flow_ns: str,
         clock: object,
         subscriber_id: str = "",
         lead_resolver: object | None = None,
     ) -> None:
-        for method in ("add_tag", "trigger_flow"):
-            if not callable(getattr(transport, method, None)):
-                raise TypeError(f"transport must expose {method}")
+        if not callable(getattr(transport, "add_tag", None)):
+            raise TypeError("transport must expose add_tag")
         if type(subscriber_id) is not str or (
             subscriber_id and not subscriber_id.isdecimal()
         ):
@@ -41,15 +39,12 @@ class ManyChatHandoffDeliveryAdapter:
             raise ValueError("handoff delivery requires one fixed or durable lead source")
         if type(tag_id) is not int or tag_id < 1:
             raise ValueError("tag_id must be a positive exact integer")
-        if type(flow_ns) is not str or not flow_ns or "\x00" in flow_ns:
-            raise ValueError("flow_ns must be non-empty NUL-free text")
         if not callable(getattr(clock, "now", None)):
             raise TypeError("clock must expose now")
         self._transport = transport
         self._subscriber_id = subscriber_id
         self._lead_resolver = lead_resolver
         self._tag_id = tag_id
-        self._flow_ns = flow_ns
         self._clock = clock
 
     def deliver(self, message: HandoffEffectJob) -> HandoffReceipt:
@@ -67,7 +62,6 @@ class ManyChatHandoffDeliveryAdapter:
             raise HandoffDeliveryUnknown(
                 "ManyChat handoff lacks one durable subscriber owner"
             ) from exc
-        tagged = False
         try:
             tag = self._transport.add_tag(
                 subscriber_id=subscriber_id,
@@ -76,20 +70,8 @@ class ManyChatHandoffDeliveryAdapter:
             )
             if type(tag) is not ManyChatTransportResponse:
                 raise RuntimeError("ManyChat tag receipt is invalid")
-            tagged = True
-            flow = self._transport.trigger_flow(
-                subscriber_id=subscriber_id,
-                flow_ns=self._flow_ns,
-                idempotency_key=message.effect_id + ":flow",
-            )
-            if type(flow) is not ManyChatTransportResponse:
-                raise RuntimeError("ManyChat handoff flow receipt is invalid")
         except ManyChatTransportNotCalled as exc:
-            if not tagged:
-                raise HandoffDeliveryNotCalled("ManyChat handoff tag was not called") from exc
-            raise HandoffDeliveryUnknown(
-                "ManyChat handoff flow is unknown after tag mutation"
-            ) from exc
+            raise HandoffDeliveryNotCalled("ManyChat handoff tag was not called") from exc
         except HandoffDeliveryUnknown:
             raise
         except Exception as exc:
@@ -97,14 +79,10 @@ class ManyChatHandoffDeliveryAdapter:
                 "ManyChat handoff effect outcome is unknown"
             ) from exc
         digest = hashlib.sha256(
-            b"v2-manychat-handoff-acceptance-v1\0"
+            b"v2-manychat-handoff-tag-acceptance-v2\0"
             + (tag.provider_request_id or "").encode("utf-8")
             + b"\0"
             + tag.dispatch_correlation_id.encode("utf-8")
-            + b"\0"
-            + (flow.provider_request_id or "").encode("utf-8")
-            + b"\0"
-            + flow.dispatch_correlation_id.encode("utf-8")
         ).hexdigest()
         return HandoffReceipt.for_message(
             message,

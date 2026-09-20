@@ -1037,7 +1037,6 @@ def build_worker_set(
             delivery=ManyChatHandoffDeliveryAdapter(
                 transport=handoff_transport,
                 tag_id=settings.manychat_handoff_tag_id,
-                flow_ns=settings.manychat_handoff_flow_ns,
                 clock=UTCClock(),
                 subscriber_id=(
                     settings.allowed_subscriber_ids[0]

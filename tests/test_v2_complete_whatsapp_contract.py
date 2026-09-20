@@ -115,6 +115,23 @@ def test_handoff_and_delivery_do_not_collapse_into_one_gate(tmp_path: Path) -> N
     assert settings.manychat_delivery_enabled is False
 
 
+def test_handoff_requires_tag_not_reply_flow(tmp_path: Path) -> None:
+    env = _base(tmp_path)
+    env["V2_ENABLE_MANYCHAT_HANDOFF"] = "true"
+    for key in (
+        "V2_MANYCHAT_HANDOFF_FLOW_NS", "V2_MANYCHAT_REPLY_FLOW_NS",
+        "V2_MANYCHAT_REPLY_FIELD_ID", "V2_MANYCHAT_PAYMENT_FLOW_NS",
+        "V2_MANYCHAT_PAYMENT_LINK_FIELD_ID", "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID",
+    ):
+        env.pop(key)
+    settings = V2Settings.from_env(env)
+    assert settings.manychat_handoff_enabled
+    assert not settings.manychat_delivery_enabled
+    env.pop("V2_MANYCHAT_HANDOFF_TAG_ID")
+    with pytest.raises(ValueError, match="handoff requires"):
+        V2Settings.from_env(env)
+
+
 def test_duplicate_subscriber_entries_are_rejected_not_silently_deduped(tmp_path: Path) -> None:
     env = _base(tmp_path)
     env["V2_ALLOWED_SUBSCRIBER_IDS"] = "1873018537,1873018537"
