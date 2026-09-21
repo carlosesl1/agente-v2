@@ -22,7 +22,13 @@ from v2_contracts.model import (
     ModelProposal,
     ModelRequest,
 )
-from v2_contracts.model_wire import V8_RESPONSE_FIELDS
+from v2_contracts.model_wire import (
+    CHILD_INPUT_REJECTED_EXIT,
+    CHILD_INVALID_RESPONSE_EXIT,
+    V8_RESPONSE_FIELDS,
+    ChildExecutionFailed,
+    ChildInputRejected,
+)
 from v2_contracts.passengers import PassengerInput
 from v2_contracts.providers import ReadKind, ReadRequest
 
@@ -979,11 +985,8 @@ class HermesModelAdapter:
                 check=False,
                 env=self._child_env,
             )
-        except (OSError, subprocess.SubprocessError):
-            return None, self._failure_frame(
-                stdin_bytes=stdin_bytes,
-                reason="child_process_failed",
-            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ChildExecutionFailed("child process failed") from exc
         returncode = getattr(result, "returncode", None)
         stdout = getattr(result, "stdout", None)
         stderr = getattr(result, "stderr", None)
@@ -992,21 +995,20 @@ class HermesModelAdapter:
             or type(stdout) is not bytes
             or type(stderr) is not bytes
         ):
+            raise ChildExecutionFailed("invalid child process result")
+        if returncode == CHILD_INPUT_REJECTED_EXIT:
+            # Output repair cannot fix an unchanged, invalid input envelope.
+            raise ChildInputRejected("child rejected the model request")
+        if returncode == CHILD_INVALID_RESPONSE_EXIT:
             return None, self._failure_frame(
                 stdin_bytes=stdin_bytes,
-                reason="invalid_process_result",
+                reason="model_response_invalid",
             )
         if returncode != 0:
-            return None, self._failure_frame(
-                stdin_bytes=stdin_bytes,
-                reason="child_nonzero_exit",
-            )
+            raise ChildExecutionFailed("child exited without a model response")
         marker_at = stdout.rfind(_RESULT_MARKER)
         if marker_at < 0:
-            return None, self._failure_frame(
-                stdin_bytes=stdin_bytes,
-                reason="result_marker_missing",
-            )
+            raise ChildExecutionFailed("child result marker missing")
         response = stdout[marker_at + len(_RESULT_MARKER) :]
         if not response or len(response) > 128 * 1024:
             return None, self._failure_frame(

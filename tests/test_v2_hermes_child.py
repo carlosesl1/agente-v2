@@ -311,11 +311,11 @@ def test_child_transports_normal_context_without_changing_current_request() -> (
                 ),
                 [],
             ),
-            ["user", "current"],
+            ["assistant", "wrong current role"],
         ],
     ),
 )
-def test_child_rejects_noncanonical_or_unbounded_dialogue(messages) -> None:
+def test_child_rejects_noncanonical_dialogue(messages) -> None:
     wire = json.dumps(
         {"system_prompt": "Return V2 JSON.", "messages": messages},
         separators=(",", ":"),

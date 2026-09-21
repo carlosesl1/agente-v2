@@ -13,6 +13,13 @@ import sys
 import tempfile
 from typing import Final
 
+from v2_contracts.model import InvalidModelProposal
+from v2_contracts.model_wire import (
+    CHILD_EXECUTION_FAILED_EXIT,
+    CHILD_INPUT_REJECTED_EXIT,
+    CHILD_INVALID_RESPONSE_EXIT,
+    ChildInputRejected,
+)
 from v2_host.structured_output import maya_v8_request_overrides
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
@@ -30,25 +37,32 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _closed_request(raw: bytes) -> dict[str, object]:
-    if not raw or len(raw) > _MAX_INPUT:
-        raise ValueError("model wire input size is invalid")
-    value = json.loads(raw, object_pairs_hook=_unique_object)
+    if type(raw) is not bytes or not raw or len(raw) > _MAX_INPUT:
+        raise ChildInputRejected("model wire input size is invalid")
+    try:
+        value = json.loads(raw, object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeError) as exc:
+        raise ChildInputRejected("model wire input JSON is invalid") from exc
     if type(value) is not dict or set(value) != {"system_prompt", "messages"}:
-        raise ValueError("model wire input fields mismatch")
+        raise ChildInputRejected("model wire input fields mismatch")
     if type(value["system_prompt"]) is not str or not value["system_prompt"].strip():
-        raise ValueError("model system prompt is invalid")
+        raise ChildInputRejected("model system prompt is invalid")
     messages = value["messages"]
-    if type(messages) is not list or not 1 <= len(messages) <= 9 or len(messages) % 2 != 1:
-        raise ValueError("model messages wire is invalid")
+    # The parent budgets dialogue bytes; this boundary budgets the entire wire.
+    # Do not impose a second, incompatible turn-count window or truncate history.
+    if type(messages) is not list or not messages or len(messages) % 2 != 1:
+        raise ChildInputRejected("model messages wire is invalid")
     for index, message in enumerate(messages):
         if (
             type(message) is not list
             or len(message) != 2
             or message[0] != ("user" if index % 2 == 0 else "assistant")
             or type(message[1]) is not str
-            or not message[1]
+            # A committed operation-result turn has no customer text. Only that
+            # historical user slot may be empty; replies/current JSON stay nonempty.
+            or (not message[1] and (index % 2 != 0 or index == len(messages) - 1))
         ):
-            raise ValueError("model messages wire is invalid")
+            raise ChildInputRejected("model messages wire is invalid")
     return value
 
 
@@ -80,8 +94,11 @@ def _prompt(request: dict[str, object]) -> str:
 
 def _extract_json(raw: bytes) -> bytes:
     if not raw or len(raw) > _MAX_OUTPUT:
-        raise ValueError("Hermes CLI output size is invalid")
-    text = raw.decode("utf-8").strip()
+        raise InvalidModelProposal("Hermes CLI output size is invalid")
+    try:
+        text = raw.decode("utf-8").strip()
+    except UnicodeError as exc:
+        raise InvalidModelProposal("Hermes output encoding is invalid") from exc
     if text.startswith("```json") and text.endswith("```"):
         text = text[7:-3].strip()
     elif text.startswith("```") and text.endswith("```"):
@@ -97,14 +114,17 @@ def _extract_json(raw: bytes) -> bytes:
             continue
         if type(value) is not dict:
             continue
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    raise ValueError("Hermes CLI did not return one closed JSON object")
+        try:
+            return json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except ValueError as exc:
+            raise InvalidModelProposal("Hermes output JSON values are invalid") from exc
+    raise InvalidModelProposal("Hermes CLI did not return one closed JSON object")
 
 
 def _required_option(argv: Sequence[str], names: tuple[str, ...], label: str) -> str:
@@ -187,6 +207,7 @@ async def run_structured(
     profile_resolver: Callable[[str], str] = _default_profile_resolver,
     session_db_factory: Callable[[Path], object] = _default_session_db_factory,
 ) -> bytes:
+    request = _closed_request(stdin_bytes)
     if not argv or any(type(item) is not str or not item for item in argv):
         raise ValueError("Hermes command settings are required")
     profile = _required_option(argv, ("--profile", "-p"), "Hermes profile")
@@ -205,7 +226,6 @@ async def run_structured(
     os.environ["HERMES_HOME"] = hermes_home
     os.environ["HERMES_PROFILE"] = profile
 
-    request = _closed_request(stdin_bytes)
     with tempfile.TemporaryDirectory(prefix="v2-hermes-child-") as tmp:
         tmp_path = Path(tmp)
         agent = agent_factory(
@@ -242,8 +262,12 @@ async def run_structured(
                 if inspect.isawaitable(closed):
                     await closed
     if type(result) is not dict or type(result.get("final_response")) is not str:
-        raise RuntimeError("Hermes agent returned an invalid final response")
-    return _RESULT_MARKER + _extract_json(result["final_response"].encode("utf-8"))
+        raise InvalidModelProposal("Hermes agent returned an invalid final response")
+    try:
+        response_bytes = result["final_response"].encode("utf-8")
+    except UnicodeError as exc:
+        raise InvalidModelProposal("Hermes output encoding is invalid") from exc
+    return _RESULT_MARKER + _extract_json(response_bytes)
 
 
 def run(
@@ -282,7 +306,13 @@ def main() -> None:
     except Exception as exc:
         # Keep stderr categorical; input, provider output and credentials are private.
         print(f"v2_hermes_child_failed:{type(exc).__name__}", file=sys.stderr)
-        raise SystemExit(65) from exc
+        if isinstance(exc, ChildInputRejected):
+            exit_code = CHILD_INPUT_REJECTED_EXIT
+        elif isinstance(exc, InvalidModelProposal):
+            exit_code = CHILD_INVALID_RESPONSE_EXIT
+        else:
+            exit_code = CHILD_EXECUTION_FAILED_EXIT
+        raise SystemExit(exit_code) from exc
     sys.stdout.buffer.write(output)
 
 

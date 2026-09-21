@@ -410,7 +410,9 @@ def test_hermes_adapter_preserves_valid_reply_bytes_and_fails_closed_after_repai
     assert responses == []
 
 
-def test_hermes_adapter_fails_closed_after_two_child_process_failures() -> None:
+def test_hermes_adapter_distinguishes_process_failure_without_output_repair() -> None:
+    from v2_contracts.model_wire import ChildExecutionFailed
+
     class Failed:
         returncode = 1
         stdout = b""
@@ -438,9 +440,6 @@ def test_hermes_adapter_fails_closed_after_two_child_process_failures() -> None:
         state_version=0,
     )
 
-    with pytest.raises(
-        InvalidModelProposal,
-        match="model proposal remained invalid after bounded attempts",
-    ):
+    with pytest.raises(ChildExecutionFailed, match="child exited without a model response"):
         adapter.complete_audited(request)
-    assert responses == []
+    assert len(responses) == 1  # No response exists for the model to repair.

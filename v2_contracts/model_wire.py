@@ -1,8 +1,22 @@
-"""Closed provider response shape for Maya's minimal V8 conversation envelope."""
+"""Child process outcomes and closed Maya V8 response shape."""
 
 from __future__ import annotations
 
 from typing import Final
+
+# Child process status is transport evidence, not customer/model semantics.
+CHILD_INPUT_REJECTED_EXIT: Final = 64
+CHILD_INVALID_RESPONSE_EXIT: Final = 65
+CHILD_EXECUTION_FAILED_EXIT: Final = 70
+
+
+class ChildInputRejected(ValueError):
+    """The child rejected the request before model inference."""
+
+
+class ChildExecutionFailed(RuntimeError):
+    """The child failed to execute; no valid model response was obtained."""
+
 
 V8_RESPONSE_FIELDS: Final = frozenset(
     {

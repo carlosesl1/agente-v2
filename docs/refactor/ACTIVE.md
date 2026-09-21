@@ -1,4 +1,11 @@
-# Active implementation — V2 release preparation (local)
+# Active implementation — V2 child history and error contract (local)
+
+- Current maintenance scope explicitly authorized by Carlos: align child history without count-based truncation, and distinguish invalid child input from invalid model output. No Bókun, commercial-policy, deployment or external-effect changes.
+- DONE local: branch `fix/v2-child-history-727d3625`, based on authenticated `874b8f2`, in `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`. Parent context and wire byte bounds preserved; categorical input/output/execution failures cross the existing process and inbox boundaries.
+- Evidence: `/home/ubuntu/workspace/v2-child-history-727d3625/RELATORIO.md`. Final clean-env suite: 2317 tests + 2958 subtests passed, no exclusions; 128 integrated tests passed. Preserved incident history crossed the real subprocess once with exact content; SDK/model synthetic, candidate mounted read-only over the authenticated base image with no network.
+- NEXT: no automatic rollout. Real-model/WhatsApp validation, candidate image release and deployment remain separate from this local fix. GA, isolated test, Ops, authority and live state are unchanged.
+
+## Preserved release preparation (historical)
 
 - Preparação local: contratos históricos corrigidos sem skips/deselections; 2283 testes + 2958 subtestes passaram. Evidência: `docs/refactor/evidence/2026-09-19-v2-release-preparation.md`.
 - DONE local: candidata `a7864e2`, imagem local `sha256:7815b4880763…`, 68 testes na imagem, `/readyz` API-only 200 e compatibilidade de inbox sintética antiga→nova→antiga. Smoke Maya real: 3 turnos/4 chamadas, consulta simulada e recuperação sem replay, zero comandos comerciais/envios. Evidência e limites no relatório acima.
