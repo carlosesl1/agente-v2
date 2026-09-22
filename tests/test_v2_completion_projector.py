@@ -196,7 +196,8 @@ def test_package_results_and_two_payment_components_reach_one_maya_turn(
                 p.public_text for p in payments.completed_offers()
             }
         assert len(authored_chunks(projector)) == 1
-        assert public.pending_count() == 0
+        # Stripe has a separate authenticated channel action; Wise stays in context.
+        assert public.pending_count() == (2 if method is PaymentMethod.STRIPE else 0)
         assert projector.run_once(now=NOW).inserted == 0
     finally:
         projector._boundary.close()

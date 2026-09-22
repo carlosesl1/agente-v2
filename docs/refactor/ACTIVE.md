@@ -1,4 +1,17 @@
-# Active maintenance — V2 model-owned service scope (local)
+# Active maintenance — V2 Stripe buttons via ManyChat (local)
+
+- Authorized by Carlos in the current chat: fix the diagnosed loss of the ManyChat payment-button dispatch. Base `2482c8ae7845b4277b95529a225067f831adc913`; branch `fix/v2-manychat-payment-buttons-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
+- Owner: completion projection into the existing public outbox; preserve Maya-authored boundary replies and the existing ManyChat field/flow adapter. Stripe URL plus factual service label is an authenticated channel artifact, not replacement Maya prose. No new queue/database/schema, semantic classifier or model.
+- DONE local: causal producer-to-HTTP RED (10 failed/4 passed), projection repair, restart/replay and uncertain-delivery gates. Final focused gate **98 passed**; full clean regression **2351 passed, 2958 subtests passed**, two upstream deprecation warnings, no exclusions. Boundary guard, changed-file Ruff and diff checks passed.
+- Container qualification: **71 passed** with the exact candidate source mounted read-only over the prior immutable runtime image, `--network none`, no operational credentials. This is not a rebuilt release image or live WhatsApp validation.
+- Inline review (no subagents): source-coverage recovery, pre-dispatch completion consolidation, historical release compatibility, and durable pre-I/O outbox fence including process loss/acceptance-persistence interruption. Preserve prompts, reservation/payment creation and independent unresolved incidents.
+- NEXT outside this local change: publication/rebuild and separately authorized real-channel qualification; no automatic rollout. Before installing on existing state, reconcile undelivered historical Stripe offers: initiation receipts do not reveal external deactivation. Never resume the closed test mount to force delivery.
+- Scope: no production deployment, real channel/provider effects, replay of archived live-test state, or edits to active state. GA/test/Ops authority, V3 and legacy remain untouched. Account for legacy payment receipts and native completion consolidation.
+- Diagnostic: `/home/ubuntu/workspace/v2-manychat-button-727d3625/DIAGNOSTICO.md`. New evidence: `/home/ubuntu/workspace/v2-manychat-button-fix-727d3625/`.
+
+## Prior local maintenance
+
+# V2 model-owned service scope (local)
 
 - Authorized by Carlos: correct the service-scope defect found in the isolated real conversation. Branch `fix/v2-service-scope-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, base `377648731664dc2a2acf1b286b79168f2ea94663`.
 - Evidence shows the committed facts never contained `service`; recorded model summaries also omit it. Passenger collection was admitted by the parser, then failed in the executor because the activity party could not be resolved.

@@ -23,9 +23,11 @@ from reservation_domain import (
 from reservation_execution import LedgerStatus
 from reservation_execution.projection import LedgerSnapshot
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
-from v2_application.completion import PublicOutboxStore
+from v2_application.completion import PublicOutboxStore, PublicReply
 from v2_application.payments import SQLitePaymentInitiationStore
+from v2_contracts.channel import PublicMessageAuthor
 from v2_contracts.completion import CompletionEvent, CompletionTurn
+from v2_contracts.payments import BusinessUnit, CustomerLanguage, StripePaymentLink
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,8 +197,9 @@ class CompletionProjector:
         _utc(now)
         if self.executor is None:
             raise RuntimeError("completion continuation executor is not bound")
+        events_snapshot = self.events()
         grouped = defaultdict(list)
-        for event in self.events():
+        for event in events_snapshot:
             if (
                 source_coverage(
                     self._boundary, event.lead_id, event.event_id, event.payload_hash
@@ -214,7 +217,69 @@ class CompletionProjector:
             except CompletionSuperseded:
                 continue
             inserted += int(not result.replayed)
+        self._enqueue_payment_buttons(events_snapshot, now=now)
         return CompletionProjectionResult(inserted, attempted)
+
+    def _enqueue_payment_buttons(self, events, *, now: datetime) -> None:
+        """Project committed Stripe offers, independently of Maya's prose.
+
+        Scan covered events too: a customer turn may consume the event, or the
+        process may stop after the turn commit but before this outbox commit.
+        Stable release identities make either recovery idempotent. A separate
+        release namespace preserves pre-dispatch completion consolidation;
+        historical release:10-payment rows remain excluded by events().
+        """
+        for event in events:
+            if (
+                event.kind != "payment_offer"
+                or source_coverage(
+                    self._boundary, event.lead_id, event.event_id, event.payload_hash
+                )
+                is None
+            ):
+                continue
+            records = tuple(
+                record
+                for record in self._payment_store.context_for_payment(event.payment_id)
+                if type(record.offer) is StripePaymentLink
+            )
+            if not records:
+                continue  # Pix/Wise instructions stay in Maya's existing context.
+            if len(records) != 1:
+                raise RuntimeError("payment button requires one authenticated offer")
+            record = records[0]
+            offer = record.offer
+            text = _payment_button_text(
+                record.selection.obligation.business_unit, offer
+            )
+            self._public_store.enqueue(
+                PublicReply(
+                    release_id=_opaque("release:20-payment-button", offer.payment_id),
+                    lead_id=event.lead_id,
+                    message_id=_opaque("message:payment-link", offer.payment_id),
+                    channel="manychat",
+                    chunks=(text,),
+                    author=PublicMessageAuthor.AUTHENTICATED_SYSTEM,
+                ),
+                now=now,
+            )
+
+
+def _payment_button_text(unit: BusinessUnit, offer: StripePaymentLink) -> str:
+    """Existing channel payload: a factual field label and provider-issued URL."""
+    if type(offer.customer_language) is not CustomerLanguage:
+        raise ValueError("payment button requires exact customer_language")
+    label = {
+        CustomerLanguage.PT_BR: {
+            BusinessUnit.HOSTEL: "Link de pagamento da hospedagem",
+            BusinessUnit.AGENCY: "Link de pagamento do passeio",
+        },
+        CustomerLanguage.EN: {
+            BusinessUnit.HOSTEL: "Accommodation payment link",
+            BusinessUnit.AGENCY: "Tour payment link",
+        },
+    }[offer.customer_language][unit]
+    return f"{label}: {offer.public_url}"
 
 
 def _confirmed_group(

@@ -329,6 +329,23 @@ class PublicOutboxStore:
                 self._connection.execute("ROLLBACK")
             raise
 
+    def fence(self, claim: PublicClaim, *, now: datetime) -> None:
+        """Reserve uncertainty durably before I/O; lease expiry cannot resend it.
+
+        Reuse the terminal state with the current claim token retained. Only an
+        explicit not-called result may release it; acceptance completes it.
+        Process loss leaves manual_review, never a reclaimable lease.
+        """
+        now_text = _utc(now, "now")
+        cursor = self._connection.execute(
+            "UPDATE public_outbox SET status='manual_review',updated_at=? "
+            "WHERE outbox_id=? AND status='leased' AND claim_owner=? "
+            "AND fencing_token=? AND lease_expires_at>?",
+            (now_text, claim.outbox_id, claim.worker_id, claim.fencing_token, now_text),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("public delivery claim is stale or already fenced")
+
     def complete(
         self,
         claim: PublicClaim,
@@ -344,7 +361,7 @@ class PublicOutboxStore:
         cursor = self._connection.execute(
             "UPDATE public_outbox SET status='delivered',receipt_id=?,acceptance_json=?,acceptance_hash=?,"
             "claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
-            "WHERE outbox_id=? AND status='leased' AND claim_owner=? AND fencing_token=?",
+            "WHERE outbox_id=? AND status IN ('leased','manual_review') AND claim_owner=? AND fencing_token=?",
             (
                 acceptance.acceptance_id,
                 acceptance_json,
@@ -362,7 +379,7 @@ class PublicOutboxStore:
         now_text = _utc(now, "now")
         cursor = self._connection.execute(
             "UPDATE public_outbox SET status='pending',claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
-            "WHERE outbox_id=? AND status='leased' AND claim_owner=? AND fencing_token=?",
+            "WHERE outbox_id=? AND status IN ('leased','manual_review') AND claim_owner=? AND fencing_token=?",
             (now_text, claim.outbox_id, claim.worker_id, claim.fencing_token),
         )
         if cursor.rowcount != 1:
@@ -372,7 +389,7 @@ class PublicOutboxStore:
         now_text = _utc(now, "now")
         cursor = self._connection.execute(
             "UPDATE public_outbox SET status='manual_review',claim_owner=NULL,lease_expires_at=NULL,updated_at=? "
-            "WHERE outbox_id=? AND status='leased' AND claim_owner=? AND fencing_token=?",
+            "WHERE outbox_id=? AND status IN ('leased','manual_review') AND claim_owner=? AND fencing_token=?",
             (now_text, claim.outbox_id, claim.worker_id, claim.fencing_token),
         )
         if cursor.rowcount != 1:
@@ -472,6 +489,7 @@ class PublicDeliveryWorker:
         )
         if claim is None:
             return PublicDeliveryDisposition.IDLE
+        self._store.fence(claim, now=now)
         try:
             receipt = self._delivery.send(claim)
         except PublicDeliveryRejected:
