@@ -85,6 +85,9 @@ selected_choice_refs, selection_requested, pending_action_disposition, and passe
 Each reply_chunks item contains text and expects_reply. Write each public message once;
 mark at most the final chunk as expects_reply=true. Do not add tools, effects, mechanical
 IDs, or facts not justified by the original request and observations.
+For passenger updates or selection, supply the service scope in facts if absent from
+state_facts, using the original conversation. Reuse a known scope unless the customer
+changes it. Do not invent scope or ask the customer to repeat an already clear choice.
 When observations are present in the request, use them and return read_requests as an
 empty list; the parent permits only one provider-read round per turn. selection_requested
 must be false by default; it may be true only on an inform proposal with a fresh read when
@@ -131,6 +134,18 @@ CURRENT-TURN COMMERCIAL PROGRESSION:
 - The request contains the complete original customer message. When that message already
   provides the service, date or period, and party needed for an availability or price
   check, emit the corresponding typed facts and read_requests in this same frame.
+- Emit the service scope from the full conversation as a typed service fact:
+  service=hostel for lodging (including private rooms), service=agency for activities,
+  service=package when both are in scope. This records interest, not booking permission.
+  Preserve a known service in state_facts unless the customer changes the scope; checking
+  one component of a package does not drop the other. Product IDs and tool reads do not
+  populate this fact. Do not invent a scope when the conversation is genuinely ambiguous.
+- Before emitting passengers or requesting/selecting an option, ensure that the service
+  is supplied in facts or already known in state_facts. Passenger updates require an
+  activity scope (agency or package); lodging holder data goes in standalone facts.
+  Recover a missing scope from the original dialogue, not by asking the customer to
+  repeat an already clear choice. If genuinely unclear, ask naturally without selecting
+  or emitting an unbound passenger update.
 - You are the sole semantic owner of facts and informational read intent. The parent does
   not parse customer language, inject facts, or infer informational reads from keywords.
 - Never reply that you are ready to check, will check later, or need the customer to send
@@ -715,7 +730,7 @@ def _v8_proposal(decoded: dict[str, object], request: ModelRequest) -> ModelProp
     target_offer_id = selected_offers[0] if len(selected_offers) == 1 else None
     target_offer_ids = selected_offers if len(selected_offers) == 2 else ()
     try:
-        return ModelProposal(
+        proposal = ModelProposal(
             source_event_id=request.source_event_id,
             intent=intent,
             reply_chunks=reply_chunks,
@@ -744,6 +759,22 @@ def _v8_proposal(decoded: dict[str, object], request: ModelRequest) -> ModelProp
         if type(exc) is InvalidModelProposal:
             raise
         raise InvalidModelProposal("v8 model proposal is invalid") from exc
+
+    # Validate the model-owned scope at the decoding boundary so the existing
+    # bounded protocol repair can fix omissions before passenger/state mutation.
+    # A consultation or selected reference is not evidence of customer intent.
+    declared = {fact.name: fact.value for fact in proposal.facts}
+    services = ("hostel", "agency", "package")
+    if "service" in declared and declared["service"] not in services:
+        raise InvalidModelProposal("v8 service fact must be hostel, agency or package")
+    effective = {fact.name: fact.value for fact in request.state_facts}
+    effective.update(declared)
+    service = effective.get("service")
+    if proposal.passengers and service not in ("agency", "package"):
+        raise InvalidModelProposal("v8 passengers require an activity service scope")
+    if (proposal.intent == "select" or proposal.selection_requested) and service not in services:
+        raise InvalidModelProposal("v8 selection requires a service scope")
+    return proposal
 
 
 def _proposal(

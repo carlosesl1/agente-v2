@@ -81,6 +81,195 @@ EFFECT_DIGEST = "b" * 64
 TARGET_DIGEST = "c" * 64
 
 
+@pytest.mark.parametrize("post_read", (False, True))
+def test_missing_service_repairs_before_passenger_merge_and_survives_restart(
+    tmp_path, post_read
+) -> None:
+    from types import SimpleNamespace
+
+    from reservation_boundary.conversation import DesiredService
+    from v2_adapters.hermes_model import HermesModelAdapter
+    from v2_application.passengers import (
+        attach_projection_manifest,
+        projection_passenger_inputs,
+    )
+
+    batches, authorities = [], {}
+    for index in range(3):
+        event = replace(
+            EVENT,
+            event_id=f"event:scope:{index}",
+            text=(
+                "Hospedagem e passeio para dois adultos, sem crianças.",
+                "Aqui estão os dados dos dois participantes.",
+                "Pode manter o titular já informado.",
+            )[index],
+            payload_hash=str(index + 3) * 64,
+        )
+        batch = replace(
+            BATCH,
+            batch_id=f"batch:scope:{index}",
+            events=(event,),
+            combined_text=event.text,
+        )
+        batches.append(batch)
+        authorities[batch.batch_id] = replace(
+            AUTHORITY,
+            authorization_id=f"auth:scope:{index}",
+            allocation_ids=(f"allocation:scope:{index}",),
+            allocation_manifest_hash=str(index + 3) * 64,
+        )
+    passengers = [
+        {
+            "position": i,
+            "participant_type": "adult",
+            "is_holder": i == 1,
+            "full_name": f"Viajante Sintético {i}",
+            "birth_date": "1990-05-15",
+            "gender": "m",
+            "country_code": "BR",
+        }
+        for i in (1, 2)
+    ]
+
+    def wire(**changes):
+        data = {
+            "intent": "inform",
+            "reply_chunks": [{"text": "Dados recebidos.", "expects_reply": False}],
+            "facts": [],
+            "read_requests": [],
+            "passengers": [],
+            "selected_choice_refs": [],
+            "selection_requested": False,
+            "pending_action_disposition": None,
+        }
+        data.update(changes)
+        return json.dumps(data, ensure_ascii=False).encode()
+
+    opening = wire(
+        facts=[
+            {"name": "adults", "value": 2},
+            {"name": "children", "value": 0},
+            {"name": "product_id", "value": "product:buracao"},
+        ]
+    )
+    missing = wire(passengers=passengers)
+    repaired = wire(
+        facts=[{"name": "service", "value": "package"}], passengers=passengers
+    )
+    followup = wire(
+        passengers=[
+            {
+                **passengers[0],
+                "full_name": None,
+                "birth_date": None,
+                "gender": None,
+                "country_code": None,
+            }
+        ]
+    )
+    responses = [opening]
+    if post_read:
+        responses.append(
+            wire(
+                read_requests=[
+                    {
+                        "kind": "activity",
+                        "product_id": "product:buracao",
+                        "activity_date": "2026-08-12",
+                        "adults": 2,
+                        "children": 0,
+                    }
+                ]
+            )
+        )
+    responses.extend([missing, repaired, followup])
+    seen = []
+
+    def run(command, **kwargs):
+        assert not store._connection.in_transaction
+        assert responses, "unexpected extra model call"
+        seen.append(json.loads(kwargs["input"]))
+        return SimpleNamespace(
+            returncode=0, stdout=b"PHASE8_RESULT\x00" + responses.pop(0), stderr=b""
+        )
+
+    def executor():
+        adapter = HermesModelAdapter(
+            command=("synthetic-child",),
+            system_prompt="system",
+            timeout=10,
+            transcript_key=TRANSCRIPT_KEY,
+            run=run,
+            environ={},
+        )
+        return _executor(
+            store=store,
+            model=adapter,
+            profile=FakeProfile(store),
+            reads=V2ReadService({ReadKind.ACTIVITY: read_port}),
+            private_customer_facts=private,
+            public_authority=MappingAuthority(authorities),
+        )
+
+    store = SQLiteBoundaryStore.open_path_v8(tmp_path / "boundary.sqlite3")
+    private = SQLitePrivateCustomerFactStore(tmp_path / "customer.sqlite3")
+    read_port = FakeActivityReadPort(store)
+    try:
+        for authority in authorities.values():
+            _install_public_authority(store, authority)
+        worker = executor()
+        worker.execute(batches[0])
+        initial = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert initial.desired_services == ()
+        assert all(f.name != "service" for f in initial.facts)
+        result = worker.execute(batches[1])
+        assert result.reply_chunks == ("Dados recebidos.",)
+        assert result.receipt.command_rows == result.receipt.relay_rows == ()
+        assert len(read_port.calls) == int(post_read)
+        committed = store.load_latest_conversation_projection(BATCH.lead_id)
+        assert committed.desired_services == (
+            DesiredService.HOSTEL,
+            DesiredService.AGENCY,
+        )
+        assert {f.name: f.value.value for f in committed.facts}["service"] == "package"
+        before = private.load_passenger_manifest(BATCH.lead_id)
+        assert before is not None
+        assert (
+            len(
+                projection_passenger_inputs(
+                    attach_projection_manifest(committed, before)
+                )
+            )
+            == 2
+        )
+        # Both canonical owners are recreated; no preloaded conversation-state fixture.
+        store.close()
+        private.close()
+        store = SQLiteBoundaryStore.open_path_v8(tmp_path / "boundary.sqlite3")
+        private = SQLitePrivateCustomerFactStore(tmp_path / "customer.sqlite3")
+        read_port = FakeActivityReadPort(store)
+        worker = executor()
+        calls = len(seen)
+        replay = worker.execute(batches[1])
+        assert replay.replayed and len(seen) == calls
+        assert private.load_passenger_manifest(BATCH.lead_id) == before
+        result = worker.execute(batches[2])
+        assert result.receipt.command_rows == result.receipt.relay_rows == ()
+        assert result.reply_chunks == ("Dados recebidos.",)
+        context = json.loads(seen[-1]["messages"][-1][1])
+        assert any(
+            f == {"name": "service", "value": "package"} for f in context["state_facts"]
+        )
+        assert len(context["passengers"]) == 2
+        assert len(seen) == 4 + int(post_read)
+        assert not responses and not read_port.calls
+        assert seen[-3]["messages"] == seen[-2]["messages"]
+    finally:
+        private.close()
+        store.close()
+
+
 def test_committed_dialogue_reaches_next_turn_and_replay_repairs_private_row(
     tmp_path,
 ) -> None:

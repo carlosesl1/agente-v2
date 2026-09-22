@@ -1,4 +1,16 @@
-# Active implementation — V2 child history and error contract (local)
+# Active maintenance — V2 model-owned service scope (local)
+
+- Authorized by Carlos: correct the service-scope defect found in the isolated real conversation. Branch `fix/v2-service-scope-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, base `377648731664dc2a2acf1b286b79168f2ea94663`.
+- Evidence shows the committed facts never contained `service`; recorded model summaries also omit it. Passenger collection was admitted by the parser, then failed in the executor because the activity party could not be resolved.
+- Invariant: Maya supplies semantic scope; the adapter validates the effective typed scope before passenger collection/selection admission. Existing state is reusable. Reads alone, product IDs and customer/prose keywords never imply purchase scope or authorization.
+- DONE local: causal RED (11 failed, 9 passed), minimal adapter/prompt correction, final focused suite (224 passed), complete suite (2334 passed, 2958 subtests), boundary/diff checks and zero new Ruff findings versus base. Three real-model retrospective scope/collection probes passed on the candidate source, with zero tools/provider dispatch/effects; this is not a complete business journey or a rebuilt-image qualification.
+- NEXT outside this local change: publish/rebuild/CI, authorize and repeat the isolated channel journey, then evaluate promotion separately. Production is unchanged.
+- Preserve the existing one structural-repair attempt, authored prose, handoff exhaustion, provider freshness and effect guards. No new agent, queue, database, regex, schema field or semantic reviewer. No deploy or external commercial/channel effects in this maintenance step; GA/Ops/V3 and active state untouched.
+- Evidence directory: `/home/ubuntu/workspace/v2-service-scope-727d3625/`.
+
+## Prior maintenance (historical)
+
+# V2 child history and error contract (local)
 
 - Current maintenance scope explicitly authorized by Carlos: align child history without count-based truncation, and distinguish invalid child input from invalid model output. No Bókun, commercial-policy, deployment or external-effect changes.
 - DONE local: branch `fix/v2-child-history-727d3625`, based on authenticated `874b8f2`, in `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`. Parent context and wire byte bounds preserved; categorical input/output/execution failures cross the existing process and inbox boundaries.

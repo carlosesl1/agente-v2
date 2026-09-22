@@ -44,6 +44,193 @@ def _v8_payload(**changes: object) -> dict[str, object]:
     return payload
 
 
+def _scope_passenger() -> dict[str, object]:
+    return {
+        "position": 1,
+        "participant_type": "adult",
+        "is_holder": True,
+        "full_name": "Viajante Sintético",
+        "birth_date": "1990-05-15",
+        "gender": "m",
+        "country_code": "BR",
+    }
+
+
+@pytest.mark.parametrize("service", (None, "hostel", "activity"))
+def test_v8_passenger_scope_is_validated_before_runtime_admission(service) -> None:
+    facts = [{"name": "adults", "value": 2}, {"name": "children", "value": 0}]
+    if service is not None:
+        facts.append({"name": "service", "value": service})
+    # A product, a typed consultation and prose are not a declaration of scope.
+    facts.append({"name": "product_id", "value": "product:buracao"})
+    with pytest.raises(InvalidModelProposal, match="service"):
+        _proposal(
+            _v8_bytes(
+                facts=facts,
+                passengers=[_scope_passenger()],
+                reply_chunks=["Quero hospedagem e passeio para os dois viajantes."],
+                read_requests=[
+                    {
+                        "kind": "activity",
+                        "product_id": "product:buracao",
+                        "activity_date": "2026-08-12",
+                        "adults": 2,
+                        "children": 0,
+                    }
+                ],
+            ),
+            _v8_request(),
+        )
+
+
+@pytest.mark.parametrize("service", ("agency", "package"))
+@pytest.mark.parametrize("inherited", (False, True))
+def test_v8_passenger_scope_reuses_state_or_current_maya_fact(
+    service, inherited
+) -> None:
+    from dataclasses import replace
+
+    request = _v8_request()
+    facts = []
+    if inherited:
+        request = replace(request, state_facts=(ModelFact("service", service),))
+    else:
+        facts = [{"name": "service", "value": service}]
+    proposal = _proposal(
+        _v8_bytes(facts=facts, passengers=[_scope_passenger()]), request
+    )
+    assert len(proposal.passengers) == 1
+    assert proposal.facts == (() if inherited else (ModelFact("service", service),))
+
+
+def test_v8_current_service_change_overrides_stale_activity_scope() -> None:
+    from dataclasses import replace
+
+    request = replace(_v8_request(), state_facts=(ModelFact("service", "package"),))
+    with pytest.raises(InvalidModelProposal, match="service"):
+        _proposal(
+            _v8_bytes(
+                facts=[{"name": "service", "value": "hostel"}],
+                passengers=[_scope_passenger()],
+            ),
+            request,
+        )
+    request = replace(request, state_facts=(ModelFact("service", "hostel"),))
+    assert _proposal(
+        _v8_bytes(
+            facts=[{"name": "service", "value": "package"}],
+            passengers=[_scope_passenger()],
+        ),
+        request,
+    ).passengers
+
+
+@pytest.mark.parametrize("service", (None, "lodging", "agency"))
+def test_v8_selection_preparation_requires_canonical_effective_scope(service) -> None:
+    from dataclasses import replace
+
+    request = _v8_request()
+    if service is not None:
+        request = replace(request, state_facts=(ModelFact("service", service),))
+    data = _v8_bytes(
+        selection_requested=True,
+        read_requests=[
+            {
+                "kind": "activity",
+                "product_id": "product:buracao",
+                "activity_date": "2026-08-12",
+                "adults": 2,
+                "children": 0,
+            }
+        ],
+    )
+    if service == "agency":
+        assert _proposal(data, request).selection_requested is True
+    else:
+        with pytest.raises(InvalidModelProposal, match="service"):
+            _proposal(data, request)
+
+
+def test_v8_informational_read_does_not_invent_purchase_scope() -> None:
+    proposal = _proposal(
+        _v8_bytes(
+            read_requests=[
+                {
+                    "kind": "activity",
+                    "product_id": "product:buracao",
+                    "activity_date": "2026-08-12",
+                    "adults": 2,
+                    "children": 0,
+                }
+            ]
+        ),
+        _v8_request(),
+    )
+    assert proposal.facts == ()
+    assert proposal.selection_requested is False
+
+
+def test_service_scope_contract_reaches_initial_and_repair_wire() -> None:
+    initial = json.loads(_request_wire(_v8_request(), "system"))["system_prompt"]
+    repair = json.loads(
+        _request_wire(_v8_request(), "system\n" + _PROTOCOL_REPAIR_SUFFIX)
+    )["system_prompt"]
+    for prompt in (initial, repair):
+        assert "service=hostel" in prompt and "service=agency" in prompt
+        assert "service=package" in prompt
+        assert "scope from the full conversation" in prompt
+        assert "state_facts" in prompt
+    assert "service scope" in _PROTOCOL_REPAIR_SUFFIX
+
+
+@pytest.mark.parametrize("repair_succeeds", (True, False))
+def test_missing_service_uses_existing_single_structural_repair(
+    repair_succeeds,
+) -> None:
+    from dataclasses import replace
+
+    request = replace(
+        _v8_request(), state_facts=(ModelFact("adults", 2), ModelFact("children", 0))
+    )
+    invalid = _v8_bytes(passengers=[_scope_passenger()])
+    valid = _v8_bytes(
+        facts=[{"name": "service", "value": "package"}],
+        passengers=[_scope_passenger()],
+        reply_chunks=["Dados recebidos, obrigada."],
+    )
+    responses = [invalid, valid if repair_succeeds else invalid]
+    seen = []
+
+    def run(command, **kwargs):
+        assert responses, "must not add a third repair attempt"
+        seen.append(json.loads(kwargs["input"]))
+        return SimpleNamespace(
+            returncode=0, stdout=b"PHASE8_RESULT\x00" + responses.pop(0), stderr=b""
+        )
+
+    adapter = HermesModelAdapter(
+        command=("synthetic-child",),
+        system_prompt="system",
+        timeout=10,
+        transcript_key=b"s" * 32,
+        run=run,
+        environ={},
+    )
+    if repair_succeeds:
+        turn = adapter.complete_audited(request)
+        assert turn.proposal.facts == (ModelFact("service", "package"),)
+        assert turn.proposal.reply_chunks == ("Dados recebidos, obrigada.",)
+        assert len(turn.proposal.passengers) == 1
+        assert [f.response_bytes for f in turn.frames] == [invalid, valid]
+    else:
+        with pytest.raises(InvalidModelProposal, match="bounded attempts"):
+            adapter.complete_audited(request)
+    assert len(seen) == 2 and not responses
+    assert seen[0]["messages"] == seen[1]["messages"]
+    assert _PROTOCOL_REPAIR_SUFFIX not in seen[0]["system_prompt"]
+    assert _PROTOCOL_REPAIR_SUFFIX in seen[1]["system_prompt"]
+
+
 def test_commercial_progression_suffix_distinguishes_immediate_and_progressive_handoff() -> None:
     suffix = hermes_model_module._COMMERCIAL_PROGRESSION_SYSTEM_SUFFIX
     assert "PROGRESSIVE HANDOFF TRIAGE" in suffix
@@ -1844,7 +2031,7 @@ def test_ordinary_request_rejects_each_legacy_schema_and_repairs_with_v8(
     )
     repaired = _v8_bytes(
         reply_chunks=list(reply_chunks),
-        facts=[{"name": "service", "value": "activity"}],
+        facts=[{"name": "service", "value": "agency"}],
     )
     responses = [legacy, repaired]
     seen: list[dict[str, object]] = []
@@ -1877,7 +2064,7 @@ def test_ordinary_request_rejects_each_legacy_schema_and_repairs_with_v8(
     assert [frame.response_bytes for frame in turn.frames] == [legacy, repaired]
     assert turn.closure.ephemeral_session_id.startswith("uds:")
     assert turn.proposal.reply_chunks == reply_chunks
-    assert turn.proposal.facts == (ModelFact("service", "activity"),)
+    assert turn.proposal.facts == (ModelFact("service", "agency"),)
 
 
 def test_normal_protocol_rejects_two_legacy_frames_and_fails_closed(
