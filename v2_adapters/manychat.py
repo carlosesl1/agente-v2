@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Final, Protocol
 from urllib.parse import urlparse
 
@@ -19,6 +19,9 @@ from v2_contracts.channel import (
     PublicDeliveryRejected,
     PublicDeliveryUnknown,
 )
+from v2_contracts.execution_context import PaymentInitiationContext
+from v2_contracts.payment_delivery import ManyChatPaymentRoute, validate_payment_routes
+from v2_contracts.payments import StripePaymentLink
 
 
 class ManyChatPayloadError(ValueError):
@@ -191,9 +194,8 @@ class ManyChatFlowDeliveryAdapter:
         allowed_subscriber_id: str | None,
         reply_field_id: int,
         reply_flow_ns: str,
-        payment_link_field_id: int,
-        payment_description_field_id: int,
-        payment_flow_ns: str,
+        payment_routes: tuple[ManyChatPaymentRoute, ...],
+        payment_context_resolver: Callable[[object], PaymentInitiationContext] | None = None,
     ) -> None:
         for method in ("set_custom_field", "set_custom_fields", "trigger_flow"):
             if not callable(getattr(transport, method, None)):
@@ -203,26 +205,19 @@ class ManyChatFlowDeliveryAdapter:
             or not allowed_subscriber_id.isdecimal()
         ):
             raise ValueError("allowed_subscriber_id must be decimal text or None")
-        for name, value in (
-            ("reply_field_id", reply_field_id),
-            ("payment_link_field_id", payment_link_field_id),
-            ("payment_description_field_id", payment_description_field_id),
-        ):
-            if type(value) is not int or value < 1:
-                raise ValueError(f"{name} must be a positive exact integer")
-        for name, value in (
-            ("reply_flow_ns", reply_flow_ns),
-            ("payment_flow_ns", payment_flow_ns),
-        ):
-            if type(value) is not str or not value or "\x00" in value:
-                raise ValueError(f"{name} must be non-empty NUL-free text")
+        if type(reply_field_id) is not int or reply_field_id < 1:
+            raise ValueError("reply_field_id must be a positive exact integer")
+        if type(reply_flow_ns) is not str or not reply_flow_ns or "\x00" in reply_flow_ns:
+            raise ValueError("reply_flow_ns must be non-empty NUL-free text")
         self._transport = transport
         self._allowed_subscriber_id = allowed_subscriber_id
         self._reply_field_id = reply_field_id
         self._reply_flow_ns = reply_flow_ns
-        self._payment_link_field_id = payment_link_field_id
-        self._payment_description_field_id = payment_description_field_id
-        self._payment_flow_ns = payment_flow_ns
+        validate_payment_routes(payment_routes)
+        if payment_context_resolver is not None and not callable(payment_context_resolver):
+            raise TypeError("payment_context_resolver must be callable")
+        self._payment_routes = {(r.business_unit, r.customer_language): r for r in payment_routes}
+        self._payment_context_resolver = payment_context_resolver
 
     def send(self, claim: object) -> PublicChannelAcceptance:
         outbox_id = getattr(claim, "message_id", None)
@@ -256,25 +251,42 @@ class ManyChatFlowDeliveryAdapter:
             type(source_message_id) is str
             and source_message_id.startswith("message:payment-link:")
         )
+        route = None
+        if payment:
+            # Resolve BEFORE any field mutation. Never infer account or locale from prose.
+            if self._payment_context_resolver is None:
+                raise PublicDeliveryRejected("payment routing owner is unavailable")
+            context = self._payment_context_resolver(claim)
+            if type(context) is not PaymentInitiationContext or type(context.offer) is not StripePaymentLink:
+                raise PublicDeliveryRejected("payment route requires an authenticated Stripe offer")
+            obligation, offer = context.selection.obligation, context.offer
+            if offer.account_profile_id != obligation.receiver_profile_id:
+                raise PublicDeliveryRejected("payment account differs from obligation")
+            route = self._payment_routes.get((obligation.business_unit, offer.customer_language))
+            if route is None:
+                raise PublicDeliveryRejected("payment route is absent")
+            description, url = self._payment_values(text)
+            if url != offer.public_url:
+                raise PublicDeliveryRejected("payment URL differs from authenticated offer")
         mutated = False
         try:
             if payment:
-                description, url = self._payment_values(text)
+                assert route is not None
                 response = self._transport.set_custom_fields(
                     subscriber_id=subscriber_id,
                     fields=[
                         {
-                            "field_id": self._payment_link_field_id,
+                            "field_id": route.link_field_id,
                             "field_value": url,
                         },
                         {
-                            "field_id": self._payment_description_field_id,
+                            "field_id": route.description_field_id,
                             "field_value": description,
                         },
                     ],
                     idempotency_key=outbox_id + ":fields",
                 )
-                flow_ns = self._payment_flow_ns
+                flow_ns = route.flow_ns
             else:
                 response = self._transport.set_custom_field(
                     subscriber_id=subscriber_id,

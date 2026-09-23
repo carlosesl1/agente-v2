@@ -23,11 +23,17 @@ from reservation_domain import (
 from reservation_execution import LedgerStatus
 from reservation_execution.projection import LedgerSnapshot
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
-from v2_application.completion import PublicOutboxStore, PublicReply
+from v2_application.completion import PublicClaim, PublicOutboxStore, PublicReply
 from v2_application.payments import SQLitePaymentInitiationStore
-from v2_contracts.channel import PublicMessageAuthor
+from v2_contracts.channel import PublicDeliveryRejected, PublicMessageAuthor
 from v2_contracts.completion import CompletionEvent, CompletionTurn
-from v2_contracts.payments import BusinessUnit, CustomerLanguage, StripePaymentLink
+from v2_contracts.execution_context import PaymentInitiationContext
+from v2_contracts.payments import (
+    BusinessUnit,
+    CustomerLanguage,
+    PaymentMethod,
+    StripePaymentLink,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +225,43 @@ class CompletionProjector:
             inserted += int(not result.replayed)
         self._enqueue_payment_buttons(events_snapshot, now=now)
         return CompletionProjectionResult(inserted, attempted)
+
+    def payment_context_for_claim(self, claim: PublicClaim) -> PaymentInitiationContext:
+        """Recover routing from the payment owner, keeping persisted IDs unchanged."""
+        if type(claim) is not PublicClaim:
+            raise PublicDeliveryRejected("payment routing requires an exact outbox claim")
+        if self._payment_store is None:
+            raise PublicDeliveryRejected("payment routing owner is unavailable")
+        source = getattr(claim, "source_message_id", None)
+        matches = tuple(
+            offer for offer in self._payment_store.completed_offers()
+            if type(offer) is StripePaymentLink
+            and _opaque("message:payment-link", offer.payment_id) == source
+        )
+        if len(matches) != 1:
+            raise PublicDeliveryRejected("payment row lacks one authenticated offer")
+        offer = matches[0]
+        lead = self._lead_resolver.lead_id_for_payment(offer.payment_id)
+        if lead is None or getattr(claim, "lead_id", None) != lead:
+            raise PublicDeliveryRejected("payment row belongs to another lead")
+        records = tuple(r for r in self._payment_store.context_for_payment(offer.payment_id) if r.offer == offer)
+        if len(records) != 1:
+            raise PublicDeliveryRejected("payment row lacks one authenticated selection")
+        record = records[0]
+        obligation = record.selection.obligation
+        if record.selection.method is not PaymentMethod.STRIPE:
+            raise PublicDeliveryRejected("payment method differs from Stripe offer")
+        if offer.account_profile_id != obligation.receiver_profile_id:
+            raise PublicDeliveryRejected("payment account differs from obligation")
+        if type(offer.customer_language) is not CustomerLanguage:
+            raise PublicDeliveryRejected("payment route lacks an authenticated language")
+        if (
+            getattr(claim, "author", None) is not PublicMessageAuthor.AUTHENTICATED_SYSTEM
+            or getattr(claim, "chunk_index", None) != 0
+            or getattr(claim, "text", None) != _payment_button_text(obligation.business_unit, offer)
+        ):
+            raise PublicDeliveryRejected("payment row differs from its authenticated offer")
+        return record
 
     def _enqueue_payment_buttons(self, events, *, now: datetime) -> None:
         """Project committed Stripe offers, independently of Maya's prose.

@@ -7,6 +7,7 @@ from v2_adapters.manychat import ManyChatFlowDeliveryAdapter
 from v2_adapters.provider_http import ManyChatHTTPTransport
 from v2_application.completion import PublicDeliveryWorker, PublicOutboxStore, PublicReply
 from v2_contracts.channel import PublicMessageAuthor
+from v2_host.settings import _default_payment_routes
 
 
 NOW = datetime(2026, 8, 12, 20, 0, tzinfo=timezone.utc)
@@ -32,9 +33,7 @@ def test_general_availability_delivery_uses_claim_subscriber_without_global_allo
         allowed_subscriber_id=None,
         reply_field_id=101,
         reply_flow_ns="flow:reply:v2",
-        payment_link_field_id=201,
-        payment_description_field_id=202,
-        payment_flow_ns="flow:payment:v2",
+        payment_routes=_default_payment_routes(),
     )
     store = PublicOutboxStore((tmp_path / "public-ga.sqlite3").resolve())
     try:

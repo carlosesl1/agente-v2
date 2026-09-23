@@ -1011,11 +1011,8 @@ def build_worker_set(
                 ),
                 reply_field_id=settings.manychat_reply_field_id,
                 reply_flow_ns=settings.manychat_reply_flow_ns,
-                payment_link_field_id=settings.manychat_payment_link_field_id,
-                payment_description_field_id=(
-                    settings.manychat_payment_description_field_id
-                ),
-                payment_flow_ns=settings.manychat_payment_flow_ns,
+                payment_routes=settings.manychat_payment_routes,
+                payment_context_resolver=completion_projector.payment_context_for_claim,
             ),
             effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
             worker_id="worker:manychat-public",

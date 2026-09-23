@@ -548,6 +548,11 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert type(
             manychat_workers[WorkerQueue.PUBLIC_DELIVERY]
         ) is CombinedPublicDeliveryWorker
+        delivery = manychat_workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
+        assert delivery._payment_context_resolver.__self__ is manychat_workers[WorkerQueue.POST_PAYMENT]
+        assert delivery._payment_routes == {
+            (r.business_unit, r.customer_language): r for r in manychat_enabled.manychat_payment_routes
+        }
         assert (
             manychat_container.readiness().capabilities["manychat_delivery"]
             == "ready"

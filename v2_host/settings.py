@@ -2,21 +2,50 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
-import json
-import os
 from pathlib import Path
-import re
 from urllib.parse import urlsplit
 
+from v2_contracts.payment_delivery import ManyChatPaymentRoute, validate_payment_routes
+from v2_contracts.payments import BusinessUnit, CustomerLanguage
 
 _REAL_EFFECTS_ACK = "ENABLE_V2_REAL_EFFECTS_FOR_CONTROLLED_TEST"
 _CONTROLLED_MODEL = "openai-codex/gpt-5.6-terra"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _default_payment_routes() -> tuple[ManyChatPaymentRoute, ...]:
+    # Operator-supplied namespaces, corroborated by ManyChat account inventory.
+    return (
+        ManyChatPaymentRoute(BusinessUnit.HOSTEL, CustomerLanguage.PT_BR, 14385975, 14389398, "content20260317150732_004280"),
+        ManyChatPaymentRoute(BusinessUnit.HOSTEL, CustomerLanguage.EN, 14385975, 14389398, "content20260317175037_863148"),
+        ManyChatPaymentRoute(BusinessUnit.AGENCY, CustomerLanguage.PT_BR, 14385973, 14389400, "content20260316210707_801647"),
+        ManyChatPaymentRoute(BusinessUnit.AGENCY, CustomerLanguage.EN, 14385973, 14389400, "content20260317181131_597245"),
+    )
+
+
+def _payment_routes(raw: str) -> tuple[ManyChatPaymentRoute, ...]:
+    if not raw:
+        return _default_payment_routes()
+    rows = json.loads(raw)
+    if type(rows) is not list:
+        raise ValueError("V2_MANYCHAT_PAYMENT_ROUTES_JSON must be an array")
+    routes = tuple(ManyChatPaymentRoute(
+        business_unit=BusinessUnit(row["business_unit"]),
+        customer_language=CustomerLanguage(row["customer_language"]),
+        link_field_id=row["link_field_id"],
+        description_field_id=row["description_field_id"],
+        flow_ns=row["flow_ns"],
+    ) for row in rows)
+    validate_payment_routes(routes)
+    return routes
 
 
 class RuntimeMode(str, Enum):
@@ -207,6 +236,8 @@ class V2Settings:
     manychat_base_url: str = "https://api.manychat.com"
     manychat_reply_field_id: int | None = None
     manychat_reply_flow_ns: str = ""
+    # Deprecated single-route values remain parseable but never route a payment.
+    manychat_payment_routes: tuple[ManyChatPaymentRoute, ...] = field(default_factory=_default_payment_routes)
     manychat_payment_link_field_id: int | None = None
     manychat_payment_description_field_id: int | None = None
     manychat_payment_flow_ns: str = ""
@@ -478,13 +509,11 @@ class V2Settings:
             )
         if owns_worker and self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
+        validate_payment_routes(self.manychat_payment_routes)
         if owns_worker and self.manychat_delivery_enabled and (
             not self.manychat_api_key
             or self.manychat_reply_field_id is None
             or not self.manychat_reply_flow_ns
-            or self.manychat_payment_link_field_id is None
-            or self.manychat_payment_description_field_id is None
-            or not self.manychat_payment_flow_ns
         ):
             raise ValueError(
                 "ManyChat delivery requires reply/payment fields and flows"
@@ -888,6 +917,7 @@ class V2Settings:
                 "V2_MANYCHAT_PAYMENT_DESCRIPTION_FIELD_ID",
             ),
             manychat_payment_flow_ns=worker_source.get("V2_MANYCHAT_PAYMENT_FLOW_NS", ""),
+            manychat_payment_routes=_payment_routes(worker_source.get("V2_MANYCHAT_PAYMENT_ROUTES_JSON", "")),
             manychat_handoff_tag_id=_optional_positive_int(
                 worker_source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
                 "V2_MANYCHAT_HANDOFF_TAG_ID",

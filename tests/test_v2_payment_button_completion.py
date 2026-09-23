@@ -30,6 +30,9 @@ from v2_application.public_delivery import CombinedPublicDeliveryWorker
 from v2_application.reservations import ReservationAllocator
 from v2_contracts.channel import PublicAcceptanceOperation, PublicMessageAuthor
 
+from v2_host.settings import _default_payment_routes
+
+PAYMENT_FLOWS = {r.flow_ns for r in _default_payment_routes()}
 LEAD = "manychat:12345"
 
 
@@ -59,7 +62,7 @@ def lab(tmp_path):
             and value.behavior == "not_called"
         ):
             raise httpx.ConnectError("fixture: no connection", request=request)
-        if body.get("flow_ns") == "fixture:payment":
+        if body.get("flow_ns") in PAYMENT_FLOWS:
             if value.behavior == "unknown":
                 raise httpx.ReadTimeout("fixture: response lost", request=request)
             if value.behavior == "crash":
@@ -76,9 +79,8 @@ def lab(tmp_path):
             allowed_subscriber_id=None,
             reply_field_id=101,
             reply_flow_ns="fixture:reply",
-            payment_link_field_id=201,
-            payment_description_field_id=202,
-            payment_flow_ns="fixture:payment",
+            payment_routes=_default_payment_routes(),
+            payment_context_resolver=projector.payment_context_for_claim,
         )
         try:
             yield value
@@ -138,7 +140,7 @@ def buttons(lab):
     return [
         b
         for p, b, _ in lab.http
-        if p.endswith("sendFlow") and b["flow_ns"] == "fixture:payment"
+        if p.endswith("sendFlow") and b["flow_ns"] in PAYMENT_FLOWS
     ]
 
 

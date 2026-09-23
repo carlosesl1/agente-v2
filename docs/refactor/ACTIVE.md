@@ -1,3 +1,15 @@
+# Active maintenance — V2 account-bound ManyChat Stripe routing
+
+- Authorized by Carlos: map each Stripe button to its account/business unit and language using the four exact ManyChat namespaces supplied in this chat. Branch `fix/v2-manychat-account-routing-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, base `11b918cbb20872bbefd038241c537a6e2573a67a`.
+- Local verification complete: seven causal REDs, 113 focused tests, and full isolated suite **2393 tests / 2958 subtests passed**. Exact-image qualification follows the local commit; no deployment is authorized by these checks. Evidence `/home/ubuntu/workspace/v2-manychat-account-routing-727d3625/`.
+- NEXT: when authorized, qualify all four native WhatsApp CTAs and final redirects in a fresh isolated contact test; no general promotion. Independent Bókun `RESERVED` presentation remains outside this patch.
+- Contract/runbook: `docs/operations/manychat-payment-routing.md`; GET inventory verified exact namespaces and separate unit fields. No external writes during this maintenance.
+- Owner: channel delivery binding to the existing authenticated Stripe offer/selection and durable lead, not Maya prose, URL guessing or lexical service/locale detection. Preserve authorship, message/release identities and uncertain-send fences.
+- Scope: four flows and independent Hostel/Agency fields, default composition and configuration. No Bókun status changes, new bookings/charges, GA/Ops deployment, active-state edits, V3 or legacy. Live ManyChat discovery is GET-only; actual sends and rollout are separate gates.
+- Runtime authority verified OK. ManyChat inventory independently confirms supplied namespaces and separate account link fields.
+
+## Previous maintenance
+
 # Active maintenance — V2 Maya text and button contract (local)
 
 - Authorized by Carlos: resolve the two blockers found by real-model completion tests. Base `c1ca886a3950f81f355c5ccf2f34bc0138e46608`; branch `fix/v2-maya-text-button-contract-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.

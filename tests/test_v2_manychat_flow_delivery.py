@@ -11,6 +11,19 @@ from v2_application.completion import (
     PublicReply,
 )
 from v2_contracts.channel import PublicMessageAuthor
+from v2_contracts.execution_context import PaymentInitiationContext
+from v2_contracts.payments import (
+    BusinessUnit, CustomerLanguage, DueKind, PaymentObligation, PaymentSelection,
+    PaymentMethod, StripePaymentLink,
+)
+from v2_host.settings import _default_payment_routes
+
+
+def _fixture_payment_context(_claim):
+    obligation = PaymentObligation("payment:flow", "anchor:flow", BusinessUnit.HOSTEL, 45000, "BRL", DueKind.PREPAYMENT, 1, "account:hostel")
+    offer = StripePaymentLink("payment:flow", "anchor:flow", "account:hostel", 1, "https://buy.stripe.com/test_completion", "a" * 64, "b" * 64, CustomerLanguage.PT_BR)
+    return PaymentInitiationContext("initiation:flow", PaymentSelection(obligation, PaymentMethod.STRIPE), "completed", True, offer)
+
 
 NOW = datetime(2026, 7, 24, 18, 0, tzinfo=timezone.utc)
 
@@ -33,9 +46,8 @@ def _adapter(
         allowed_subscriber_id=allowed_subscriber_id,
         reply_field_id=101,
         reply_flow_ns="flow:reply:v2",
-        payment_link_field_id=201,
-        payment_description_field_id=202,
-        payment_flow_ns="flow:payment:v2",
+        payment_routes=_default_payment_routes(),
+        payment_context_resolver=_fixture_payment_context,
     )
 
 
@@ -104,13 +116,13 @@ def test_reply_and_payment_use_typed_custom_fields_then_flows(tmp_path) -> None:
     assert seen[0][1] == {
         "subscriber_id": "1873018537",
         "fields": [
-            {"field_id": 201, "field_value": "https://buy.stripe.com/test_completion"},
-            {"field_id": 202, "field_value": "Link de pagamento da hospedagem"},
+            {"field_id": 14385975, "field_value": "https://buy.stripe.com/test_completion"},
+            {"field_id": 14389398, "field_value": "Link de pagamento da hospedagem"},
         ],
     }
     assert seen[1][1] == {
         "subscriber_id": "1873018537",
-        "flow_ns": "flow:payment:v2",
+        "flow_ns": "content20260317150732_004280",
     }
     assert seen[2][1] == {
         "subscriber_id": "1873018537",
