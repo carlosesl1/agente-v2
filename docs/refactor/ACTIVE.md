@@ -1,4 +1,15 @@
-# Active maintenance — V2 Stripe buttons via ManyChat (local)
+# Active maintenance — V2 Maya text and button contract (local)
+
+- Authorized by Carlos: resolve the two blockers found by real-model completion tests. Base `c1ca886a3950f81f355c5ccf2f34bc0138e46608`; branch `fix/v2-maya-text-button-contract-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
+- Verified before candidate freeze: five causal RED failures; 183 focal tests GREEN (including byte-exact Unicode to ManyChat, URL repair, restart/idempotency and tag-only terminal-failure handoff), architectural boundaries and Ruff OK. Read evidence keeps the exact prior policy/hash; only authored replies permit natural Unicode.
+- NEXT: full regression and immutable-image real-model matrix. Consult the external evidence directory below for the post-commit verdict; do not infer production approval or a deploy from this maintenance note.
+- Owners: authored-reply validation, model execution-context projection and primary Maya prompt. Preserve strict provider/read normalization, exact authored text, financial URLs in channel delivery, uncertain-send fences and existing handoff on terminal inbox failures. No semantic reviewer, rewriting, intent regex, new queue/database or business effects.
+- No deploy, live provider/channel effects, active-state edits, V3 or legacy work. Runtime authority verified OK before work.
+- Evidence: `/home/ubuntu/workspace/v2-text-button-fix-727d3625-20260923/`; prior failing matrix `/home/ubuntu/workspace/v2-button-tests-c1ca886-20260922/` remains unchanged.
+
+## Previous maintenance
+
+# V2 Stripe buttons via ManyChat (local)
 
 - Authorized by Carlos in the current chat: fix the diagnosed loss of the ManyChat payment-button dispatch. Base `2482c8ae7845b4277b95529a225067f831adc913`; branch `fix/v2-manychat-payment-buttons-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
 - Owner: completion projection into the existing public outbox; preserve Maya-authored boundary replies and the existing ManyChat field/flow adapter. Stripe URL plus factual service label is an authenticated channel artifact, not replacement Maya prose. No new queue/database/schema, semantic classifier or model.

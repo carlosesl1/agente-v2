@@ -40,7 +40,8 @@ def component_wire(component: ExecutionComponentContext) -> dict:
                     "amount_minor": payment.selection.obligation.amount_minor,
                     "currency": payment.selection.obligation.currency,
                     "economic_version": payment.selection.obligation.economic_version,
-                    "public_url": payment.offer.public_url
+                    # URLs belong to the authenticated channel action, not prose.
+                    "delivery": "manychat_button"
                     if type(payment.offer) is StripePaymentLink
                     else None,
                     "instructions": payment.offer.public_text

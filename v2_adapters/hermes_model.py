@@ -611,6 +611,14 @@ def _v8_reply_chunks(value: object) -> tuple[tuple[str, ...], str | None]:
             if reply_index is not None:
                 raise InvalidModelProposal("v8 may expect one customer reply")
             reply_index = index
+        # Validate the existing public-channel contract before admission, so
+        # the same Maya can use the existing single protocol-repair attempt.
+        from v2_contracts.channel import validate_public_reply_text
+
+        try:
+            validate_public_reply_text(text, limit=4096)
+        except ValueError as exc:
+            raise InvalidModelProposal("v8 public reply contract is invalid") from exc
         chunks.append(text)
     if reply_index is not None and reply_index != len(chunks) - 1:
         raise InvalidModelProposal("v8 reply expectation must be on the final chunk")

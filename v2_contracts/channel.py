@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
 import hashlib
 import json
 import re
+import unicodedata
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import Final
-
 
 _ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _HASH_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -41,6 +41,33 @@ def _require_utc(value: object, field_name: str) -> datetime:
         or value.utcoffset() != timedelta(0)
     ):
         raise ValueError(f"{field_name} must be an exact UTC datetime")
+    return value
+
+
+PUBLIC_TEXT_FORBIDDEN_PATTERNS: Final = {
+    "control": r"[\u0000-\u0008\u000b-\u001f\u007f]",
+    "html": r"<[A-Za-z!/][^>]*>",
+    "markdown_link": r"!?\[[^\]]*\]\([^)]+\)",
+    "provider_ref": r"(?:cloudbeds\.property\.|bokun\.product\.)",
+    "secret_marker": r"(?i)\b(?:api[_-]?key|access[_-]?token|bearer)\b\s*[:=]",
+    "url": r"(?i)(?:https?://|www\.)\S+",
+}
+
+
+def validate_public_reply_text(value: object, *, limit: int) -> str:
+    """Validate the channel contract without rewriting Maya's Unicode bytes."""
+    _require_text(value, "public reply")
+    if value != value.strip() or "\r" in value or "\t" in value or "  " in value:
+        raise ValueError("public text normalization mismatch")
+    if len(value) > limit:
+        raise ValueError("public text exceeds its code-point limit")
+    # A normalized inspection view preserves technical controls without making
+    # natural glyphs (ordinal signs, composed/decomposed accents) invalid prose.
+    view = unicodedata.normalize("NFKC", value)
+    if any(
+        re.search(pattern, view) for pattern in PUBLIC_TEXT_FORBIDDEN_PATTERNS.values()
+    ):
+        raise ValueError("public text contains forbidden active content")
     return value
 
 
@@ -96,22 +123,24 @@ class PublicChannelAcceptance:
     def __post_init__(self) -> None:
         if type(self.state) is not PublicAcceptanceState:
             raise TypeError("state must be exact PublicAcceptanceState")
-        if type(self.operations) is not tuple or not self.operations or any(
-            type(item) is not PublicAcceptanceOperation for item in self.operations
+        if (
+            type(self.operations) is not tuple
+            or not self.operations
+            or any(
+                type(item) is not PublicAcceptanceOperation for item in self.operations
+            )
         ):
             raise TypeError("operations must be a non-empty exact operation tuple")
-        if (
-            type(self.provider_request_ids) is not tuple
-            or len(self.provider_request_ids) != len(self.operations)
-        ):
+        if type(self.provider_request_ids) is not tuple or len(
+            self.provider_request_ids
+        ) != len(self.operations):
             raise TypeError("provider_request_ids must align with operations")
         for value in self.provider_request_ids:
             if value is not None:
                 _require_id(value, "provider_request_id")
-        if (
-            type(self.dispatch_correlation_ids) is not tuple
-            or len(self.dispatch_correlation_ids) != len(self.operations)
-        ):
+        if type(self.dispatch_correlation_ids) is not tuple or len(
+            self.dispatch_correlation_ids
+        ) != len(self.operations):
             raise TypeError("dispatch_correlation_ids must align with operations")
         for value in self.dispatch_correlation_ids:
             _require_id(value, "dispatch_correlation_id")
@@ -122,9 +151,7 @@ class PublicChannelAcceptance:
                 "schema": "v2-public-channel-acceptance",
                 "version": 1,
                 "data": {
-                    "dispatch_correlation_ids": list(
-                        self.dispatch_correlation_ids
-                    ),
+                    "dispatch_correlation_ids": list(self.dispatch_correlation_ids),
                     "operations": [item.value for item in self.operations],
                     "provider_request_ids": list(self.provider_request_ids),
                     "state": self.state.value,
@@ -167,7 +194,13 @@ class PublicChannelAcceptance:
                 provider_request_ids=tuple(data["provider_request_ids"]),
                 dispatch_correlation_ids=tuple(data["dispatch_correlation_ids"]),
             )
-        except (KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeError,
+            json.JSONDecodeError,
+        ) as exc:
             raise ValueError("public acceptance payload is not canonical") from exc
 
 
@@ -194,7 +227,10 @@ class InboundEvent:
         _require_optional_text(self.media_url, "media_url")
         _require_optional_text(self.media_type, "media_type")
         _require_utc(self.occurred_at, "occurred_at")
-        if type(self.payload_hash) is not str or _HASH_RE.fullmatch(self.payload_hash) is None:
+        if (
+            type(self.payload_hash) is not str
+            or _HASH_RE.fullmatch(self.payload_hash) is None
+        ):
             raise ValueError("payload_hash must be a lowercase SHA-256")
         if not self.text.strip() and self.media_url is None:
             raise ValueError("event must contain text or media_url")
@@ -224,9 +260,13 @@ class InboundBatch:
             raise ValueError("events must belong to exactly one lead")
         if any(event.subscriber_id != self.subscriber_id for event in self.events):
             raise ValueError("events must belong to exactly one subscriber")
-        ordered = tuple(sorted(self.events, key=lambda event: (event.occurred_at, event.event_id)))
+        ordered = tuple(
+            sorted(self.events, key=lambda event: (event.occurred_at, event.event_id))
+        )
         if ordered != self.events:
             raise ValueError("events must be ordered by occurred_at and event_id")
-        expected_text = "\n".join(event.text for event in self.events if event.text.strip())
+        expected_text = "\n".join(
+            event.text for event in self.events if event.text.strip()
+        )
         if type(self.combined_text) is not str or self.combined_text != expected_text:
             raise ValueError("combined_text must be the canonical event text join")

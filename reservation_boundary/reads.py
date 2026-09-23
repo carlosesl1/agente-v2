@@ -33,6 +33,7 @@ from reservation_boundary.types import (
     TypedFact,
 )
 from reservation_domain import Party, SearchQuery, ServiceKind
+from v2_contracts.channel import PUBLIC_TEXT_FORBIDDEN_PATTERNS
 
 
 _IDENTIFIER_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -721,14 +722,7 @@ class LegacyGenesisEvidenceRecord:
 
 
 _PUBLIC_READ_POLICY: Final = {
-    "forbidden_patterns": {
-        "control": r"[\u0000-\u0008\u000b-\u001f\u007f]",
-        "html": r"<[A-Za-z!/][^>]*>",
-        "markdown_link": r"!?\[[^\]]*\]\([^)]+\)",
-        "provider_ref": r"(?:cloudbeds\.property\.|bokun\.product\.)",
-        "secret_marker": r"(?i)\b(?:api[_-]?key|access[_-]?token|bearer)\b\s*[:=]",
-        "url": r"(?i)(?:https?://|www\.)\S+",
-    },
+    "forbidden_patterns": dict(PUBLIC_TEXT_FORBIDDEN_PATTERNS),
     "limits": {"knowledge_codepoints": 4096, "label_codepoints": 256},
     "normalization": {
         "double_ascii_space": "forbidden",
