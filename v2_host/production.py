@@ -25,6 +25,7 @@ from v2_adapters.bokun_groups import (
     load_activity_group_policy,
 )
 from v2_adapters.cloudbeds import CloudbedsReadAdapter, CloudbedsReservationPort
+from v2_adapters.execution_context import ReservationStatusReader
 from v2_adapters.group_enriched_activity import GroupEnrichedActivityReadAdapter
 from v2_adapters.hermes_model import HermesModelAdapter
 from v2_adapters.knowledge import KnowledgeReadAdapter
@@ -665,6 +666,21 @@ def _build_inbox_worker(
             payment_store=container.payment_initiation,
             public_store=container.public_outbox,
             followup=container.followup,
+            reservation_status_reader=ReservationStatusReader(
+                cloudbeds=CloudbedsGETAuditTransport(
+                    api_key=settings.cloudbeds_api_key,
+                    property_id=settings.cloudbeds_property_id,
+                    base_url=settings.cloudbeds_base_url,
+                    timeout_seconds=5.0,
+                ),
+                bokun=BokunGETAuditTransport(
+                    access_key=settings.bokun_access_key,
+                    secret_key=settings.bokun_secret_key,
+                    base_url=settings.bokun_base_url,
+                    timeout_seconds=5.0,
+                ),
+                clock=clock,
+            ),
             lead_resolver=DurableLeadResolver(
                 boundary=container.boundary, execution=container.execution,
                 followup=container.followup, inbox=container.inbox,

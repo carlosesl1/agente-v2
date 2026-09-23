@@ -51,6 +51,7 @@ class ReservationExecutionStatusResolver:
         public_store=None,
         followup=None,
         lead_resolver=None,
+        reservation_status_reader=None,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
@@ -59,6 +60,7 @@ class ReservationExecutionStatusResolver:
         self._public = public_store
         self._followup = followup
         self._lead_resolver = lead_resolver
+        self._reservation_status_reader = reservation_status_reader
 
     def resolve(self, state: BoundaryState) -> str | None:
         return self.context(state).status
@@ -189,6 +191,16 @@ class ReservationExecutionStatusResolver:
             payments,
             settlement_status,
             settlements,
+            reservation_status=(
+                self._reservation_status_reader.read(
+                    service=command.payload.components[0].service.value,
+                    provider_reference=outcome.provider_reference,
+                )
+                if self._reservation_status_reader is not None
+                and outcome is not None
+                and outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
+                else None
+            ),
         )
 
     @staticmethod

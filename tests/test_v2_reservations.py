@@ -576,8 +576,7 @@ def test_bokun_booking_id_confirmation_is_durable_and_not_replayed(
         assert isinstance(first.transition.state, SucceededState)
         outcome = first.transition.state.outcome
         assert outcome.certainty is ExecutionCertainty.EFFECT_CONFIRMED
-        fingerprint = hashlib.sha256(raw_reference.encode()).hexdigest()
-        assert outcome.provider_reference == f"provider:bokun:{fingerprint[:32]}"
+        assert outcome.provider_reference == f"provider:bokun:id:{raw_reference}"
         assert raw_reference not in repr(outcome)
         assert store._connection.execute(
             "SELECT dispatch_slots_consumed,status FROM execution_ledger "
@@ -1424,7 +1423,7 @@ def test_bokun_port_normalizes_confirmed_booking_reference_like_base() -> None:
 
     assert result.certainty is ProviderCertainty.EFFECT_CONFIRMED
     assert result.normalized_status == "confirmed"
-    assert result.provider_reference is None
+    assert result.provider_reference == "booking-123"
     assert result.provider_reference_fingerprint == hashlib.sha256(
         b"booking-123"
     ).hexdigest()
@@ -1440,10 +1439,10 @@ def test_bokun_port_normalizes_confirmed_booking_reference_like_base() -> None:
             "reservation_id",
             True,
         ),
-        (BokunReservationPort, "bokun", "book_activity", "booking_id", False),
+        (BokunReservationPort, "bokun", "book_activity", "booking_id", True),
     ),
 )
-def test_specific_provider_ports_expose_raw_reference_only_for_cloudbeds(
+def test_specific_provider_ports_persist_native_reference_for_lifecycle_reads(
     port_type,
     provider: str,
     operation: str,

@@ -507,6 +507,8 @@ class V2ReservationExecutionAdapter:
             raise TypeError("provider port returned a non-canonical result")
         if self.provider == "cloudbeds" and result.provider_reference is not None:
             provider_reference = cloudbeds_outcome_reference(result.provider_reference)
+        elif self.provider == "bokun" and result.provider_reference is not None:
+            provider_reference = f"provider:bokun:id:{result.provider_reference}"
         elif result.provider_reference_fingerprint is not None:
             provider_reference = (
                 f"provider:{self.provider}:"

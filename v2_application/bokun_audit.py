@@ -398,7 +398,7 @@ class BokunAuditProjector:
             ):
                 ignored += 1
                 continue
-            booking_id = reference.removeprefix("provider:bokun:")
+            booking_id = reference.removeprefix("provider:bokun:").removeprefix("id:")
             try:
                 _require_id(booking_id, "booking_id")
             except ValueError:

@@ -1,3 +1,13 @@
+# Active maintenance — exact reservation lifecycle and consolidated V2 journey
+
+- Authorized by Carlos in session 727d36251e40: reservation confirmation is distinct from payment; nonpayment leads to automatic cancellation; Maya needs the exact provider status. Continue remaining consolidation, isolated deployment and real WhatsApp/Stripe TEST journey. ManyChat links retain latest fields per lead/unit as accepted; no immutable-link redesign.
+- Base `5167668c1d554c31e89b534a12ce95f6faff31cf`; branch `fix/v2-manychat-account-routing-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
+- NEXT: causal tests for native reference persistence and fresh read-only lifecycle projection; minimal implementation in current execution context and provider readers; preserve execution certainty and immutable ledgers. No semantic rewriting, lexical intent triggers, subagents, new state machine or active database edits.
+- Plan: `docs/superpowers/plans/2026-09-23-exact-reservation-status.md`. Evidence `/home/ubuntu/workspace/v2-exact-reservation-status-727d3625/`.
+- Promotion gate: exact candidate tests/image, isolated `/readyz`, natural WhatsApp authorization, provider readback, payment TEST and postpayment. No GA cutover if any gate fails. V3, legacy and Ops remain outside scope.
+
+## Previous maintenance
+
 # Active maintenance — V2 account-bound ManyChat Stripe routing
 
 - Authorized by Carlos: map each Stripe button to its account/business unit and language using the four exact ManyChat namespaces supplied in this chat. Branch `fix/v2-manychat-account-routing-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, base `11b918cbb20872bbefd038241c537a6e2573a67a`.

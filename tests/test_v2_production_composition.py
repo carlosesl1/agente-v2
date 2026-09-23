@@ -648,6 +648,10 @@ def test_general_availability_builds_full_multi_lead_worker_graph(
         assert type(workers[WorkerQueue.HANDOFF]) is HandoffOutboxWorker
         assert workers[WorkerQueue.POST_PAYMENT].executor is workers[WorkerQueue.INBOX]._executor
         assert workers[WorkerQueue.INBOX]._executor._completion_projector is workers[WorkerQueue.POST_PAYMENT]
+        status_reader = workers[WorkerQueue.INBOX]._executor._execution_status_resolver._reservation_status_reader
+        assert type(status_reader).__name__ == "ReservationStatusReader"
+        assert type(status_reader._cloudbeds).__name__ == "CloudbedsGETAuditTransport"
+        assert type(status_reader._bokun).__name__ == "BokunGETAuditTransport"
         assert workers[WorkerQueue.POST_PAYMENT]._lead_resolver is not None
         delivery = workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
         assert delivery._allowed_subscriber_id is None

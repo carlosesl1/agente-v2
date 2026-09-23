@@ -232,6 +232,17 @@ _ACTIVE_EXECUTION_SYSTEM_SUFFIX: Final = """
 OPERATION RESULTS AND COMMUNICATION:
 - execution_components contains authenticated per-operation facts. active_execution_status
   is only the current group's summary; never replace individual results with that label.
+- execution_status_scope=creation_result means certainty/normalized_status describe the
+  historical creation operation, NOT today's reservation status and NOT payment.
+  reservation.status is the exact current provider status observed at reservation.observed_at;
+  use it for the current reservation state, including cancellation after initial confirmation.
+  Confirmed or RESERVED does not mean paid. Read reservation.payment_status, paid_amount and
+  balance_due independently, alongside the payment settlement facts. Provider payment records
+  and our settlement ledger are different sources; never claim a successful payment from a link.
+  Unpaid reservations are subject to automatic cancellation. Do not invent its deadline,
+  cause or completion: current cancellation must come from a provider observation. If that
+  read is unavailable, explain the uncertainty instead of asserting the reservation is still
+  confirmed or cancelled from history. Keep earlier successful creation evidence intact.
 - Preserve every confirmed component and its provider_reference even when another failed
   or is unknown. Null certainty means no recorded final outcome, not proof of no call.
 - Payment initiation (including a link/instruction) is distinct from settlement. Source

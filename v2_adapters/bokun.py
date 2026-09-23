@@ -448,6 +448,7 @@ class BokunReservationPort:
             operation="book_activity",
             reference_field="booking_id",
             transport=self._transport,
+            persist_provider_reference=True,
         )
 
 

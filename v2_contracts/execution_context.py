@@ -90,6 +90,33 @@ class PaymentSettlementContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderReservationStatus:
+    """A fresh provider read, separate from creation and settlement ledgers."""
+
+    source_status: str
+    observed_at: datetime
+    reservation_status: str | None = None
+    payment_status: str | None = None
+    paid_amount: str | None = None
+    balance_due: str | None = None
+    currency: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_status not in {"observed", "unavailable"}:
+            raise ValueError("invalid provider status source")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("provider observation requires an aware datetime")
+        if (self.source_status == "observed") != bool(self.reservation_status):
+            raise ValueError("observed source requires native reservation status")
+        if self.source_status == "unavailable" and any(
+            value is not None for value in (
+                self.payment_status, self.paid_amount, self.balance_due, self.currency
+            )
+        ):
+            raise ValueError("unavailable status cannot carry financial claims")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionComponentContext:
     command_id: str | None
     draft_id: str
@@ -102,6 +129,7 @@ class ExecutionComponentContext:
     payments: tuple[PaymentInitiationContext, ...] = ()
     settlement_status: str = "unavailable"
     settlements: tuple[PaymentSettlementContext, ...] = ()
+    reservation_status: ProviderReservationStatus | None = None
 
     def __post_init__(self) -> None:
         if type(self.offer) is not ExecutedOffer:
