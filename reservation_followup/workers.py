@@ -355,6 +355,7 @@ class PaymentSettlementWorker:
         settlement: SettlementPort,
         worker_id: str,
         lease_ttl: timedelta,
+        clock=None,
     ) -> None:
         if type(store) is not SQLiteFollowupUnitOfWork:
             raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
@@ -373,6 +374,7 @@ class PaymentSettlementWorker:
             raise TypeError("settlement must expose dispatch(permit)")
         if type(lease_ttl) is not timedelta or lease_ttl <= timedelta(0):
             raise ValueError("lease_ttl must be a positive timedelta")
+        self._clock = clock
         self._store = store
         self._settlement = settlement
         self._settlement_version = settlement.settlement_version
@@ -382,7 +384,7 @@ class PaymentSettlementWorker:
     def run_once(self, *, now: datetime) -> SettlementWorkerResult:
         claim = self._store.claim_settlement(
             worker_id=self._worker_id,
-            now=now,
+            now=self._clock() if self._clock else now,
             lease_ttl=self._lease_ttl,
         )
         if claim is None:
@@ -408,7 +410,7 @@ class PaymentSettlementWorker:
             disposition = self._store.release_pre_dispatch_settlement(
                 claim,
                 retryable=preparation_retryable,
-                now=now,
+                now=self._clock() if self._clock else now,
             )
             worker_disposition = (
                 SettlementWorkerDisposition.PREPARATION_REQUEUED
@@ -420,7 +422,7 @@ class PaymentSettlementWorker:
                 claim.command.settlement_command_id,
             )
 
-        permit = self._store.fence_settlement(claim, request, now=now)
+        permit = self._store.fence_settlement(claim, request, now=self._clock() if self._clock else now)
         dispatched: object = None
         dispatch_failed = False
         try:
@@ -439,7 +441,7 @@ class PaymentSettlementWorker:
             claim,
             permit,
             outcome,
-            now=now,
+            now=self._clock() if self._clock else now,
         )
         disposition = (
             SettlementWorkerDisposition.SETTLED

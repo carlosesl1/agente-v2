@@ -20,7 +20,7 @@ class CompletionEvent:
     def __post_init__(self) -> None:
         for name in ("event_id", "lead_id"):
             _require_id(getattr(self, name), name)
-        if self.kind not in {"reservation_result", "payment_offer"}:
+        if self.kind not in {"reservation_result", "payment_offer", "payment_settlement"}:
             raise ValueError("unknown completion event kind")
         if type(self.command_ids) is not tuple:
             raise TypeError("command_ids must be an exact tuple")
@@ -28,9 +28,9 @@ class CompletionEvent:
             _require_id(identity, "command_id")
         if self.payment_id is not None:
             _require_id(self.payment_id, "payment_id")
-        if (self.kind == "reservation_result") != bool(self.command_ids):
+        if (self.kind in {"reservation_result", "payment_settlement"}) != bool(self.command_ids):
             raise ValueError("reservation events require command identities")
-        if (self.kind == "payment_offer") != (self.payment_id is not None):
+        if (self.kind in {"payment_offer", "payment_settlement"}) != (self.payment_id is not None):
             raise ValueError("payment events require a payment identity")
         _require_utc(self.occurred_at, "occurred_at")
         if (

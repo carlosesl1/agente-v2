@@ -1,3 +1,12 @@
+# Active maintenance — native Stripe receipt and settlement
+
+- Authorized by Carlos: fix the actual paid TEST webhook ignored by the old endpoint and close native ingress/provider settlement. Base e13452c609ed1889387564c2ccb568e2625a3b8e; same worktree and branch below.
+- Implementation complete with causal TDD: native account-scoped Stripe TEST ingress, existing financial ledger/fence, Cloudbeds/Bókun settlement, Maya completion and handoff, authentic ManyChat acceptance observation. Full pre-final suite 2443 tests / 2958 subtests passed; final Cloudbeds configured-base/currency regressions 37 passed. Final full rerun and immutable-image qualification remain release gates, not claims of a live payment E2E.
+- NEXT: freeze and qualify the exact local source/image; keep activation blocked until the Agency TEST key permits Accounts Read. All other required Stripe read probes passed. No endpoint provisioning, live payment replay, contact reopening or GA/Ops change. Evidence `/home/ubuntu/workspace/v2-stripe-settlement-727d3625/`; runbook `docs/operations/native-stripe-settlement.md`.
+- No GA cutover, cancelled-reservation payment replay, active database edits, legacy/V3 changes, new financial ledger or subagents. Existing ManyChat acceptance preserved.
+
+## Previous maintenance
+
 # Active maintenance — exact reservation lifecycle and consolidated V2 journey
 
 - Authorized by Carlos in session 727d36251e40: reservation confirmation is distinct from payment; nonpayment leads to automatic cancellation; Maya needs the exact provider status. Continue remaining consolidation, isolated deployment and real WhatsApp/Stripe TEST journey. ManyChat links retain latest fields per lead/unit as accepted; no immutable-link redesign.

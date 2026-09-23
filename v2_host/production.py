@@ -17,7 +17,11 @@ from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import ServiceKind
 from reservation_execution.reconciliation import Reconciler
 from reservation_followup.reconciliation import PaymentReconciler
-from reservation_followup.workers import HandoffOutboxWorker
+from reservation_followup.workers import (
+    HandoffOutboxWorker,
+    PaymentOutboxWorker,
+    PaymentSettlementWorker,
+)
 from v2_adapters.bokun import BokunReadAdapter, BokunReservationPort
 from v2_adapters.bokun_groups import (
     ActivityGroupPolicy,
@@ -77,6 +81,7 @@ from v2_application.recovery import (
 )
 from v2_application.relay_worker import BoundaryRelayWorker
 from v2_application.reservations import V2ReservationExecutionAdapter
+from v2_application.stripe_payment_effects import StripePaymentEffectObserver
 from v2_application.turn_executor import V2TurnExecutor
 from v2_application.workers import V2ReservationWorker
 from v2_contracts.critical_actions import CriticalActionKind
@@ -93,6 +98,7 @@ from v2_host.public_authority import (
     ManifestPublicAuthorityResolver,
 )
 from v2_host.settings import RuntimeMode, V2Settings
+from v2_host.stripe_settlement import StripeSettlementAdapter
 from v2_host.worker_main import (
     WorkerFailureReason,
     WorkerHealthResult,
@@ -142,6 +148,25 @@ def _inbox_turn_budget(settings: V2Settings) -> timedelta:
     if type(settings) is not V2Settings:
         raise TypeError("inbox turn budget requires exact V2Settings")
     return timedelta(seconds=(settings.hermes_timeout_seconds * 6) + 30)
+
+
+class _StripeSettlementStage:
+    def __init__(self, *, guard, worker):
+        self.guard, self.worker = guard, worker
+
+    def run_once(self, *, now):
+        if not self.guard.allows_workflow("worker:stripe-settlement"):
+            return {"status": "closed", "capability": "stripe_settlement"}
+        return self.worker.run_once(now=now)
+
+
+class _StripeCompletionStage:
+    def __init__(self, *, completion, effects):
+        self.completion, self.effects = completion, effects
+
+    def run_once(self, *, now):
+        return {"completion": self.completion.run_once(now=now),
+                "effects": self.effects.run_once(now=UTCClock().now())}
 
 
 class ControlledEffectGuard:
@@ -245,6 +270,7 @@ class ReconciliationStage:
             self._manual_handoff = ManualReviewHandoffProjector(
                 inbox=container.inbox,
                 execution=container.execution,
+                followup=container.followup,
                 coordinator=HandoffCoordinator(store=container.followup),
                 lead_id=(
                     f"manychat:{settings.allowed_subscriber_ids[0]}"
@@ -937,6 +963,7 @@ def build_worker_set(
             payment_store=container.payment_initiation,
             public_store=container.public_outbox,
             boundary=container.boundary,
+            followup=container.followup,
             lead_resolver=DurableLeadResolver(
                 boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox,
             ),
@@ -1065,6 +1092,36 @@ def build_worker_set(
         )
     else:
         handoff_worker = ClosedCapabilityWorker("manychat_handoff")
+    settlement_worker = ClosedCapabilityWorker("settlement_writes")
+    post_payment_worker = completion_projector
+    if settings.stripe_settlement_enabled:
+        financial_leads = DurableLeadResolver(boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox)
+        financial_guard = ControlledEffectGuard(settings=settings,clock=UTCClock())
+        settlement_worker = _StripeSettlementStage(
+            guard=financial_guard,
+            worker=PaymentSettlementWorker(
+                store=container.followup,
+                settlement=StripeSettlementAdapter(
+                    store=container.followup, execution=container.execution,
+                    cloudbeds_api_key=settings.cloudbeds_api_key,
+                    cloudbeds_property_id=settings.cloudbeds_property_id,
+                    bokun_access_key=settings.bokun_access_key, bokun_secret_key=settings.bokun_secret_key,
+                    cloudbeds_base_url=settings.cloudbeds_base_url, bokun_base_url=settings.bokun_base_url,
+                    effect_guard=financial_guard, lead_resolver=financial_leads,
+                    allowed_subscribers=settings.allowed_subscriber_ids,
+                ),
+                worker_id="worker:stripe-settlement", lease_ttl=timedelta(seconds=120),
+                clock=UTCClock().now,
+            ),
+        )
+        post_payment_worker = _StripeCompletionStage(
+            completion=completion_projector,
+            effects=PaymentOutboxWorker(
+                store=container.followup,
+                delivery=StripePaymentEffectObserver(followup=container.followup,boundary=container.boundary,lead_resolver=financial_leads,coordinator=HandoffCoordinator(store=container.followup)),
+                worker_id="worker:stripe-effects",lease_ttl=timedelta(seconds=30),
+            ),
+        )
     workers: dict[WorkerQueue, object] = {
         WorkerQueue.INBOX: inbox_worker,
         WorkerQueue.BOUNDARY_RELAY: boundary_relay,
@@ -1072,8 +1129,8 @@ def build_worker_set(
         WorkerQueue.HANDOFF: handoff_worker,
         WorkerQueue.OUTCOME_PROJECTOR: outcome_projector,
         WorkerQueue.PAYMENT_INITIATION: payment_worker,
-        WorkerQueue.SETTLEMENT: ClosedCapabilityWorker("settlement_writes"),
-        WorkerQueue.POST_PAYMENT: completion_projector,
+        WorkerQueue.SETTLEMENT: settlement_worker,
+        WorkerQueue.POST_PAYMENT: post_payment_worker,
         WorkerQueue.PUBLIC_DELIVERY: public_delivery,
         WorkerQueue.RECONCILIATION: ReconciliationStage(
             container=container,
@@ -1137,6 +1194,7 @@ def build_worker_set(
             "manychat_handoff": (
                 "ready" if settings.manychat_handoff_enabled else "closed"
             ),
+            "stripe_settlement": "ready" if settings.stripe_settlement_enabled else "closed",
             "payment_initiation": (
                 "ready" if payment_enabled else "closed"
             ),

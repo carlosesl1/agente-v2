@@ -200,6 +200,8 @@ class V2Settings:
     webhook_secret: str
     sqlite_path: Path
     process_role: V2ProcessRole = V2ProcessRole.COMBINED
+    stripe_native_accounts: dict = field(default_factory=dict, repr=False)
+    stripe_native_result_key: bytes = field(default=b"", repr=False)
     stripe_webhook_secret: str = ""
     wise_webhook_secret: str = ""
     pix_webhook_secret: str = ""
@@ -211,6 +213,7 @@ class V2Settings:
     cloudbeds_writes_enabled: bool = False
     bokun_writes_enabled: bool = False
     stripe_links_enabled: bool = False
+    stripe_settlement_enabled: bool = False
     wise_instructions_enabled: bool = False
     pix_instructions_enabled: bool = False
     manychat_delivery_enabled: bool = False
@@ -308,6 +311,11 @@ class V2Settings:
             raise ValueError("webhook_secret may not contain NUL")
         if owns_api and not self.webhook_secret.strip():
             raise ValueError("webhook_secret is required")
+        from v2_application.native_stripe import validate_native_accounts
+
+        validate_native_accounts(self.stripe_native_accounts, self.stripe_native_result_key)
+        if not owns_api and (self.stripe_native_accounts or self.stripe_native_result_key):
+            raise ValueError("native Stripe ingress credentials belong to API role")
         financial_values = (
             self.stripe_webhook_secret,
             self.wise_webhook_secret,
@@ -507,6 +515,15 @@ class V2Settings:
             raise ValueError(
                 "critical_approval_ttl_seconds must be an exact integer from 1 to 86400"
             )
+        if type(self.stripe_settlement_enabled) is not bool:
+            raise TypeError("stripe_settlement_enabled must be an exact bool")
+        if self.stripe_settlement_enabled and (
+            self.runtime_mode not in {RuntimeMode.CONTROLLED_WRITE, RuntimeMode.GENERAL_AVAILABILITY}
+            or not self.cloudbeds_writes_enabled or not self.bokun_writes_enabled
+            or not self.stripe_links_enabled or not self.manychat_handoff_enabled
+            or not self.manychat_delivery_enabled
+        ):
+            raise ValueError("Stripe settlement requires productive mode, both providers, links, delivery and handoff")
         if owns_worker and self.cloudbeds_writes_enabled and not self.cloudbeds_source_id:
             raise ValueError("Cloudbeds writes require cloudbeds_source_id")
         validate_payment_routes(self.manychat_payment_routes)
@@ -854,6 +871,8 @@ class V2Settings:
             webhook_secret=api_source.get("V2_MANYCHAT_WEBHOOK_SECRET", ""),
             sqlite_path=Path(raw_path),
             process_role=process_role,
+            stripe_native_accounts=json.loads(api_source.get("V2_STRIPE_NATIVE_ACCOUNTS_JSON", "{}")),
+            stripe_native_result_key=_hex_key(api_source.get("V2_STRIPE_NATIVE_RESULT_KEY_HEX", "")),
             stripe_webhook_secret=api_source.get("V2_STRIPE_WEBHOOK_SECRET", ""),
             wise_webhook_secret=api_source.get("V2_WISE_WEBHOOK_SECRET", ""),
             pix_webhook_secret=api_source.get("V2_PIX_WEBHOOK_SECRET", ""),
@@ -871,6 +890,7 @@ class V2Settings:
             pix_instructions_enabled=_env_bool(
                 source, "V2_ENABLE_PIX_INSTRUCTIONS"
             ),
+            stripe_settlement_enabled=_env_bool(worker_source, "V2_ENABLE_STRIPE_SETTLEMENT"),
             manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
             manychat_handoff_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_HANDOFF"),
             real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),

@@ -3939,6 +3939,31 @@ class SQLiteFollowupUnitOfWork:
                 fenced_at=now,
             )
 
+    def assert_live_settlement_permit(self, permit: SettlementPermit, *, now: datetime) -> None:
+        """Authenticate the current durable one-shot fence at the HTTP boundary."""
+        if type(permit) is not SettlementPermit:
+            raise TypeError("settlement requires an exact permit")
+        now = _require_utc_input(now, "now")
+        state = self.load_payment(permit.command.payment_id)
+        records = self._payment_financial_records(state)
+        if records is None:
+            raise StaleLease("settlement financial records are unavailable")
+        claim_record, command, ledger = records
+        if (
+            command != permit.command
+            or ledger["status"] != "dispatch_fenced"
+            or ledger["outcome"] is not None
+            or ledger["lease"] != permit.lease
+            or ledger["fencing_token"] != permit.lease.fencing_token
+            or ledger["claim_count"] != permit.claim_count
+            or ledger["dispatch_slots"] != 1
+            or ledger["request_hash"] != permit.request_hash
+            or ledger["fenced_at"] != permit.fenced_at
+            or claim_record.status is not PaymentEvidenceClaimStatus.IN_PROGRESS
+            or not permit.fenced_at <= now < permit.lease.expires_at
+        ):
+            raise StaleLease("settlement dispatch lost its permanent fence")
+
     def record_settlement_outcome(
         self,
         claim: SettlementClaim,

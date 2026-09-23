@@ -359,6 +359,7 @@ class ManualReviewHandoffProjector:
         lead_id: str = "",
         lead_resolver: object | None = None,
         inbox: SQLiteInbox | None = None,
+        followup=None,
     ) -> None:
         if type(execution) is not SQLiteUnitOfWork:
             raise TypeError("execution must be exact SQLiteUnitOfWork")
@@ -366,6 +367,7 @@ class ManualReviewHandoffProjector:
             raise TypeError("coordinator must be exact HandoffCoordinator")
         if inbox is not None and type(inbox) is not SQLiteInbox:
             raise TypeError("inbox must be exact SQLiteInbox")
+        self._followup = followup
         self._inbox = inbox
         self._execution = execution
         self._coordinator = coordinator
@@ -429,6 +431,24 @@ class ManualReviewHandoffProjector:
                 created += 1
             else:
                 replayed += 1
+        if self._followup is not None and self._execution is not None:
+            from reservation_followup.serialization import semantic_hash
+            for command, _ in self._execution.list_outcome_projection_inputs():
+                lead_id = (self._lead_resolver.lead_id_for_command(command.command_id) if self._lead_resolver is not None else self._lead_id)
+                if lead_id is None:
+                    continue
+                for workflow in self._followup.payments_for_reservation(command.command_id):
+                    finish = workflow.settlement_finish
+                    if finish is None or finish.outcome.certainty.value == "settled":
+                        continue
+                    token = semantic_hash(finish)
+                    request = self._coordinator.open_exception_once(
+                        lead_id=lead_id, workflow_id=command.workflow_id,
+                        source_event_id="event:stripe-settlement:" + token[:32],
+                        reason_code=HandoffReasonCode.OPERATIONAL_REVIEW, now=now,
+                    )
+                    created += int(request.created)
+                    replayed += int(not request.created)
         return ManualReviewHandoffProjection(created, replayed)
 
 

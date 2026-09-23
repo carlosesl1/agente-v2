@@ -65,6 +65,7 @@ class CompletionProjector:
         include_payment_offers: bool = True,
         executor=None,
         inbox=None,
+        followup=None,
     ) -> None:
         if (
             type(execution) is not SQLiteUnitOfWork
@@ -87,6 +88,7 @@ class CompletionProjector:
             include_payment_offers and payment_store is None
         ):
             raise ValueError("payment offers require their store capability")
+        self._followup = followup
         self._execution = execution
         self._payment_store = payment_store
         self._public_store = public_store
@@ -177,6 +179,22 @@ class CompletionProjector:
                         digest,
                     )
                 )
+        if self._followup is not None:
+            from reservation_followup.serialization import semantic_hash
+            for command, _ in self._execution.list_outcome_projection_inputs():
+                lead_id = self._lead_resolver.lead_id_for_command(command.command_id)
+                if lead_id is None:
+                    continue
+                for workflow in self._followup.payments_for_reservation(command.command_id):
+                    finish = workflow.settlement_finish
+                    if finish is None:
+                        continue
+                    fact_hash = semantic_hash(finish)
+                    result.append(CompletionEvent(
+                        "completion:settlement:" + fact_hash[:40], lead_id,
+                        "payment_settlement", (command.command_id,),
+                        workflow.subject.payment_id, finish.finished_at, fact_hash,
+                    ))
         return tuple(sorted(result, key=lambda e: (e.occurred_at, e.event_id)))
 
     def context(self, lead_id: str) -> CompletionContext:
