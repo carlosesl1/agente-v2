@@ -440,10 +440,10 @@ def test_controlled_lodging_completion_stays_active_with_payment_closed(
     try:
         workers = build_worker_set(container=container, settings=settings)
 
-        assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert type(workers[WorkerQueue.POST_PAYMENT].completion) is CompletionProjector
         assert type(workers[WorkerQueue.OUTCOME_PROJECTOR]) is ClosedCapabilityWorker
         assert type(workers[WorkerQueue.PAYMENT_INITIATION]) is ClosedCapabilityWorker
-        projector = workers[WorkerQueue.POST_PAYMENT]
+        projector = workers[WorkerQueue.POST_PAYMENT].completion
         assert projector._include_payment_offers is False
     finally:
         container.close()

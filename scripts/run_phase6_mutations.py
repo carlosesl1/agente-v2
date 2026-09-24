@@ -300,11 +300,11 @@ MUTANTS = (
         path="reservation_followup/workers.py",
         old=(
             "        if delivery_failed:\n"
-            "            self._store.release_payment_outbox(claim, now=now)\n"
+            "            self._store.release_payment_outbox(claim, now=completed_at())\n"
         ),
         new=(
             "        if delivery_failed:\n"
-            "            self._store.release_payment_outbox(claim, now=now)\n"
+            "            self._store.release_payment_outbox(claim, now=completed_at())\n"
             "            self._store._connection.execute(\n"
             "                \"UPDATE main.payment_ledger \"\n"
             "                \"SET claim_count=claim_count+1 WHERE settlement_command_id=?\",\n"
