@@ -4450,9 +4450,22 @@ class SQLiteFollowupUnitOfWork:
             raise StaleLease("payment outbox lease is stale, expired, or divergent")
         return clean, row
 
-    def claim_payment_outbox(
+    def claim_payment_observation(self, **kwargs) -> PaymentOutboxClaim | None:
+        """Lease a read-only receipt observation, never authority for a dispatch.
+
+        Existing dispatch deadlines/slots stay immutable. Only un-dispatched
+        state/acceptance/handoff observations are eligible; physical deliveries
+        must continue using claim_payment_outbox and its deadline gate.
+        """
+        return self._claim_payment_outbox(observation_only=True, **kwargs)
+
+    def claim_payment_outbox(self, **kwargs) -> PaymentOutboxClaim | None:
+        return self._claim_payment_outbox(observation_only=False, **kwargs)
+
+    def _claim_payment_outbox(
         self,
         *,
+        observation_only: bool,
         worker_id: str,
         delivery_id: str,
         delivery_version: int,
@@ -4479,10 +4492,19 @@ class SQLiteFollowupUnitOfWork:
             )
             for (payment_id,) in terminal_payments:
                 self._load_payment(payment_id)
+            observation_filter = (
+                "dispatch_slots_consumed=0 AND kind IN "
+                "('paid_state_transition','customer_payment_confirmation','manual_review') AND "
+                if observation_only and self._schema_version == SCHEMA_VERSION_V2
+                else ""
+            )
+            if observation_only and self._schema_version != SCHEMA_VERSION_V2:
+                raise ValueError("payment observations require the V2 store")
             candidate = self._connection.execute(
                 "SELECT message_id, payment_id FROM main.payment_outbox WHERE "
-                "(status='pending' AND claim_owner IS NULL) OR "
-                "(status='leased' AND lease_expires_at<=?) "
+                + observation_filter
+                + "((status='pending' AND claim_owner IS NULL) OR "
+                "(status='leased' AND lease_expires_at<=?)) "
                 "ORDER BY CASE kind "
                 "WHEN 'paid_state_transition' THEN 0 "
                 "WHEN 'customer_payment_confirmation' THEN 1 "
@@ -4520,7 +4542,7 @@ class SQLiteFollowupUnitOfWork:
                         "payment outbox dispatch_deadline_at",
                     )
                 )
-                if now >= deadline or expires_at > deadline:
+                if not observation_only and (now >= deadline or expires_at > deadline):
                     raise ValueError("payment lease exceeds immutable dispatch deadline")
                 cursor = self._connection.execute(
                     "UPDATE main.payment_outbox SET status='leased', claim_owner=?, "

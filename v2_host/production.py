@@ -1093,9 +1093,8 @@ def build_worker_set(
     else:
         handoff_worker = ClosedCapabilityWorker("manychat_handoff")
     settlement_worker = ClosedCapabilityWorker("settlement_writes")
-    post_payment_worker = completion_projector
+    financial_leads = DurableLeadResolver(boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox)
     if settings.stripe_settlement_enabled:
-        financial_leads = DurableLeadResolver(boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox)
         financial_guard = ControlledEffectGuard(settings=settings,clock=UTCClock())
         settlement_worker = _StripeSettlementStage(
             guard=financial_guard,
@@ -1114,12 +1113,17 @@ def build_worker_set(
                 clock=UTCClock().now,
             ),
         )
+    post_payment_worker = completion_projector
+    if not isinstance(completion_projector, ClosedCapabilityWorker):
+        # Receipt observation has no provider/channel effects and remains available
+        # when the write window is closed, including recovery of historical waits.
         post_payment_worker = _StripeCompletionStage(
             completion=completion_projector,
             effects=PaymentOutboxWorker(
                 store=container.followup,
                 delivery=StripePaymentEffectObserver(followup=container.followup,boundary=container.boundary,lead_resolver=financial_leads,coordinator=HandoffCoordinator(store=container.followup)),
                 worker_id="worker:stripe-effects",lease_ttl=timedelta(seconds=30),
+                clock=UTCClock().now,
             ),
         )
     workers: dict[WorkerQueue, object] = {

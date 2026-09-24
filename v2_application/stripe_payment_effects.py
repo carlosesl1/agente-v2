@@ -12,6 +12,8 @@ from v2_contracts.channel import PublicChannelAcceptance
 
 
 class StripePaymentEffectObserver:
+    # This port only verifies already-durable local facts and cannot send/pay.
+    observation_only = True
     delivery_id = "v2:stripe-payment-effect-observer"
     delivery_version = 1
 

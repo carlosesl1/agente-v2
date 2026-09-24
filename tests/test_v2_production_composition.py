@@ -459,7 +459,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         assert type(
             stripe_workers[WorkerQueue.OUTCOME_PROJECTOR]
         ) is ReservationOutcomeProjector
-        assert type(stripe_workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert type(stripe_workers[WorkerQueue.POST_PAYMENT].completion) is CompletionProjector
         assert (
             stripe_container.readiness().capabilities["stripe_test_links"]
             == "ready"
@@ -513,7 +513,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             instructions_workers[WorkerQueue.OUTCOME_PROJECTOR]
         ) is ReservationOutcomeProjector
         assert type(
-            instructions_workers[WorkerQueue.POST_PAYMENT]
+            instructions_workers[WorkerQueue.POST_PAYMENT].completion
         ) is CompletionProjector
         assert instructions_container.readiness().capabilities[
             "wise_instructions"
@@ -549,7 +549,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
             manychat_workers[WorkerQueue.PUBLIC_DELIVERY]
         ) is CombinedPublicDeliveryWorker
         delivery = manychat_workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
-        assert delivery._payment_context_resolver.__self__ is manychat_workers[WorkerQueue.POST_PAYMENT]
+        assert delivery._payment_context_resolver.__self__ is manychat_workers[WorkerQueue.POST_PAYMENT].completion
         assert delivery._payment_routes == {
             (r.business_unit, r.customer_language): r for r in manychat_enabled.manychat_payment_routes
         }
@@ -643,16 +643,16 @@ def test_general_availability_builds_full_multi_lead_worker_graph(
         assert type(workers[WorkerQueue.RESERVATION]) is V2ReservationWorker
         assert type(workers[WorkerQueue.PAYMENT_INITIATION]) is PaymentInitiationWorker
         assert type(workers[WorkerQueue.OUTCOME_PROJECTOR]) is ReservationOutcomeProjector
-        assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert type(workers[WorkerQueue.POST_PAYMENT].completion) is CompletionProjector
         assert type(workers[WorkerQueue.PUBLIC_DELIVERY]) is CombinedPublicDeliveryWorker
         assert type(workers[WorkerQueue.HANDOFF]) is HandoffOutboxWorker
-        assert workers[WorkerQueue.POST_PAYMENT].executor is workers[WorkerQueue.INBOX]._executor
-        assert workers[WorkerQueue.INBOX]._executor._completion_projector is workers[WorkerQueue.POST_PAYMENT]
+        assert workers[WorkerQueue.POST_PAYMENT].completion.executor is workers[WorkerQueue.INBOX]._executor
+        assert workers[WorkerQueue.INBOX]._executor._completion_projector is workers[WorkerQueue.POST_PAYMENT].completion
         status_reader = workers[WorkerQueue.INBOX]._executor._execution_status_resolver._reservation_status_reader
         assert type(status_reader).__name__ == "ReservationStatusReader"
         assert type(status_reader._cloudbeds).__name__ == "CloudbedsGETAuditTransport"
         assert type(status_reader._bokun).__name__ == "BokunGETAuditTransport"
-        assert workers[WorkerQueue.POST_PAYMENT]._lead_resolver is not None
+        assert workers[WorkerQueue.POST_PAYMENT].completion._lead_resolver is not None
         delivery = workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
         assert delivery._allowed_subscriber_id is None
         handoff = workers[WorkerQueue.HANDOFF]._delivery
@@ -1348,7 +1348,7 @@ def test_confirmed_lodging_recovery_projects_completion_after_write_gate_closes(
     recovered = V2Container.open(settings=closed, role=V2Role.WORKER)
     try:
         workers = build_worker_set(container=recovered, settings=closed)
-        completion = workers[WorkerQueue.POST_PAYMENT]
+        completion = workers[WorkerQueue.POST_PAYMENT].completion
 
         assert type(completion) is CompletionProjector
         from tests.v2_completion_helpers import CompletionMaya
@@ -1378,7 +1378,7 @@ def test_lodging_completion_readiness_is_ready_without_payment_effects(
     try:
         workers = build_worker_set(container=container, settings=settings)
 
-        assert type(workers[WorkerQueue.POST_PAYMENT]) is CompletionProjector
+        assert type(workers[WorkerQueue.POST_PAYMENT].completion) is CompletionProjector
         assert container.readiness().capabilities["completion_projector"] == "ready"
         assert container.readiness().capabilities["outcome_projector"] == "closed"
         assert container.readiness().capabilities["payment_initiation"] == "closed"

@@ -14,6 +14,7 @@ from reservation_domain import (
 )
 from reservation_execution import LedgerStatus
 from reservation_execution.sqlite_store import SQLiteUnitOfWork
+from reservation_followup.payment import VerifiedStripeEvent
 from v2_application.lead_identity import payment_id_for_command
 from v2_contracts.execution_context import (
     ComponentOutcome,
@@ -151,6 +152,13 @@ class ReservationExecutionStatusResolver:
                 workflow.settlement_finish.outcome.certainty.value
                 if workflow.settlement_finish
                 else None,
+                stripe_capture_observed_at=(
+                    workflow.evidence_record.evidence.observed_at
+                    if workflow.verified_evidence is not None
+                    and workflow.evidence_record is not None
+                    and type(workflow.evidence_record.evidence) is VerifiedStripeEvent
+                    else None
+                ),
             )
             for workflow in workflows
         )

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
-from collections.abc import Callable
-import time
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
@@ -209,6 +209,7 @@ class PaymentOutboxWorker:
         delivery: PaymentEffectDeliveryPort,
         worker_id: str,
         lease_ttl: timedelta,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(store) is not SQLiteFollowupUnitOfWork:
             raise TypeError("store must be exact SQLiteFollowupUnitOfWork")
@@ -225,9 +226,19 @@ class PaymentOutboxWorker:
         self._delivery_version = delivery.delivery_version
         self._worker_id = _require_id(worker_id, "worker_id")
         self._lease_ttl = lease_ttl
+        if clock is not None and not callable(clock):
+            raise TypeError("clock must be callable")
+        self._clock = clock
 
     def run_once(self, *, now: datetime) -> PaymentOutboxWorkerResult:
-        claim = self._store.claim_payment_outbox(
+        started = time.monotonic()
+        now = self._clock() if self._clock is not None else now
+        claim_method = (
+            self._store.claim_payment_observation
+            if getattr(self._delivery, "observation_only", False) is True
+            else self._store.claim_payment_outbox
+        )
+        claim = claim_method(
             worker_id=self._worker_id,
             delivery_id=self._delivery_id,
             delivery_version=self._delivery_version,
@@ -236,6 +247,12 @@ class PaymentOutboxWorker:
         )
         if claim is None:
             return PaymentOutboxWorkerResult.idle()
+        def completed_at() -> datetime:
+            return (
+                self._clock() if self._clock is not None
+                else now + timedelta(seconds=time.monotonic() - started)
+            )
+
         receipt: object = None
         delivery_failed = False
         try:
@@ -245,12 +262,12 @@ class PaymentOutboxWorker:
         except Exception:
             delivery_failed = True
         if delivery_failed:
-            self._store.release_payment_outbox(claim, now=now)
+            self._store.release_payment_outbox(claim, now=completed_at())
             return PaymentOutboxWorkerResult(
                 PaymentOutboxWorkerDisposition.RETRYABLE_FAILURE,
                 claim.message_id,
             )
-        self._store.complete_payment_outbox(claim, receipt, now=now)
+        self._store.complete_payment_outbox(claim, receipt, now=completed_at())
         return PaymentOutboxWorkerResult(
             PaymentOutboxWorkerDisposition.DELIVERED,
             claim.message_id,

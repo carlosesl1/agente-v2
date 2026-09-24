@@ -355,7 +355,10 @@ def test_effect_observer_does_not_invent_customer_delivery(lab, tmp_path):
         lease_ttl=timedelta(seconds=30),
     )
     try:
-        results = [outbox.run_once(now=lab.now).disposition.value for _ in range(3)]
+        results = []
+        for _ in range(3):
+            results.append(outbox.run_once(now=lab.now).disposition.value)
+            lab.now += timedelta(seconds=1)
         # Current owner chooses jobs by stable identity. Public confirmation may
         # be first; it must remain pending rather than assert synthetic delivery.
         assert "retryable_failure" in results
@@ -479,3 +482,60 @@ def test_existing_provider_payment_is_not_blindly_credited_again(lab):
     lab.paid = "420.00"
     assert worker(lab).run_once(now=lab.now).disposition.value == "preparation_terminal"
     assert not [r for r in lab.provider_requests if r.method == "POST"]
+
+
+@pytest.mark.parametrize("delay", [1, 31, 3600])
+def test_read_only_effect_observation_can_wait_for_durable_handoff(lab, tmp_path, delay):
+    from reservation_boundary.sqlite_store import SQLiteBoundaryStore
+    from reservation_followup.workers import PaymentOutboxWorker
+    from v2_application.recovery import HandoffCoordinator, ManualReviewHandoffProjector
+    from v2_application.stripe_payment_effects import StripePaymentEffectObserver
+
+    lab.status = "canceled"
+    worker(lab).run_once(now=lab.now)
+    boundary = SQLiteBoundaryStore.open_path_v8(tmp_path / "delayed-effect.sqlite3")
+    resolver = SimpleNamespace(lead_id_for_command=lambda _: "manychat:12345")
+    coordinator = HandoffCoordinator(store=lab.followup)
+    observer = StripePaymentEffectObserver(
+        followup=lab.followup, boundary=boundary, lead_resolver=resolver,
+        coordinator=coordinator, clock=lambda: lab.now,
+    )
+    outbox = PaymentOutboxWorker(
+        store=lab.followup, delivery=observer, worker_id="worker:delayed-observation",
+        lease_ttl=timedelta(seconds=30),
+    )
+    try:
+        assert outbox.run_once(now=lab.now).disposition.value == "retryable_failure"
+        lab.now += timedelta(seconds=delay)
+        ManualReviewHandoffProjector(
+            execution=lab.execution, followup=lab.followup,
+            coordinator=coordinator, lead_resolver=resolver,
+        ).run_once(now=lab.now)
+        assert outbox.run_once(now=lab.now).disposition.value == "delivered"
+        assert outbox.run_once(now=lab.now).disposition.value == "idle"
+        assert not [r for r in lab.provider_requests if r.method == "POST"]
+    finally:
+        boundary.close()
+
+
+def test_payment_receipt_completion_uses_time_after_delivery(lab, monkeypatch):
+    from reservation_followup.types import PaymentReceipt
+    from reservation_followup.workers import PaymentOutboxWorker
+
+    lab.status = "canceled"
+    worker(lab).run_once(now=lab.now)
+    ticks = iter([10.0, 11.0])
+    monkeypatch.setattr("reservation_followup.workers.time.monotonic", lambda: next(ticks))
+    class ReceiptPort:
+        delivery_id = "fixture:receipt-time"
+        delivery_version = 1
+        def deliver(self, claim):
+            return PaymentReceipt.for_claim(
+                claim, receipt_id="receipt:after-delivery", delivery_reference="fixture:accepted",
+                delivered_at=lab.now + timedelta(milliseconds=500),
+            )
+    outbox = PaymentOutboxWorker(
+        store=lab.followup, delivery=ReceiptPort(), worker_id="worker:receipt-time",
+        lease_ttl=timedelta(seconds=30),
+    )
+    assert outbox.run_once(now=lab.now).disposition.value == "delivered"

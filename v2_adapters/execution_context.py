@@ -180,6 +180,13 @@ def component_wire(component: ExecutionComponentContext) -> dict:
                     "method": s.method,
                     "status": s.status,
                     "certainty": s.certainty,
+                    "verified_payment": {
+                        "source": "stripe",
+                        "status": "captured",
+                        "amount_minor": s.amount_minor,
+                        "currency": s.currency,
+                        "observed_at": s.stripe_capture_observed_at.isoformat(),
+                    } if s.stripe_capture_observed_at is not None else None,
                 }
                 for s in component.settlements
             ],

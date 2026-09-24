@@ -87,6 +87,7 @@ class PaymentSettlementContext:
     method: str | None
     status: str
     certainty: str | None
+    stripe_capture_observed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

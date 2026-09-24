@@ -1,3 +1,13 @@
+# Active maintenance — Stripe settlement incident corrections
+
+- Authorized by Carlos in this chat: correct settlement and post-payment failures; operator already cancelled the Cloudbeds payment/reservation. Branch `fix/v2-manychat-account-routing-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, source base `97db2b0b2d73dc497881896c612c2fa16c8eb9e8` (only documentation differs from deployed `1341cd8`).
+- Runtime recovered using the exact declared closed rollback; same image and state. Authority OK; GA/Ops unchanged. No reopening, new reservation, charge, refund, active SQLite edit, or payment replay.
+- NEXT: causal tests for delayed read-only payment-effect observations and receipt chronology; separate verified Stripe capture facts from provider settlement in Maya context; preserve response evidence on ambiguous settlement. Then clean regression, offline incident-copy replay and immutable-image qualification. Real writes and E2E payment retest remain closed.
+- Owners: existing followup outbox/worker, Stripe settlement adapter and execution-context projection. Maya remains the sole semantic author. No text rewrite/gates, extra ledger or subagents.
+- Evidence `/home/ubuntu/workspace/v2-payment-corrections-727d3625/`. The historical Cloudbeds POST response was not retained; do not claim a proven response-shape root cause from a current zero balance. Stripe TEST capture remains succeeded/no refund as observed after cancellation.
+
+## Previous maintenance
+
 # Active maintenance — native Stripe receipt and settlement
 
 - Authorized by Carlos: fix the actual paid TEST webhook ignored by the old endpoint and close native ingress/provider settlement. Base e13452c609ed1889387564c2ccb568e2625a3b8e; same worktree and branch below.

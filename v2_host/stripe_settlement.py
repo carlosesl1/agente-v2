@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from urllib.parse import urlsplit
@@ -298,7 +299,32 @@ class StripeSettlementAdapter:
                 True,
                 evidence,
             )
-        row = response.json()
+        try:
+            row = response.json()
+            _require(type(row) is dict)
+            return self._receipt_outcome(row, state, native, reference, evidence)
+        except (ValueError, TypeError, KeyError, AttributeError, TerminalSettlementPreparationError):
+            # A received response must not lose its evidence just because its
+            # contract is incomplete. Do not retry, infer from aggregate balance,
+            # or report no payment. Persist unknown with the response fingerprint.
+            logging.getLogger(__name__).warning(
+                "stripe_settlement_receipt_unrecognized",
+                extra={
+                    "http_status": response.status_code,
+                    "response_sha256": evidence[1],
+                    "receipt_shape": {
+                        k: type(row.get(k)).__name__
+                        for k in ("success", "paymentID", "transactionID", "bookingId")
+                    } if isinstance(locals().get("row"), dict) else "non_object",
+                },
+            )
+            return SettlementOutcome(
+                SettlementCertainty.DISPATCHED_UNKNOWN,
+                False, False, None, True, evidence,
+            )
+
+    @staticmethod
+    def _receipt_outcome(row, state, native, reference, evidence):
         if state.subject.business_unit.value == "hostel":
             if row.get("success") is False:
                 return SettlementOutcome(

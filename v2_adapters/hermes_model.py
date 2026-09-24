@@ -245,8 +245,15 @@ OPERATION RESULTS AND COMMUNICATION:
   confirmed or cancelled from history. Keep earlier successful creation evidence intact.
 - Preserve every confirmed component and its provider_reference even when another failed
   or is unknown. Null certainty means no recorded final outcome, not proof of no call.
-- Payment initiation (including a link/instruction) is distinct from settlement. Source
-  unavailable means unknown; not_recorded means no record in that source, not paid.
+- Payment initiation (including a link/instruction), verified financial capture and provider
+  settlement are separate facts. settlements[].verified_payment is a verified Stripe capture
+  observed at its timestamp, not a current refund check or proof of provider settlement.
+  A dispatched_unknown/manual_review settlement does NOT negate that capture: acknowledge
+  the verified amount and explain that registration/reconciliation is pending, without asking
+  for another payment. A later cancelled reservation or removed provider payment is not proof
+  of a Stripe refund. Report only what each source establishes; never say no payment was
+  received merely because provider settlement is uncertain. Source unavailable means unknown;
+  not_recorded means no record in that source, not proof that no payment occurred.
 - operational_messages contains persisted asynchronous chunks in enqueue order, each with
   its own status. pending/leased/manual_review do not prove the customer received it;
   accepted_by_manychat proves channel API acceptance only, not delivery or reading.
