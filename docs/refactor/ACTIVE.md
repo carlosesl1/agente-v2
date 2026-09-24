@@ -1,3 +1,14 @@
+# Active maintenance — component renewal and Cloudbeds receipt qualification
+
+- Authorized by Carlos in this chat: continue remaining technical work; approved the existing-flow, component-scoped renewal design with fresh provider status and new customer confirmation.
+- Base `ab58c2ff3823eb7963840294b4eeb77777f5289d`; branch `fix/v2-manychat-account-routing-727d3625`; worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`.
+- Spec `docs/superpowers/specs/2026-09-24-component-renewal-design.md`. NEXT: spec review gate, then causal RED/GREEN for terminal component renewal and receipt evidence, followed by hermetic regression/closed sandbox qualification.
+- Runtime authority OK; scope is isolated source/test work only. No reopening, external booking/payment/refund/channel effects, active SQLite edits, GA/Ops/V3 changes, new agent/queue/ledger or subagents.
+- Owners: existing active execution context, turn executor, conversation reducer and Stripe settlement adapter. Preserve semantic authorship, component histories and durable fences. Historical incident response remains unavailable; do not infer root cause or success from aggregate balance.
+- Evidence `/home/ubuntu/workspace/v2-renewal-corrections-727d3625/`.
+
+## Previous maintenance
+
 # Active maintenance — Stripe settlement incident corrections
 
 - Authorized by Carlos in this chat: correct settlement and post-payment failures; operator already cancelled the Cloudbeds payment/reservation. Branch `fix/v2-manychat-account-routing-727d3625`, worktree `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, source base `97db2b0b2d73dc497881896c612c2fa16c8eb9e8` (only documentation differs from deployed `1341cd8`).
