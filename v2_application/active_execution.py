@@ -27,6 +27,7 @@ from v2_contracts.execution_context import (
     PaymentSettlementContext,
 )
 from v2_contracts.model import ModelProposal
+from v2_application.turn_plan import proposal_values
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
@@ -271,12 +272,12 @@ class ReservationExecutionStatusResolver:
         return "failed_no_effect"
 
 
-def _proposal_services(state: BoundaryState, proposal: ModelProposal) -> frozenset[str]:
+def _proposal_services(state: BoundaryState, proposal: ModelProposal, projection: ConversationProjection | None = None) -> frozenset[str]:
     if proposal.intent == "confirm":
         if type(state.workflow) is not AwaitingConfirmationState:
             return frozenset()  # Never renew by confirming the old command.
         return frozenset(c.service.value for c in state.workflow.draft.components)
-    service = next((f.value for f in proposal.facts if f.name == "service"), None)
+    service = proposal_values(proposal, projection).get("service")
     return {
         "hostel": frozenset({"lodging"}),
         "agency": frozenset({"activity"}),
@@ -327,6 +328,7 @@ def _terminal_unpaid_component(component: ExecutionComponentContext, now: dateti
 def component_renewal_allowed(
     state: BoundaryState, proposal: ModelProposal, *,
     execution_context: ExecutionContext | None, now: datetime | None,
+    projection: ConversationProjection | None = None,
 ) -> bool:
     """New selection/confirmation of a terminal unpaid service, never a replay.
 
@@ -340,7 +342,7 @@ def component_renewal_allowed(
         or not (proposal.intent in {"select", "confirm"} or proposal.selection_requested)
     ):
         return False
-    services = _proposal_services(state, proposal)
+    services = _proposal_services(state, proposal, projection)
     components = tuple(c for c in execution_context.components if c.offer.service in services)
     if not services or {c.offer.service for c in components} != services:
         return False
@@ -354,6 +356,7 @@ def blocks_active_commercial_progression(
     execution_status: str | None = None,
     execution_context: ExecutionContext | None = None,
     now: datetime | None = None,
+    projection: ConversationProjection | None = None,
 ) -> bool:
     """Preserve dispatched commands while permitting independently authorized renewal."""
     if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
@@ -370,15 +373,15 @@ def blocks_active_commercial_progression(
     status = execution_status or active_execution_status(state)
     if status is not None:
         return not component_renewal_allowed(
-            state, proposal, execution_context=execution_context, now=now,
+            state, proposal, execution_context=execution_context, now=now, projection=projection,
         )
     # Recheck retained history on the new draft, including after process restart.
     if execution_context is not None:
-        services = _proposal_services(state, proposal)
+        services = _proposal_services(state, proposal, projection)
         historical = tuple(c for c in execution_context.components if c.offer.service in services)
         if historical:
             return not component_renewal_allowed(
-                state, proposal, execution_context=execution_context, now=now,
+                state, proposal, execution_context=execution_context, now=now, projection=projection,
             )
     return False
 

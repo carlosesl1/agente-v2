@@ -11,6 +11,22 @@ from v2_contracts.model import ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
+def proposal_values(
+    proposal: ModelProposal,
+    projection: ConversationProjection | None = None,
+) -> dict[str, object]:
+    """Resolve the agent's current fact delta against its committed context.
+
+    This is a validation view, not a rewritten model frame or new consent.
+    Explicit current values always win; absent context remains absent.
+    """
+    values = {} if projection is None else {
+        item.name: item.value.value for item in projection.facts
+    }
+    values.update({item.name: item.value for item in proposal.facts})
+    return values
+
+
 def preserve_initial_facts(
     initial: ModelProposal,
     observation_frame: ModelProposal,
@@ -97,7 +113,7 @@ def _commercial_requests(
     return tuple(requests)
 
 
-def derive_selection_reads(proposal: ModelProposal) -> tuple[ReadRequest, ...]:
+def derive_selection_reads(proposal: ModelProposal, projection: ConversationProjection | None = None) -> tuple[ReadRequest, ...]:
     """Refresh an explicit typed selection, never infer or rewrite the intent."""
     if type(proposal) is not ModelProposal:
         raise TypeError("commercial plan requires an exact ModelProposal")
@@ -105,7 +121,7 @@ def derive_selection_reads(proposal: ModelProposal) -> tuple[ReadRequest, ...]:
         return ()
     return _commercial_requests(
         source_event_id=proposal.source_event_id,
-        values={item.name: item.value for item in proposal.facts},
+        values=proposal_values(proposal, projection),
     )
 
 

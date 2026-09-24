@@ -30,6 +30,13 @@ from v2_contracts.model import ModelFact, ModelProposal
 from v2_contracts.providers import ReadKind, ReadRequest
 
 
+class RejectionAwareModel(FakeAuditedModel):
+    def complete_audited(self, request):
+        if request.action_rejection is not None:
+            self.proposals.insert(0, ModelProposal(request.source_event_id, "inform", ("Contratação bloqueada.",), (), (), ()))
+        return super().complete_audited(request)
+
+
 class MatchingLodgingReadPort(FakeLodgingReadPort):
     def read(self, request):
         observed = super().read(request)
@@ -38,11 +45,12 @@ class MatchingLodgingReadPort(FakeLodgingReadPort):
 
 
 @pytest.mark.parametrize("explicit_start_date", [True, False])
-def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path, explicit_start_date):
+@pytest.mark.parametrize("repeat_facts", [True, False, "first_only"])
+def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path, explicit_start_date, repeat_facts):
     store = SQLiteBoundaryStore.open_path_v8(tmp_path / "boundary.sqlite3")
     execution = SQLiteUnitOfWork.open_v6(tmp_path / "execution.sqlite3")
     followup = SQLiteFollowupUnitOfWork.open_v2(tmp_path / "followup.sqlite3")
-    model = FakeAuditedModel(store, [])
+    model = RejectionAwareModel(store, [])
     reads = V2ReadService({ReadKind.LODGING: MatchingLodgingReadPort(store), ReadKind.ACTIVITY: FakeActivityReadPort(store)})
     executor = _executor(store=store, model=model, profile=FakeProfile(store), reads=reads)
     lab = SimpleNamespace(store=store, model=model, executor=executor)
@@ -107,15 +115,23 @@ def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_
             reservation_status_reader=native_reads,
         )
         executor._execution_status_resolver = resolver
-        third = next_batch(lab, "replace-activity", "Quero um novo passeio no lugar do expirado. A hospedagem fica como está.")
         activity_facts = tuple(
             replace(f, value="agency") if f.name == "service" else
             replace(f, value=date(2026, 8, 12)) if f.name == "start_date" else f
             for f in facts if f.name != "end_date" and (explicit_start_date or f.name != "start_date")
         )
+        if not repeat_facts:
+            # A previous informational turn already committed the agent's scope.
+            # The next real-model frames legitimately carry only their deltas.
+            remembered = next_batch(lab, "remember-activity-scope", "Só o passeio, com os dados já informados.")
+            model.proposals[:] = [ModelProposal(remembered.batch_id, "inform", ("Dados mantidos.",), activity_facts, (), ())]
+            executor.execute(remembered)
+            assert not store.load_state(BATCH.lead_id).state.handoff
+        third = next_batch(lab, "replace-activity", "Quero um novo passeio no lugar do expirado. A hospedagem fica como está.")
+        delta_facts = activity_facts if repeat_facts else ()
         model.proposals[:] = [
-            ModelProposal(third.batch_id, "inform", (), activity_facts, (replace(activity_read, request_id="read:replacement"),), (), selection_requested=True),
-            ModelProposal(third.batch_id, "select", ("Novo resumo apenas do passeio.",), activity_facts, (), (), target_offer_id="offer:" + "6" * 64),
+            ModelProposal(third.batch_id, "inform", (), delta_facts, (replace(activity_read, request_id="read:replacement"),), (), selection_requested=True),
+            ModelProposal(third.batch_id, "select", ("Novo resumo apenas do passeio.",), () if repeat_facts == "first_only" else delta_facts, (), (), target_offer_id="offer:" + "6" * 64),
         ]
         summary = executor.execute(third)
         assert not summary.receipt.command_rows

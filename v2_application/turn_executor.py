@@ -1623,10 +1623,10 @@ class V2TurnExecutor:
             )
         elif pending_action is None and not first_proposal.read_requests:
             first_proposal = replace(first_proposal,
-                read_requests=derive_selection_reads(first_proposal))
+                read_requests=derive_selection_reads(first_proposal, projection))
         if blocks_active_commercial_progression(
             current.state, first_proposal, execution_status=execution_status,
-            execution_context=execution_context, now=self._clock.now(),
+            execution_context=execution_context, now=self._clock.now(), projection=projection,
         ):
             return reject_action("proposal conflicts with commanded workflow", first_audited)
         first_audited = AuditedModelTurn.from_frames(
@@ -1868,9 +1868,10 @@ class V2TurnExecutor:
                     invalid_fact_names=second_invalid_private_facts,
                     revoke_pending=pending_action is not None,
                 )
+            proposal = preserve_initial_facts(first_proposal, proposal)
             if blocks_active_commercial_progression(
                 current.state, proposal, execution_status=execution_status,
-                execution_context=execution_context, now=self._clock.now(),
+                execution_context=execution_context, now=self._clock.now(), projection=projection,
             ):
                 return reject_action("proposal conflicts with commanded workflow",
                     AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
@@ -1880,7 +1881,6 @@ class V2TurnExecutor:
                 ephemeral_session_id=second_audited.closure.ephemeral_session_id,
             )
             second_frame_hash = _frame_commitments(second_audited)[-1].canonical_hash()
-            proposal = preserve_initial_facts(first_proposal, proposal)
             projection = _merge_passenger_updates(
                 projection,
                 proposal,
@@ -1913,7 +1913,7 @@ class V2TurnExecutor:
             )
         if blocks_active_commercial_progression(
             current.state, proposal, execution_status=execution_status,
-            execution_context=execution_context, now=self._clock.now(),
+            execution_context=execution_context, now=self._clock.now(), projection=projection,
         ):
             return reject_action("proposal conflicts with commanded workflow", audited, v2_observations)
         audited = AuditedModelTurn.from_frames(
@@ -2302,7 +2302,7 @@ class V2TurnExecutor:
             fresh_context = self._execution_status_resolver.context(current.state)
             if blocks_active_commercial_progression(
                 current.state, proposal, execution_status=fresh_context.status,
-                execution_context=fresh_context, now=self._clock.now(),
+                execution_context=fresh_context, now=self._clock.now(), projection=decision.projection,
             ):
                 raise _ActionContractRejected("reservation lifecycle changed before commit")
         commit_now = self._clock.now()

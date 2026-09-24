@@ -61,6 +61,7 @@ from reservation_followup import (
     HandoffWorkflow,
 )
 from v2_application.active_execution import component_renewal_allowed
+from v2_application.turn_plan import proposal_values as _proposal_values
 from v2_contracts.execution_context import ExecutionContext
 from v2_application.critical_actions import (
     ApprovalMatch,
@@ -734,12 +735,8 @@ def reservation_profile_ready(
     ).ready
 
 
-def _proposal_values(proposal: ModelProposal) -> dict[str, object]:
-    return {item.name: item.value for item in proposal.facts}
-
-
-def _proposal_binds_offer(proposal: ModelProposal, offer: OfferSnapshot) -> bool:
-    values = _proposal_values(proposal)
+def _proposal_binds_offer(proposal: ModelProposal, offer: OfferSnapshot, projection: ConversationProjection | None = None) -> bool:
+    values = _proposal_values(proposal, projection)
     expected_service = {
         ServiceKind.LODGING: "hostel",
         ServiceKind.ACTIVITY: "agency",
@@ -772,8 +769,9 @@ def _proposal_binds_package(
     *,
     lodging: OfferSnapshot,
     activity: OfferSnapshot,
+    projection: ConversationProjection | None = None,
 ) -> bool:
-    values = _proposal_values(proposal)
+    values = _proposal_values(proposal, projection)
     if (
         lodging.service is not ServiceKind.LODGING
         or activity.service is not ServiceKind.ACTIVITY
@@ -1494,7 +1492,7 @@ class V2ConversationReducer:
             raise ValueError("fact_commitment_hash must be a lowercase SHA-256")
         instant = _utc(now, "now")
         renewing_component = proposal.intent == "select" and component_renewal_allowed(
-            state, proposal, execution_context=execution_context, now=instant,
+            state, proposal, execution_context=execution_context, now=instant, projection=projection,
         )
         merged = _merge_projection(
             projection,
@@ -1510,7 +1508,7 @@ class V2ConversationReducer:
             sibling_only = {
                 "agency": {"start_date", "end_date"},
                 "hostel": {"activity_date", "product_id"},
-            }.get(values.get("service"), set()) - values.keys()
+            }.get(_proposal_values(proposal, projection).get("service"), set()) - values.keys()
             merged = replace(merged, facts=tuple(
                 fact for fact in merged.facts if fact.name not in sibling_only
             ))
@@ -1930,11 +1928,12 @@ class V2ConversationReducer:
                 proposal,
                 lodging=lodging_offer,
                 activity=activity_offer,
+                projection=merged,
             ):
                 raise ConversationReductionError(
                     "proposal facts diverge from the selected package offers"
                 )
-            values = _proposal_values(proposal)
+            values = _proposal_values(proposal, merged)
             payment_method = values.get("payment_method")
             if payment_method not in ("stripe", "wise", "pix"):
                 raise ConversationReductionError(
@@ -2075,11 +2074,11 @@ class V2ConversationReducer:
                 proposal.target_offer_id,
                 now=instant,
             )
-            if not _proposal_binds_offer(proposal, offer):
+            if not _proposal_binds_offer(proposal, offer, merged):
                 raise ConversationReductionError(
                     "proposal facts diverge from the selected provider offer"
                 )
-            values = _proposal_values(proposal)
+            values = _proposal_values(proposal, merged)
             payment_method = values.get("payment_method")
             if payment_method not in ("stripe", "wise", "pix"):
                 raise ConversationReductionError(
