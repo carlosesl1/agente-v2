@@ -609,6 +609,8 @@ class V2Settings:
             raise TypeError("hermes_transcript_key must be exact bytes")
         if type(self.payment_result_store_key) is not bytes:
             raise TypeError("payment_result_store_key must be exact bytes")
+        if self.payment_result_store_key and len(self.payment_result_store_key) != 32:
+            raise ValueError("payment history requires a dedicated 32-byte result store key")
         if type(self.hermes_timeout_seconds) is not int or self.hermes_timeout_seconds < 1:
             raise ValueError("hermes_timeout_seconds must be positive")
         for name in (
@@ -780,6 +782,11 @@ class V2Settings:
             "hostel": self.hostel_payment_percentage,
             "agency": self.agency_payment_percentage,
         }
+
+    @property
+    def payment_history_configured(self) -> bool:
+        """Historical observations remain available when payment effects are closed."""
+        return bool(self.payment_result_store_key)
 
     @property
     def enabled_payment_methods(self) -> tuple[str, ...]:
@@ -968,19 +975,8 @@ class V2Settings:
             hermes_command=_json_command(worker_source.get("V2_HERMES_COMMAND_JSON", "")),
             hermes_system_prompt=_system_prompt(worker_source),
             hermes_transcript_key=_hex_key(worker_source.get("V2_HERMES_TRANSCRIPT_KEY_HEX", "")),
-            payment_result_store_key=(
-                _payment_result_store_key(
-                    worker_source.get("V2_PAYMENT_RESULT_STORE_KEY_HEX", "")
-                )
-                if any(
-                    _env_bool(source, name, default=False)
-                    for name in (
-                        "V2_ENABLE_STRIPE_LINKS",
-                        "V2_ENABLE_WISE_INSTRUCTIONS",
-                        "V2_ENABLE_PIX_INSTRUCTIONS",
-                    )
-                )
-                else b""
+            payment_result_store_key=_payment_result_store_key(
+                worker_source.get("V2_PAYMENT_RESULT_STORE_KEY_HEX", "")
             ),
             hermes_timeout_seconds=timeout,
             knowledge_base_path=Path(knowledge_path) if knowledge_path else None,

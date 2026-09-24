@@ -1,3 +1,14 @@
+# Active maintenance — payment history must survive closed effect gates
+
+- Current instruction: Carlos reported WhatsApp connected and asked to continue. The connection/identity and prior message were reconciled without replay. Two new summary-only requests reached Maya and received replies, but both were refused before a new provider read. No new booking, checkout, settlement or refund was produced; TEST was closed after each bounded attempt.
+- Proven cause: `V2Settings.from_env` erased the payment-result key when emission gates were closed, and `V2Container.open` omitted the history owner. `component_renewal_allowed` correctly rejected an unavailable payment history. Do not open emission gates or weaken that predicate to work around missing history.
+- Correction scope: existing settings and composition only; preserve a configured worker history key/store independently of effect workers. API isolation, absent-key fail-closed behavior, component guards, model authorship and payment capabilities remain unchanged. No schema migration, new semantic rule or direct edits to active databases.
+- Evidence: `/home/ubuntu/workspace/v2-renewal-e2e-727d3625/resume-20260924T200802Z/`. Causal RED and 112 focused/regression passes; an isolated SQLite-backup proof with real provider GET observations preserves 2 payment initiations, 6 step receipts and 2 reconciliations, permits agency renewal, and still rejects lodging renewal. This is not a model/channel/financial E2E pass.
+- TEST remains on its declared predecessor `a4ff977`; read and verify the authority before any subsequent action. This source change is NOT deployed. GA/Ops and retained state are unchanged.
+- NEXT: finish candidate qualification and separately authorize its TEST-only CLOSED publication, then resume the summary-only external conversation. New financial effects still require current scenario/component/amount confirmation; prior paid/cancelled resources are not reusable authorization.
+
+## Previous maintenance — CLOSED renewal publication completed
+
 # Active maintenance — CLOSED renewal publication completed
 
 - Authorization: Carlos said “Siga para concluir” after the qualified-candidate closeout; scope executed was TEST CLOSED publication only, with the same retained state. No external transaction/channel or GA authority was inferred.

@@ -244,7 +244,7 @@ class V2Container:
                 "public_outbox",
                 "private_customer",
             ]
-            if settings.enabled_payment_methods:
+            if settings.payment_history_configured:
                 mutable_worker_owners.append("payment_initiation")
             if settings.ops_trace_path is not None:
                 mutable_worker_owners.append("ops_trace")
@@ -295,7 +295,7 @@ class V2Container:
             followup = SQLiteFollowupUnitOfWork.open_v2(paths["followup"], migrate_v1=True)
             opened.append(followup)
             payment_initiation = None
-            if settings.enabled_payment_methods:
+            if settings.payment_history_configured:
                 payment_initiation = SQLitePaymentInitiationStore(
                     paths["payment_initiation"],
                     result_encryption_key=settings.payment_result_store_key,
@@ -352,7 +352,7 @@ class V2Container:
                 "execution": 1,
                 "followup": 1,
                 "inbox": 1,
-                "payment_initiation": int(bool(self.settings.enabled_payment_methods)),
+                "payment_initiation": int(self.settings.payment_history_configured),
                 "public_outbox": 1,
                 "private_customer": 1,
             },
