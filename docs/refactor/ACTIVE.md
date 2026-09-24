@@ -1,3 +1,13 @@
+# Active maintenance — CLOSED renewal publication completed
+
+- Authorization: Carlos said “Siga para concluir” after the qualified-candidate closeout; scope executed was TEST CLOSED publication only, with the same retained state. No external transaction/channel or GA authority was inferred.
+- Promotion and verification completed. Read the canonical `ACTIVE_RUNTIME.json` and run its verifier for current component refs/digests; never infer active source from this documentary HEAD. Source and exact image were already qualified; registry and remote source identity were authenticated during publication.
+- Internal/public readiness, fresh healthy heartbeat, closed worker gates, unchanged state mounts, consistent SQLite backups and unchanged financial/delivery table hashes were verified. GA/Ops container identities and start times did not change; rollback remains the exact closed predecessor bundle.
+- Evidence: `/home/ubuntu/workspace/v2-renewal-corrections-727d3625/publication-20260924/PUBLICACAO.md` and `verification-final.json`.
+- NEXT: obtain explicit scenario authorization for a new external reservation/payment/WhatsApp journey. Preserve old cancellations, captures and uncertain effects. Do not open gates, repeat old POSTs, reset state, create bookings/checkouts, issue refunds or promote GA implicitly. Historical Cloudbeds response cause remains unproved.
+
+## Previous maintenance — historical qualification before publication
+
 # Active maintenance — component renewal and Cloudbeds receipt qualification
 
 - Authorized by Carlos in this chat: “Então siga com o que falta” — remaining technical work only. The implementation uses the existing flow, component-scoped renewal, fresh provider status and new customer confirmation; no extra effect/deploy authorization is inferred.
