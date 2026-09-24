@@ -1,3 +1,14 @@
+# Active maintenance — history visibility and stable protocol-repair snapshot
+
+- Carlos explicitly selected: “Corrigir o relógio, requalificar e publicar somente no TEST fechado, sem reservas ou cobranças”. Authorized scope is the existing history fix plus stable request context during a bounded protocol repair, complete qualification, then TEST-only CLOSED publication with the same retained state. No channel messages, booking/payment/settlement/refund effects, GA/Ops/V3 changes or active SQLite edits.
+- The repair now reuses the original serialized request/messages/clock, changing only the existing protocol-repair instructions. A new model turn still samples a fresh clock. Existing schema, authorship, transcript and effect assertions remain intact.
+- Causal RED: advancing seconds and Bahia midnight failed for all six legacy-schema repair paths; separate-turn clock refresh passed. Focused GREEN: 107 tests. Final immutable source/image qualification must succeed before publication; preserve all earlier failed/partial runs as evidence.
+- Owners: `v2_host.settings`, `v2_host.composition`, `v2_adapters.hermes_model`; tests add causal witnesses without weakening existing assertions. No new controller, semantic rules or text-based routing.
+- Evidence root: `/home/ubuntu/workspace/v2-renewal-e2e-727d3625/resume-20260924T200802Z/`.
+- NEXT: freeze and qualify the joint candidate, authenticate its exact source/image, publish only CLOSED TEST with rollback and before/after state proofs, then report the verified result. Financial/conversational resumption remains a separate gate after this publication scope.
+
+## Previous maintenance — history correction before clock authorization
+
 # Active maintenance — payment history must survive closed effect gates
 
 - Current instruction: Carlos reported WhatsApp connected and asked to continue. The connection/identity and prior message were reconciled without replay. Two new summary-only requests reached Maya and received replies, but both were refused before a new provider read. No new booking, checkout, settlement or refund was produced; TEST was closed after each bounded attempt.

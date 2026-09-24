@@ -1132,7 +1132,13 @@ class HermesModelAdapter:
         original_stdin = wire(request, base_prompt)
         attempted_frames: list[AuditedTranscriptFrame] = []
         for prompt in prompts:
-            stdin_bytes = original_stdin if prompt == base_prompt else wire(request, prompt)
+            stdin_bytes = original_stdin
+            if prompt != base_prompt:
+                # Repair instructions may change; the original request snapshot may not.
+                # In particular, a second clock read could change relative-date semantics.
+                envelope = json.loads(original_stdin)
+                envelope["system_prompt"] = prompt + envelope["system_prompt"][len(base_prompt):]
+                stdin_bytes = _canonical(envelope)
             turn, frame = self._attempt(
                 request,
                 stdin_bytes=stdin_bytes,
