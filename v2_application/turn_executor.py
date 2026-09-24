@@ -1626,6 +1626,7 @@ class V2TurnExecutor:
                 read_requests=derive_selection_reads(first_proposal))
         if blocks_active_commercial_progression(
             current.state, first_proposal, execution_status=execution_status,
+            execution_context=execution_context, now=self._clock.now(),
         ):
             return reject_action("proposal conflicts with commanded workflow", first_audited)
         first_audited = AuditedModelTurn.from_frames(
@@ -1869,6 +1870,7 @@ class V2TurnExecutor:
                 )
             if blocks_active_commercial_progression(
                 current.state, proposal, execution_status=execution_status,
+                execution_context=execution_context, now=self._clock.now(),
             ):
                 return reject_action("proposal conflicts with commanded workflow",
                     AuditedModelTurn.combine((first_audited, second_audited)), v2_observations)
@@ -1911,6 +1913,7 @@ class V2TurnExecutor:
             )
         if blocks_active_commercial_progression(
             current.state, proposal, execution_status=execution_status,
+            execution_context=execution_context, now=self._clock.now(),
         ):
             return reject_action("proposal conflicts with commanded workflow", audited, v2_observations)
         audited = AuditedModelTurn.from_frames(
@@ -1994,6 +1997,7 @@ class V2TurnExecutor:
                     reads=v2_observations,
                     fact_commitment_hash=fact_commitment_hash,
                     now=decision_now,
+                    execution_context=execution_context,
                 ),
                 input_value=candidate,
                 technical_metadata={
@@ -2288,6 +2292,19 @@ class V2TurnExecutor:
                 "private customer update cannot persist reservation effects"
             )
         internal_jobs = _handoff_jobs(batch.batch_id, decision.handoff_request)
+        if self._execution_status_resolver is not None and (
+            command_rows
+            or (
+                type(decision.next_state.workflow) is AwaitingConfirmationState
+                and decision.next_state.workflow != current.state.workflow
+            )
+        ):
+            fresh_context = self._execution_status_resolver.context(current.state)
+            if blocks_active_commercial_progression(
+                current.state, proposal, execution_status=fresh_context.status,
+                execution_context=fresh_context, now=self._clock.now(),
+            ):
+                raise _ActionContractRejected("reservation lifecycle changed before commit")
         commit_now = self._clock.now()
         if (
             type(commit_now) is not datetime

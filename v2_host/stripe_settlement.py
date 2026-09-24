@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -307,16 +308,21 @@ class StripeSettlementAdapter:
             # A received response must not lose its evidence just because its
             # contract is incomplete. Do not retry, infer from aggregate balance,
             # or report no payment. Persist unknown with the response fingerprint.
+            diagnostic = {
+                "http_status": response.status_code,
+                "response_sha256": evidence[1],
+                "provider_request_id": response.headers.get("x-request-id"),
+                "receipt_shape": {
+                    k: type(row.get(k)).__name__
+                    for k in ("success", "paymentID", "transactionID", "bookingId")
+                } if isinstance(locals().get("row"), dict) else "non_object",
+            }
+            # Plain production formatters discard extra fields. Keep the shape
+            # and fingerprint in the actual message without logging raw receipts.
             logging.getLogger(__name__).warning(
-                "stripe_settlement_receipt_unrecognized",
-                extra={
-                    "http_status": response.status_code,
-                    "response_sha256": evidence[1],
-                    "receipt_shape": {
-                        k: type(row.get(k)).__name__
-                        for k in ("success", "paymentID", "transactionID", "bookingId")
-                    } if isinstance(locals().get("row"), dict) else "non_object",
-                },
+                "stripe_settlement_receipt_unrecognized %s",
+                json.dumps(diagnostic, sort_keys=True, separators=(",", ":")),
+                extra=diagnostic,
             )
             return SettlementOutcome(
                 SettlementCertainty.DISPATCHED_UNKNOWN,
@@ -337,8 +343,10 @@ class StripeSettlementAdapter:
                 )
             _require(
                 row.get("success") is True
-                and bool(row.get("paymentID"))
-                and bool(row.get("transactionID"))
+                and all(
+                    type(row.get(key)) is str and bool(row[key].strip())
+                    for key in ("paymentID", "transactionID")
+                )
             )
             receipt = str(row["paymentID"]) + ":" + str(row["transactionID"])
         else:

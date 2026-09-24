@@ -60,6 +60,8 @@ from reservation_followup import (
     HandoffRequested,
     HandoffWorkflow,
 )
+from v2_application.active_execution import component_renewal_allowed
+from v2_contracts.execution_context import ExecutionContext
 from v2_application.critical_actions import (
     ApprovalMatch,
     CriticalActionDenied,
@@ -1469,6 +1471,7 @@ class V2ConversationReducer:
         fact_commitment_hash: str,
         now: datetime,
         private_facts: PrivateCustomerFactSnapshot | None = None,
+        execution_context: ExecutionContext | None = None,
     ) -> V2ConversationDecision:
         if (
             type(state) is not BoundaryState
@@ -1490,11 +1493,27 @@ class V2ConversationReducer:
         ):
             raise ValueError("fact_commitment_hash must be a lowercase SHA-256")
         instant = _utc(now, "now")
+        renewing_component = proposal.intent == "select" and component_renewal_allowed(
+            state, proposal, execution_context=execution_context, now=instant,
+        )
         merged = _merge_projection(
             projection,
             proposal,
             fact_commitment_hash=fact_commitment_hash,
         )
+        if renewing_component:
+            # The new proposal has its own service scope. Do not let inherited
+            # sibling-only dates/product facts invalidate its later confirmation.
+            # Explicit current facts are preserved, and prior projections/history
+            # remain immutable in their existing stores.
+            values = _proposal_values(proposal)
+            sibling_only = {
+                "agency": {"end_date"},
+                "hostel": {"activity_date", "product_id"},
+            }.get(values.get("service"), set()) - values.keys()
+            merged = replace(merged, facts=tuple(
+                fact for fact in merged.facts if fact.name not in sibling_only
+            ))
         projected_activity_party = (
             _projection_party(merged)
             if DesiredService.AGENCY in merged.desired_services
@@ -1578,6 +1597,8 @@ class V2ConversationReducer:
 
         workflow = state.workflow
         post_command_offer_ids = _post_command_offer_ids(workflow)
+        if renewing_component:
+            post_command_offer_ids = None  # New summary, not an old command replay.
         if post_command_offer_ids is not None and proposal.intent == "confirm":
             return _post_command_guard_decision(
                 state=state,

@@ -257,9 +257,15 @@ OPERATION RESULTS AND COMMUNICATION:
 - operational_messages contains persisted asynchronous chunks in enqueue order, each with
   its own status. pending/leased/manual_review do not prove the customer received it;
   accepted_by_manychat proves channel API acceptance only, not delivery or reading.
-- Never repeat or replace the already-commanded workflow, especially an uncertain effect.
-  Questions, new facts and independent read-only consultations remain possible. A read
-  does not authorize a new selection or effect; history does not establish fresh availability.
+- Never replay an already-commanded effect, especially an uncertain one. For a customer
+  requesting a NEW booking in place of an expired/cancelled unpaid component, interpret
+  the requested service explicitly (hostel or agency, not the old package). If the current
+  per-component provider and financial facts support replacement, obtain fresh availability
+  for that service and propose a new summary. Create nothing before a new confirmation.
+  Preserve active siblings and all old reservation/payment references; never reuse or
+  transfer an old checkout or capture. Unknown status, pending settlement or captured money
+  needs reconciliation/handoff, not another booking. A consultation alone is not consent.
+  Questions and new facts remain possible; history never establishes fresh availability.
 """.strip()
 
 

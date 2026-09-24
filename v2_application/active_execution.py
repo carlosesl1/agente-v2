@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from typing import Protocol
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from reservation_boundary.conversation import ConversationProjection
 from reservation_boundary.types import BoundaryState, StringSlot
 from reservation_domain import (
+    AwaitingConfirmationState,
     ExecutingState,
     ExecutionCertainty,
     ExecutionQueuedState,
@@ -268,26 +271,116 @@ class ReservationExecutionStatusResolver:
         return "failed_no_effect"
 
 
+def _proposal_services(state: BoundaryState, proposal: ModelProposal) -> frozenset[str]:
+    if proposal.intent == "confirm":
+        if type(state.workflow) is not AwaitingConfirmationState:
+            return frozenset()  # Never renew by confirming the old command.
+        return frozenset(c.service.value for c in state.workflow.draft.components)
+    service = next((f.value for f in proposal.facts if f.name == "service"), None)
+    return {
+        "hostel": frozenset({"lodging"}),
+        "agency": frozenset({"activity"}),
+        "package": frozenset({"lodging", "activity"}),
+    }.get(service, frozenset())
+
+
+def _terminal_unpaid_component(component: ExecutionComponentContext, now: datetime) -> bool:
+    observation = component.reservation_status
+    if (
+        component.command_id is None
+        or component.outcome is None
+        or component.outcome.certainty != "effect_confirmed"
+        or not component.outcome.provider_reference
+        or component.payment_initiation_status == "unavailable"
+        or component.settlement_status == "unavailable"
+        or observation is None
+        or observation.source_status != "observed"
+        or not timedelta(0) <= now - observation.observed_at <= timedelta(seconds=60)
+    ):
+        return False
+    terminal = {
+        "lodging": {"canceled", "cancelled"},
+        "activity": {"TIMEOUT", "CANCELLED", "CANCELED", "ABORTED"},
+    }
+    if observation.reservation_status not in terminal.get(component.offer.service, set()):
+        return False
+    try:
+        if Decimal(observation.paid_amount) != 0:
+            return False
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if observation.payment_status not in {None, "NOT_PAID"}:
+        return False
+    if any(p.status != "completed" for p in component.payments):
+        return False
+    return not any(
+        s.stripe_capture_observed_at is not None
+        or s.certainty is not None
+        or s.status not in {
+            "awaiting_method", "awaiting_financial_confirmation", "awaiting_evidence",
+            "expired", "cancelled",
+        }
+        for s in component.settlements
+    )
+
+
+def component_renewal_allowed(
+    state: BoundaryState, proposal: ModelProposal, *,
+    execution_context: ExecutionContext | None, now: datetime | None,
+) -> bool:
+    """New selection/confirmation of a terminal unpaid service, never a replay.
+
+    History stays in its existing stores. At confirmation, scope comes from the
+    new draft rather than a model-provided service override.
+    """
+    if (
+        type(execution_context) is not ExecutionContext
+        or type(now) is not datetime or now.tzinfo is None
+        or proposal.effect_proposals
+        or not (proposal.intent in {"select", "confirm"} or proposal.selection_requested)
+    ):
+        return False
+    services = _proposal_services(state, proposal)
+    components = tuple(c for c in execution_context.components if c.offer.service in services)
+    if not services or {c.offer.service for c in components} != services:
+        return False
+    return all(_terminal_unpaid_component(c, now) for c in components)
+
+
 def blocks_active_commercial_progression(
     state: BoundaryState,
     proposal: ModelProposal,
     *,
     execution_status: str | None = None,
+    execution_context: ExecutionContext | None = None,
+    now: datetime | None = None,
 ) -> bool:
-    """Keep an enqueued/executing draft authoritative over new commercial progress."""
-
+    """Preserve dispatched commands while permitting independently authorized renewal."""
     if type(state) is not BoundaryState or type(proposal) is not ModelProposal:
         raise TypeError("active progression guard requires exact V2 contracts")
-    status = execution_status or active_execution_status(state)
-    if status is None:
-        return False
-    return bool(
+    progress = bool(
         proposal.intent in {"select", "confirm", "adjust"}
         or proposal.target_offer_id is not None
         or proposal.target_offer_ids
         or proposal.selection_requested
         or proposal.effect_proposals
     )
+    if not progress:
+        return False
+    status = execution_status or active_execution_status(state)
+    if status is not None:
+        return not component_renewal_allowed(
+            state, proposal, execution_context=execution_context, now=now,
+        )
+    # Recheck retained history on the new draft, including after process restart.
+    if execution_context is not None:
+        services = _proposal_services(state, proposal)
+        historical = tuple(c for c in execution_context.components if c.offer.service in services)
+        if historical:
+            return not component_renewal_allowed(
+                state, proposal, execution_context=execution_context, now=now,
+            )
+    return False
 
 
 def _request_matches_active_draft(
