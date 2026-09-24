@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import date, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from reservation_boundary.sqlite_store import SQLiteBoundaryStore
 from reservation_boundary.worker_store import SQLiteBoundaryWorkerStore
 from reservation_domain import AwaitingConfirmationState, ExecutionCertainty, ServiceKind, dumps_command
@@ -35,7 +37,8 @@ class MatchingLodgingReadPort(FakeLodgingReadPort):
                        "adults": request.adults, "children": request.children})
 
 
-def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path):
+@pytest.mark.parametrize("explicit_start_date", [True, False])
+def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path, explicit_start_date):
     store = SQLiteBoundaryStore.open_path_v8(tmp_path / "boundary.sqlite3")
     execution = SQLiteUnitOfWork.open_v6(tmp_path / "execution.sqlite3")
     followup = SQLiteFollowupUnitOfWork.open_v2(tmp_path / "followup.sqlite3")
@@ -108,7 +111,7 @@ def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_
         activity_facts = tuple(
             replace(f, value="agency") if f.name == "service" else
             replace(f, value=date(2026, 8, 12)) if f.name == "start_date" else f
-            for f in facts if f.name != "end_date"
+            for f in facts if f.name != "end_date" and (explicit_start_date or f.name != "start_date")
         )
         model.proposals[:] = [
             ModelProposal(third.batch_id, "inform", (), activity_facts, (replace(activity_read, request_id="read:replacement"),), (), selection_requested=True),

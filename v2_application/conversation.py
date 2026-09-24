@@ -1508,7 +1508,7 @@ class V2ConversationReducer:
             # remain immutable in their existing stores.
             values = _proposal_values(proposal)
             sibling_only = {
-                "agency": {"end_date"},
+                "agency": {"start_date", "end_date"},
                 "hostel": {"activity_date", "product_id"},
             }.get(values.get("service"), set()) - values.keys()
             merged = replace(merged, facts=tuple(
