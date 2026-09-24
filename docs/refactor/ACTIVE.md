@@ -1,3 +1,13 @@
+# Active maintenance — history/clock candidate published TEST CLOSED
+
+- Completed the exact scope Carlos selected: clock correction, joint qualification and TEST-only CLOSED publication, without bookings, charges or customer messages. Read the canonical authority and run its verifier for active component identities; this documentary HEAD is not a new runtime release.
+- Published functional revision `a8d2e913c7790bf9421a26cb5dfabe111800c324`, authenticated ref `refs/heads/production/test-history-clock-a8d2e91`. Full qualification: 2499 tests / 2958 subtests; 210 tests against image modules; three controlled real-model scenarios, zero executable tools (not financial/channel/handoff E2E).
+- Live verification: authority OK, API/router readyz passed, fresh healthy worker, history configured while payment methods and all effect gates remain closed. Same state mounts, 24 financial/delivery tables unchanged, 10 SQLite backups and closed predecessor rollback retained; GA/Ops unchanged. WhatsApp WORKING; contact paused and client sends disabled.
+- Evidence: `/home/ubuntu/workspace/v2-renewal-e2e-727d3625/resume-20260924T200802Z/publication-joint/PUBLICACAO.md` and `verification-final.json`.
+- NEXT: only a separately scoped conversational/transactional window; confirm current component/amount before new effects. Do not repeat technical publication, reopen gates, replay old POSTs, reuse historical checkout authority, edit active SQLite, reset state or promote GA implicitly.
+
+## Previous maintenance — authorized joint qualification and publication
+
 # Active maintenance — history visibility and stable protocol-repair snapshot
 
 - Carlos explicitly selected: “Corrigir o relógio, requalificar e publicar somente no TEST fechado, sem reservas ou cobranças”. Authorized scope is the existing history fix plus stable request context during a bounded protocol repair, complete qualification, then TEST-only CLOSED publication with the same retained state. No channel messages, booking/payment/settlement/refund effects, GA/Ops/V3 changes or active SQLite edits.
