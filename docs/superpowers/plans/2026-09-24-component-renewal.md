@@ -8,9 +8,13 @@
 
 **Tech Stack:** Python, pytest, SQLite, httpx controlled transports, existing V2 runtime.
 
+## Completed qualification
+
+Functional candidate `a4ff97782cf4f6025268179b6c570bc4b802693d` is preserved on `qualification/component-renewal-a4ff977`. Tasks 1–3 passed with causal witnesses; package-to-activity scope includes both explicit start dates and activity-date-only proposals. Task 4: 2477 tests / 2958 subtests passed, 251 tests / 6 subtests passed in the exact image, four mutations detected, three zero-tool real-model context probes. These probes reached availability/manifest collection or handoff, not full model-driven booking/channel completion. Task 5: runtime authority OK, original manifest bytes and all seven runtime container identities preserved, temporary model-auth copies removed, no deployment or external effects. Evidence and remaining gates: `/home/ubuntu/workspace/v2-renewal-corrections-727d3625/RESULTADO.md` and `PROXIMA-ETAPA.md`.
+
 ## Global Constraints
 
-- Approved spec: `docs/superpowers/specs/2026-09-24-component-renewal-design.md`.
+- Recorded spec: `docs/superpowers/specs/2026-09-24-component-renewal-design.md`.
 - Same declared worktree/branch, base `ab58c2f`; no live state writes or external effects.
 - Maya owns semantics. Only typed service/selection/current draft defines renewal scope, never prose.
 - Fresh provider status and verified local financial context; no payment transfer or automatic refund.

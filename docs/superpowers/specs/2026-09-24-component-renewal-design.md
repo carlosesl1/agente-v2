@@ -2,11 +2,11 @@
 
 ## Autorização e escopo
 
-Carlos aprovou neste chat a correção no fluxo existente, por componente, com consulta atual e nova confirmação. Base autenticada TEST: `ab58c2ff3823eb7963840294b4eeb77777f5289d`. Worktree existente: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, branch `fix/v2-manychat-account-routing-727d3625`.
+Carlos pediu “Então siga com o que falta”. Esta especificação registra a abordagem técnica adotada: correção no fluxo existente, por componente, com consulta atual e nova confirmação. Não se infere autorização adicional de perguntas de esclarecimento sem resposta registrada. Base autenticada TEST: `ab58c2ff3823eb7963840294b4eeb77777f5289d`. Worktree existente: `/home/ubuntu/agente-v2/.worktrees/atendimento-simples-727d3625`, branch `fix/v2-manychat-account-routing-727d3625`.
 
 Somente fonte isolada, testes e qualificação sem efeitos externos nesta etapa. Não abrir janelas, criar reservas/cobranças, estornar, escrever nos bancos ativos ou promover GA/Ops. Não alterar V3/legado. Sem subagentes ou regras lexicais. Nova operação financeira pelo WhatsApp depende de autorização posterior.
 
-## Desenho aprovado
+## Desenho implementado nesta etapa técnica
 
 Maya interpreta o pedido e o serviço desejado. O controlador não interpreta prosa: valida a proposta tipada e consulta a reserva anterior. Uma reserva anterior com efeito confirmado mas estado atual terminal (expirada/cancelada) pode dar lugar a uma nova proposta **do componente solicitado**, não a repetição do comando anterior. A proposta usa disponibilidade fresca e exige novo resumo entregue e nova confirmação do cliente antes de produzir novo comando.
 
