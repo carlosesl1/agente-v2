@@ -1,3 +1,14 @@
+# Active E2E — new agency booking/link awaiting human TEST checkout
+
+- User explicitly authorized one new 4Ps booking for 2026-11-25 08:30, two adults, BRL 730.80 total / BRL 146.16 agency TEST deposit, conditional on unchanged fresh terms. No automatic checkout or historical lodging/payment changes.
+- After zero-effect expired-summary attempts, one fresh summary and immediate natural confirmation in a bounded window produced one booking command/dispatch and one completed payment initiation/dispatch. Native Bókun booking `104856042` is **RESERVED / NOT_PAID**, paid zero, fee-inclusive due BRL 730.80. Stripe agency TEST link is active, amount BRL 146.16, zero paid sessions observed.
+- Native WhatsApp CTA received; ManyChat 302 reaches the same authenticated new Payment Link with `mcp_token` tracking, Stripe landing 200. Verbatim URL equality is false; account, price and new reservation-anchor metadata were independently verified by authenticated GET.
+- Same functional runtime `5fccceedc318510e4b3e443a9f1a98742417ebf8`; current issuing state retained and effect/send gates closed, contact paused. Old commercial rows byte-for-byte preserved; zero new settlement commands/evidence/ledger rows; GA/Ops unchanged. Never roll back to an empty/pre-booking state while this checkout is payable.
+- NEXT: **AWAITING_HUMAN_TEST_PAYMENT**. Only the new agency button is eligible; revalidate a delayed/expired booking before payment. After human TEST checkout, prove genuine Stripe receipt/correlation, one provider settlement, native read-back and final WhatsApp response under revalidated authority. Not financial E2E PASS.
+- Evidence: `/home/ubuntu/workspace/v2-renewal-e2e-727d3625/journey-20260924T220219Z/booking-fresh/RESULTADO.md`, `handoff-proof.json`, `provider-final-audit.private.json`, `cta-verification.json`, `historical-row-preservation.json`, and executed closure receipt.
+
+## Previous stage — context correction and summary gate
+
 # Active maintenance — persisted commercial context published TEST CLOSED
 
 - Carlos requested continuation of the real WhatsApp E2E. Closed payment capability initially blocked summary materialization; after correcting the scoped test window, real-model delta frames exposed a runtime guard that ignored committed commercial facts.
