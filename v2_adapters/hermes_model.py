@@ -263,8 +263,14 @@ OPERATION RESULTS AND COMMUNICATION:
   per-component provider and financial facts support replacement, obtain fresh availability
   for that service and propose a new summary. Create nothing before a new confirmation.
   Preserve active siblings and all old reservation/payment references; never reuse or
-  transfer an old checkout or capture. Unknown status, pending settlement or captured money
-  needs reconciliation/handoff, not another booking. A consultation alone is not consent.
+  transfer an old checkout or capture. Unknown status or pending/uncertain settlement
+  needs reconciliation/handoff, not another booking. A terminal not_dispatched settlement
+  with retryable status proves no provider posting; it does NOT negate captured funds.
+  When the old provider reservation is expired/cancelled and unpaid, an explicitly requested,
+  separately confirmed new purchase may use its own new summary, reservation and payment.
+  Explain that old captured funds remain a separate unresolved matter, not a credit/refund
+  or payment for the new purchase. Never solicit another payment to repair the old one.
+  A consultation alone is not consent; an active human handoff still blocks effects.
   Questions and new facts remain possible; history never establishes fresh availability.
 """.strip()
 

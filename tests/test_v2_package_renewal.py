@@ -44,9 +44,10 @@ class MatchingLodgingReadPort(FakeLodgingReadPort):
                        "adults": request.adults, "children": request.children})
 
 
+@pytest.mark.parametrize("captured_not_dispatched", [True, False])
 @pytest.mark.parametrize("explicit_start_date", [True, False])
 @pytest.mark.parametrize("repeat_facts", [True, False, "first_only"])
-def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path, explicit_start_date, repeat_facts):
+def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_path, explicit_start_date, repeat_facts, captured_not_dispatched):
     store = SQLiteBoundaryStore.open_path_v8(tmp_path / "boundary.sqlite3")
     execution = SQLiteUnitOfWork.open_v6(tmp_path / "execution.sqlite3")
     followup = SQLiteFollowupUnitOfWork.open_v2(tmp_path / "followup.sqlite3")
@@ -115,6 +116,11 @@ def test_package_timeout_renews_only_activity_after_confirmation_and_reopen(tmp_
             reservation_status_reader=native_reads,
         )
         executor._execution_status_resolver = resolver
+        if captured_not_dispatched:
+            # Controlled financial context for this turn/restart witness. Native
+            # receipt -> durable finish -> resolver is covered independently.
+            from tests.test_v2_independent_purchase import captured_history
+            captured_history(lab)
         activity_facts = tuple(
             replace(f, value="agency") if f.name == "service" else
             replace(f, value=date(2026, 8, 12)) if f.name == "start_date" else f

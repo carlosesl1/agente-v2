@@ -314,13 +314,20 @@ def _terminal_unpaid_component(component: ExecutionComponentContext, now: dateti
         return False
     if any(p.status != "completed" for p in component.payments):
         return False
-    return not any(
-        s.stripe_capture_observed_at is not None
-        or s.certainty is not None
-        or s.status not in {
-            "awaiting_method", "awaiting_financial_confirmation", "awaiting_evidence",
-            "expired", "cancelled",
-        }
+    # A final pre-dispatch outcome cannot credit the old reservation. It may
+    # still carry captured funds: keep that evidence/incident intact while a
+    # NEW summary and separate confirmation create their own obligation.
+    # Pending, uncertain, partial and settled outcomes never enter this branch.
+    return all(
+        (s.certainty == "not_dispatched" and s.status == "retryable")
+        or (
+            s.stripe_capture_observed_at is None
+            and s.certainty is None
+            and s.status in {
+                "awaiting_method", "awaiting_financial_confirmation", "awaiting_evidence",
+                "expired", "cancelled",
+            }
+        )
         for s in component.settlements
     )
 
