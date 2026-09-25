@@ -1,4 +1,4 @@
-"""Bounded image GET for the same Maya child. Never calls bank/model/effect APIs."""
+"""Bounded image/PDF GET for the same Maya child. No bank/model/effect APIs."""
 
 import base64
 import hashlib
@@ -49,7 +49,7 @@ class ProofMediaReader:
             for event in events:
                 if event.media_url is None:
                     continue
-                digest, mime = None, event.media_type
+                digest, document_digest, mime = None, None, event.media_type
                 try:
                     url = urlsplit(event.media_url)
                     if (
@@ -61,7 +61,8 @@ class ProofMediaReader:
                         or url.fragment
                     ):
                         raise ValueError("media_url_rejected")
-                    if len(result) >= 4:
+                    image_count = sum(a.image_data_url is not None for a in result)
+                    if image_count >= 4:
                         raise ValueError("media_count_exceeded")
                     with client.stream(
                         "GET", event.media_url, follow_redirects=False
@@ -73,13 +74,55 @@ class ProofMediaReader:
                             .strip()
                             .lower()
                         )
-                        if mime not in ("image/png", "image/jpeg", "image/webp"):
+                        if mime not in (
+                            "image/png",
+                            "image/jpeg",
+                            "image/webp",
+                            "application/pdf",
+                            "application/octet-stream",
+                        ):
                             raise ValueError("image_required")
                         raw = bytearray()
                         for chunk in response.iter_bytes():
                             raw.extend(chunk)
                             if len(raw) > 4 * 1024 * 1024:
                                 raise ValueError("media_too_large")
+                    if mime == "application/octet-stream":
+                        if not raw.startswith(b"%PDF-"):
+                            raise ValueError("media_invalid")
+                        mime = "application/pdf"
+                    if mime == "application/pdf":
+                        from v2_adapters.pdf_render import render_pdf
+
+                        document_digest = retain_bytes(self.archive, bytes(raw))
+                        pages = render_pdf(bytes(raw))
+                        if image_count + len(pages) > 4:
+                            raise ValueError("media_count_exceeded")
+                        data_urls = [
+                            "data:image/png;base64," + base64.b64encode(page).decode()
+                            for page in pages
+                        ]
+                        size = sum(len(data) for data in data_urls)
+                        if size > budget:
+                            raise ValueError("media_too_large")
+                        rendered = tuple(
+                            ModelAttachment(
+                                mime,
+                                Status.IMAGE_READY,
+                                event.event_id,
+                                retain_bytes(self.archive, page),
+                                data,
+                                document_sha256=document_digest,
+                                page_number=number,
+                                page_count=len(pages),
+                            )
+                            for number, (page, data) in enumerate(
+                                zip(pages, data_urls), 1
+                            )
+                        )
+                        result.extend(rendered)
+                        budget -= size
+                        continue
                     from PIL import Image
 
                     with Image.open(io.BytesIO(raw)) as image:
@@ -107,7 +150,10 @@ class ProofMediaReader:
                             Status.UNAVAILABLE,
                             event.event_id,
                             digest,
-                            error_code="proof_image_unavailable",
+                            error_code="proof_pdf_unavailable"
+                            if mime == "application/pdf"
+                            else "proof_image_unavailable",
+                            document_sha256=document_digest,
                         )
                     )
             return tuple(result)

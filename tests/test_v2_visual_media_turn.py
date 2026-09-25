@@ -168,8 +168,9 @@ def test_model_cannot_mint_approval_or_rebind_image(tmp_path, change):
         _proposal(json.dumps(raw).encode(), f.request)
 
 
+@pytest.mark.parametrize("media_kind", ("image", "pdf"))
 def test_native_executor_discards_prevalidation_prose_and_publishes_tool_result_once(
-    tmp_path,
+    tmp_path, media_kind,
 ):
     from tests.test_v2_turn_executor import (
         BATCH,
@@ -189,11 +190,17 @@ def test_native_executor_discards_prevalidation_prose_and_publishes_tool_result_
 
     f = lab(tmp_path)
     f.leads.lead_id_for_command = lambda _: BATCH.lead_id
+    if media_kind == "pdf":
+        from tests.test_v2_pdf_proofs import pdf_bytes
+        raw, mime = pdf_bytes(), "application/pdf"
+    else:
+        raw = base64.b64decode(f.attachment.image_data_url.split(",", 1)[1])
+        mime = "image/png"
     event = replace(
         EVENT,
         event_id=f.proof.source_event_id,
-        media_url="https://media.example.invalid/p.png",
-        media_type="image/png",
+        media_url="https://media.example.invalid/proof",
+        media_type=mime,
     )
     batch = replace(BATCH, events=(event,))
     boundary = SQLiteBoundaryStore.open_memory_v8()
@@ -206,6 +213,10 @@ def test_native_executor_discards_prevalidation_prose_and_publishes_tool_result_
 
     def run(command, **kwargs):
         calls.append(json.loads(kwargs["input"]))
+        if len(calls) == 1:
+            metadata = json.loads(calls[0]["messages"][-1][1])["attachments"]
+            assert len(calls[0]["images"]) == (2 if media_kind == "pdf" else 1)
+            replies[0]["payment_proof"]["source_sha256"] = metadata[-1]["source_sha256"]
         return SimpleNamespace(
             returncode=0,
             stdout=b"PHASE8_RESULT\x00" + json.dumps(replies.pop(0)).encode(),
@@ -219,7 +230,11 @@ def test_native_executor_discards_prevalidation_prose_and_publishes_tool_result_
         transcript_key=TRANSCRIPT_KEY,
         run=run,
     )
-    media = SimpleNamespace(extract=lambda events: (f.attachment,))
+    media = ProofMediaReader(
+        allowed_hosts=("media.example.invalid",), archive=tmp_path / "proofs/images",
+        client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(
+            200, content=raw, headers={"content-type": mime}))),
+    )
     executor = V2TurnExecutor(
         store=boundary,
         model=model,

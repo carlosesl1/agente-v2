@@ -234,13 +234,27 @@ class VisualProofService:
             and (a.source_event_id, a.source_sha256)
             == (proof.source_event_id, proof.source_sha256)
         ]
-        if len(matches) != 1:
+        if not matches or (len(matches) != 1 and not (
+            matches[0].document_sha256 and len({a.document_sha256 for a in matches}) == 1
+        )):
             raise ValueError("proof origin does not bind one received image")
         from v2_contracts.model_wire import validate_image_data_url
 
         self.retain(
             self.archive / "images", validate_image_data_url(matches[0].image_data_url)
         )
+        document = None
+        if matches[0].document_sha256:
+            pages = [a for a in request.attachments if
+                     (a.source_event_id, a.document_sha256) ==
+                     (proof.source_event_id, matches[0].document_sha256)]
+            original = (self.archive / "images" / matches[0].document_sha256).read_bytes()
+            if hashlib.sha256(original).hexdigest() != matches[0].document_sha256:
+                raise ValueError("document origin archive mismatch")
+            document = {"sha256": matches[0].document_sha256, "media_type": "application/pdf",
+                        "pages": [{"page_number": a.page_number, "source_sha256": a.source_sha256} for a in pages]}
+            for page in pages:
+                self.retain(self.archive / "images", validate_image_data_url(page.image_data_url))
         now = self.clock()
         rows = [
             r
@@ -308,6 +322,7 @@ class VisualProofService:
             "stage": "document_comparison",
             "lead_id": request.lead_id,
             "observed": proof.to_dict(),
+            **({"document": document} if document is not None else {}),
             "expected": expected,
             "analysis": result["analysis"],
             "reasons": result["reasons"],

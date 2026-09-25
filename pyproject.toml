@@ -13,8 +13,9 @@ runtime = [
   "PyYAML>=6.0.0",
   "cryptography>=42.0.0",
   "Pillow>=11.0.0,<13",
+  "pypdfium2==5.13.0",
 ]
-dev = ["pytest>=8.0.0"]
+dev = ["pytest>=8.0.0", "reportlab>=4,<6", "pypdf>=6,<7"]
 
 [tool.phase7-wheel]
 packages = [

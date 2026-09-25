@@ -88,10 +88,23 @@ O gate de Stripe é independente: habilitar Pix/Wise não habilita Stripe.
 
 ## Limites explícitos desta versão
 
-- PNG, JPEG e WebP. PDF, áudio, imagem ilegível ou indisponível não autorizam baixa;
-  a Maya precisa pedir um formato legível ou encaminhar o caso.
-- Até quatro imagens por lote, até 4 MiB por imagem e 6 MiB de dados codificados
-  no conjunto, preservando espaço para o envelope e contexto.
+- PNG, JPEG, WebP e **PDF**, inclusive PDF escaneado e multipágina. A mesma Maya
+  lê as páginas renderizadas; não há agente OCR nem autoridade financeira adicional.
+- PDF original e páginas PNG são preservados por SHA-256 no arquivo de evidências.
+  Cada página carrega `document_sha256`, `page_number`, `page_count` e o evento de
+  origem. O assessment vincula a observação ao original e à lista inteira de páginas.
+  O identificador da transferência continua sendo a chave de deduplicação: PDF,
+  nova exportação ou imagem do mesmo pagamento não geram outra baixa.
+- Até quatro imagens/páginas por lote, até 4 MiB por arquivo original e 6 MiB de
+  dados codificados no conjunto, preservando espaço para envelope e contexto.
+  PDFs são renderizados a 144 dpi com PDFium (`pypdfium2==5.13.0`) em subprocesso
+  com limite de tempo/memória; máximo 16 megapixels por página.
+- **Todas as páginas ou nenhuma**: documento com senha necessária, corrompido,
+  vazio ou acima dos limites fica indisponível. Não se ignora silenciosamente a
+  última página para aprovar um comprovante parcial. A Maya pede arquivo legível
+  ou encaminha o caso conforme o contexto; mídia indisponível não autoriza baixa.
+- `application/pdf` é reconhecido; `application/octet-stream` só é tratado como
+  PDF se os bytes começarem pela assinatura PDF e o parser conseguir abri-los.
 - Hora/fuso da transferência precisam ser inequívocos. Em Wise, usa-se o valor
   efetivamente destinado ao beneficiário, não o valor de origem antes de câmbio/taxas.
 - A janela vem da reserva confirmada (prazo existente de 24h), com transferência

@@ -304,7 +304,7 @@ class AttachmentContentStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ModelAttachment:
-    """Presence metadata only; never extracted content or payment evidence."""
+    """Event-bound pixels and optional original PDF provenance; not payment authority."""
 
     media_type: str | None
     content_status: AttachmentContentStatus = AttachmentContentStatus.NOT_EXTRACTED
@@ -312,6 +312,9 @@ class ModelAttachment:
     source_sha256: str | None = None
     image_data_url: str | None = dataclass_field(default=None, repr=False)
     error_code: str | None = None
+    document_sha256: str | None = None
+    page_number: int | None = None
+    page_count: int | None = None
 
     def __post_init__(self) -> None:
         if self.media_type is not None:
@@ -325,11 +328,27 @@ class ModelAttachment:
                 raise InvalidModelProposal("image origin mismatch")
         elif self.image_data_url is not None:
             raise InvalidModelProposal("non-image cannot carry pixels")
+        if self.document_sha256 is not None:
+            if (type(self.document_sha256) is not str or len(self.document_sha256) != 64
+                    or any(c not in "0123456789abcdef" for c in self.document_sha256)
+                    or self.media_type != "application/pdf"):
+                raise InvalidModelProposal("document origin invalid")
+            if self.content_status is AttachmentContentStatus.IMAGE_READY:
+                if (type(self.page_number) is not int or type(self.page_count) is not int
+                        or not 1 <= self.page_number <= self.page_count <= 4):
+                    raise InvalidModelProposal("document page invalid")
+            elif self.page_number is not None or self.page_count is not None:
+                raise InvalidModelProposal("unavailable document cannot carry pages")
+        elif (self.page_number is not None or self.page_count is not None
+              or self.media_type == "application/pdf" and self.content_status is AttachmentContentStatus.IMAGE_READY):
+            raise InvalidModelProposal("document page requires original hash")
 
     def to_dict(self):
         value = {"media_type": self.media_type, "content_status":self.content_status.value}
         if self.content_status is not AttachmentContentStatus.NOT_EXTRACTED:
             value.update(source_event_id=self.source_event_id, source_sha256=self.source_sha256, error_code=self.error_code)
+        if self.document_sha256 is not None:
+            value.update(document_sha256=self.document_sha256, page_number=self.page_number, page_count=self.page_count)
         return value
 
 
@@ -376,6 +395,16 @@ class ModelRequest:
             type(item) is not ModelAttachment for item in self.attachments
         ):
             raise InvalidModelProposal("attachments must contain exact ModelAttachment values")
+        documents = {}
+        for attachment in self.attachments:
+            if attachment.document_sha256 and attachment.content_status is AttachmentContentStatus.IMAGE_READY:
+                key = (attachment.source_event_id, attachment.document_sha256)
+                documents.setdefault(key, []).append(attachment)
+        for pages in documents.values():
+            count = pages[0].page_count
+            if (any(p.page_count != count for p in pages)
+                    or [p.page_number for p in pages] != list(range(1, count + 1))):
+                raise InvalidModelProposal("document pages incomplete or inconsistent")
         if self.trigger not in {"customer_message", "operation_result"}:
             raise InvalidModelProposal("invalid turn trigger")
         if type(self.completion_events) is not tuple or any(
