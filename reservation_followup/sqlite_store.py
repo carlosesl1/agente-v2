@@ -2322,6 +2322,9 @@ class SQLiteFollowupUnitOfWork:
             return  # Legacy standalone store API retains its original lease contract.
         with self._transaction("begin_handoff_delivery"):
             self._assert_live_handoff_claim(claim, now=now)
+            current, _ = self._load_handoff(claim.message.handoff_id)
+            if current.cancellation is not None:
+                raise StaleLease("handoff was cancelled before dispatch")
             changed = self._connection.execute(
                 "UPDATE handoff_outbox SET dispatch_slots_consumed=1,cas_revision=cas_revision+1 "
                 "WHERE message_id=? AND dispatch_slots_consumed=0",
@@ -2411,10 +2414,18 @@ class SQLiteFollowupUnitOfWork:
         owner = _handoff_claim_owner(worker_id, delivery_id, delivery_version)
         with self._transaction("claim_handoff_outbox"):
             self._recover_uncertain_handoffs(now)
+            # Retain cancelled jobs as evidence, but never send them later and
+            # re-pause a contact whose incident the operator already closed.
+            active_incidents = (
+                "AND handoff_id IN (SELECT handoff_id FROM main.handoff_workflows "
+                "WHERE status!='cancelled') "
+                if self._schema_version == SCHEMA_VERSION_V2 else ""
+            )
             candidate = self._connection.execute(
                 "SELECT message_id, handoff_id FROM main.handoff_outbox "
-                "WHERE (status='pending' AND claim_owner IS NULL) "
-                "OR (status='leased' AND lease_expires_at<=?) "
+                "WHERE ((status='pending' AND claim_owner IS NULL) "
+                "OR (status='leased' AND lease_expires_at<=?)) "
+                + active_incidents +
                 "ORDER BY CASE kind WHEN 'customer_acknowledgement' THEN 0 ELSE 1 END, "
                 "created_at, message_id LIMIT 1",
                 (now.isoformat(),),
