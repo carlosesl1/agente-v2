@@ -1,3 +1,12 @@
+# Active blocker — TEST immutable image reference DRIFT
+
+- Final authority verification fails: declared digest cannot be inspected locally. All three TEST containers still use the declared image ID and source revision; that image exists by ID but has no RepoDigests. Cause of reference loss is not established.
+- Repair scope was presented to Carlos (pull only the exact declared digest, no rebuild/restart/config/state changes), but no answer arrived. Timeout is not authorization. No repair was executed; stop here under the runtime-authority contract.
+- Keep effects/sends closed and current issuing state intact. Do not pay the new TEST checkout yet. After authorized reference restoration, verify authority and revalidate native reservation status before checkout; the one-new-booking allowance has already been consumed, so expiry does not authorize another booking.
+- Evidence: `/home/ubuntu/workspace/v2-renewal-e2e-727d3625/journey-20260924T220219Z/booking-fresh/authority-recheck.json`, `drift-image-reference.json`, and `final-runtime-proof.json`.
+
+## Earlier completed transaction stage — handoff held by the blocker above
+
 # Active E2E — new agency booking/link awaiting human TEST checkout
 
 - User explicitly authorized one new 4Ps booking for 2026-11-25 08:30, two adults, BRL 730.80 total / BRL 146.16 agency TEST deposit, conditional on unchanged fresh terms. No automatic checkout or historical lodging/payment changes.
