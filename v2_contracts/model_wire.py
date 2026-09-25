@@ -195,4 +195,22 @@ V8_RESPONSE_JSON_SCHEMA: Final = _object(
 )
 
 
-__all__ = ["V8_RESPONSE_FIELDS", "V8_RESPONSE_JSON_SCHEMA"]
+from copy import deepcopy
+from v2_contracts.payment_proof import proof_schema
+V9_RESPONSE_JSON_SCHEMA = deepcopy(V8_RESPONSE_JSON_SCHEMA)
+V9_RESPONSE_JSON_SCHEMA["properties"].update(schema={"type":"string","const":"v2-model-proposal-v9"}, payment_proof=proof_schema())
+V9_RESPONSE_JSON_SCHEMA["required"] = list(V9_RESPONSE_JSON_SCHEMA["properties"])
+
+def validate_image_data_url(value):
+    import base64
+    if type(value) is not str or len(value) > 6 * 1024 * 1024:
+        raise ValueError("image data exceeds bound")
+    prefix, data = value.split(",", 1)
+    if prefix not in ("data:image/png;base64", "data:image/jpeg;base64", "data:image/webp;base64"):
+        raise ValueError("invalid image media type")
+    raw = base64.b64decode(data, validate=True)
+    if not raw or len(raw) > 4 * 1024 * 1024:
+        raise ValueError("invalid image bytes")
+    return raw
+
+__all__ = ["V8_RESPONSE_FIELDS", "V8_RESPONSE_JSON_SCHEMA", "V9_RESPONSE_JSON_SCHEMA"]

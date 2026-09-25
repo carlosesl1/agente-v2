@@ -23,7 +23,7 @@ from v2_contracts.model_wire import (
 from v2_host.structured_output import maya_v8_request_overrides
 
 _RESULT_MARKER: Final = b"PHASE8_RESULT\x00"
-_MAX_INPUT: Final = 512 * 1024
+_MAX_INPUT: Final = 8 * 1024 * 1024
 _MAX_OUTPUT: Final = 128 * 1024
 
 
@@ -43,7 +43,7 @@ def _closed_request(raw: bytes) -> dict[str, object]:
         value = json.loads(raw, object_pairs_hook=_unique_object)
     except (ValueError, UnicodeError) as exc:
         raise ChildInputRejected("model wire input JSON is invalid") from exc
-    if type(value) is not dict or set(value) != {"system_prompt", "messages"}:
+    if type(value) is not dict or set(value) not in ({"system_prompt", "messages"}, {"system_prompt", "messages", "images"}):
         raise ChildInputRejected("model wire input fields mismatch")
     if type(value["system_prompt"]) is not str or not value["system_prompt"].strip():
         raise ChildInputRejected("model system prompt is invalid")
@@ -63,6 +63,15 @@ def _closed_request(raw: bytes) -> dict[str, object]:
             or (not message[1] and (index % 2 != 0 or index == len(messages) - 1))
         ):
             raise ChildInputRejected("model messages wire is invalid")
+    if "images" in value:
+        from v2_contracts.model_wire import validate_image_data_url
+        if type(value["images"]) is not list or not 1 <= len(value["images"]) <= 4:
+            raise ChildInputRejected("invalid image count")
+        try:
+            for image in value["images"]:
+                validate_image_data_url(image)
+        except (ValueError, TypeError) as exc:
+            raise ChildInputRejected("invalid image") from exc
     return value
 
 
@@ -146,7 +155,7 @@ def _response_contract(argv: Sequence[str]) -> str:
     if len(indexes) != 1 or indexes[0] + 1 >= len(argv):
         raise ValueError("response contract is invalid")
     value = argv[indexes[0] + 1]
-    if value != "maya-v8":
+    if value not in ("maya-v8", "maya-v9"):
         raise ValueError("response contract is invalid")
     return value
 
@@ -178,7 +187,10 @@ def _structured_conversation_prompt(request: dict[str, object]) -> str:
             )
         )
     parts.append("CURRENT REQUEST JSON:\n" + messages[-1][1])
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if request.get("images"):
+        return [{"type":"text", "text":text}, *({"type":"image_url", "image_url":{"url":url}} for url in request["images"])]
+    return text
 
 
 def _default_profile_resolver(profile: str) -> str:
@@ -218,8 +230,8 @@ async def run_structured(
     )
     if reasoning_effort != "high":
         raise ValueError("reasoning effort must be high")
-    _response_contract(argv)
-    request_overrides = maya_v8_request_overrides()
+    contract = _response_contract(argv)
+    request_overrides = maya_v8_request_overrides(contract)
     hermes_home = profile_resolver(profile)
     if type(hermes_home) is not str or not hermes_home:
         raise ValueError("Hermes profile home is invalid")

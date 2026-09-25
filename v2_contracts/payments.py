@@ -387,6 +387,8 @@ class PaymentInstruction:
     economic_version: int
     public_text: str
     settled: bool = False
+    requested_amount_minor: int | None = None
+    currency: str | None = None
 
     def __post_init__(self) -> None:
         _id(self.payment_id, "payment_id")
@@ -400,6 +402,8 @@ class PaymentInstruction:
             raise ValueError("public_text must be exact non-empty text")
         if self.settled is not False:
             raise ValueError("payment instruction can never claim settlement")
+        if self.requested_amount_minor is not None or self.currency is not None:
+            _money(self.requested_amount_minor, self.currency)
 
 
 PaymentMethodOffer = StripePaymentLink | PaymentInstruction

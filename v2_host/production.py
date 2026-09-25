@@ -666,6 +666,16 @@ def _build_inbox_worker(
         timeout=settings.hermes_timeout_seconds,
         transcript_key=settings.hermes_transcript_key,
     )
+    proof_media = visual_proofs = None
+    if settings.visual_proofs_enabled:
+        from v2_adapters.proof_media import ProofMediaReader, retain_bytes
+        from v2_application.visual_proofs import VisualProofService
+        archive = settings.sqlite_paths["followup"].parent / "payment-proof-evidence"
+        proof_media = ProofMediaReader(allowed_hosts=settings.proof_media_hosts, archive=archive / "images")
+        visual_proofs = VisualProofService(execution=container.execution, payments=container.payment_initiation,
+            followup=container.followup, lead_resolver=DurableLeadResolver(boundary=container.boundary,
+                execution=container.execution, followup=container.followup, inbox=container.inbox),
+            receivers=settings.visual_proof_receivers, archive=archive, retain=retain_bytes, clock=clock.now)
     turn_budget = _inbox_turn_budget(settings)
     executor = V2TurnExecutor(
         store=container.boundary,
@@ -687,6 +697,7 @@ def _build_inbox_worker(
         turn_timeout=turn_budget,
         max_commit_attempts=2,
         completion_projector=completion_projector,
+        proof_media=proof_media, visual_proofs=visual_proofs,
         execution_status_resolver=ReservationExecutionStatusResolver(
             container.execution,
             payment_store=container.payment_initiation,
@@ -1094,7 +1105,7 @@ def build_worker_set(
         handoff_worker = ClosedCapabilityWorker("manychat_handoff")
     settlement_worker = ClosedCapabilityWorker("settlement_writes")
     financial_leads = DurableLeadResolver(boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox)
-    if settings.stripe_settlement_enabled:
+    if settings.stripe_settlement_enabled or settings.visual_proofs_enabled:
         financial_guard = ControlledEffectGuard(settings=settings,clock=UTCClock())
         settlement_worker = _StripeSettlementStage(
             guard=financial_guard,
@@ -1108,6 +1119,7 @@ def build_worker_set(
                     cloudbeds_base_url=settings.cloudbeds_base_url, bokun_base_url=settings.bokun_base_url,
                     effect_guard=financial_guard, lead_resolver=financial_leads,
                     allowed_subscribers=settings.allowed_subscriber_ids,
+                    enabled_methods=(("stripe",) if settings.stripe_settlement_enabled else ()) + (("pix","wise") if settings.visual_proofs_enabled else ()),
                 ),
                 worker_id="worker:stripe-settlement", lease_ttl=timedelta(seconds=120),
                 clock=UTCClock().now,
@@ -1199,6 +1211,7 @@ def build_worker_set(
                 "ready" if settings.manychat_handoff_enabled else "closed"
             ),
             "stripe_settlement": "ready" if settings.stripe_settlement_enabled else "closed",
+            "visual_proofs": "ready" if settings.visual_proofs_enabled else "closed",
             "payment_initiation": (
                 "ready" if payment_enabled else "closed"
             ),

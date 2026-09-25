@@ -156,6 +156,9 @@ class ReservationExecutionStatusResolver:
                 workflow.settlement_finish.outcome.certainty.value
                 if workflow.settlement_finish
                 else None,
+                evidence_basis=("visual_receipt" if workflow.evidence_record is not None and getattr(workflow.evidence_record.evidence, "human_review_status", None) == "pending" else None),
+                human_review=("pending" if workflow.evidence_record is not None and getattr(workflow.evidence_record.evidence, "human_review_status", None) == "pending" else None),
+                bank_settlement_confirmed=(False if workflow.evidence_record is not None and getattr(workflow.evidence_record.evidence, "human_review_status", None) == "pending" else None),
                 stripe_capture_observed_at=(
                     workflow.evidence_record.evidence.observed_at
                     if workflow.verified_evidence is not None

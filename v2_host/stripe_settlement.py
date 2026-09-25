@@ -66,7 +66,11 @@ class StripeSettlementAdapter:
         cloudbeds_base_url="https://api.cloudbeds.com",
         bokun_base_url="https://api.bokun.io",
         cloudbeds_auth_mode="bearer",
+        enabled_methods=("stripe",),
     ):
+        self.enabled_methods = frozenset(enabled_methods)
+        if not self.enabled_methods or not self.enabled_methods <= {"stripe","pix","wise"}:
+            raise ValueError("settlement methods invalid")
         self.store = store
         self.execution = execution
         self.cloudbeds_key = cloudbeds_api_key
@@ -137,10 +141,11 @@ class StripeSettlementAdapter:
     def _bound_state(self, request):
         state = self.store.load_payment(request.payment_id)
         subject = state.subject
-        _require(
-            subject.method is PaymentMethod.STRIPE
-            and type(state.evidence_record.evidence) is VerifiedStripeEvent
-        )
+        from reservation_followup.payment import VisualTransferEvidence
+        _require(subject.method.value in self.enabled_methods and state.evidence_record is not None)
+        evidence = state.evidence_record.evidence
+        _require((subject.method is PaymentMethod.STRIPE and type(evidence) is VerifiedStripeEvent)
+            or (type(evidence) is VisualTransferEvidence and evidence.method is subject.method))
         _require(
             subject.payment_version == request.payment_version
             and subject.economic_signature == request.economic_signature
@@ -222,7 +227,7 @@ class StripeSettlementAdapter:
             )
             _require(
                 any(
-                    m.get("method") == "Cartãodecrédito"
+                    m.get("method") == {"stripe":"Cartãodecrédito","pix":"PIX","wise":"Wise"}[subject.method.value]
                     for m in methods["data"].get("methods", [])
                 )
             )
@@ -268,9 +273,9 @@ class StripeSettlementAdapter:
                 data={
                     "propertyID": self.property_id,
                     "reservationID": native,
-                    "type": "Cartãodecrédito",
+                    "type": {"stripe":"Cartãodecrédito","pix":"PIX","wise":"Wise"}[state.subject.method.value],
                     "amount": format(amount, ".2f"),
-                    "description": "Stripe " + reference,
+                    "description": state.subject.method.value.capitalize() + " " + reference,
                 },
                 follow_redirects=False,
             )
@@ -283,9 +288,9 @@ class StripeSettlementAdapter:
                     "payment": {
                         "amount": float(amount),
                         "currency": "BRL",
-                        "paymentType": "WEB_PAYMENT",
+                        "paymentType": "WEB_PAYMENT" if state.subject.method is PaymentMethod.STRIPE else "POINT_OF_SALE",
                         "paymentReferenceId": reference,
-                        "comment": "Stripe " + reference,
+                        "comment": state.subject.method.value.capitalize() + " " + reference,
                     }
                 },
                 follow_redirects=False,

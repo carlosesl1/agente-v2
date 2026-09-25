@@ -214,6 +214,9 @@ class V2Settings:
     bokun_writes_enabled: bool = False
     stripe_links_enabled: bool = False
     stripe_settlement_enabled: bool = False
+    visual_proofs_enabled: bool = False
+    visual_proof_receivers: dict = field(default_factory=dict, repr=False)
+    proof_media_hosts: tuple[str, ...] = ()
     wise_instructions_enabled: bool = False
     pix_instructions_enabled: bool = False
     manychat_delivery_enabled: bool = False
@@ -515,6 +518,18 @@ class V2Settings:
             raise ValueError(
                 "critical_approval_ttl_seconds must be an exact integer from 1 to 86400"
             )
+        if type(self.visual_proofs_enabled) is not bool:
+            raise TypeError("visual_proofs_enabled must be exact bool")
+        if self.visual_proofs_enabled:
+            from v2_application.visual_proofs import validate_receivers
+            validate_receivers(self.visual_proof_receivers)
+            if (self.runtime_mode not in {RuntimeMode.CONTROLLED_WRITE, RuntimeMode.GENERAL_AVAILABILITY}
+                or not (self.pix_instructions_enabled or self.wise_instructions_enabled)
+                or not self.bokun_writes_enabled or not self.cloudbeds_writes_enabled
+                or not self.manychat_delivery_enabled or not self.manychat_handoff_enabled
+                or not self.payment_result_store_key or "maya-v9" not in self.hermes_command
+                or type(self.proof_media_hosts) is not tuple or not self.proof_media_hosts):
+                raise ValueError("visual proofs require productive mode, providers, instructions, delivery, handoff, owner key, maya-v9 and media hosts")
         if type(self.stripe_settlement_enabled) is not bool:
             raise TypeError("stripe_settlement_enabled must be an exact bool")
         if self.stripe_settlement_enabled and (
@@ -898,6 +913,9 @@ class V2Settings:
                 source, "V2_ENABLE_PIX_INSTRUCTIONS"
             ),
             stripe_settlement_enabled=_env_bool(worker_source, "V2_ENABLE_STRIPE_SETTLEMENT"),
+            visual_proofs_enabled=_env_bool(worker_source, "V2_ENABLE_VISUAL_PROOFS"),
+            visual_proof_receivers=json.loads(worker_source.get("V2_VISUAL_PROOF_RECEIVERS_JSON", "{}")),
+            proof_media_hosts=tuple(h.strip() for h in worker_source.get("V2_PROOF_MEDIA_HOSTS", "").split(",") if h.strip()),
             manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
             manychat_handoff_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_HANDOFF"),
             real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),

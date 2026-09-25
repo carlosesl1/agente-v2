@@ -271,7 +271,62 @@ class VerifiedStripeEvent:
         _require_hash(self.verification_hash, "stripe.verification_hash")
 
 
-PaymentEvidence = PixVisualEvidence | VerifiedWiseCredit | VerifiedStripeEvent
+@dataclass(frozen=True, slots=True)
+class VisualTransferEvidence:
+    """Mechanically accepted document, never bank-authenticated credit.
+
+    Expected/observed comparison is retained by assessment_hash and the original
+    event/byte identity. Human review is independent of financial settlement.
+    """
+    method: PaymentMethod
+    amount_minor: int
+    currency: str
+    receiver_profile_id: str
+    transaction_id: str
+    observed_at: datetime
+    validated_at: datetime
+    source_event_id: str
+    source_sha256: str
+    recipient_identifier: str
+    recipient_name: str
+    payer_name: str
+    assessment_hash: str
+
+    def __post_init__(self) -> None:
+        if type(self.method) is not PaymentMethod or self.method not in (PaymentMethod.PIX, PaymentMethod.WISE):
+            raise ValueError("visual transfer method must be Pix or Wise")
+        _require_positive_int(self.amount_minor, "visual.amount_minor")
+        _require_currency(self.currency, "visual.currency")
+        _require_id(self.receiver_profile_id, "visual.receiver")
+        for name in ("source_sha256", "assessment_hash"):
+            _require_hash(getattr(self, name), name)
+        for name in ("transaction_id", "source_event_id", "recipient_identifier", "recipient_name", "payer_name"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip() or len(value) > 256 or "\x00" in value:
+                raise ValueError("visual field is invalid: " + name)
+        for name in ("observed_at", "validated_at"):
+            _require_canonical_utc(getattr(self, name), name)
+        if self.observed_at > self.validated_at:
+            raise ValueError("visual transaction is future-dated")
+        if self.method is PaymentMethod.PIX and not re.fullmatch(r"[a-zA-Z0-9]{32}", self.transaction_id):
+            raise ValueError("visual Pix needs a canonical E2E")
+        if self.method is PaymentMethod.WISE and not (self.transaction_id.isascii() and self.transaction_id.isdecimal() and not self.transaction_id.startswith("0")):
+            raise ValueError("visual Wise needs its numeric transfer ID")
+
+    @property
+    def human_review_status(self) -> str:
+        return "pending"
+
+    @property
+    def bank_settlement_confirmed(self) -> bool:
+        return False
+
+
+def _visual_evidence_hash(evidence: VisualTransferEvidence) -> str:
+    return _canonical_digest({f.name: (getattr(evidence, f.name).isoformat() if isinstance(getattr(evidence, f.name), datetime) else getattr(evidence, f.name)) for f in fields(evidence)})
+
+
+PaymentEvidence = PixVisualEvidence | VerifiedWiseCredit | VerifiedStripeEvent | VisualTransferEvidence
 
 
 def _pix_evidence_hash(evidence: PixVisualEvidence) -> str:
@@ -328,6 +383,8 @@ def evidence_claim_key(evidence: PaymentEvidence) -> str:
 
     clean = _revalidate_evidence(evidence)
     _require_intrinsic_integrity(clean)
+    if type(clean) is VisualTransferEvidence:
+        return (f"pix:{clean.transaction_id}" if clean.method is PaymentMethod.PIX else "wise:" + hashlib.sha256(clean.transaction_id.encode()).hexdigest())
     if type(clean) is PixVisualEvidence:
         return f"pix:{clean.normalized_e2e}"
     if type(clean) is VerifiedWiseCredit:
@@ -341,7 +398,7 @@ def _require_evidence_claim_key(value: str) -> str:
     if type(value) is not str:
         raise ValueError("evidence claim key must be canonical text")
     if value.startswith("pix:"):
-        if not _is_canonical_e2e(value[4:]):
+        if not (_is_canonical_e2e(value[4:]) or re.fullmatch(r"[a-zA-Z0-9]{32}", value[4:])):
             raise ValueError("Pix evidence claim key is not canonical")
         return value
     if value.startswith("wise:"):
@@ -361,6 +418,9 @@ def _require_evidence_claim_key(value: str) -> str:
 
 
 def _require_intrinsic_integrity(evidence: PaymentEvidence) -> None:
+    if type(evidence) is VisualTransferEvidence:
+        evidence.__post_init__()
+        return
     if type(evidence) is PixVisualEvidence:
         if evidence.proof_status not in (PixProofStatus.PAID, PixProofStatus.COMPLETED):
             raise ValueError("Pix claim requires completed/paid evidence")
@@ -430,7 +490,7 @@ def _revalidate_subject(subject: PaymentSubject) -> PaymentSubject:
 
 def _revalidate_evidence(evidence: PaymentEvidence) -> PaymentEvidence:
     evidence_type = type(evidence)
-    if evidence_type not in (PixVisualEvidence, VerifiedWiseCredit, VerifiedStripeEvent):
+    if evidence_type not in (PixVisualEvidence, VerifiedWiseCredit, VerifiedStripeEvent, VisualTransferEvidence):
         raise TypeError("evidence must be an exact PaymentEvidence type")
     timestamp = (
         evidence.credited_at
@@ -567,12 +627,14 @@ class VerifiedPaymentEvidence:
         if type(self.method) is not PaymentMethod:
             raise ValueError("verified_evidence.method must be an exact PaymentMethod")
         if type(self.evidence) not in (
+            VisualTransferEvidence,
             PixVisualEvidence,
             VerifiedWiseCredit,
             VerifiedStripeEvent,
         ):
             raise ValueError("verified_evidence.evidence must be an exact evidence type")
         expected_method = {
+            VisualTransferEvidence: getattr(self.evidence, "method", None),
             PixVisualEvidence: PaymentMethod.PIX,
             VerifiedWiseCredit: PaymentMethod.WISE,
             VerifiedStripeEvent: PaymentMethod.STRIPE,
@@ -584,6 +646,7 @@ class VerifiedPaymentEvidence:
             raise ValueError("verified evidence claim key is not canonical")
         _require_hash(self.evidence_hash, "verified_evidence.evidence_hash")
         expected_hash = {
+            VisualTransferEvidence: _visual_evidence_hash,
             PixVisualEvidence: _pix_evidence_hash,
             VerifiedWiseCredit: _wise_verification_hash,
             VerifiedStripeEvent: _stripe_verification_hash,
@@ -609,9 +672,21 @@ def validate_evidence(
         PaymentMethod.WISE: VerifiedWiseCredit,
         PaymentMethod.STRIPE: VerifiedStripeEvent,
     }[clean_subject.method]
-    if type(clean_evidence) is not expected_evidence_type:
+    if type(clean_evidence) is VisualTransferEvidence:
+        if clean_evidence.method is not clean_subject.method:
+            raise ValueError("visual method mismatch")
+        if (clean_evidence.amount_minor, clean_evidence.currency, clean_evidence.receiver_profile_id) != (clean_subject.amount_minor, clean_subject.currency, clean_subject.receiver_profile_id):
+            raise ValueError("visual economics/receiver mismatch")
+        trusted = clean_trust.pix_receiver_profile_id if clean_evidence.method is PaymentMethod.PIX else clean_trust.wise_account_profile_id
+        if trusted != clean_subject.receiver_profile_id:
+            raise ValueError("visual receiver is not trusted")
+        _validate_window(clean_subject, clean_evidence.observed_at, require_deadline=True)
+        _validate_window(clean_subject, clean_evidence.validated_at, require_deadline=True)
+    elif type(clean_evidence) is not expected_evidence_type:
         raise ValueError("payment evidence type does not match selected method")
-    if type(clean_evidence) is PixVisualEvidence:
+    if type(clean_evidence) is VisualTransferEvidence:
+        evidence_hash = _visual_evidence_hash(clean_evidence)
+    elif type(clean_evidence) is PixVisualEvidence:
         evidence_hash = _validate_pix(clean_subject, clean_evidence, clean_trust)
     elif type(clean_evidence) is VerifiedWiseCredit:
         evidence_hash = _validate_wise(clean_subject, clean_evidence, clean_trust)

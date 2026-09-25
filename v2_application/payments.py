@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from reservation_followup.payment import VisualTransferEvidence
+
 import hashlib
 import hmac
 import json
@@ -226,7 +228,7 @@ class V2PaymentEvidenceGateway:
                 if transition.commands
                 else EvidenceDisposition.DUPLICATE
             ),
-            visual_evidence_accepted=type(event.evidence) is PixVisualEvidence,
+            visual_evidence_accepted=type(event.evidence) in (PixVisualEvidence, VisualTransferEvidence),
             bank_settlement_confirmed=False,
         )
 
@@ -458,6 +460,7 @@ def _offer_bytes(offer: PaymentMethodOffer) -> bytes:
             "receiver_profile_id": offer.receiver_profile_id,
             "economic_version": offer.economic_version,
             "public_text": offer.public_text,
+            **({"requested_amount_minor":offer.requested_amount_minor, "currency":offer.currency} if offer.requested_amount_minor is not None else {}),
             "settled": offer.settled,
         }
     else:
@@ -505,7 +508,7 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
                 settled=value["settled"],
             )
         if value["type"] == "instruction":
-            if set(value) != {
+            if set(value) - ({"requested_amount_minor", "currency"} if "requested_amount_minor" in value and "currency" in value else set()) != {
                 "type",
                 "payment_id",
                 "reservation_anchor_id",
@@ -523,6 +526,8 @@ def _offer_from_bytes(raw: bytes) -> PaymentMethodOffer:
                 receiver_profile_id=value["receiver_profile_id"],
                 economic_version=value["economic_version"],
                 public_text=value["public_text"],
+                requested_amount_minor=value.get("requested_amount_minor"),
+                currency=value.get("currency"),
                 settled=value["settled"],
             )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:

@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir \
       "pydantic==2.13.4" \
       "PyYAML==6.0.3" \
       "cryptography==46.0.7" \
+      "Pillow==12.2.0" \
       "uvicorn==0.41.0"
 
 COPY reservation_boundary /app/reservation_boundary

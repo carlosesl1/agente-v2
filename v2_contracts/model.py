@@ -13,6 +13,7 @@ from enum import Enum
 from typing import ClassVar, Final
 
 from v2_contracts.completion import CompletionEvent
+from v2_contracts.payment_proof import PaymentProofObservation
 from v2_contracts.critical_actions import (
     ApprovalBasis,
     CriticalActionKind,
@@ -297,6 +298,8 @@ class EffectProposal:
 
 class AttachmentContentStatus(str, Enum):
     NOT_EXTRACTED = "not_extracted"
+    IMAGE_READY = "image_ready"
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,12 +308,29 @@ class ModelAttachment:
 
     media_type: str | None
     content_status: AttachmentContentStatus = AttachmentContentStatus.NOT_EXTRACTED
+    source_event_id: str | None = None
+    source_sha256: str | None = None
+    image_data_url: str | None = dataclass_field(default=None, repr=False)
+    error_code: str | None = None
 
     def __post_init__(self) -> None:
         if self.media_type is not None:
             _text(self.media_type, "attachment media_type")
         if type(self.content_status) is not AttachmentContentStatus:
             raise InvalidModelProposal("attachment content_status must be exact")
+        if self.content_status is AttachmentContentStatus.IMAGE_READY:
+            from v2_contracts.model_wire import validate_image_data_url
+            raw = validate_image_data_url(self.image_data_url)
+            if not self.source_event_id or hashlib.sha256(raw).hexdigest() != self.source_sha256 or self.error_code:
+                raise InvalidModelProposal("image origin mismatch")
+        elif self.image_data_url is not None:
+            raise InvalidModelProposal("non-image cannot carry pixels")
+
+    def to_dict(self):
+        value = {"media_type": self.media_type, "content_status":self.content_status.value}
+        if self.content_status is not AttachmentContentStatus.NOT_EXTRACTED:
+            value.update(source_event_id=self.source_event_id, source_sha256=self.source_sha256, error_code=self.error_code)
+        return value
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -337,6 +357,8 @@ class ModelRequest:
     completion_events: tuple[CompletionEvent, ...] = ()
     attachments: tuple[ModelAttachment, ...] = ()
     action_rejection: str | None = None
+    payment_candidates: tuple[dict, ...] = ()
+    payment_proof_result: dict | None = None
 
     def __post_init__(self) -> None:
         for values, expected in ((self.execution_components, ExecutionComponentContext),
@@ -476,8 +498,11 @@ class ModelProposal:
     pending_disposition: str | None = None
     passengers: tuple[PassengerInput, ...] = ()
     clarification_question: str | None = None
+    payment_proof: PaymentProofObservation | None = None
 
     def __post_init__(self) -> None:
+        if self.payment_proof is not None and (type(self.payment_proof) is not PaymentProofObservation or self.intent != "inform" or self.read_requests or self.facts or self.passengers or self.effect_proposals):
+            raise InvalidModelProposal("proof observation must be a standalone inform")
         _text(self.source_event_id, "source_event_id", identifier=True)
         if self.intent not in _ALLOWED_INTENTS:
             raise InvalidModelProposal("intent is outside the closed V2 grammar")

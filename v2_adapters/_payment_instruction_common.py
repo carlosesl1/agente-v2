@@ -14,7 +14,7 @@ def percentages(values: dict[str, int] | None, profiles: set[str]) -> dict[str, 
     return result
 
 
-def instruction_amount(amount_minor: int, currency: str, percentage: int) -> str:
+def requested_amount(amount_minor: int, percentage: int) -> int:
     due_minor = int(
         (
             Decimal(amount_minor) * Decimal(percentage) / Decimal(100)
@@ -22,7 +22,11 @@ def instruction_amount(amount_minor: int, currency: str, percentage: int) -> str
     )
     if due_minor < 1:
         raise ValueError("payment percentage produced no payable minor units")
-    major = Decimal(due_minor) / Decimal(100)
+    return due_minor
+
+
+def instruction_amount(amount_minor: int, currency: str, percentage: int) -> str:
+    major = Decimal(requested_amount(amount_minor, percentage)) / Decimal(100)
     if currency == "BRL":
         rendered = f"{major:.2f}".replace(".", ",")
         return f"Valor desta etapa: R$ {rendered}."

@@ -88,6 +88,9 @@ class PaymentSettlementContext:
     status: str
     certainty: str | None
     stripe_capture_observed_at: datetime | None = None
+    evidence_basis: str | None = None
+    human_review: str | None = None
+    bank_settlement_confirmed: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

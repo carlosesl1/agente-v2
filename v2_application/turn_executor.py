@@ -1089,6 +1089,8 @@ class V2TurnExecutor:
         max_commit_attempts: int,
         execution_status_resolver: ExecutionStatusResolver | None = None,
         completion_projector: CompletionProjector | None = None,
+        proof_media=None,
+        visual_proofs=None,
         ops_recorder: OpsRecorder | None = None,
         ops_full_content: bool = False,
     ) -> None:
@@ -1142,6 +1144,8 @@ class V2TurnExecutor:
         self._max_commit_attempts = max_commit_attempts
         self._execution_status_resolver = execution_status_resolver
         self._completion_projector = completion_projector
+        self._proof_media = proof_media
+        self._visual_proofs = visual_proofs
         self._ops_recorder = NullOpsRecorder() if ops_recorder is None else ops_recorder
         self._ops_full_content = ops_full_content
 
@@ -1416,11 +1420,12 @@ class V2TurnExecutor:
             message=batch.combined_text,
             trigger="operation_result" if type(batch) is CompletionTurn else "customer_message",
             completion_events=completion_events,
-            attachments=tuple(
+            attachments=(self._proof_media.extract(batch.events) if self._proof_media is not None and type(batch) is InboundBatch else tuple(
                 ModelAttachment(event.media_type)
                 for event in (batch.events if type(batch) is InboundBatch else ())
                 if event.media_url is not None
-            ),
+            )),
+            payment_candidates=self._visual_proofs.context(batch.lead_id) if self._visual_proofs is not None and type(batch) is InboundBatch else (),
             locale=projection.locale,
             state_version=current.version,
             recent_dialogue=recent_dialogue,
@@ -1542,10 +1547,25 @@ class V2TurnExecutor:
         )
         if first_proposal.source_event_id != batch.batch_id:
             raise TurnExecutionError("model proposal source event diverged")
-        if type(batch) is CompletionTurn:
+        proof_result = None
+        if first_proposal.payment_proof is not None:
+            if type(batch) is not InboundBatch or self._visual_proofs is None:
+                raise TurnExecutionError("visual proof capability unavailable")
+            proof_result = self._visual_proofs.accept(request=request, proof=first_proposal.payment_proof)
+            reply_request = replace(request, request_id=_opaque("proof-result", batch.batch_id, current.version),
+                payment_proof_result=proof_result, attachments=(), payment_candidates=())
+            response = trace.call(NodeType.MAYA_REQUEST, lambda: self._model.complete_audited(reply_request),
+                input_value=reply_request, output_value=lambda value: value.proposal,
+                technical_metadata={"reason":"payment_proof_result"})
+            first_audited = AuditedModelTurn.combine((first_audited, response))
+            first_proposal = response.proposal
+            if first_proposal.source_event_id != batch.batch_id:
+                raise TurnExecutionError("proof reply source event diverged")
+        if type(batch) is CompletionTurn or proof_result is not None:
             communication_only = ModelProposal(
                 source_event_id=batch.batch_id, intent="inform",
                 reply_chunks=first_proposal.reply_chunks, facts=(), read_requests=(), effect_proposals=(),
+                clarification_question=first_proposal.clarification_question if proof_result is not None else None,
             )
             if first_proposal != communication_only:
                 raise ValueError("operation_result is communication-only")
@@ -1788,11 +1808,7 @@ class V2TurnExecutor:
                 lead_id=batch.lead_id,
                 source_event_id=batch.batch_id,
                 message=batch.combined_text,
-                attachments=tuple(
-                    ModelAttachment(event.media_type)
-                    for event in batch.events
-                    if event.media_url is not None
-                ),
+                attachments=request.attachments,
                 locale=projection.locale,
                 state_version=current.version,
                 recent_dialogue=recent_dialogue,

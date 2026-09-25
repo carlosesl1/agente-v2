@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from v2_adapters._payment_instruction_common import instruction_amount, percentages
+from v2_adapters._payment_instruction_common import instruction_amount, percentages, requested_amount
 from v2_contracts.payments import PaymentInstruction, PaymentMethod, PaymentObligation
 
 
@@ -58,6 +58,8 @@ class WiseInstructionAdapter:
             receiver_profile_id=obligation.receiver_profile_id,
             economic_version=obligation.economic_version,
             public_text=public_text,
+            requested_amount_minor=requested_amount(obligation.amount_minor, self._percentages[obligation.receiver_profile_id]),
+            currency=obligation.currency,
         )
 
 

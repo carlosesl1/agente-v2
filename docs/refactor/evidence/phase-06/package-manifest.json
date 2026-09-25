@@ -11,9 +11,9 @@
       "sha256": "fa5cf7181f3014e4adbdd4536a2541e96186ea51b0c6f35e23d4dbb8a70e0024"
     },
     {
-      "bytes": 84037,
+      "bytes": 88174,
       "path": "reservation_followup/payment.py",
-      "sha256": "f259d1ed1f3a385670c28b7a19fe0a8950229f09b22b76913241841bd198c917"
+      "sha256": "6327d36630adae9237d15fb7e08ec82033f473a00f9e3560a869703fd98e71ae"
     },
     {
       "bytes": 4485,
@@ -36,9 +36,9 @@
       "sha256": "3b9eb3f267ccb5dd2a28c209ccbc3d3695ec6c759acfa4eefa9eed2087a19457"
     },
     {
-      "bytes": 12521,
+      "bytes": 12605,
       "path": "reservation_followup/serialization.py",
-      "sha256": "fe3fae5d69a140b6795e9a6609d2709d8ac2154051e45f6477f50190009f4a9e"
+      "sha256": "9cb636fd9f321aa87e1e25ecd3ba428d1a2be965373c6a343eca1f35bbc40a9e"
     },
     {
       "bytes": 214695,
