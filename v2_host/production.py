@@ -667,11 +667,17 @@ def _build_inbox_worker(
         transcript_key=settings.hermes_transcript_key,
     )
     proof_media = visual_proofs = None
-    if settings.visual_proofs_enabled:
-        from v2_adapters.proof_media import ProofMediaReader, retain_bytes
-        from v2_application.visual_proofs import VisualProofService
+    if settings.proof_media_hosts:
+        from v2_adapters.proof_media import ProofMediaReader
+
         archive = settings.sqlite_paths["followup"].parent / "payment-proof-evidence"
-        proof_media = ProofMediaReader(allowed_hosts=settings.proof_media_hosts, archive=archive / "images")
+        proof_media = ProofMediaReader(
+            allowed_hosts=settings.proof_media_hosts, archive=archive / "images"
+        )
+    if settings.visual_proofs_enabled:
+        from v2_adapters.proof_media import retain_bytes
+        from v2_application.visual_proofs import VisualProofService
+
         visual_proofs = VisualProofService(execution=container.execution, payments=container.payment_initiation,
             followup=container.followup, lead_resolver=DurableLeadResolver(boundary=container.boundary,
                 execution=container.execution, followup=container.followup, inbox=container.inbox),
@@ -1211,6 +1217,11 @@ def build_worker_set(
                 "ready" if settings.manychat_handoff_enabled else "closed"
             ),
             "stripe_settlement": "ready" if settings.stripe_settlement_enabled else "closed",
+            "media_reading": (
+                "ready"
+                if settings.proof_media_hosts and isinstance(inbox_worker, InboxTurnWorker)
+                else "closed"
+            ),
             "visual_proofs": "ready" if settings.visual_proofs_enabled else "closed",
             "payment_initiation": (
                 "ready" if payment_enabled else "closed"

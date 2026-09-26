@@ -39,6 +39,34 @@ class ProofMediaReader:
             client,
         )
 
+    def _allowed_url(self, value):
+        try:
+            url = urlsplit(value)
+            return (
+                url.scheme == "https"
+                and url.hostname in self.hosts
+                and not url.username
+                and not url.password
+                and url.port in (None, 443)
+                and not url.fragment
+            )
+        except ValueError:
+            return False
+
+    def _sources(self, events):
+        """Transport discovery only: retain original text, URL bytes and event ID."""
+        for event in events:
+            seen = set()
+            if event.media_url is not None:
+                seen.add(event.media_url)
+                yield event, event.media_url, event.media_type
+            # ManyChat may put the attachment URL in the text field. Do not infer
+            # financial meaning or file type from prose/extensions; HTTP owns MIME.
+            for token in (getattr(event, "text", "") or "").split():
+                if token not in seen and self._allowed_url(token):
+                    seen.add(token)
+                    yield event, token, None
+
     def extract(self, events):
         client = self.client or httpx.Client(
             trust_env=False, timeout=10, follow_redirects=False
@@ -46,26 +74,16 @@ class ProofMediaReader:
         result = []
         budget = 6 * 1024 * 1024
         try:
-            for event in events:
-                if event.media_url is None:
-                    continue
-                digest, document_digest, mime = None, None, event.media_type
+            for event, media_url, media_type in self._sources(events):
+                digest, document_digest, mime = None, None, media_type
                 try:
-                    url = urlsplit(event.media_url)
-                    if (
-                        url.scheme != "https"
-                        or url.hostname not in self.hosts
-                        or url.username
-                        or url.password
-                        or url.port not in (None, 443)
-                        or url.fragment
-                    ):
+                    if not self._allowed_url(media_url):
                         raise ValueError("media_url_rejected")
                     image_count = sum(a.image_data_url is not None for a in result)
                     if image_count >= 4:
                         raise ValueError("media_count_exceeded")
                     with client.stream(
-                        "GET", event.media_url, follow_redirects=False
+                        "GET", media_url, follow_redirects=False
                     ) as response:
                         response.raise_for_status()
                         mime = (

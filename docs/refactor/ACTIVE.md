@@ -1,3 +1,14 @@
+# Active task — server-side URL PDF reading
+
+- Carlos: “Siga dessa forma e faça funcionar da melhor maneira. Não cometa erros”. Scope: URL download/rendering to the same Maya, causal tests, real-model/URL-message qualification and TEST-only publication with financial gates closed.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/pdf-url-727d3625`; branch: `fix/v2-pdf-url-727d3625`.
+- Runtime: READ → VERIFY canonical authority before deployment. Verified baseline is in the manifest, not this historical document.
+- Plan: `docs/superpowers/plans/2026-09-26-pdf-url-reading.md`.
+- Evidence: baseline 34 passed; 9 causal REDs; focal/integration 20 passed; architectural boundary OK. Logs outside Git: `/home/ubuntu/workspace/v2-pdf-url-727d3625/`. A temporary readiness typo and a canonical batch fixture mismatch were caught and corrected before publication.
+- NEXT: qualify real URL and same Maya in immutable image, finish clean regression, then TEST-only publication and native URL-message ingress. No new payments/reservations, no polling represented as a lossless feed, no GA/Ops/V3 changes, no subagents.
+
+## Historical material below (not active instructions)
+
 # Active blocker — TEST immutable image reference DRIFT
 
 - Final authority verification fails: declared digest cannot be inspected locally. All three TEST containers still use the declared image ID and source revision; that image exists by ID but has no RepoDigests. Cause of reference loss is not established.
