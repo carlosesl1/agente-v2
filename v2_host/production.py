@@ -874,6 +874,7 @@ def _build_payment_worker(
         stripe: object = StripeLinkAdapter(
             transport=StripeTestHTTPTransport(
                 secret_keys=settings.stripe_test_secret_keys,
+                livemode=settings.stripe_environment.value == "live",
                 base_url=settings.stripe_base_url,
                 wise_rates=WiseExchangeRateReader(
                     api_token=settings.wise_api_token,
@@ -895,6 +896,7 @@ def _build_payment_worker(
         stripe_reconciler = StripeLinkReconciliationAdapter(
             transport=StripeTestReconciliationTransport(
                 secret_keys=settings.stripe_test_secret_keys,
+                livemode=settings.stripe_environment.value == "live",
                 base_url=settings.stripe_base_url,
             ),
             account_profiles=profiles,

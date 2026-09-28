@@ -283,12 +283,13 @@ def _stripe_payment_link(
 
 
 class StripeTestHTTPTransport:
-    """Closed Product → Price → Payment Link transport for Stripe test accounts."""
+    """Product → Price → Payment Link transport; explicit mode, TEST by default."""
 
     def __init__(
         self,
         *,
         secret_keys: Mapping[str, str],
+        livemode: bool = False,
         base_url: str = "https://api.stripe.com",
         timeout_seconds: float = 10.0,
         client: httpx.Client | None = None,
@@ -297,16 +298,20 @@ class StripeTestHTTPTransport:
         clock: Callable[[], datetime] | None = None,
         effect_guard: object | None = None,
     ) -> None:
+        if type(livemode) is not bool:
+            raise TypeError("Stripe livemode must be exact bool")
+        self.livemode = livemode
+        prefixes = ("sk_live_", "rk_live_") if livemode else ("sk_test_", "rk_test_")
         if type(secret_keys) is not dict or not secret_keys:
             raise ValueError("Stripe test secret keys must be a non-empty exact map")
         if any(
             type(profile) is not str
             or not profile
             or type(key) is not str
-            or not key.startswith(("sk_test_", "rk_test_"))
+            or not key.startswith(prefixes)
             for profile, key in secret_keys.items()
         ):
-            raise ValueError("Stripe transport accepts only mapped test keys")
+            raise ValueError(f"Stripe transport requires mapped {'live' if livemode else 'test'} keys")
         if not _is_canonical_stripe_api_origin(base_url):
             raise ValueError("Stripe base URL must be the canonical Stripe API")
         if type(timeout_seconds) not in (int, float) or timeout_seconds <= 0:
@@ -334,7 +339,7 @@ class StripeTestHTTPTransport:
         self._effect_guard = effect_guard
 
     def __repr__(self) -> str:
-        return f"StripeTestHTTPTransport(accounts={len(self._keys)},mode=test)"
+        return f"StripeTestHTTPTransport(accounts={len(self._keys)},mode={"live" if self.livemode else "test"})"
 
     def _post(
         self,
@@ -426,10 +431,9 @@ class StripeTestHTTPTransport:
         assert type(value) is str
         return value
 
-    @staticmethod
-    def _require_test_mode(payload: dict[str, object], kind: str) -> None:
-        if payload.get("livemode") is not False:
-            raise RuntimeError(f"Stripe {kind} was not confirmed in test mode")
+    def _require_mode(self, payload: dict[str, object], kind: str) -> None:
+        if payload.get("livemode") is not self.livemode:
+            raise RuntimeError(f"Stripe {kind} was not confirmed in {'live' if self.livemode else 'test'} mode")
 
     @staticmethod
     def _canonical_link_url(payload: dict[str, object]) -> str:
@@ -495,7 +499,7 @@ class StripeTestHTTPTransport:
             },
             idempotency_key=product_key,
         )
-        self._require_test_mode(product, "product")
+        self._require_mode(product, "product")
         product_metadata = product.get("metadata")
         if (
             product.get("name") != presentation.name
@@ -540,7 +544,7 @@ class StripeTestHTTPTransport:
             form=price_form,
             idempotency_key=price_key,
         )
-        self._require_test_mode(price, "price")
+        self._require_mode(price, "price")
         price_id = self._provider_id(price, "price")
         self._record_step(
             request,
@@ -585,7 +589,7 @@ class StripeTestHTTPTransport:
             },
             idempotency_key=link_key,
         )
-        self._require_test_mode(link, "payment link")
+        self._require_mode(link, "payment link")
         link_id = self._provider_id(link, "payment link")
         url = self._canonical_link_url(link)
         if link.get("active") is not True:
@@ -603,26 +607,31 @@ class StripeTestHTTPTransport:
 
 
 class StripeTestReconciliationTransport:
-    """Private Stripe test-mode reader with no create surface."""
+    """Mode-bound Stripe reader with no create surface; TEST by default."""
 
     def __init__(
         self,
         *,
         secret_keys: Mapping[str, str],
+        livemode: bool = False,
         base_url: str = "https://api.stripe.com",
         timeout_seconds: float = 10.0,
         client: httpx.Client | None = None,
     ) -> None:
+        if type(livemode) is not bool:
+            raise TypeError("Stripe livemode must be exact bool")
+        self.livemode = livemode
+        prefixes = ("sk_live_", "rk_live_") if livemode else ("sk_test_", "rk_test_")
         if type(secret_keys) is not dict or not secret_keys:
             raise ValueError("Stripe test secret keys must be a non-empty exact map")
         if any(
             type(profile) is not str
             or not profile
             or type(key) is not str
-            or not key.startswith(("sk_test_", "rk_test_"))
+            or not key.startswith(prefixes)
             for profile, key in secret_keys.items()
         ):
-            raise ValueError("Stripe reconciliation accepts only mapped test keys")
+            raise ValueError("Stripe reconciliation keys must match the selected mode")
         if not _is_canonical_stripe_api_origin(base_url):
             raise ValueError("Stripe base URL must be the canonical Stripe API")
         if type(timeout_seconds) not in (int, float) or timeout_seconds <= 0:
@@ -633,7 +642,7 @@ class StripeTestReconciliationTransport:
         self._client = client or httpx.Client()
 
     def __repr__(self) -> str:
-        return f"StripeTestReconciliationTransport(accounts={len(self._keys)},mode=test,method=GET)"
+        return f"StripeTestReconciliationTransport(accounts={len(self._keys)},mode={"live" if self.livemode else "test"},method=GET)"
 
     def get(
         self,
@@ -710,8 +719,8 @@ class StripeLinkReconciliationAdapter:
             raise RuntimeError("Stripe reconciliation list envelope is invalid")
         return tuple(data)
 
-    @staticmethod
     def _product_matches(
+        self,
         payload: dict[str, object],
         *,
         product_id: str | None,
@@ -719,7 +728,7 @@ class StripeLinkReconciliationAdapter:
         metadata: dict[str, str],
     ) -> bool:
         return (
-            payload.get("livemode") is False
+            payload.get("livemode") is self._transport.livemode
             and (product_id is None or payload.get("id") == product_id)
             and _is_stripe_object_id(payload.get("id"), "prod")
             and payload.get("name") == presentation.name
@@ -728,8 +737,8 @@ class StripeLinkReconciliationAdapter:
             and all(payload["metadata"].get(k) == v for k, v in metadata.items())
         )
 
-    @staticmethod
     def _price_matches(
+        self,
         payload: dict[str, object],
         *,
         price_id: str | None,
@@ -737,7 +746,7 @@ class StripeLinkReconciliationAdapter:
         request: StripeLinkRequest,
     ) -> bool:
         return (
-            payload.get("livemode") is False
+            payload.get("livemode") is self._transport.livemode
             and payload.get("active") is True
             and (price_id is None or payload.get("id") == price_id)
             and _is_stripe_object_id(payload.get("id"), "price")
@@ -746,8 +755,8 @@ class StripeLinkReconciliationAdapter:
             and payload.get("unit_amount") == request.amount_minor
         )
 
-    @staticmethod
     def _link_values(
+        self,
         payload: dict[str, object],
         *,
         link_id: str | None,
@@ -759,7 +768,7 @@ class StripeLinkReconciliationAdapter:
         line_items = payload.get("line_items")
         lines = line_items.get("data") if type(line_items) is dict else None
         if (
-            payload.get("livemode") is not False
+            payload.get("livemode") is not self._transport.livemode
             or payload.get("active") is not True
             or not _is_stripe_object_id(candidate_id, "plink")
             or (link_id is not None and candidate_id != link_id)

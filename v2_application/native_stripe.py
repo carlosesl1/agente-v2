@@ -1,4 +1,4 @@
-"""Account-scoped native Stripe TEST ingress into the existing financial owner.
+"""Account-scoped native Stripe TEST/LIVE ingress into the existing financial owner.
 
 No provider POSTs. Hosted checkout acceptance is the financial confirmation;
 canonical payment_intent.succeeded IDs (retrieved from Stripe) own global claims.
@@ -67,7 +67,10 @@ class NativeStripeIgnored(RuntimeError):
     """Authentic notification outside this endpoint's explicitly supported scope."""
 
 
-def validate_native_accounts(accounts, result_key):
+def validate_native_accounts(accounts, result_key, *, livemode=False):
+    if type(livemode) is not bool:
+        raise TypeError("Stripe livemode must be exact bool")
+    prefixes = ("rk_live_", "sk_live_") if livemode else ("rk_test_", "sk_test_")
     if type(accounts) is not dict or set(accounts) - {"hostel", "agency"}:
         raise ValueError("native Stripe accounts must use business-unit keys")
     if type(result_key) is not bytes or bool(accounts) != bool(result_key):
@@ -85,12 +88,12 @@ def validate_native_accounts(accounts, result_key):
         if any(type(v) is not str or not v or "\x00" in v for v in config.values()):
             raise ValueError("native Stripe account requires non-empty text")
         if (
-            not config["api_key"].startswith(("rk_test_", "sk_test_"))
+            not config["api_key"].startswith(prefixes)
             or not config["account_id"].startswith("acct_")
             or not config["webhook_secret"].startswith("whsec_")
         ):
             raise ValueError(
-                "native Stripe activation is TEST-only with exact account secret"
+                "native Stripe account key must match the selected mode"
             )
     if len({c["account_id"] for c in accounts.values()}) != len(accounts):
         raise ValueError("native Stripe units require distinct accounts")
@@ -117,7 +120,9 @@ def _object_id(value, prefix):
     return value
 
 
-def verify_checkout(body, headers, *, secret, received_at):
+def verify_checkout(body, headers, *, secret, received_at, livemode=False):
+    if type(livemode) is not bool:
+        raise TypeError("Stripe livemode must be exact bool")
     signature = next(
         (v for k, v in headers.items() if k.lower() == "stripe-signature"), ""
     )
@@ -149,7 +154,7 @@ def verify_checkout(body, headers, *, secret, received_at):
     _require(
         type(event) is dict
         and event.get("object") == "event"
-        and event.get("livemode") is False
+        and event.get("livemode") is livemode
     )
     if event.get("type") not in {
         "checkout.session.completed",
@@ -163,7 +168,8 @@ def verify_checkout(body, headers, *, secret, received_at):
         and 0 < event["created"] <= received_at.timestamp()
     )
     session = event.get("data", {}).get("object", {})
-    _require(type(session) is dict and session.get("object") == "checkout.session")
+    _require(type(session) is dict and session.get("object") == "checkout.session"
+             and session.get("livemode") is livemode)
     _object_id(session.get("id"), "cs")
     if session.get("payment_status") != "paid":
         raise NativeStripeIgnored()
@@ -172,9 +178,10 @@ def verify_checkout(body, headers, *, secret, received_at):
 
 class NativeStripeIngress:
     def __init__(
-        self, *, paths, accounts, result_key, allowed_subscribers=(), client=None
+        self, *, paths, accounts, result_key, allowed_subscribers=(), client=None, livemode=False
     ):
-        validate_native_accounts(accounts, result_key)
+        validate_native_accounts(accounts, result_key, livemode=livemode)
+        self.livemode = livemode
         self.paths = paths
         self.accounts = accounts
         self.result_key = result_key
@@ -184,7 +191,8 @@ class NativeStripeIngress:
     def accept(self, unit, body, headers, *, received_at):
         config = self.accounts[unit]
         event = verify_checkout(
-            body, headers, secret=config["webhook_secret"], received_at=received_at
+            body, headers, secret=config["webhook_secret"], received_at=received_at,
+            livemode=self.livemode
         )
         # All blocking I/O runs in a request worker, with short-lived SQLite owners.
         with ExitStack() as stack:
@@ -217,7 +225,7 @@ class NativeStripeIngress:
             session = get("checkout/sessions/" + session_id)
             _require(
                 session.get("id") == session_id
-                and session.get("livemode") is False
+                and session.get("livemode") is self.livemode
                 and session.get("status") == "complete"
                 and session.get("mode") == "payment"
                 and session.get("payment_status") == "paid"
@@ -229,7 +237,7 @@ class NativeStripeIngress:
             intent = get("payment_intents/" + pi_id)
             _require(
                 intent.get("id") == pi_id
-                and intent.get("livemode") is False
+                and intent.get("livemode") is self.livemode
                 and intent.get("status") == "succeeded"
             )
             _require(
@@ -318,10 +326,10 @@ class NativeStripeIngress:
             )
             _require(
                 link.get("id") == link_id
-                and link.get("livemode") is False
+                and link.get("livemode") is self.livemode
                 and link.get("url") == offer.public_url
                 and price.get("id") == price_id
-                and price.get("livemode") is False
+                and price.get("livemode") is self.livemode
             )
 
             def receipt_matches(step, expected):
@@ -446,7 +454,7 @@ class NativeStripeIngress:
             transaction = canonical[0]
             _require(
                 transaction.get("type") == "payment_intent.succeeded"
-                and transaction.get("livemode") is False
+                and transaction.get("livemode") is self.livemode
                 and transaction.get("account") is None
             )
             _object_id(transaction.get("id"), "evt")

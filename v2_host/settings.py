@@ -317,7 +317,10 @@ class V2Settings:
             raise ValueError("webhook_secret is required")
         from v2_application.native_stripe import validate_native_accounts
 
-        validate_native_accounts(self.stripe_native_accounts, self.stripe_native_result_key)
+        if type(self.stripe_environment) is not StripeEnvironment:
+            raise TypeError("stripe_environment must be exact StripeEnvironment")
+        validate_native_accounts(self.stripe_native_accounts, self.stripe_native_result_key,
+                                 livemode=self.stripe_environment is StripeEnvironment.LIVE)
         if not owns_api and (self.stripe_native_accounts or self.stripe_native_result_key):
             raise ValueError("native Stripe ingress credentials belong to API role")
         financial_values = (
@@ -449,8 +452,9 @@ class V2Settings:
                 raise ValueError("candidate git sha must be an immutable 40-character lowercase hex sha")
             if not _IMAGE_DIGEST_RE.fullmatch(self.candidate_image_digest):
                 raise ValueError("candidate image digest must be an immutable sha256 digest")
-            if self.stripe_environment is not StripeEnvironment.TEST:
-                raise ValueError("write runtime requires the Stripe test environment")
+            if (self.runtime_mode is RuntimeMode.CONTROLLED_WRITE
+                    and self.stripe_environment is not StripeEnvironment.TEST):
+                raise ValueError("controlled_write requires the Stripe test environment")
         if any(gates):
             if self.global_kill_switch_engaged:
                 raise ValueError("real effects require the global kill switch to be released")
@@ -483,18 +487,20 @@ class V2Settings:
                     "enabled payment methods require a dedicated 32-byte result store key"
                 )
         if owns_worker and self.stripe_links_enabled:
+            prefixes = (("sk_live_", "rk_live_") if self.stripe_environment is StripeEnvironment.LIVE
+                        else ("sk_test_", "rk_test_"))
             keys = (
                 self.stripe_hostel_secret_key,
                 self.stripe_agency_secret_key,
             )
             if any(
                 type(value) is not str
-                or not value.startswith(("sk_test_", "rk_test_"))
+                or not value.startswith(prefixes)
                 or "\x00" in value
                 for value in keys
             ):
                 raise ValueError(
-                    "Stripe link creation requires two test Stripe keys"
+                    f"Stripe link creation requires two {self.stripe_environment.value} Stripe keys"
                 )
             if not self.wise_api_token or "\x00" in self.wise_api_token:
                 raise ValueError("Stripe link creation requires a Wise exchange-rate token")

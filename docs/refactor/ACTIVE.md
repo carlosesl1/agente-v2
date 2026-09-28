@@ -1,3 +1,14 @@
+# Active task — production payments, forms deferred
+
+- Carlos authorized preparing the complete V2 for production, explicitly deferring form requirements.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/production-payments-727d3625`; branch `feat/v2-production-payments-727d3625`.
+- Plan: `docs/superpowers/plans/2026-09-28-production-payments.md`.
+- NEXT: causal Stripe TEST/LIVE boundary tests, minimal mode-aware integration, qualification and GA activation only after verified credentials/receivers; preserve state, TEST, Ops and rollback. No V3, forms, subagents, fabricated transactions or manual live SQLite edits.
+- Activation prerequisites discovered: V2 configs inspected contain only TEST Stripe keys; structured Pix/Wise receiver configuration is absent. Missing facts must not be guessed.
+- Runtime identity always comes from verified ACTIVE_RUNTIME.json, not this document.
+
+## Previous task (historical)
+
 # Active task — xAI STT for URL-only audio
 
 - Carlos supplied an API key and requested “deixe tudo configurado” after approving URL download → xAI STT → same Maya. Secret is outside Git; no value in this document.

@@ -81,6 +81,7 @@ def build_api_app(
         paths=settings.sqlite_paths,
         accounts=settings.stripe_native_accounts,
         result_key=settings.stripe_native_result_key,
+        livemode=settings.stripe_environment.value == "live",
         allowed_subscribers=settings.allowed_subscriber_ids,
     ) if settings.stripe_native_accounts else None
     app.state.native_stripe = native

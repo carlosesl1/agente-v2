@@ -14,9 +14,9 @@ from tests.native_stripe_helpers import close_lab, make_lab
 from tests.test_v2_native_stripe import NOW, accept
 
 
-@pytest.fixture
-def lab(tmp_path):
-    value = make_lab(tmp_path)
+@pytest.fixture(params=[False, True], ids=["test", "live"])
+def lab(tmp_path, request):
+    value = make_lab(tmp_path, livemode=request.param)
     value.receipt = accept(value)
     value.followup = SQLiteFollowupUnitOfWork.open_v2(value.paths["followup"])
     value.provider_requests = []
@@ -249,13 +249,14 @@ def test_settlement_fact_wakes_maya_once_and_terminal_failure_opens_handoff(
 
 
 @pytest.mark.parametrize("status", ["RESERVED", "CANCELLED"])
-def test_agency_deposit_uses_bound_bokun_payment_contract(tmp_path, status):
+@pytest.mark.parametrize("livemode", [False, True])
+def test_agency_deposit_uses_bound_bokun_payment_contract(tmp_path, status, livemode):
     import base64
     import hashlib
     import hmac
     import json
 
-    lab = make_lab(tmp_path, unit="agency")
+    lab = make_lab(tmp_path, unit="agency", livemode=livemode)
     lab.receipt = accept(lab)
     lab.followup = SQLiteFollowupUnitOfWork.open_v2(lab.paths["followup"])
     lab.now = NOW + timedelta(seconds=1)

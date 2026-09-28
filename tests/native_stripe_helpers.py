@@ -34,7 +34,7 @@ def signature(body, when=NOW, secret="whsec_native"):
     return {"Stripe-Signature": f"t={stamp},v1={digest}"}
 
 
-def make_lab(tmp_path, unit="hostel"):
+def make_lab(tmp_path, unit="hostel", *, livemode=False):
     cfg = settings(tmp_path)
     if unit == "agency":
         from dataclasses import replace
@@ -48,6 +48,12 @@ def make_lab(tmp_path, unit="hostel"):
                 }
             },
         )
+    if livemode:
+        from dataclasses import replace
+        from v2_host.settings import StripeEnvironment
+        cfg = replace(cfg, stripe_environment=StripeEnvironment.LIVE,
+            stripe_native_accounts={u: {**a, "api_key": "rk_live_native"}
+                                    for u, a in cfg.stripe_native_accounts.items()})
     paths = cfg.sqlite_paths
     execution = SQLiteUnitOfWork.open_v6(paths["execution"])
     payments = SQLitePaymentInitiationStore(
@@ -102,7 +108,7 @@ def make_lab(tmp_path, unit="hostel"):
             if req.url.path == "/v1/products":
                 obj = {
                     "id": "prod_Native",
-                    "livemode": False,
+                    "livemode": livemode,
                     "name": form["name"],
                     "description": form["description"],
                     "metadata": {
@@ -112,7 +118,7 @@ def make_lab(tmp_path, unit="hostel"):
             elif req.url.path == "/v1/prices":
                 obj = {
                     "id": "price_Native",
-                    "livemode": False,
+                    "livemode": livemode,
                     "product": form["product"],
                     "currency": "brl",
                     "unit_amount": int(form["unit_amount"]),
@@ -133,7 +139,7 @@ def make_lab(tmp_path, unit="hostel"):
                 assert req.url.path == "/v1/payment_links"
                 obj = {
                     "id": "plink_Native",
-                    "livemode": False,
+                    "livemode": livemode,
                     "active": True,
                     "url": "https://buy.stripe.com/test_Native",
                     "metadata": {
@@ -159,7 +165,8 @@ def make_lab(tmp_path, unit="hostel"):
     lab.client = httpx.Client(transport=httpx.MockTransport(handler))
     stripe = StripeLinkAdapter(
         transport=StripeTestHTTPTransport(
-            secret_keys={profiles[BusinessUnit(unit)]: "rk_test_native"},
+            secret_keys={profiles[BusinessUnit(unit)]: "rk_live_native" if livemode else "rk_test_native"},
+            **({"livemode": True} if livemode else {}),
             base_url="https://api.stripe.com",
             client=lab.client,
             wise_rates=lambda: WiseBRLRates(usd_brl=Decimal(5), eur_brl=Decimal(6)),
@@ -189,7 +196,7 @@ def make_lab(tmp_path, unit="hostel"):
         "object": "checkout.session",
         "status": "complete",
         "payment_status": "paid",
-        "livemode": False,
+        "livemode": livemode,
         "mode": "payment",
         "expires_at": int((NOW + timedelta(hours=24)).timestamp()),
         "payment_link": "plink_Native",
@@ -202,14 +209,14 @@ def make_lab(tmp_path, unit="hostel"):
         "id": "pi_Native",
         "object": "payment_intent",
         "status": "succeeded",
-        "livemode": False,
+        "livemode": livemode,
         "amount_received": amount,
         "currency": "brl",
     }
     lab.canonical_event = {
         "id": "evt_1QNative8aBcD23eFgH45",
         "object": "event",
-        "livemode": False,
+        "livemode": livemode,
         "type": "payment_intent.succeeded",
         "created": int((NOW - timedelta(seconds=1)).timestamp()),
         "data": {"object": lab.intent},
@@ -217,7 +224,7 @@ def make_lab(tmp_path, unit="hostel"):
     lab.event = {
         "id": "evt_CheckoutNative",
         "object": "event",
-        "livemode": False,
+        "livemode": livemode,
         "type": "checkout.session.completed",
         "created": int(NOW.timestamp()),
         "data": {"object": lab.session},

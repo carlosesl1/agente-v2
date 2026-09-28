@@ -76,6 +76,7 @@ def accept(lab, body=None, headers=None):
         result_key=KEY,
         allowed_subscribers=("12345",),
         client=lab.client,
+        livemode=lab.settings.stripe_environment.value == "live",
     )
     return ingress.accept(
         lab.unit, body, signature(body) if headers is None else headers, received_at=NOW
