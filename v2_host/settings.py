@@ -217,6 +217,7 @@ class V2Settings:
     visual_proofs_enabled: bool = False
     visual_proof_receivers: dict = field(default_factory=dict, repr=False)
     proof_media_hosts: tuple[str, ...] = ()
+    xai_stt_api_key: str = field(default="", repr=False)
     wise_instructions_enabled: bool = False
     pix_instructions_enabled: bool = False
     manychat_delivery_enabled: bool = False
@@ -338,7 +339,10 @@ class V2Settings:
             self.webhook_secret or any(financial_values)
         ):
             raise ValueError("worker role may not contain ingress credentials")
+        if self.xai_stt_api_key and (not self.proof_media_hosts or any(c in self.xai_stt_api_key for c in "\r\n\x00")):
+            raise ValueError("xAI STT requires worker media hosts and valid key")
         worker_only_values = (
+            self.xai_stt_api_key,
             self.cloudbeds_api_key,
             self.cloudbeds_property_id,
             self.cloudbeds_source_id,
@@ -916,6 +920,7 @@ class V2Settings:
             visual_proofs_enabled=_env_bool(worker_source, "V2_ENABLE_VISUAL_PROOFS"),
             visual_proof_receivers=json.loads(worker_source.get("V2_VISUAL_PROOF_RECEIVERS_JSON", "{}")),
             proof_media_hosts=tuple(h.strip() for h in worker_source.get("V2_PROOF_MEDIA_HOSTS", "").split(",") if h.strip()),
+            xai_stt_api_key=worker_source.get("V2_XAI_STT_API_KEY", ""),
             manychat_delivery_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_DELIVERY"),
             manychat_handoff_enabled=_env_bool(source, "V2_ENABLE_MANYCHAT_HANDOFF"),
             real_effects_ack=source.get("V2_REAL_EFFECTS_ACK", ""),

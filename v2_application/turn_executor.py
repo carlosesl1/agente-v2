@@ -1163,7 +1163,8 @@ class V2TurnExecutor:
             lead_id=batch.lead_id,
             source_turn_id=batch.batch_id,
             source_event_hash=_event_hash(_source_events(batch)),
-            customer_message=batch.combined_text,
+            customer_message=(self._proof_media.dialogue_text(batch.events, batch.combined_text)
+                if callable(getattr(self._proof_media, "dialogue_text", None)) else batch.combined_text),
             assistant_reply_chunks=reply_chunks,
             committed_at=committed_at,
         )

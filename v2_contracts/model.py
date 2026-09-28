@@ -299,6 +299,7 @@ class EffectProposal:
 class AttachmentContentStatus(str, Enum):
     NOT_EXTRACTED = "not_extracted"
     IMAGE_READY = "image_ready"
+    TRANSCRIPT_READY = "transcript_ready"
     UNAVAILABLE = "unavailable"
 
 
@@ -315,6 +316,8 @@ class ModelAttachment:
     document_sha256: str | None = None
     page_number: int | None = None
     page_count: int | None = None
+    transcript_text: str | None = dataclass_field(default=None, repr=False)
+    transcription_model: str | None = None
 
     def __post_init__(self) -> None:
         if self.media_type is not None:
@@ -328,6 +331,16 @@ class ModelAttachment:
                 raise InvalidModelProposal("image origin mismatch")
         elif self.image_data_url is not None:
             raise InvalidModelProposal("non-image cannot carry pixels")
+        if self.content_status is AttachmentContentStatus.TRANSCRIPT_READY:
+            _text(self.source_event_id, "transcript source_event_id", identifier=True)
+            if (type(self.source_sha256) is not str or _SHA256_RE.fullmatch(self.source_sha256) is None
+                    or type(self.transcript_text) is not str or not self.transcript_text.strip()
+                    or "\x00" in self.transcript_text or len(self.transcript_text.encode("utf-8")) > 16_384
+                    or type(self.media_type) is not str or not self.media_type.startswith("audio/")
+                    or self.transcription_model != "grok-voice-transcribe-2.0" or self.error_code):
+                raise InvalidModelProposal("transcript origin/content invalid")
+        elif self.transcript_text is not None or self.transcription_model is not None:
+            raise InvalidModelProposal("non-transcript cannot carry speech text")
         if self.document_sha256 is not None:
             if (type(self.document_sha256) is not str or len(self.document_sha256) != 64
                     or any(c not in "0123456789abcdef" for c in self.document_sha256)
@@ -347,6 +360,8 @@ class ModelAttachment:
         value = {"media_type": self.media_type, "content_status":self.content_status.value}
         if self.content_status is not AttachmentContentStatus.NOT_EXTRACTED:
             value.update(source_event_id=self.source_event_id, source_sha256=self.source_sha256, error_code=self.error_code)
+        if self.content_status is AttachmentContentStatus.TRANSCRIPT_READY:
+            value.update(transcript_text=self.transcript_text, transcription_model=self.transcription_model)
         if self.document_sha256 is not None:
             value.update(document_sha256=self.document_sha256, page_number=self.page_number, page_count=self.page_count)
         return value

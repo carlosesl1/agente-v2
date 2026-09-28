@@ -1,3 +1,15 @@
+# Active task — xAI STT for URL-only audio
+
+- Carlos supplied an API key and requested “deixe tudo configurado” after approving URL download → xAI STT → same Maya. Secret is outside Git; no value in this document.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/xai-stt-727d3625`; branch: `feat/v2-xai-stt-727d3625`.
+- Plan/spec: `docs/superpowers/plans/2026-09-26-xai-stt.md`.
+- NEXT: run full isolated regression and immutable-image real xAI/Maya webhook qualification; then same-state CLOSED TEST publication. Keep GA/Ops, channel sends and financial gates unchanged; no V3, legacy, subagents or active SQLite edits.
+- Implementation evidence: 21 initial causal failures + batch bound witness; 116 focused tests and fasttrack boundary check pass. Existing API-only test fixture needed explicit process role, absolute SQLite path and the real ingress env key. Readiness uses the existing closed status `ready` (assembled), not a new `configured` enum.
+- Review performed directly, without subagents: provider-only transcription, bounded byte/MIME handling, event/hash/model cache binding, no text rewrite, retained-state mounts and child environment allowlist. Full/image/model evidence remains pending.
+- Evidence root: `/home/ubuntu/workspace/v2-xai-stt-727d3625/`.
+
+## Previous task (historical)
+
 # Active task — server-side URL PDF reading
 
 - Carlos: “Siga dessa forma e faça funcionar da melhor maneira. Não cometa erros”. Scope: URL download/rendering to the same Maya, causal tests, real-model/URL-message qualification and TEST-only publication with financial gates closed.

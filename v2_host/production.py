@@ -671,8 +671,12 @@ def _build_inbox_worker(
         from v2_adapters.proof_media import ProofMediaReader
 
         archive = settings.sqlite_paths["followup"].parent / "payment-proof-evidence"
+        from v2_adapters.audio_stt import XaiSpeechToText
+
+        transcriber = (XaiSpeechToText(api_key=settings.xai_stt_api_key,
+            archive=archive / "audio-transcriptions") if settings.xai_stt_api_key else None)
         proof_media = ProofMediaReader(
-            allowed_hosts=settings.proof_media_hosts, archive=archive / "images"
+            allowed_hosts=settings.proof_media_hosts, archive=archive / "images", transcriber=transcriber
         )
     if settings.visual_proofs_enabled:
         from v2_adapters.proof_media import retain_bytes
@@ -1222,6 +1226,8 @@ def build_worker_set(
                 if settings.proof_media_hosts and isinstance(inbox_worker, InboxTurnWorker)
                 else "closed"
             ),
+            "audio_transcription": ("ready" if settings.xai_stt_api_key
+                and settings.proof_media_hosts and isinstance(inbox_worker, InboxTurnWorker) else "closed"),
             "visual_proofs": "ready" if settings.visual_proofs_enabled else "closed",
             "payment_initiation": (
                 "ready" if payment_enabled else "closed"

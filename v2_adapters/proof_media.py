@@ -30,7 +30,8 @@ def retain_bytes(root, data):
 
 
 class ProofMediaReader:
-    def __init__(self, *, allowed_hosts, archive, client=None):
+    def __init__(self, *, allowed_hosts, archive, client=None, transcriber=None):
+        self.transcriber = transcriber
         if not allowed_hosts:
             raise ValueError("explicit media hosts required")
         self.hosts, self.archive, self.client = (
@@ -67,10 +68,28 @@ class ProofMediaReader:
                     seen.add(token)
                     yield event, token, None
 
+    def dialogue_text(self, events, original):
+        """Read only the event-bound transcript cache; never download on replay."""
+        from v2_adapters.audio_stt import transcript_dialogue
+
+        attachments = []
+        if self.transcriber is not None:
+            for event, url, _ in self._sources(events):
+                if len(attachments) >= 4:
+                    break
+                cached = self.transcriber.cached_event(event.event_id, url)
+                if cached is not None and len(transcript_dialogue(original, (*attachments, cached)).encode("utf-8")) <= 16_384:
+                    attachments.append(cached)
+        return transcript_dialogue(original, attachments)
+
     def extract(self, events):
         client = self.client or httpx.Client(
             trust_env=False, timeout=10, follow_redirects=False
         )
+        from v2_adapters.audio_stt import AUDIO_MIMES, MODEL, audio_mime, transcript_dialogue
+
+        events = tuple(events)
+        original = "\n".join(event.text for event in events if event.text)
         result = []
         budget = 6 * 1024 * 1024
         try:
@@ -79,6 +98,15 @@ class ProofMediaReader:
                 try:
                     if not self._allowed_url(media_url):
                         raise ValueError("media_url_rejected")
+                    if sum(a.content_status is Status.TRANSCRIPT_READY for a in result) >= 4:
+                        raise ValueError("media_count_exceeded")
+                    if self.transcriber is not None:
+                        cached = self.transcriber.cached_event(event.event_id, media_url)
+                        if cached is not None:
+                            if len(transcript_dialogue(original, (*result, cached)).encode("utf-8")) > 16_384:
+                                raise ValueError("media_too_large")
+                            result.append(cached)
+                            continue
                     image_count = sum(a.image_data_url is not None for a in result)
                     if image_count >= 4:
                         raise ValueError("media_count_exceeded")
@@ -92,7 +120,7 @@ class ProofMediaReader:
                             .strip()
                             .lower()
                         )
-                        if mime not in (
+                        if mime not in AUDIO_MIMES and mime not in (
                             "image/png",
                             "image/jpeg",
                             "image/webp",
@@ -105,6 +133,20 @@ class ProofMediaReader:
                             raw.extend(chunk)
                             if len(raw) > 4 * 1024 * 1024:
                                 raise ValueError("media_too_large")
+                    detected_audio = audio_mime(bytes(raw))
+                    if mime in AUDIO_MIMES or mime == "application/octet-stream" and detected_audio:
+                        if self.transcriber is None or detected_audio is None:
+                            raise ValueError("audio_transcription_unavailable")
+                        mime = detected_audio
+                        digest = retain_bytes(self.archive, bytes(raw))
+                        transcript = self.transcriber.transcribe(bytes(raw), mime)
+                        attachment = ModelAttachment(mime, Status.TRANSCRIPT_READY, event.event_id, digest,
+                            transcript_text=transcript, transcription_model=MODEL)
+                        if len(transcript_dialogue(original, (*result, attachment)).encode("utf-8")) > 16_384:
+                            raise ValueError("media_too_large")
+                        self.transcriber.bind_event(event.event_id, media_url, attachment)
+                        result.append(attachment)
+                        continue
                     if mime == "application/octet-stream":
                         if not raw.startswith(b"%PDF-"):
                             raise ValueError("media_invalid")
@@ -168,7 +210,9 @@ class ProofMediaReader:
                             Status.UNAVAILABLE,
                             event.event_id,
                             digest,
-                            error_code="proof_pdf_unavailable"
+                            error_code="audio_transcription_unavailable"
+                            if mime in AUDIO_MIMES or mime and mime.startswith("audio/")
+                            else "proof_pdf_unavailable"
                             if mime == "application/pdf"
                             else "proof_image_unavailable",
                             document_sha256=document_digest,
