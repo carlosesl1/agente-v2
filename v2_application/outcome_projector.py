@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
@@ -259,6 +259,24 @@ class ReservationOutcomeProjector:
             receiver_profile_id=context.receiver_profile_id,
             display_details=context.display_details,
         )
+        existing = tuple(
+            record.selection
+            for record in self._payment_store.context_for_payment(context.payment_id)
+            if record.selection.method is method
+            and record.selection.obligation.economic_version == context.economic_version
+        )
+        if existing:
+            if len(existing) != 1:
+                raise RuntimeError("persisted payment selection is ambiguous")
+            original = existing[0]
+            # Deployment configuration selects receivers for NEW obligations only.
+            # A replay retains the authenticated selection, including its original
+            # receiver, and still rejects any changed reservation/economic fact.
+            if replace(
+                original.obligation, receiver_profile_id=obligation.receiver_profile_id
+            ) != obligation:
+                raise RuntimeError("persisted payment obligation changed after projection")
+            return original
         return PaymentSelection(obligation, method)
 
 

@@ -45,6 +45,15 @@ Before activation:
    queues, effective mode, routes, account/profile mapping and both settlement
    adapters. Code/image readiness alone is not financial activation.
 
+## Receiver rotation and historical replay
+
+Configured receiver profiles apply only to the first projection of an obligation.
+Replaying an already-projected reservation preserves its authenticated payment
+selection, including the original TEST/LIVE receiver. Ambiguous selections or
+changes to the other economic facts are rejected. The activation gate must run
+the outcome projector on state copies and prove that no payment is enqueued.
+This pure projection check is separate from provider/dispatch worker cycles.
+
 ## Pix/Wise
 
 The already-implemented visual-proof contract uses V9, explicit structured
