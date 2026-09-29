@@ -82,7 +82,6 @@ def test_cloudbeds_transport_calls_native_read_endpoints_and_normalizes() -> Non
     }
     assert [request.url.path for request in seen] == [
         "/api/v1.3/getAvailableRoomTypes",
-        "/api/v1.2/getRatePlans",
     ]
     assert all(request.headers["Authorization"] == "Bearer cloudbeds-secret" for request in seen)
     query = parse_qs(seen[0].url.query.decode())
@@ -92,6 +91,8 @@ def test_cloudbeds_transport_calls_native_read_endpoints_and_normalizes() -> Non
 
 def test_cloudbeds_room_description_exposes_selected_public_room_name() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("includeSharedRooms") == "true":
+            return httpx.Response(200, json={"success": True, "data": []})
         if request.url.path.endswith("getAvailableRoomTypes"):
             return httpx.Response(
                 200,
@@ -124,6 +125,7 @@ def test_cloudbeds_room_description_exposes_selected_public_room_name() -> None:
                         {
                             "roomTypeID": "rt-suite",
                             "roomTypeName": "Suite Casal",
+                            "isPrivate": True,
                             "roomTypeDescription": "Quarto com cama de casal e banheiro privativo.",
                             "roomTypeFeatures": ["Wi-Fi", "Banheiro privativo"],
                         }

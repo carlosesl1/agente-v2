@@ -15,6 +15,7 @@ from v2_adapters._provider_common import (
     text,
     validated_adapter,
 )
+from v2_adapters.cloudbeds_inventory import public_unit_inventory
 from v2_contracts.private_offers import PrivateOfferBinding, PrivateOfferQuery
 from v2_contracts.providers import (
     ProviderDispatchPermit,
@@ -121,7 +122,10 @@ class CloudbedsReadAdapter:
             "adults": request.adults,
             "children": request.children,
         }
-        response = exact_dict(self._transport("lodging", query), "Cloudbeds response")
+        transport_query = dict(query)
+        if request.adults + request.children > 1:
+            transport_query["include_unit_inventory"] = True
+        response = exact_dict(self._transport("lodging", transport_query), "Cloudbeds response")
         raw_options = response.get("options")
         if type(raw_options) is not list:
             raise ProviderReadError("Cloudbeds response options must be a list")
@@ -163,6 +167,8 @@ class CloudbedsReadAdapter:
             )
             private_options.append(private)
         public: dict[str, object] = {"options": public_options}
+        if "unit_inventory" in response:
+            public["unit_inventory"] = public_unit_inventory(response["unit_inventory"], query=query)
         if len(public_options) == 1:
             public.update(public_options[0])
         observed_at, expires_at = observed_window(self._clock, self._ttl)

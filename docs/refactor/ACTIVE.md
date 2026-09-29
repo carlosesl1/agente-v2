@@ -1,3 +1,13 @@
+# Active task — Cloudbeds group inventory
+
+- Carlos authorized fixing empty-availability handling and exposing places distributed across different lodging items. Maya remains the sole semantic owner.
+- Worktree: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`; branch `fix/v2-cloudbeds-party-727d3625`.
+- Plan: `docs/superpowers/plans/2026-09-29-cloudbeds-party-inventory.md`.
+- Status: implemented/qualified, NOT deployed. Acceptance: `docs/superpowers/plans/2026-09-29-cloudbeds-party-acceptance.md` (1,855 V2/phase3 tests, 44 subtests, actual GET-only Cloudbeds reads and four real-model scenarios). Production cutover remains separate; no commercial effects.
+- Baseline: 11 provider-transport tests passed; runtime authority verified OK. No V3/legacy/subagents/state editing. Evidence outside Git in `/home/ubuntu/workspace/v2-cloudbeds-party-727d3625/`.
+
+## Previous task (historical)
+
 # Active task — production payments, forms deferred
 
 - Carlos authorized preparing the complete V2 for production, explicitly deferring form requirements.

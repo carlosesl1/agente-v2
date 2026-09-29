@@ -100,6 +100,7 @@ def test_lodging_read_binds_dates_occupancy_price_and_private_offer_id() -> None
                 "check_out": "2026-08-12",
                 "adults": 2,
                 "children": 0,
+                "include_unit_inventory": True,
             },
         )
     ]

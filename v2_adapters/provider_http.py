@@ -24,7 +24,8 @@ from urllib.parse import urlencode
 import httpx
 import yaml
 
-from v2_adapters._provider_common import binding_hash
+from v2_adapters._provider_common import ProviderReadError, binding_hash
+from v2_adapters.cloudbeds_inventory import normalize_unit_inventory
 from v2_adapters.manychat import ManyChatTransportResponse, ManyChatTransportNotCalled
 from v2_contracts.localization import customer_language_from_phone
 from v2_contracts.providers import (
@@ -992,7 +993,9 @@ class CloudbedsHTTPTransport:
             "detailedRates": "true",
         }
         available = self._get("/api/v1.3/getAvailableRoomTypes", params)
-        self._get("/api/v1.2/getRatePlans", params)
+        if (type(available) is not dict or type(available.get("data")) is not list
+                or any(type(row) is not dict for row in available["data"])):
+            raise ProviderHTTPError("Cloudbeds availability response is malformed")
         options: list[dict[str, object]] = []
         request = ReadRequest(
             request_id="cloudbeds-transport",
@@ -1083,7 +1086,20 @@ class CloudbedsHTTPTransport:
                     "available_units": available_units,
                 }
             )
-        return {"options": options}
+        result = {"options": options}
+        if payload.get("include_unit_inventory") is True:
+            inventory = self._get("/api/v1.3/getAvailableRoomTypes", {
+                **params, "adults": 1, "children": 0, "rooms": 1,
+                "includeSharedRooms": "true", "detailedRates": "false",
+            })
+            catalog = self._get("/api/v1.3/getRoomTypes", {"propertyID": self._property_id})
+            try:
+                result["unit_inventory"] = normalize_unit_inventory(
+                    inventory, catalog, property_id=self._property_id, query=query,
+                )
+            except ProviderReadError as exc:
+                raise ProviderHTTPError(str(exc)) from exc
+        return result
 
     def _room_description(self, payload: dict[str, object]) -> dict[str, object]:
         offer_id = str(payload.get("offer_id") or "")
