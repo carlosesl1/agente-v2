@@ -37,6 +37,7 @@ def make_completion(
     *,
     lead_id="manychat:1873018537",
     include_payment_offers=True,
+    **completion_options,
 ):
     boundary = SQLiteBoundaryStore.open_path_v8(
         tmp_path / "communication-boundary.sqlite3"
@@ -51,6 +52,7 @@ def make_completion(
         boundary=boundary,
         lead_resolver=owner,
         include_payment_offers=include_payment_offers,
+        **completion_options,
     )
     executor = _executor(
         store=boundary,

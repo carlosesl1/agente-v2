@@ -147,6 +147,19 @@ class _AuthorityScanner(ast.NodeVisitor):
                     "AUTHENTICATED_SYSTEM",
                 )
             )
+            # A configured form button is a factual channel payload, not Maya prose.
+            # Keep this exception bound to its named owner and catalog DTO.
+            chunks = keywords.get("chunks")
+            if (
+                self.path == "v2_application/booking_forms.py"
+                and owner == "_reply"
+                and author is not None
+                and _attribute(author, "PublicMessageAuthor", "AUTHENTICATED_SYSTEM")
+                and isinstance(chunks, ast.Tuple)
+                and len(chunks.elts) == 1
+                and _attribute(chunks.elts[0], "route", "text")
+            ):
+                allowed = True
             if not allowed:
                 self._record(
                     "public-reply-author",

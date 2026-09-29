@@ -245,6 +245,7 @@ class V2Settings:
     manychat_reply_flow_ns: str = ""
     # Deprecated single-route values remain parseable but never route a payment.
     manychat_payment_routes: tuple[ManyChatPaymentRoute, ...] = field(default_factory=_default_payment_routes)
+    booking_forms_from: datetime | None = None
     manychat_payment_link_field_id: int | None = None
     manychat_payment_description_field_id: int | None = None
     manychat_payment_flow_ns: str = ""
@@ -429,6 +430,12 @@ class V2Settings:
             or self.write_window_end.utcoffset() != timedelta(0)
         ):
             raise ValueError("write window end must be an explicit UTC datetime")
+        if self.booking_forms_from is not None and (
+            type(self.booking_forms_from) is not datetime
+            or self.booking_forms_from.tzinfo is None
+            or self.booking_forms_from.utcoffset() != timedelta(0)
+        ):
+            raise ValueError("booking forms cutoff must be an explicit UTC datetime")
         if type(self.allowed_subscriber_ids) is not tuple or any(
             type(value) is not str or not value.isdecimal()
             for value in self.allowed_subscriber_ids
@@ -974,6 +981,9 @@ class V2Settings:
             ),
             manychat_payment_flow_ns=worker_source.get("V2_MANYCHAT_PAYMENT_FLOW_NS", ""),
             manychat_payment_routes=_payment_routes(worker_source.get("V2_MANYCHAT_PAYMENT_ROUTES_JSON", "")),
+            booking_forms_from=_optional_utc_datetime(
+                worker_source.get("V2_BOOKING_FORMS_FROM", ""), "V2_BOOKING_FORMS_FROM"
+            ),
             manychat_handoff_tag_id=_optional_positive_int(
                 worker_source.get("V2_MANYCHAT_HANDOFF_TAG_ID", ""),
                 "V2_MANYCHAT_HANDOFF_TAG_ID",

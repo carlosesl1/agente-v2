@@ -991,6 +991,7 @@ def build_worker_set(
                 boundary=container.boundary, execution=container.execution, followup=container.followup, inbox=container.inbox,
             ),
             include_payment_offers=bool(settings.enabled_payment_methods),
+            booking_forms_from=settings.booking_forms_from,
             inbox=container.inbox,
         ) if completion_enabled else ClosedCapabilityWorker("completion_projector")
     )
@@ -1079,6 +1080,7 @@ def build_worker_set(
                 reply_flow_ns=settings.manychat_reply_flow_ns,
                 payment_routes=settings.manychat_payment_routes,
                 payment_context_resolver=completion_projector.payment_context_for_claim,
+                booking_form_resolver=completion_projector.booking_forms.route_for_claim,
             ),
             effect_guard=ControlledEffectGuard(settings=settings, clock=UTCClock()),
             worker_id="worker:manychat-public",

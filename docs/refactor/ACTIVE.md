@@ -1,4 +1,12 @@
-# Active task — Maya attendant voice
+# Active task — ManyChat tour liability forms
+
+- Carlos supplied six PT/EN form URLs, two ManyChat flows and link field 14426643; approved sending after payment confirmation, one form for multiple tours.
+- Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; predecessor `27949f7`.
+- Plan/spec: `docs/superpowers/plans/2026-09-29-manychat-booking-forms.md`.
+- DONE: catalog for six PT/EN URLs, payment-backed one-per-lead button projection, authenticated ManyChat field→flow, atomic dedup, restart/uncertainty fencing and handoff. 1,862 broad V2 tests passed; after final prompt locale clarification, 122 focused tests and five real-model completion-to-recording-transport cases passed (English repeated three times). Evidence: `/home/ubuntu/workspace/v2-waiver-forms-727d3625/RESULTADO.md`. Disabled until an authorized publication sets `V2_BOOKING_FORMS_FROM`. No deploy, live channel send or external provider effect.
+- Baseline: 68 targeted tests pass. Runtime authority verified. No V3, legacy, active SQLite edits, subagents or changes to financial semantics.
+
+## Previous task — Maya attendant voice
 
 - Carlos requested a general conceptual voice correction: attendant speaking for Chapada, not a narrator of system/tool results.
 - Same worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; predecessor `589ced1`.

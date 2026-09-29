@@ -247,13 +247,19 @@ class PublicOutboxStore:
     def close(self) -> None:
         self._connection.close()
 
-    def enqueue(self, reply: PublicReply, *, now: datetime) -> int:
+    def enqueue(self, reply: PublicReply, *, now: datetime, once_per_release: bool = False) -> int:
         if type(reply) is not PublicReply:
             raise TypeError("reply must be exact PublicReply")
         now_text = _utc(now, "now")
         inserted = 0
         self._connection.execute("BEGIN IMMEDIATE")
         try:
+            if once_per_release and self._connection.execute(
+                "SELECT 1 FROM public_outbox WHERE release_id=? AND lead_id=? LIMIT 1",
+                (reply.release_id, reply.lead_id),
+            ).fetchone() is not None:
+                self._connection.execute("COMMIT")
+                return 0
             for index, text in enumerate(reply.chunks):
                 outbox_id = _outbox_id(reply, index)
                 row = self._connection.execute(
@@ -394,6 +400,14 @@ class PublicOutboxStore:
         )
         if cursor.rowcount != 1:
             raise RuntimeError("public delivery claim is stale")
+
+    def reviewable_outbox_ids(self, lead_id: str, *, now: datetime) -> frozenset[str]:
+        """Exclude live in-flight fences from terminal communication incidents."""
+        return frozenset(row[0] for row in self._connection.execute(
+            "SELECT outbox_id FROM public_outbox WHERE lead_id=? AND status='manual_review' "
+            "AND (claim_owner IS NULL OR lease_expires_at<=?)",
+            (lead_id, _utc(now, "now")),
+        ))
 
     def accepted_count(self, release_id: str) -> int:
         return self._connection.execute(

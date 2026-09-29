@@ -66,6 +66,7 @@ class CompletionProjector:
         executor=None,
         inbox=None,
         followup=None,
+        booking_forms_from: datetime | None = None,
     ) -> None:
         if (
             type(execution) is not SQLiteUnitOfWork
@@ -97,6 +98,11 @@ class CompletionProjector:
         self._include_payment_offers = include_payment_offers
         self.executor = executor
         self._inbox = inbox
+        from v2_application.booking_forms import BookingFormProjector
+        self.booking_forms = BookingFormProjector(
+            execution=execution, followup=followup, public_store=public_store,
+            boundary=boundary, lead_resolver=lead_resolver, enabled_from=booking_forms_from,
+        )
 
     def _legacy_exists(self, lead_id, release_id):
         return any(
@@ -242,6 +248,7 @@ class CompletionProjector:
                 continue
             inserted += int(not result.replayed)
         self._enqueue_payment_buttons(events_snapshot, now=now)
+        self.booking_forms.run_once(now=now)
         return CompletionProjectionResult(inserted, attempted)
 
     def payment_context_for_claim(self, claim: PublicClaim) -> PaymentInitiationContext:

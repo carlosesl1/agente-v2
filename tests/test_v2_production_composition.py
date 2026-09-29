@@ -526,6 +526,7 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
 
     manychat_enabled = replace(
         settings,
+        booking_forms_from=datetime(2026, 9, 29, tzinfo=timezone.utc),
         manychat_delivery_enabled=True,
         real_effects_ack=REAL_EFFECTS_ACK,
         global_kill_switch_engaged=False,
@@ -550,6 +551,11 @@ def test_controlled_write_idle_mounts_inbox_and_boundary_relay_with_effects_clos
         ) is CombinedPublicDeliveryWorker
         delivery = manychat_workers[WorkerQueue.PUBLIC_DELIVERY]._completion._delivery
         assert delivery._payment_context_resolver.__self__ is manychat_workers[WorkerQueue.POST_PAYMENT].completion
+        form_owner = manychat_workers[WorkerQueue.POST_PAYMENT].completion.booking_forms
+        assert form_owner.enabled_from == manychat_enabled.booking_forms_from
+        assert delivery._booking_form_resolver.__self__ is form_owner
+        assert form_owner.public is manychat_container.public_outbox
+        assert form_owner.followup is manychat_container.followup
         assert delivery._payment_routes == {
             (r.business_unit, r.customer_language): r for r in manychat_enabled.manychat_payment_routes
         }

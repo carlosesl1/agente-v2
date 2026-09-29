@@ -196,6 +196,7 @@ class ManyChatFlowDeliveryAdapter:
         reply_flow_ns: str,
         payment_routes: tuple[ManyChatPaymentRoute, ...],
         payment_context_resolver: Callable[[object], PaymentInitiationContext] | None = None,
+        booking_form_resolver: Callable | None = None,
     ) -> None:
         for method in ("set_custom_field", "set_custom_fields", "trigger_flow"):
             if not callable(getattr(transport, method, None)):
@@ -218,6 +219,7 @@ class ManyChatFlowDeliveryAdapter:
             raise TypeError("payment_context_resolver must be callable")
         self._payment_routes = {(r.business_unit, r.customer_language): r for r in payment_routes}
         self._payment_context_resolver = payment_context_resolver
+        self._booking_form_resolver = booking_form_resolver
 
     def send(self, claim: object) -> PublicChannelAcceptance:
         outbox_id = getattr(claim, "message_id", None)
@@ -251,6 +253,15 @@ class ManyChatFlowDeliveryAdapter:
             type(source_message_id) is str
             and source_message_id.startswith("message:payment-link:")
         )
+        form = type(source_message_id) is str and source_message_id.startswith("message:booking-form:")
+        form_route = None
+        if form:
+            from v2_contracts.booking_forms import BookingFormRoute
+            if self._booking_form_resolver is None:
+                raise PublicDeliveryRejected("booking form owner is unavailable")
+            form_route = self._booking_form_resolver(claim)
+            if type(form_route) is not BookingFormRoute:
+                raise PublicDeliveryRejected("booking form route is invalid")
         route = None
         if payment:
             # Resolve BEFORE any field mutation. Never infer account or locale from prose.
@@ -287,6 +298,14 @@ class ManyChatFlowDeliveryAdapter:
                     idempotency_key=outbox_id + ":fields",
                 )
                 flow_ns = route.flow_ns
+            elif form:
+                response = self._transport.set_custom_field(
+                    subscriber_id=subscriber_id,
+                    field_id=form_route.link_field_id,
+                    field_value=form_route.url,
+                    idempotency_key=outbox_id + ":field",
+                )
+                flow_ns = form_route.flow_ns
             else:
                 response = self._transport.set_custom_field(
                     subscriber_id=subscriber_id,

@@ -66,7 +66,7 @@ def test_live_prompt_preserves_whatsapp_identity_installment_and_channel_rules()
     assert "parcelar presencialmente" in prompt
     assert "agência ou no hostel" in prompt
     assert "não realiza parcelamento" in prompt
-    assert "conversa natural de WhatsApp" in prompt
+    assert "VOZ DE ATENDIMENTO" in prompt
     assert "Nunca use e-mail como canal de continuidade" in prompt
     assert "Todas as interações com o lead acontecem somente pelo WhatsApp" in prompt
 
