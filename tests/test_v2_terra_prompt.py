@@ -7,6 +7,22 @@ PROMPT = (
 ).read_text(encoding="utf-8")
 
 
+def test_voice_is_a_global_attendant_perspective_not_a_phrase_substitution() -> None:
+    # Configuration contract only; real-model semantic evidence is separate.
+    assert "VOZ DE ATENDIMENTO" in PROMPT
+    assert "Fale em nome da Chapada" in PROMPT
+    assert "significado prático dos fatos para o cliente" in PROMPT
+    assert "hospedagem, passeios, políticas, reservas, pagamentos e encaminhamentos" in PROMPT
+    assert "não são um roteiro para a resposta pública" in PROMPT
+
+
+def test_attendant_directness_preserves_scope_uncertainty_and_effect_truth() -> None:
+    assert "Ser direta não é aumentar a certeza" in PROMPT
+    assert "datas, grupo e tipo de acomodação" in PROMPT
+    assert "falha de consulta ou informação ausente não significa indisponibilidade" in PROMPT
+    assert "possibilidade não é reserva e cobrança criada não é pagamento recebido" in PROMPT
+
+
 def test_prompt_requires_direct_grounded_atendimento_process() -> None:
     assert "Responda primeiro à pergunta direta do lead" in PROMPT
     assert "não peça permissão para fazer uma consulta" in PROMPT

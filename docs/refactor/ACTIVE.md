@@ -1,4 +1,11 @@
-# Active task — Cloudbeds group inventory
+# Active task — Maya attendant voice
+
+- Carlos requested a general conceptual voice correction: attendant speaking for Chapada, not a narrator of system/tool results.
+- Same worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; predecessor `589ced1`.
+- Plan: `docs/superpowers/plans/2026-09-29-maya-attendant-voice.md`.
+- DONE: conceptual primary-prompt voice correction, aligned task instructions, 231 regression tests, real-model baseline and iterative comparison; final eight synthetic contexts repeated twice (16 valid frames). Evidence and sampling caveats: `/home/ubuntu/workspace/v2-attendant-voice-727d3625/RESULTADO.md`. Authority verified; no application-code change and no deployment.
+
+## Previous task — Cloudbeds group inventory
 
 - Carlos authorized fixing empty-availability handling and exposing places distributed across different lodging items. Maya remains the sole semantic owner.
 - Worktree: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`; branch `fix/v2-cloudbeds-party-727d3625`.
