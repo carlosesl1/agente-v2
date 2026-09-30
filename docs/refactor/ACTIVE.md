@@ -4,7 +4,8 @@
 - Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; base `6c0bd481b4ba2a5ca2c0834789a7438ac13371df`.
 - Owner: `Dockerfile.v2`. Regression owner: `tests/test_v2_release_preparation.py`.
 - DONE: two causal packaging REDs and original-image FileNotFoundError reproduced. Added only the catalog COPY plus a build-time catalog load; 101 focused tests passed and fasttrack boundaries passed.
-- NEXT: freeze the corrected commit, construct its exact image and run full regression with Git history. Verify the catalog/projector inside the image without runtime mounts or network; record final evidence outside Git. Deployment remains separately authorized.
+- QUALIFIED candidate: `346cf3331cce473c3c880add381f82ca1e48fa82`; local image `sha256:677c8f0e5037d536b528c1a872a8191f27d2353fa0e4c2407d17fa11f72b0479`. Full single run: 2,836 tests / 2,958 subtests passed. Identical probe fails on the original image and passes on the corrected image: six routes, enabled/disabled projector initialization, 171 runtime/config file hashes matched. Final authority verified OK. Evidence: `/home/ubuntu/workspace/v2-form-image-fix-727d3625/RESULTADO.md`.
+- NEXT: await explicit authorization for publication; then prepare immutable registry reference, rollback/consistent backup, activation cutoff and cutover readiness gates. No deploy, registry push, channel sends or commercial effects occurred in this correction. The documentation-only closeout successor is not another runtime candidate.
 - Evidence/plan: `/home/ubuntu/workspace/v2-form-image-fix-727d3625/SCOPE.md`. Original failed image evidence preserved at `/home/ubuntu/workspace/v2-release-tests-6c0bd48/RESULTADO.md`.
 - Constraints: no prompt/runtime semantic changes, multi-room reservations, live SQLite edits, channel sends, V3, legacy or subagents. Production authority verified before work.
 
