@@ -1,4 +1,14 @@
-# Active task — ManyChat tour liability forms
+# Active task — booking-form image packaging correction
+
+- Carlos authorized correcting the missing release prerequisite; no deployment or reservation behavior change.
+- Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; base `6c0bd481b4ba2a5ca2c0834789a7438ac13371df`.
+- Owner: `Dockerfile.v2`. Regression owner: `tests/test_v2_release_preparation.py`.
+- DONE: two causal packaging REDs and original-image FileNotFoundError reproduced. Added only the catalog COPY plus a build-time catalog load; 101 focused tests passed and fasttrack boundaries passed.
+- NEXT: freeze the corrected commit, construct its exact image and run full regression with Git history. Verify the catalog/projector inside the image without runtime mounts or network; record final evidence outside Git. Deployment remains separately authorized.
+- Evidence/plan: `/home/ubuntu/workspace/v2-form-image-fix-727d3625/SCOPE.md`. Original failed image evidence preserved at `/home/ubuntu/workspace/v2-release-tests-6c0bd48/RESULTADO.md`.
+- Constraints: no prompt/runtime semantic changes, multi-room reservations, live SQLite edits, channel sends, V3, legacy or subagents. Production authority verified before work.
+
+## Previous task — ManyChat tour liability forms
 
 - Carlos supplied six PT/EN form URLs, two ManyChat flows and link field 14426643; approved sending after payment confirmation, one form for multiple tours.
 - Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; predecessor `27949f7`.

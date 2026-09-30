@@ -25,12 +25,20 @@ def test_current_runtime_is_packaged_by_docker_not_historical_wheel():
     for resource in (
         "cerebro_faq.yaml", "v2_activity_group_policy.json", "v2_bokun_product_map.json",
         "v2_terra_system_prompt.txt", "v2_payment_instructions.json",
-        "v2_public_commercial_catalog.json",
+        "v2_public_commercial_catalog.json", "v2_booking_forms.json",
     ):
         assert f"COPY config/{resource} /app/config/{resource}" in source
         assert (ROOT / "config" / resource).is_file()
     assert 'ENTRYPOINT ["python", "-m", "v2_host.api_main"]' in source
     assert "build_phase7_wheel" not in source
+
+
+def test_runtime_build_loads_booking_forms_not_only_python_imports():
+    source = (ROOT / "Dockerfile.v2").read_text()
+    assert (
+        'python -c "from v2_contracts.booking_forms import BookingFormCatalog; '
+        'BookingFormCatalog.load()"'
+    ) in source
 
 
 def test_historical_snapshot_failure_propagates():

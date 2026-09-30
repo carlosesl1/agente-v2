@@ -44,6 +44,7 @@ COPY deploy /app/deploy
 COPY config/cerebro_faq.yaml /app/config/cerebro_faq.yaml
 COPY config/v2_activity_group_policy.json /app/config/v2_activity_group_policy.json
 COPY config/v2_bokun_product_map.json /app/config/v2_bokun_product_map.json
+COPY config/v2_booking_forms.json /app/config/v2_booking_forms.json
 COPY config/v2_terra_system_prompt.txt /app/config/v2_terra_system_prompt.txt
 COPY config/v2_payment_instructions.json /app/config/v2_payment_instructions.json
 COPY config/v2_public_commercial_catalog.json /app/config/v2_public_commercial_catalog.json
@@ -62,6 +63,7 @@ RUN python -m compileall -q \
       v2_ops \
       deploy \
     && python -c "from deploy.canary_router import create_app_from_env" \
+    && python -c "from v2_contracts.booking_forms import BookingFormCatalog; BookingFormCatalog.load()" \
     && addgroup --system --gid 10001 v2 \
     && adduser --system --uid 10001 --ingroup v2 --home /nonexistent --no-create-home v2 \
     && chmod -R a+rX /app \
