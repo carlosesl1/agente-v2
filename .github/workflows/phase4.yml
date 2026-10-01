@@ -1,9 +1,7 @@
 name: phase-4-confirmation
 
+# Historical phase validation is manual; v2-main.yml validates the integrated source.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:

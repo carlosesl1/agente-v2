@@ -1,4 +1,4 @@
-# Agente v2 — Refatoração do fluxo Maya
+# Agente V2 — Maya / Chapada Leads
 
 ## Runtime ativo (obrigatório)
 
@@ -30,6 +30,19 @@ referência. Consulte o runbook
 [`docs/operations/runtime-authority.md`](docs/operations/runtime-authority.md).
 
 Repositório dedicado à refatoração controlada do processo de atendimento e reservas da Maya/Chapada Leads.
+
+## Base integrada para desenvolvimento
+
+A `main` reúne a versão qualificada mais recente do agente e as melhorias
+operacionais existentes. Para iniciar a próxima integração de canal, use uma
+branch nova sobre `origin/main`, não uma worktree histórica.
+
+- [Handoff atual](docs/refactor/ACTIVE.md)
+- [Base de integração, proveniência e validação](docs/operations/integration-baseline.md)
+- A API secundária ainda não está configurada. Um merge não publica uma imagem,
+  não troca o canal e não comprova E2E comercial.
+- CI atual: `.github/workflows/v2-main.yml`, suíte integral e Chromium real.
+  Os workflows de fases antigas permanecem disponíveis manualmente.
 
 ## Objetivo
 
@@ -125,4 +138,4 @@ python3 scripts/generate_phase7_manifest.py --check
 python3 scripts/validate_phase7.py --terminal
 ```
 
-O rollout permanece `NO-GO`; `phase8_started=true` e `phase9_started=false`.
+Este bloco de validação e seus marcadores de rollout pertencem ao snapshot histórico. Para a base integrada use as instruções de `docs/operations/integration-baseline.md`; para produção use apenas o manifesto verificado.

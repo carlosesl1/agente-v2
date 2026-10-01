@@ -1,0 +1,86 @@
+name: v2-integrated-main
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrated-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      HERMES_LEADS_AGENT_CONFIG_PATH: /tmp/no-live-config
+    steps:
+      - name: Checkout complete provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install declared dependencies and tested pytest runner
+        run: |
+          python - <<'PY'
+          import subprocess, sys, tomllib
+          from pathlib import Path
+          config = tomllib.loads(Path("pyproject.toml").read_text())
+          extras = config["project"]["optional-dependencies"]
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *extras["runtime"], *extras["dev"], "pytest==9.1.1"])
+          PY
+      - name: Prepare real Chromium regression runner
+        run: |
+          docker pull mcr.microsoft.com/playwright:v1.55.0-noble
+          npm install --prefix artifacts/ops-dashboard/playwright --no-audit --no-fund @playwright/test@1.55.0
+      - name: Validate integrated source and generated contracts
+        run: |
+          python scripts/check_fasttrack_boundaries.py
+          python scripts/generate_phase6_manifest.py --check
+          python scripts/generate_phase7_manifest.py --check
+          git diff --check
+      - name: Run every test without exclusions
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=artifacts/v2-integrated-results.xml
+          git diff --exit-code
+      - name: Publish test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-integrated-results
+          path: artifacts/v2-integrated-results.xml
+          if-no-files-found: warn
+
+  financial-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HERMES_LEADS_AGENT_CONFIG_PATH: /tmp/no-live-config
+    steps:
+      - name: Checkout complete provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reproduce properties, faults, restarts, contention and mutations
+        run: |
+          python scripts/run_phase6_properties.py --cases 20000 --seed 2026071906 --write docs/refactor/evidence/phase-06/property-result.json > /tmp/phase6-properties.stdout
+          python scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix docs/refactor/evidence/phase-06/fault-matrix.json --write-restart docs/refactor/evidence/phase-06/restart-result.json --write-concurrency docs/refactor/evidence/phase-06/concurrency-result.json > /tmp/phase6-faults.stdout
+          PYTHONHASHSEED=1 python -B -m unittest tests.test_phase6_mutation_runner -v
+          PYTHONHASHSEED=777 python -B -m unittest tests.test_phase6_mutation_runner -v
+          python -B scripts/run_phase6_mutations.py --write docs/refactor/evidence/phase-06/mutation-result.json > /tmp/phase6-mutations.stdout
+          git diff --exit-code -- docs/refactor/evidence/phase-06
