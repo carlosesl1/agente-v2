@@ -849,11 +849,18 @@ def _validate_global_component_ownership(
                 if mount["read_only"] is not False:
                     continue
                 source = str(mount["source"])
-                owner = writable_mount_owners.setdefault(source, component_name)
-                if owner != component_name:
-                    raise AuthorityError(
-                        "writable mount source is shared across components"
-                    )
+                source_path = PurePosixPath(source)
+                for owned_source, owner in writable_mount_owners.items():
+                    if owner == component_name:
+                        continue
+                    owned_path = PurePosixPath(owned_source)
+                    if source_path.is_relative_to(owned_path) or owned_path.is_relative_to(
+                        source_path
+                    ):
+                        raise AuthorityError(
+                            "writable mount source is shared across components"
+                        )
+                writable_mount_owners[source] = component_name
 
 
 def _deployment_records(

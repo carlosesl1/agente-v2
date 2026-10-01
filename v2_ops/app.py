@@ -526,13 +526,16 @@ def create_ops_app(
             return JSONResponse(status_code=401, content={"status": "authentication_required"})
         return authenticated
 
-    def trace_execution_links() -> tuple[tuple[ExecutionLink, ...], bool]:
+    def trace_execution_links(
+        lead_id: str | None = None,
+    ) -> tuple[tuple[ExecutionLink, ...], bool]:
         values: list[ExecutionLink] = []
         cursor: str | None = None
         more_available = False
         while len(values) <= _PUBLIC_LIMIT:
             remaining = _PUBLIC_LIMIT + 1 - len(values)
             page = trace_reader.list_executions(
+                lead_id=lead_id,
                 limit=min(100, remaining),
                 cursor=cursor,
                 stale_after=settings.stale_after,
@@ -830,18 +833,17 @@ def create_ops_app(
         if request.query_params or not _valid_public_id(lead_id):
             return JSONResponse(status_code=422, content={"status": "invalid_query"})
         try:
-            _payload, _snapshot, execution_links, trace_truncated, _source_token = (
-                await records_snapshot()
-            )
             if commercial_reader is None:
                 raise RecordsSourceError()
+            execution_links, trace_truncated = trace_execution_links(lead_id)
             detail = commercial_reader.lead_detail(
                 lead_id,
-                executions=execution_links,
-                generated_at=_snapshot.generated_at,
+                # Count the displayed records, not the overflow sentinel.
+                executions=execution_links[:_PUBLIC_LIMIT],
+                generated_at=_now(),
                 limit=_PUBLIC_LIMIT,
             )
-        except RecordsSourceError:
+        except (OpsTraceStoreError, RecordsSourceError, TypeError, ValueError):
             return JSONResponse(
                 status_code=503,
                 content={"status": "records_source_unavailable"},
