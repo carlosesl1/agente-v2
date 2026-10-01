@@ -46,12 +46,24 @@ def test_historical_phase_workflows_are_explicit_manual_checks(phase: int) -> No
     assert workflow["jobs"], "historical jobs must not be deleted"
 
 
-def test_integrated_main_keeps_generated_financial_stress_evidence() -> None:
+def test_integrated_main_keeps_independent_financial_stress_jobs() -> None:
     workflow = _workflow("v2-main.yml")
-    steps = workflow["jobs"]["financial-evidence"]["steps"]
-    run = "\n".join(step.get("run", "") for step in steps)
-    for runner in ("run_phase6_properties.py", "run_phase6_faults.py", "run_phase6_mutations.py"):
+    jobs = workflow["jobs"]
+    all_runs = []
+    for job_id, runner in (
+        ("financial-properties", "run_phase6_properties.py"),
+        ("financial-faults", "run_phase6_faults.py"),
+        ("financial-mutations", "run_phase6_mutations.py"),
+    ):
+        job = jobs[job_id]
+        assert job["timeout-minutes"] == "15"
+        assert "needs" not in job, "independent stress jobs must run concurrently"
+        assert job["env"]["HERMES_LEADS_AGENT_CONFIG_PATH"] == "/tmp/no-live-config"
+        run = "\n".join(step.get("run", "") for step in job["steps"])
         assert runner in run
-    assert "PYTHONHASHSEED=1" in run
-    assert "PYTHONHASHSEED=777" in run
-    assert "git diff --exit-code" in run
+        assert "git diff --exit-code" in run
+        all_runs.append(run)
+    assert "--cases 20000" in all_runs[0]
+    assert "--restart-schedules 2000 --contention-rounds 50" in all_runs[1]
+    assert "PYTHONHASHSEED=1" in all_runs[2]
+    assert "PYTHONHASHSEED=777" in all_runs[2]

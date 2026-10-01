@@ -61,7 +61,7 @@ jobs:
           path: artifacts/v2-integrated-results.xml
           if-no-files-found: warn
 
-  financial-evidence:
+  financial-properties:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -76,10 +76,48 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Reproduce properties, faults, restarts, contention and mutations
+      - name: Reproduce independent evidence
         run: |
           python scripts/run_phase6_properties.py --cases 20000 --seed 2026071906 --write docs/refactor/evidence/phase-06/property-result.json > /tmp/phase6-properties.stdout
+          git diff --exit-code -- docs/refactor/evidence/phase-06
+
+  financial-faults:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HERMES_LEADS_AGENT_CONFIG_PATH: /tmp/no-live-config
+    steps:
+      - name: Checkout complete provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reproduce independent evidence
+        run: |
           python scripts/run_phase6_faults.py --seed 2026071906 --restart-schedules 2000 --contention-rounds 50 --write-fault-matrix docs/refactor/evidence/phase-06/fault-matrix.json --write-restart docs/refactor/evidence/phase-06/restart-result.json --write-concurrency docs/refactor/evidence/phase-06/concurrency-result.json > /tmp/phase6-faults.stdout
+          git diff --exit-code -- docs/refactor/evidence/phase-06
+
+  financial-mutations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HERMES_LEADS_AGENT_CONFIG_PATH: /tmp/no-live-config
+    steps:
+      - name: Checkout complete provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reproduce independent evidence
+        run: |
           PYTHONHASHSEED=1 python -B -m unittest tests.test_phase6_mutation_runner -v
           PYTHONHASHSEED=777 python -B -m unittest tests.test_phase6_mutation_runner -v
           python -B scripts/run_phase6_mutations.py --write docs/refactor/evidence/phase-06/mutation-result.json > /tmp/phase6-mutations.stdout
