@@ -28,15 +28,16 @@ def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
     assert re.search(r"^USER\s+(?!0|root)\S+", dockerfile, re.MULTILINE)
     assert "v2_ops" in dockerfile
     assert service["read_only"] is True
+    assert service["user"] == "1001:1001"
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
     assert service["tmpfs"]
     assert "ports" not in service
     assert "docker.sock" not in rendered
-    assert "ga-state" not in rendered
-    assert "private-customer" not in rendered
-    assert len(service["volumes"]) == 1
-    assert service["volumes"][0].endswith(":/data/ops:ro")
+    assert set(service["volumes"]) == {
+        "${V2_OPS_DATA_DIR:-./data}:/data/ops:ro",
+        "${V2_OPS_RECORDS_DATA_DIR:?required}:/data/records:ro",
+    }
 
     environment = service["environment"]
     assert set(environment) == {
@@ -45,11 +46,13 @@ def test_ops_image_and_compose_are_hardened_and_isolated() -> None:
         "V2_OPS_SESSION_KEY_HEX",
         "V2_OPS_TRACE_KEY_HEX",
         "V2_OPS_TRACE_PATH",
+        "V2_OPS_RECORDS_PATH",
         "V2_OPS_SECURE_COOKIE",
         "V2_OPS_RELEASE_SHA",
         "V2_OPS_IMAGE_DIGEST",
         "V2_OPS_CONFIG_FINGERPRINT",
     }
+    assert environment["V2_OPS_RECORDS_PATH"] == "/data/records"
     for forbidden in ("cloudbeds", "bokun", "stripe", "manychat", "provider"):
         assert forbidden not in " ".join(environment).casefold()
 
@@ -77,13 +80,29 @@ def test_env_example_contains_only_ops_specific_names() -> None:
         "V2_OPS_SESSION_KEY_HEX",
         "V2_OPS_TRACE_KEY_HEX",
         "V2_OPS_TRACE_PATH",
+        "V2_OPS_RECORDS_PATH",
         "V2_OPS_SECURE_COOKIE",
         "V2_OPS_DATA_DIR",
+        "V2_OPS_RECORDS_DATA_DIR",
         "V2_OPS_IMAGE",
         "V2_OPS_RELEASE_SHA",
         "V2_OPS_IMAGE_DIGEST",
         "V2_OPS_CONFIG_FINGERPRINT",
     }
+
+
+def test_ops_image_keeps_runtime_modules_outside_the_minimal_copy() -> None:
+    dockerfile = (ROOT / "Dockerfile.v2-ops").read_text(encoding="utf-8")
+
+    assert "COPY v2_ops /app/v2_ops" in dockerfile
+    for forbidden_copy in (
+        "reservation_boundary",
+        "reservation_domain",
+        "reservation_execution",
+        "v2_application",
+        "v2_host",
+    ):
+        assert f"COPY {forbidden_copy}" not in dockerfile
 
 
 def test_env_example_quotes_scrypt_hash_against_compose_interpolation() -> None:

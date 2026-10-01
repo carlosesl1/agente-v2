@@ -3,35 +3,185 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>V2 Ops — Execution Canvas</title>
+  <title>Maya Ops — Painel operacional</title>
   <link rel="stylesheet" href="/ops/static/ops.css">
 </head>
 <body>
-  <header class="topbar">
-    <div><span class="logo">V2</span><strong>Operations</strong><span class="readonly">READ ONLY</span></div>
-    <div id="live-state" class="live-state">Conectando…</div>
-    <form method="post" action="/ops/logout"><input type="hidden" name="csrf" value="{{CSRF}}"><button>Logout</button></form>
-  </header>
-  <main class="workspace">
-    <aside class="sidebar">
-      <p class="eyebrow">EXECUÇÕES RECENTES</p>
-      <label class="search"><span>Lead ID</span><input id="lead-search" placeholder="manychat:…"></label>
-      <label class="search"><span>Status</span><select id="status-filter"><option value="">Todos</option><option>running</option><option>running_stale</option><option>completed</option><option>failed</option><option>manual_review</option></select></label>
-      <div id="execution-list" class="execution-list"></div>
+  <svg class="lucide-sprite" aria-hidden="true" width="0" height="0">
+    <!-- Lucide Icons 1.33.0; source: https://github.com/lucide-icons/lucide; ISC License. -->
+    <symbol id="lucide-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></symbol>
+    <symbol id="lucide-circle-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></symbol>
+    <symbol id="lucide-circle-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></symbol>
+    <symbol id="lucide-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></symbol>
+    <symbol id="lucide-command" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" /></symbol>
+    <symbol id="lucide-house" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+    <symbol id="lucide-loader-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></symbol>
+    <symbol id="lucide-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></symbol>
+    <symbol id="lucide-percent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="5" y1="5" y2="19" /><circle cx="6.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" /></symbol>
+    <symbol id="lucide-refresh-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></symbol>
+    <symbol id="lucide-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
+    <symbol id="lucide-user-round-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6" /><circle cx="10" cy="8" r="5" /><path d="m16 19 2 2 4-4" /></symbol>
+    <symbol id="lucide-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><path d="M16 3.128a4 4 0 0 1 0 7.744" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><circle cx="9" cy="7" r="4" /></symbol>
+    <symbol id="lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></symbol>
+  </svg>
+  <div class="app-shell">
+    <aside id="app-sidebar" class="sidebar" aria-label="Navegação principal">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"><span>M</span></span>
+        <div><strong>Maya Ops</strong><small>Operação Maya V2</small></div>
+      </div>
+      <span class="readonly-chip"><i aria-hidden="true"></i>SOMENTE LEITURA</span>
+      <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Fechar navegação"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-x"></use></svg></button>
+      <p class="nav-label">OPERAÇÃO</p>
+      <nav class="main-nav" aria-label="Navegação operacional">
+        <button id="nav-overview" class="nav-item active" type="button" aria-current="page"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-house"></use></svg><span>Visão geral</span></button>
+        <button id="nav-leads" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-users"></use></svg><span>Leads</span></button>
+        <button id="nav-execution" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-command"></use></svg><span>Execuções</span></button>
+        <button id="nav-reservations" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-circle-check"></use></svg><span>Reservas</span></button>
+        <button id="nav-payments" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-percent"></use></svg><span>Pagamentos</span></button>
+        <button id="nav-handoffs" class="nav-item" type="button"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-user-round-check"></use></svg><span>Handoffs</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="source-health"><i class="online-dot" aria-hidden="true"></i><div><strong id="source-health-state">Conectando</strong><small>Fontes operacionais</small></div></div>
+        <p>Dados existentes · acesso read-only</p>
+      </div>
     </aside>
-    <section class="canvas-shell">
-      <div class="canvas-toolbar"><strong id="canvas-title">Selecione uma execução</strong><div><button id="zoom-out">−</button><button id="zoom-in">+</button><button id="fit-canvas">Fit</button></div></div>
-      <div id="execution-canvas" class="execution-canvas" tabindex="0"><svg id="edges" aria-hidden="true"></svg><div id="nodes" class="nodes"></div></div>
-    </section>
-    <aside class="inspector">
-      <p class="eyebrow">INSPETOR</p>
-      <h2 id="node-title">Nenhum nó selecionado</h2>
-      <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>
-      <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>
-      <details><summary>Metadados técnicos</summary><pre id="metadata">{}</pre></details>
-      <details><summary>Erro sanitizado</summary><pre id="node-error">null</pre></details>
+    <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" hidden aria-label="Fechar navegação"></button>
+
+    <main class="main-content">
+      <header class="dashboard-header">
+        <div class="header-copy">
+          <button id="mobile-menu" class="mobile-menu" type="button" aria-label="Abrir navegação"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-menu"></use></svg></button>
+          <div><p class="eyebrow">OPERAÇÃO MAYA V2</p><h1 id="header-title">Painel operacional</h1><p id="header-subtitle">Fatos comerciais e execuções já registrados.</p></div>
+        </div>
+        <div class="header-actions">
+          <label class="range-control"><span>Período técnico</span><select id="range-select"><option value="24h">24 horas</option><option value="7d" selected>7 dias</option><option value="30d">30 dias</option></select></label>
+          <button id="refresh-dashboard" class="icon-button" type="button" aria-label="Atualizar painel"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-refresh-cw"></use></svg><span>Atualizar</span></button>
+          <button id="operator-menu" class="operator-button" type="button" aria-expanded="false" aria-controls="operator-popover"><span>OP</span><div><strong>Operador</strong><small>Conta autenticada</small></div></button>
+          <div id="operator-popover" class="operator-popover" hidden>
+            <form method="post" action="/ops/logout"><input type="hidden" name="csrf" value="{{CSRF}}"><button type="submit">Sair</button></form>
+          </div>
+        </div>
+      </header>
+
+      <section id="dashboard-alert" class="alert" hidden aria-live="polite"></section>
+
+      <section id="overview-view">
+        <div class="welcome-row">
+          <div><p class="eyebrow">VISÃO GERAL</p><h2>Atividade operacional</h2><p>Todo o histórico comercial registrado e traces do período técnico selecionado.</p></div>
+          <div class="health-pill"><i class="online-dot" aria-hidden="true"></i><strong id="live-state" aria-live="polite">Conectando…</strong><small id="generated-at">Ainda não atualizado</small></div>
+        </div>
+        <section id="record-summary-grid" class="record-summary-grid" aria-label="Resumo comercial registrado" aria-live="polite"></section>
+        <section class="overview-leads-panel records-panel" aria-labelledby="overview-leads-title">
+          <div class="records-head"><div><p class="eyebrow">LEADS</p><h2 id="overview-leads-title">Atividade recente por lead</h2><p>União por Lead ID persistido, sem correlação inferida.</p></div></div>
+          <div id="overview-lead-list" class="overview-lead-list"></div>
+        </section>
+        <section id="kpi-grid" class="kpi-grid" aria-label="Indicadores técnicos" aria-live="polite"></section>
+        <section class="analytics-grid" aria-label="Indicadores analíticos técnicos">
+          <article class="analytics-panel panel-volume volume-panel">
+            <div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h2>Execuções no período</h2></div><span class="panel-meta">Baldes UTC</span></div>
+            <div id="execution-series" class="volume-chart"></div>
+          </article>
+          <article class="analytics-panel panel-status">
+            <div class="panel-heading"><div><p class="eyebrow">ESTADO</p><h2>Estados atuais</h2></div><span class="panel-meta">Distribuição atual</span></div>
+            <div id="status-distribution"></div>
+          </article>
+          <article class="analytics-panel panel-trace">
+            <div class="panel-heading"><div><p class="eyebrow">TRACE</p><h2>Completude do trace</h2></div><span class="panel-meta">Registros por completude</span></div>
+            <div id="trace-distribution"></div>
+          </article>
+          <article class="analytics-panel panel-milestones">
+            <div class="panel-heading"><div><p class="eyebrow">MARCOS</p><h2>Marcos registrados</h2></div><span class="panel-meta">Categorias sobrepostas</span></div>
+            <div id="milestones-chart"></div>
+          </article>
+          <article class="analytics-panel panel-nodes">
+            <div class="panel-heading"><div><p class="eyebrow">NÓS</p><h2>Nós registrados</h2></div><span class="panel-meta">Ocorrências por tipo</span></div>
+            <div id="top-node-types"></div>
+          </article>
+        </section>
+      </section>
+
+      <section id="leads-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">LEADS</p><h2>Visão factual por lead</h2><p>Perfil comercial e histórico unidos somente pelo Lead ID persistido.</p></div><button id="export-leads" class="secondary-button" type="button">Exportar leads CSV</button></div>
+        <section class="records-panel" aria-labelledby="leads-table-title">
+          <div class="records-head"><div><h2 id="leads-table-title">Leads registrados</h2><p>Todo o histórico disponível nas fontes ativas.</p></div></div>
+          <div class="table-toolbar"><label class="search-box"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-search"></use></svg><input id="lead-list-search" type="text" autocomplete="off" aria-label="Buscar lead registrado"></label><span id="lead-result-count" class="result-count">0 leads</span></div>
+          <div id="lead-empty-state" class="empty-state" hidden>Nenhum lead registrado.</div>
+          <div class="table-wrap"><table><caption>Leads registrados nas fontes ativas</caption><thead><tr><th scope="col">Lead</th><th scope="col">Estado factual</th><th scope="col">Primeiro registro</th><th scope="col">Último registro</th><th scope="col">Fatos</th><th scope="col">Atendimentos</th><th scope="col">Execuções</th><th scope="col">Reservas</th><th scope="col">Pagamentos</th><th scope="col">Handoffs</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead><tbody id="lead-table-body"></tbody></table></div>
+          <div id="lead-mobile-list" class="records-mobile-list"></div>
+        </section>
+        <article id="lead-detail" class="lead-detail-panel" hidden>
+          <div class="lead-detail-head"><div><p class="eyebrow">DETALHE DO LEAD</p><h2 id="lead-detail-title">Lead</h2><span id="lead-detail-state" class="status-chip neutral">Não registrado</span></div><button id="export-lead-history" class="secondary-button" type="button" disabled>Exportar histórico CSV</button></div>
+          <div id="lead-detail-summary" class="fact-grid"></div>
+          <div class="lead-detail-grid">
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">PERFIL</p><h2>Fatos coletados</h2></div></div><div id="lead-facts" class="detail-list"></div></section>
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">ATENDIMENTO</p><h2>Conversa registrada</h2></div></div><div id="lead-dialogue" class="dialogue-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">RESERVAS</p><h2>Registros do lead</h2></div></div><div id="lead-reservations" class="detail-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">PAGAMENTOS</p><h2>Registros do lead</h2></div></div><div id="lead-payments" class="detail-list"></div></section>
+            <section class="detail-card"><div class="panel-heading"><div><p class="eyebrow">HANDOFFS</p><h2>Registros do lead</h2></div></div><div id="lead-handoffs" class="detail-list"></div></section>
+            <section class="detail-card detail-card-wide"><div class="panel-heading"><div><p class="eyebrow">EXECUÇÕES</p><h2>Histórico técnico</h2></div></div><div id="lead-executions" class="detail-list"></div></section>
+          </div>
+        </article>
+      </section>
+
+      <section id="executions-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">EXECUÇÕES</p><h2>Execuções operacionais</h2><p>Traces do período técnico selecionado com drill-down para Input e Output.</p></div><button id="export-executions" class="secondary-button" type="button">Exportar execuções CSV</button></div>
+        <section class="operations-panel" aria-labelledby="operations-title">
+          <div class="operations-head"><div><p class="eyebrow">OPERAÇÕES</p><h2 id="operations-title">Execuções recentes</h2><p>Registros do período selecionado.</p></div><span class="live-badge"><i class="pulse-dot" aria-hidden="true"></i>Atualização ao vivo</span></div>
+          <div class="table-toolbar">
+            <label class="search-box"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-search"></use></svg><input id="lead-search" type="text" autocomplete="off" aria-label="Buscar Lead ID"></label>
+            <label>Estado<select id="status-filter"><option value="">Todos</option></select></label>
+            <label>Completude<select id="completeness-filter"><option value="">Todas</option></select></label>
+            <span id="result-count" class="result-count">0 execuções</span>
+          </div>
+          <div id="empty-state" class="empty-state" hidden>Nenhuma execução registrada neste período.</div>
+          <div class="table-wrap"><table><caption>Execuções operacionais no período selecionado</caption><thead><tr><th scope="col">Lead</th><th scope="col">Execução</th><th scope="col">Recebida</th><th scope="col">Duração</th><th scope="col">Estado</th><th scope="col">Trace</th><th scope="col">Nó atual</th><th scope="col">Nós</th><th scope="col">Marcos</th><th scope="col">Motivo terminal</th><th scope="col"><span class="sr-only">Detalhe</span></th></tr></thead><tbody id="execution-table-body"></tbody></table></div>
+          <div id="execution-mobile-list" class="execution-mobile-list"></div>
+        </section>
+      </section>
+
+      <section id="reservations-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">RESERVAS</p><h2>Reservas registradas</h2><p>Confirmação somente quando há outcome persistido; IDs finais aparecem separadamente.</p></div><button id="export-reservations" class="secondary-button" type="button">Exportar reservas CSV</button></div>
+        <section class="records-panel" aria-labelledby="reservations-table-title"><div class="records-head"><div><h2 id="reservations-table-title">Registros de reserva</h2><p>Rascunho, workflow, outcome e auditorias de provedor.</p></div><span id="reservation-result-count" class="result-count">0 reservas</span></div><div id="reservation-empty-state" class="empty-state" hidden>Nenhuma reserva registrada.</div><div class="table-wrap"><table><caption>Reservas registradas nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Serviço</th><th scope="col">Período</th><th scope="col">Pessoas</th><th scope="col">Total</th><th scope="col">Método</th><th scope="col">Referências</th><th scope="col">Atualizada</th></tr></thead><tbody id="reservation-table-body"></tbody></table></div><div id="reservation-mobile-list" class="records-mobile-list"></div></section>
+      </section>
+
+      <section id="payments-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">PAGAMENTOS</p><h2>Pagamentos registrados</h2><p>Iniciação e link preparado não significam liquidação nem valor pago.</p></div><button id="export-payments" class="secondary-button" type="button">Exportar pagamentos CSV</button></div>
+        <section class="records-panel" aria-labelledby="payments-table-title"><div class="records-head"><div><h2 id="payments-table-title">Registros de pagamento</h2><p>Fases e efeitos exibidos sem promover estado técnico.</p></div><span id="payment-result-count" class="result-count">0 pagamentos</span></div><div id="payment-empty-state" class="empty-state" hidden>Nenhum pagamento registrado.</div><div class="table-wrap"><table><caption>Pagamentos registrados nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Fase</th><th scope="col">Método</th><th scope="col">Valor previsto</th><th scope="col">Valor pago</th><th scope="col">Etapas</th><th scope="col">Atualizado</th></tr></thead><tbody id="payment-table-body"></tbody></table></div><div id="payment-mobile-list" class="records-mobile-list"></div></section>
+      </section>
+
+      <section id="handoffs-view" class="data-view" hidden>
+        <div class="view-heading"><div><p class="eyebrow">HANDOFFS</p><h2>Handoffs registrados</h2><p>Vínculo com lead somente quando um ID persistido comprova a associação.</p></div><button id="export-handoffs" class="secondary-button" type="button">Exportar handoffs CSV</button></div>
+        <section class="records-panel" aria-labelledby="handoffs-table-title"><div class="records-head"><div><h2 id="handoffs-table-title">Registros de handoff</h2><p>Estado vazio é um fato operacional válido.</p></div><span id="handoff-result-count" class="result-count">0 handoffs</span></div><div id="handoff-empty-state" class="empty-state" hidden>Nenhum handoff registrado nas fontes ativas.</div><div class="table-wrap"><table><caption>Handoffs registrados nas fontes ativas</caption><thead><tr><th scope="col">Estado</th><th scope="col">Lead</th><th scope="col">Handoff</th><th scope="col">Código de motivo</th><th scope="col">Incidente</th><th scope="col">Eventos</th><th scope="col">Criado</th><th scope="col">Atualizado</th></tr></thead><tbody id="handoff-table-body"></tbody></table></div><div id="handoff-mobile-list" class="records-mobile-list"></div></section>
+      </section>
+    </main>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside class="execution-drawer" aria-hidden="true" id="execution-drawer" aria-labelledby="drawer-title">
+      <header class="drawer-header">
+        <div><p class="eyebrow">EXECUÇÃO</p><h2 id="drawer-title">Execução</h2><p id="drawer-lead">Não registrado</p></div>
+        <button id="drawer-close" type="button" aria-label="Fechar detalhes da execução"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lucide-x"></use></svg></button>
+      </header>
+      <div class="drawer-content">
+        <div class="drawer-status"><span id="drawer-status" class="status-chip">Não registrado</span><span id="drawer-trace" class="status-chip">Não registrado</span></div>
+        <div id="drawer-summary" class="fact-grid"></div>
+        <div class="execution-detail">
+          <section class="canvas-shell timeline-shell">
+            <div class="canvas-toolbar"><strong id="canvas-title">Execução</strong></div>
+            <ol id="execution-timeline" class="execution-timeline" aria-label="Passos da execução"></ol>
+          </section>
+          <aside class="inspector">
+            <p class="eyebrow">INSPETOR</p>
+            <h2 id="node-title">Nenhum nó selecionado</h2>
+            <section id="input-panel" class="io-panel"><div class="panel-head"><strong>Input</strong><button id="load-full-input" type="button" hidden>Carregar permitido</button></div><pre id="input-summary">{}</pre><pre id="input-full" hidden></pre></section>
+            <section id="output-panel" class="io-panel"><div class="panel-head"><strong>Output</strong><button id="load-full-output" type="button" hidden>Carregar permitido</button></div><pre id="output-summary">{}</pre><pre id="output-full" hidden></pre></section>
+            <details><summary>Metadados técnicos</summary><pre id="metadata">{}</pre></details>
+            <details><summary>Erro sanitizado</summary><pre id="node-error">null</pre></details>
+          </aside>
+        </div>
+      </div>
     </aside>
-  </main>
+  </div>
   <script src="/ops/static/ops.js" defer></script>
 </body>
 </html>

@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir \
 COPY v2_ops /app/v2_ops
 RUN python -m compileall -q v2_ops \
     && chmod -R a+rX /app \
-    && mkdir -p /data/ops \
+    && mkdir -p /data/ops /data/records \
     && chown -R v2ops:v2ops /data
 
 USER 10002:10002

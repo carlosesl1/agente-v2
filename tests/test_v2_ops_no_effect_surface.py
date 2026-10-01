@@ -20,7 +20,13 @@ def test_ops_web_package_has_no_business_effect_imports() -> None:
         "v2_application.workers",
         "reservation_execution.worker",
     )
-    for relative in ("v2_ops/app.py", "v2_ops/auth.py", "v2_ops/main.py", "v2_ops/settings.py"):
+    for relative in (
+        "v2_ops/app.py",
+        "v2_ops/auth.py",
+        "v2_ops/dashboard.py",
+        "v2_ops/main.py",
+        "v2_ops/settings.py",
+    ):
         tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
         modules = []
         for node in ast.walk(tree):
@@ -53,6 +59,7 @@ def test_ops_route_matrix_and_smoke_never_expose_business_mutation(tmp_path) -> 
     approved_posts = {"/ops/login", "/ops/logout"}
     assert {path for path, methods in paths if "POST" in methods} == approved_posts
     assert not any(method in methods for _path, methods in paths for method in ("PUT", "PATCH", "DELETE"))
+    assert ("/ops/api/dashboard", ("GET",)) in paths
     reader.close()
 
 

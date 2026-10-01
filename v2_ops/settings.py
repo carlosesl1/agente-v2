@@ -41,6 +41,7 @@ class OpsWebSettings:
     release_sha: str = "unknown"
     image_digest: str = "unknown"
     config_fingerprint: str = "unknown"
+    records_path: Path | None = None
 
     def __post_init__(self) -> None:
         if type(self.username) is not str or _USERNAME_RE.fullmatch(self.username) is None:
@@ -65,11 +66,16 @@ class OpsWebSettings:
             raise ValueError("image digest is outside the closed grammar")
         if self.config_fingerprint != "unknown" and _FINGERPRINT_RE.fullmatch(self.config_fingerprint) is None:
             raise ValueError("config fingerprint is outside the closed grammar")
+        if self.records_path is not None and (
+            not isinstance(self.records_path, Path) or not self.records_path.is_absolute()
+        ):
+            raise ValueError("records path must be absolute when configured")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "OpsWebSettings":
         source = os.environ if env is None else env
         trace_path = Path(source.get("V2_OPS_TRACE_PATH", ""))
+        records_raw = source.get("V2_OPS_RECORDS_PATH", "")
         ttl = int(source.get("V2_OPS_SESSION_TTL_SECONDS", "28800"))
         secure_raw = source.get("V2_OPS_SECURE_COOKIE", "true")
         if secure_raw not in {"true", "false"}:
@@ -88,4 +94,5 @@ class OpsWebSettings:
             release_sha=source.get("V2_OPS_RELEASE_SHA", "unknown"),
             image_digest=source.get("V2_OPS_IMAGE_DIGEST", "unknown"),
             config_fingerprint=source.get("V2_OPS_CONFIG_FINGERPRINT", "unknown"),
+            records_path=Path(records_raw) if records_raw else None,
         )

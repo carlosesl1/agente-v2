@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import quote
 
 from v2_ops.contracts import (
@@ -26,6 +26,9 @@ from v2_ops.contracts import (
     validate_closed_json,
 )
 from v2_ops.crypto import AES256GCMCipher, TraceCryptoError, parse_trace_key_hex
+
+if TYPE_CHECKING:
+    from v2_ops.dashboard import DashboardRecord
 
 
 SCHEMA_VERSION = 1
@@ -1268,6 +1271,63 @@ class SQLiteOpsTraceReader:
                         connection, row, now=instant, stale_after=threshold
                     )
                 )
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            raise OpsTraceStoreError("operational trace store unavailable") from exc
+
+    def list_dashboard_records(
+        self,
+        *,
+        start_at: datetime,
+        end_at: datetime,
+        now: datetime,
+        stale_after: timedelta = timedelta(minutes=5),
+    ) -> tuple["DashboardRecord", ...]:
+        from v2_ops.dashboard import DashboardRecord
+
+        lower = _require_utc(start_at, "start_at")
+        upper = _require_utc(end_at, "end_at")
+        instant, threshold = self._time_inputs(now, stale_after)
+        if lower > upper or upper != instant or upper - lower > timedelta(days=30):
+            raise ValueError("dashboard window is outside the bounded range")
+        try:
+            with self._connect() as connection:
+                parameters = (
+                    format_utc_timestamp(lower),
+                    format_utc_timestamp(upper),
+                )
+                execution_rows = connection.execute(
+                    "SELECT execution_id,lead_id,received_at,completed_at,status,"
+                    "trace_completeness,current_node_id,terminal_reason FROM executions "
+                    "WHERE received_at>=? AND received_at<=? "
+                    "ORDER BY received_at DESC,execution_id DESC",
+                    parameters,
+                ).fetchall()
+                node_rows = connection.execute(
+                    "SELECT n.execution_id,n.node_id,n.node_type "
+                    "FROM nodes n JOIN executions e ON e.execution_id=n.execution_id "
+                    "WHERE e.received_at>=? AND e.received_at<=? "
+                    "ORDER BY n.execution_id,n.ordinal,n.attempt,n.node_id",
+                    parameters,
+                ).fetchall()
+                grouped: dict[str, list[tuple[str, NodeType]]] = {}
+                for row in node_rows:
+                    grouped.setdefault(row[0], []).append((row[1], NodeType(row[2])))
+                result = []
+                for row in execution_rows:
+                    execution = self._execution_view(
+                        connection, row, now=instant, stale_after=threshold
+                    )
+                    nodes = grouped.get(execution.execution_id, [])
+                    by_id = dict(nodes)
+                    result.append(
+                        DashboardRecord(
+                            execution=execution,
+                            node_types=tuple(node_type for _, node_type in nodes),
+                            current_node_type=by_id.get(execution.current_node_id),
+                            node_count=len(nodes),
+                        )
+                    )
+                return tuple(result)
         except (sqlite3.Error, OSError, ValueError) as exc:
             raise OpsTraceStoreError("operational trace store unavailable") from exc
 
