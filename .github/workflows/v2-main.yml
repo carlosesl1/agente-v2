@@ -2,7 +2,7 @@ name: v2-integrated-main
 
 on:
   push:
-    branches: [main]
+    branches: [main, "integration/**"]
   pull_request:
   workflow_dispatch:
 

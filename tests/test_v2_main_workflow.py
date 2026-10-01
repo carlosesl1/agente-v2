@@ -14,7 +14,7 @@ def _workflow(name: str) -> dict:
 
 def test_main_has_an_integrated_full_suite_without_live_capability() -> None:
     workflow = _workflow("v2-main.yml")
-    assert workflow["on"]["push"]["branches"] == ["main"]
+    assert workflow["on"]["push"]["branches"] == ["main", "integration/**"]
     assert "pull_request" in workflow["on"]
     assert workflow["permissions"] == {"contents": "read"}
     job = workflow["jobs"]["integrated-suite"]
