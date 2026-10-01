@@ -1,5 +1,34 @@
 # Agente v2 — Refatoração do fluxo Maya
 
+## Runtime ativo (obrigatório)
+
+Antes de escolher checkout, branch ou artefato para qualquer tarefa do Agente V2:
+
+1. Leia a autoridade canônica, host-local e sem segredos:
+
+   ```bash
+   python3 -m json.tool /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+2. A partir da raiz deste repositório, execute o verificador read-only:
+
+   ```bash
+   python3 scripts/runtime_authority.py verify --manifest /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+Só prossiga com exit code `0`. Qualquer ausência, erro ou divergência é **DRIFT** e
+exige parada; não ajuste o manifesto para encobrir o runtime observado.
+
+GA, teste isolado e Ops são componentes separados. Depois da verificação, use
+`production/ga` para GA ou teste isolado e `production/ops` para Ops. Não inferir
+a produção por `main`, nome de worktree, tag genérica, Compose solto ou
+repo legado. Os valores ativos mutáveis, inclusive commit e digest, pertencem
+somente ao manifesto verificado, nunca a este documento de entrada.
+
+**V3 fora de escopo.** Não ler, editar, testar, reiniciar nem usar V3 como
+referência. Consulte o runbook
+[`docs/operations/runtime-authority.md`](docs/operations/runtime-authority.md).
+
 Repositório dedicado à refatoração controlada do processo de atendimento e reservas da Maya/Chapada Leads.
 
 ## Objetivo
@@ -10,9 +39,14 @@ Contrato central:
 
 > Para cada assunto comercial imutável: **um resumo → uma confirmação natural posterior → no máximo um comando durável → no máximo uma execução no provider**.
 
-## Estado
+## Snapshot histórico das fases de refatoração
 
-- Fase ativa: **Fase 8 — design/plano publicados e entrada autenticada**.
+O bloco abaixo é um snapshot histórico, não uma declaração de runtime ativo.
+Os marcos de fases e seus NO-GO registram aquele momento; consulte a autoridade
+verificada para a operação e `docs/refactor/ACTIVE.md` para a base de desenvolvimento.
+As regras de fase desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
+
+- Fase registrada neste snapshot: **Fase 8 — design/plano publicados e entrada autenticada**.
 - Fase 0: **concluída e publicada no GitHub**.
 - Fase 1: **concluída e publicada no GitHub**.
 - Fase 2: **concluída e publicada no GitHub**, sem integração com runtime ou providers.
@@ -67,7 +101,7 @@ Contrato central:
 - [Execução da Fase 7](docs/refactor/phases/phase-07-boundary-migration.md)
 - [Execução da Fase 8](docs/refactor/phases/phase-08-shadow-canary-rollout.md)
 
-## Regras de execução
+## Regras históricas para tarefas de refatoração
 
 1. Trabalhar em **uma fase por vez**.
 2. Não iniciar a fase seguinte sem fechar critérios de aceite e evidências da fase atual.

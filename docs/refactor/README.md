@@ -1,10 +1,42 @@
 # Plano da refatoração Agente v2
 
+## Runtime ativo (obrigatório)
+
+Antes de escolher checkout, branch ou artefato para qualquer tarefa do Agente V2:
+
+1. Leia a autoridade canônica, host-local e sem segredos:
+
+   ```bash
+   python3 -m json.tool /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+2. A partir da raiz deste repositório, execute o verificador read-only:
+
+   ```bash
+   python3 scripts/runtime_authority.py verify --manifest /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+Só prossiga com exit code `0`. Qualquer ausência, erro ou divergência é **DRIFT** e
+exige parada; não ajuste o manifesto para encobrir o runtime observado.
+
+GA, teste isolado e Ops são componentes separados. Depois da verificação, use
+`production/ga` para GA ou teste isolado e `production/ops` para Ops. Não inferir
+a produção por `main`, nome de worktree, tag genérica, Compose solto ou
+repo legado. Os valores ativos mutáveis, inclusive commit e digest, pertencem
+somente ao manifesto verificado, nunca a este documento de entrada.
+
+**V3 fora de escopo.** Não ler, editar, testar, reiniciar nem usar V3 como
+referência. Consulte `docs/operations/runtime-authority.md` antes da cadeia
+histórica abaixo.
+
 ## Princípio
 
 A Maya interpreta a conversa. Um kernel determinístico decide a transição comercial. Um comando durável representa o que foi autorizado. Um worker executa o provider uma vez. Uma outbox comunica o resultado.
 
-## Estado das fases
+## Snapshot histórico das fases de refatoração
+
+Esta tabela é um snapshot da trilha de refatoração, não um ponteiro operacional.
+As regras de fase desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
 
 | Fase | Estado | Objetivo |
 |---|---|---|
@@ -35,7 +67,7 @@ A Maya interpreta a conversa. Um kernel determinístico decide a transição com
 
 Os documentos históricos continuam válidos como evidência e contexto, mas não autorizam trabalho. Durante o fast-track, `ACTIVE.md` aponta a única especificação e o único plano executável.
 
-## Regra de avanço
+## Regra histórica de avanço da refatoração
 
 Uma fase só muda para `concluída` quando:
 

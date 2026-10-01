@@ -1,17 +1,49 @@
 # Regras para agentes e contribuidores
 
-## Escopo
+## Runtime ativo (obrigatório)
+
+Antes de escolher checkout, branch ou artefato para qualquer tarefa do Agente V2:
+
+1. Leia a autoridade canônica, host-local e sem segredos:
+
+   ```bash
+   python3 -m json.tool /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+2. A partir da raiz deste repositório, execute o verificador read-only:
+
+   ```bash
+   python3 scripts/runtime_authority.py verify --manifest /home/ubuntu/workspace/agente-v2-control/ACTIVE_RUNTIME.json
+   ```
+
+Só prossiga com exit code `0`. Qualquer ausência, erro ou divergência é **DRIFT** e
+exige parada; não ajuste o manifesto para encobrir o runtime observado.
+
+GA, teste isolado e Ops são componentes separados. Depois da verificação, use
+`production/ga` para GA ou teste isolado e `production/ops` para Ops. Não inferir
+a produção por `main`, nome de worktree, tag genérica, Compose solto ou
+repo legado. Os valores ativos mutáveis, inclusive commit e digest, pertencem
+somente ao manifesto verificado, nunca a este documento de entrada.
+
+**V3 fora de escopo.** Não ler, editar, testar, reiniciar nem usar V3 como
+referência. O procedimento completo está em
+`docs/operations/runtime-authority.md`.
+
+## Trilha histórica de refatoração
+
+Esta seção registra a trilha de refatoração; não descreve o runtime corrente.
+As regras de fase desta trilha valem somente para tarefas explicitamente de refatoração; nunca servem para escolher checkout nem para inferir o runtime ativo.
+
+### Escopo histórico
 
 Este repositório é a trilha limpa e auditável da refatoração Agente v2. O sistema legado/live é uma dependência observada, não um local para patches oportunistas durante o planejamento.
 
-## Disciplina obrigatória
+### Disciplina da refatoração
 
-- Leia primeiro `docs/refactor/ACTIVE.md` e execute somente sua tarefa `NEXT`. Se `NEXT` não existir ou estiver bloqueada, pare sem escolher trabalho por conta própria.
-- A cadeia de autoridade é: `AGENTS.md` → `docs/refactor/ACTIVE.md` → especificação ativa → plano ativo. Documentos antigos são somente referência e não podem substituir essa cadeia.
-- Continue pelas tarefas do plano na ordem, atualizando `ACTIVE.md` após cada commit verde. Pare somente diante de blocker material, gate que falhou, decisão comercial ausente ou autorização de efeito real.
-- Use sempre a worktree/branch declarada em `ACTIVE.md`; não implemente o fast-track em `main` nem em `/home/ubuntu/chapada-leads-hermes`.
-- `/home/ubuntu/chapada-leads-hermes` é fonte somente leitura para extração. É proibido importá-lo, editar seu código, usar seu agente/planner/LeadState ou executá-lo como backend do V2.
-- Antes de cada commit, execute o guard de fronteiras indicado pelo plano; imports proibidos bloqueiam avanço.
+- A tarefa autorizada no chat atual e seu plano delimitam a implementação. `docs/refactor/ACTIVE.md` orienta a navegação; entradas históricas não autorizam efeitos nem substituem a autoridade de runtime.
+- Trabalhe em branch/cópia isolada. A `main` é a base integrada de desenvolvimento, não a fonte da identidade de produção.
+- Antes de cada commit funcional execute `python3 scripts/check_fasttrack_boundaries.py`.
+- Não importar nem executar o backend legado neste repositório.
 - Antes de editar código funcional, identifique o owner da regra e escreva o teste que falha.
 - Não avance de fase sem atualizar: deliverables, evidências, riscos, decisões e critérios de aceite.
 - Não esconda falhas intermediárias; registre causa, impacto e substituição da evidência.
