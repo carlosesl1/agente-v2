@@ -1,4 +1,15 @@
-# Active task — booking-form image packaging correction
+# Active task — Stripe receipt-only repair
+
+- User authorized correcting Stripe webhooks in this chat; no migration, historical replay, settlement or conversational resumption.
+- Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/stripe-receiver-repair`, `fix/stripe-receiver-repair`; verified GA/TEST base `346cf3331cce473c3c880add381f82ca1e48fa82`.
+- Plan: `docs/superpowers/plans/2026-10-15-stripe-receipt-repair.md`.
+- Owners: existing `deploy/canary_router.py` and `v2_application/native_stripe.py`; no new runtime/service.
+- DONE: minimal relay/foreign-checkout correction; 35 causal REDs after test-fixture corrections, 202 focused regressions passing, boundary guard and diff check clean. Initial fixture/indentation failures are preserved in external audit logs.
+- NEXT: qualify immutable installed image, then receipt-only publication preserving stopped workers and original financial state. Authority READ→VERIFY is required before cutover.
+- Evidence outside Git: `/home/ubuntu/workspace/maya-chatwoot-deploy/audits/20261015-stripe-repair/`.
+- Preserve CW18 pilot/Humano/OAuth/jobs, Ops, V3 isolation, raw signatures, account/mode ownership and rollback. No manual active SQLite edits or subagents.
+
+## Previous task — booking-form image packaging correction
 
 - Carlos authorized correcting the missing release prerequisite; no deployment or reservation behavior change.
 - Worktree/branch: `/home/ubuntu/agente-v2/.worktrees/cloudbeds-party-727d3625`, `fix/v2-cloudbeds-party-727d3625`; base `6c0bd481b4ba2a5ca2c0834789a7438ac13371df`.

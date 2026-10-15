@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -228,6 +229,7 @@ def build_app(
     identity_probe: IdentityProbe,
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     max_body_bytes: int = 65_536,
+    stripe_receipts_enabled: bool = False,
 ) -> FastAPI:
     if not shared_secret or "\x00" in shared_secret:
         raise ValueError("shared webhook secret is required")
@@ -253,6 +255,18 @@ def build_app(
     if type(max_body_bytes) is not int or max_body_bytes < 1:
         raise ValueError("max body bytes must be positive")
 
+    if type(stripe_receipts_enabled) is not bool:
+        raise TypeError("Stripe receipt enable must be an exact boolean")
+    upstream = urlsplit(v2_url)
+    if stripe_receipts_enabled and (
+        upstream.scheme != "http" or not upstream.hostname
+        or upstream.username is not None or upstream.password is not None
+        or upstream.query or upstream.fragment
+        or upstream.path != "/webhook/manychat"
+    ):
+        raise ValueError("Stripe receipts require the existing private V2 API origin")
+    stripe_base = f"{upstream.scheme}://{upstream.netloc}/webhook/payments/stripe"
+
     app = FastAPI(title="Maya V2 Canary Relay", docs_url=None, redoc_url=None)
 
     async def runtime_identity_ready() -> bool:
@@ -277,6 +291,47 @@ def build_app(
         if not await runtime_identity_ready():
             return JSONResponse(status_code=503, content={"status": "unready"})
         return JSONResponse(status_code=200, content={"status": "ready"})
+
+    @app.post("/webhook/payments/stripe/{business_unit}")
+    async def stripe_receipt(business_unit: str, request: Request) -> Response:
+        # Receipts retain their issuing owner while conversations are suspended.
+        # This is not a conversation or a financial-effect readiness override:
+        # the native ingress still owns signature/account/mode/correlation checks.
+        if business_unit not in {"hostel", "agency"}:
+            return JSONResponse(status_code=404, content={"status": "not_found"})
+        if not stripe_receipts_enabled:
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+        if not await runtime_identity_ready():
+            return JSONResponse(status_code=503, content={"status": "runtime_identity_rejected"})
+        signature = request.headers.get("Stripe-Signature", "")
+        if not signature:
+            return JSONResponse(status_code=401, content={"status": "unauthorized"})
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                size = int(declared)
+                if size < 0:
+                    raise ValueError
+            except ValueError:
+                return JSONResponse(status_code=400, content={"status": "invalid"})
+            if size > max_body_bytes:
+                return JSONResponse(status_code=413, content={"status": "too_large"})
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > max_body_bytes:
+                return JSONResponse(status_code=413, content={"status": "too_large"})
+            body.extend(chunk)
+        if not await runtime_identity_ready():
+            return JSONResponse(status_code=503, content={"status": "runtime_identity_rejected"})
+        try:
+            status, response_body, content_type = await forward(
+                f"{stripe_base}/{business_unit}", bytes(body),
+                {"Stripe-Signature": signature,
+                 "Content-Type": request.headers.get("content-type", "application/json")},
+            )
+        except (httpx.HTTPError, TimeoutError):
+            return JSONResponse(status_code=502, content={"status": "upstream_unavailable"})
+        return Response(content=response_body, status_code=status, media_type=content_type)
 
     @app.post("/webhook/manychat")
     async def manychat(request: Request) -> Response:
@@ -383,6 +438,9 @@ def create_app_from_env() -> FastAPI:
     max_body = int(os.environ.get("CANARY_MAX_BODY_BYTES", "65536"))
     deadline_text = os.environ.get("CANARY_CUTOVER_DEADLINE", "").strip()
     deadline = _parse_time(deadline_text) if deadline_text else None
+    stripe_enable = os.environ.get("CANARY_STRIPE_RECEIPTS_ENABLED", "0")
+    if stripe_enable not in {"0", "1"}:
+        raise ValueError("CANARY_STRIPE_RECEIPTS_ENABLED must be 0 or 1")
 
     async def identity_probe() -> bool:
         try:
@@ -409,6 +467,7 @@ def create_app_from_env() -> FastAPI:
         cutover_deadline=deadline,
         identity_probe=identity_probe,
         max_body_bytes=max_body,
+        stripe_receipts_enabled=stripe_enable == "1",
     )
 
 

@@ -232,6 +232,11 @@ class NativeStripeIngress:
             )
             for key in ("payment_link", "payment_intent", "currency", "amount_total"):
                 _require(session.get(key) == event["data"]["object"].get(key))
+            # The account-wide endpoint also sees Checkouts issued by other systems.
+            # This issuer uses Payment Links only. Decide after signature, account,
+            # mode and provider-session consistency checks, never unsigned input.
+            if session.get("payment_link") is None:
+                raise NativeStripeIgnored("checkout not issued through a Payment Link")
             link_id = _object_id(session.get("payment_link"), "plink")
             pi_id = _object_id(session.get("payment_intent"), "pi")
             intent = get("payment_intents/" + pi_id)
